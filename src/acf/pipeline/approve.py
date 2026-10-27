@@ -1,11 +1,13 @@
-"""관문 승인 일반화 (G1, G2, G3, G4a, G4b, G4, G5, G5b, G6)."""
+"""관문 승인 일반화 (G1, G3, G4a, G4b, G4, G5, G5b, G6). G2는 결번이다(D-0042)."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from acf.common.errors import FactoryError
 from acf.pipeline.context import Context
 from acf.pipeline.gates import write_gate_record
+from acf.pipeline.graph import RETIRED_GATES
 
 
 def approve_gate(ctx: Context, cid: str, gate: str, answer: dict) -> Path:
@@ -14,9 +16,11 @@ def approve_gate(ctx: Context, cid: str, gate: str, answer: dict) -> Path:
 
         return approve_g1(ctx, cid, answer)
     if gate == "G2":
-        from acf.stages.s2_hero.approve import approve_g2
-
-        return approve_g2(ctx, cid, answer)
+        raise FactoryError(
+            RETIRED_GATES["G2"]
+            + ". G1에서 얼굴을 고른 뒤 acf hero run(S2)이 자동으로 외모 명세를 고정한다. "
+            '기준 이미지 생성이 필요하면 factory.toml [stages.s2] base_photo = "picked"를 쓴다'
+        )
     if gate == "G4a":
         from acf.stages.s4a_backgrounds.approve import approve_g4a
 

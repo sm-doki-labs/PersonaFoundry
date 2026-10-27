@@ -63,7 +63,12 @@ def appearance_parts(
 
 
 def build_prompt(
-    cluster: AppearanceCluster, scope: RankingScope, vocab: dict[str, Any], n: int, total: int
+    cluster: AppearanceCluster,
+    scope: RankingScope,
+    vocab: dict[str, Any],
+    n: int,
+    total: int,
+    revision_note: str = "",
 ) -> str:
     parts = [
         f"Character reference portrait of a fictional {subject_phrase(scope)} "
@@ -74,7 +79,11 @@ def build_prompt(
         "Upper body, neutral background, soft natural light. "
         "An original person, not based on any real individual."
     )
-    parts.append(f"Variation {n} of {total}.")
+    if total > 1:
+        parts.append(f"Variation {n} of {total}.")
+    if revision_note:
+        # D-0043 (2): G1 REQUEST_CHANGES의 고칠 점. 이름 유출 검사는 호출부가 한다.
+        parts.append(f"Revision note: {revision_note}")
     return " ".join(parts)
 
 
@@ -89,12 +98,15 @@ def generate_previews(
     names: list[str],
     per_cluster: int,
     size: str,
+    revision_note: str = "",
 ) -> list[ReferencePreview]:
     """프롬프트마다 이름 유출을 먼저 검사하고(FR-35) 통과한 것만 이미지 모델에 보낸다."""
     prompts = []
     for c in report.candidates:
         for n in range(1, per_cluster + 1):
-            prompt = build_prompt(c, report.scope, vocab, n, per_cluster)
+            prompt = build_prompt(
+                c, report.scope, vocab, n, per_cluster, revision_note=revision_note
+            )
             if find_name_leaks(prompt + " " + NEGATIVE, names):
                 raise NameLeakError(
                     f"미리보기 프롬프트({c.clusterId}-{n})에 순위 목록의 이름이 있다. "

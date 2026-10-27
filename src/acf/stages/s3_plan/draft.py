@@ -64,8 +64,11 @@ def plan_calls(retries: int) -> list[CallPlan]:
 
 
 def appearance_input(ctx: Context, cid: str) -> dict[str, Any] | None:
-    """G2가 승인됐으면 Planner에 줄 외모 요약(D-0024). 이미지·이름 없이 설명과 범위만 준다."""
-    if ctx.state(cid).gate("G2").status != "APPROVED":
+    """S2가 외모를 고정했으면 Planner에 줄 외모 요약(D-0024, D-0042).
+
+    이미지·이름 없이 설명과 범위만 준다.
+    """
+    if ctx.state(cid).stage("s2").status != "APPROVED":
         return None
     from acf.stages.s2_hero.approve import load_appearance_spec
 

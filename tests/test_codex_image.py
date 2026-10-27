@@ -118,7 +118,7 @@ def test_s1_previews_through_codex_image(tmp_path):
     cid = new_character(ctx, "sub")
     out = run_s1(ctx, cid, RANKING)
     previews = json.loads((out / "previews.json").read_text("utf-8"))
-    assert len(previews) == 9 and {p["provider"] for p in previews} == {"codex_image"}
-    assert len(fake.calls) == 9
+    assert len(previews) == 3 and {p["provider"] for p in previews} == {"codex_image"}
+    assert len(fake.calls) == 3
     images = [c for c in ctx.ledger(cid).calls() if c["kind"] == "IMAGE"]
-    assert len(images) == 9 and images[0]["inputTokens"] == 19000
+    assert len(images) == 3 and images[0]["inputTokens"] == 19000

@@ -57,7 +57,9 @@ def agent(req):
 def ctx(tmp_path: Path) -> Context:
     (tmp_path / "catalog.json").write_text(json.dumps(CATALOG, ensure_ascii=False), "utf-8")
     (tmp_path / "factory.toml").write_text(
-        f'[resources]\nstanford_presets_json = "{tmp_path / "catalog.json"}"\n', encoding="utf-8"
+        f'[resources]\nstanford_presets_json = "{tmp_path / "catalog.json"}"\n'
+        '[stages.s2]\nbase_photo = "picked"\n',
+        encoding="utf-8",
     )
     c = Context.load(tmp_path, execute=True)
     text = FakeTextModel()
@@ -67,7 +69,7 @@ def ctx(tmp_path: Path) -> Context:
     return c
 
 
-def _through_g2(ctx: Context) -> str:
+def _through_s2(ctx: Context) -> str:
     cid = new_character(ctx, "frames")
     run_s1(ctx, cid, RANKING)
     approve_gate(
@@ -82,19 +84,18 @@ def _through_g2(ctx: Context) -> str:
         },
     )
     run_s2(ctx, cid)
-    approve_gate(ctx, cid, "G2", {"decision": "SELECT", "selections": ["h2"], "reviewer": "u"})
     return cid
 
 
 def _through_g3(ctx: Context) -> str:
-    cid = _through_g2(ctx)
+    cid = _through_s2(ctx)
     run_s3_draft(ctx, cid, BRIEF)
     approve_gate(ctx, cid, "G3", {"decision": "APPROVE", "reviewer": "u"})
     return cid
 
 
 def test_s3_draft_receives_appearance_and_records_rev(ctx):
-    cid = _through_g2(ctx)
+    cid = _through_s2(ctx)
     out = run_s3_draft(ctx, cid, BRIEF)
     plan = json.loads((out / "plan.json").read_text("utf-8"))
     assert plan["appearanceRev"] == "ar1"

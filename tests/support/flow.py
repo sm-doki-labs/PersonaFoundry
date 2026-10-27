@@ -1,7 +1,7 @@
 """새 기획·배경·자세 흐름(D-0033~D-0035) 테스트 공용 도우미. 네트워크 없음.
 
 - make_ctx: 가짜 텍스트·이미지·영상 모델을 붙인 Context. 에이전트 응답은 stage별 함수로 등록한다.
-- through_g2: S1 → G1(c2, 참조 c2-1) → S2 → G2(h2)까지 진행한 캐릭터.
+- through_s2: S1 → G1(c2, 얼굴 c2-1) → S2(picked, 자동 APPROVED)까지 진행한 캐릭터(D-0042).
 - sample_plan_v2 / approve_plan_v2: 변형 흐름 없이 v2 기획서를 G3 승인 상태로 바로 고정한다
   (S4a 이후를 시험할 때 쓴다).
 """
@@ -50,8 +50,11 @@ class StageAgents:
 
 def make_ctx(root: Path, extra_toml: str = "") -> tuple[Context, StageAgents]:
     (root / "catalog.json").write_text(json.dumps(CATALOG, ensure_ascii=False), "utf-8")
+    # D-0043 (6): 이번 PoC는 G1 얼굴을 그대로 기준 이미지로 쓰는 picked만 구현했다.
+    # 시험이 [stages.s2]를 직접 지정하면 그대로 쓴다.
+    s2 = "" if "[stages.s2]" in extra_toml else '\n[stages.s2]\nbase_photo = "picked"\n'
     (root / "factory.toml").write_text(
-        f'[resources]\nstanford_presets_json = "{root / "catalog.json"}"\n{extra_toml}',
+        f'[resources]\nstanford_presets_json = "{root / "catalog.json"}"\n{extra_toml}{s2}',
         encoding="utf-8",
     )
     ctx = Context.load(root, execute=True)
@@ -64,7 +67,7 @@ def make_ctx(root: Path, extra_toml: str = "") -> tuple[Context, StageAgents]:
     return ctx, agents
 
 
-def through_g2(ctx: Context, slug: str = "flow") -> str:
+def through_s2(ctx: Context, slug: str = "flow") -> str:
     cid = new_character(ctx, slug)
     run_s1(ctx, cid, RANKING)
     approve_gate(
@@ -79,7 +82,6 @@ def through_g2(ctx: Context, slug: str = "flow") -> str:
         },
     )
     run_s2(ctx, cid)
-    approve_gate(ctx, cid, "G2", {"decision": "SELECT", "selections": ["h2"], "reviewer": "u"})
     return cid
 
 

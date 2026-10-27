@@ -30,10 +30,15 @@ def cmd_status(args) -> int:
         impl = "O" if s.implemented else "-"
         print(f"{sid:<5}{s.name:<12}{x.status:<16}{x.currentRev or '-':<8}{x.attempts:<4}{impl}")
     print()
-    for g in GATES:
+    shown = [g for g in GATES if st.gate(g).status != "PENDING"]
+    # G2는 결번이다(D-0042). 옛 state.json의 G2 칸은 읽기만 하고 결번으로 표시한다.
+    legacy = [
+        g for g in sorted(st.state.gates) if g not in GATES and st.gate(g).status != "PENDING"
+    ]
+    for g in shown + legacy:
         x = st.gate(g)
-        if x.status != "PENDING":
-            print(f"{g}: {x.status} rev={x.rev} record={x.recordRef}")
+        suffix = "" if g in GATES else " (결번·옛 기록)"
+        print(f"{g}: {x.status} rev={x.rev} record={x.recordRef}{suffix}")
     return 0
 
 
@@ -135,24 +140,31 @@ def cmd_check(args) -> int:
 
 
 def cmd_hero_run(args) -> int:
-    from acf.stages.s1_reference.approve import selected_references
     from acf.stages.s2_hero import run as s2
+
+    ctx = Context.load(_root(args), execute=args.execute, max_calls=args.max_calls)
+    cfg = s2.s2_config(ctx)
+    if not args.execute:
+        print(format_plan(s2.plan_calls(cfg)))
+        return 0
+    out = s2.run_s2(ctx, args.character_id)
+    print(f"S2 외모 명세: {out / 'appearance-spec.json'} (자동 APPROVED, 관문 없음)")
+    return 0
+
+
+def cmd_ref_faces(args) -> int:
+    """G1 REQUEST_CHANGES의 메모로 얼굴 미리보기만 다시 만든다(D-0043)."""
+    from acf.stages.s1_reference import faces as s1f
 
     ctx = Context.load(_root(args), execute=args.execute, max_calls=args.max_calls)
     if not args.execute:
         try:
-            refs = len(selected_references(ctx, args.character_id))
+            print(format_plan(s1f.plan_calls(ctx, args.character_id)))
         except FactoryError as e:
             print(f"아직 실행할 수 없다: {e}")
-            refs = 0
-        adapter = ctx.config.provider("image").adapter
-        print(format_plan(s2.plan_calls(s2.s2_config(ctx), refs, adapter)))
         return 0
-    out = s2.run_s2(ctx, args.character_id)
-    print(
-        f"대표 이미지 후보: {out / 'candidates.json'}\n"
-        f"검토 페이지: {out / 'gate-G2.html'} (G2 대기)"
-    )
+    out = s1f.run_faces(ctx, args.character_id)
+    print(f"얼굴 미리보기: {out / 'previews.json'}\n검토 페이지: {out / 'gate-G1.html'} (G1 대기)")
     return 0
 
 
@@ -314,7 +326,12 @@ def cmd_plan_draft(args) -> int:
 
 
 def cmd_run(args) -> int:
-    from acf.pipeline.orchestrator import RunOptions, run_until
+    from acf.pipeline.orchestrator import (
+        RunOptions,
+        run_until,
+        validate_auto_approve,
+        validate_until,
+    )
     from acf.stages.s3_plan.draft import new_character
 
     ctx = Context.load(_root(args), execute=args.execute, max_calls=args.max_calls)
@@ -327,6 +344,8 @@ def cmd_run(args) -> int:
         ranking=json.loads(Path(args.ranking).read_text("utf-8")) if args.ranking else None,
         seed=json.loads(Path(args.seed).read_text("utf-8")) if args.seed else None,
     )
+    validate_until(opt.until)
+    validate_auto_approve(opt.auto_approve)
     if not args.execute:
         print("dry run: --execute가 있어야 단계를 실행한다. 계획:")
         auto = sorted(opt.auto_approve) or "없음"
@@ -428,10 +447,22 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--execute", action="store_true")
     s.add_argument("--max-calls", type=int, default=None)
     s.set_defaults(fn=cmd_ref_run)
+    s = ref.add_parser(
+        "faces",
+        help="G1 REQUEST_CHANGES 메모로 얼굴 미리보기만 새 rf로 다시 만든다(D-0043)",
+    )
+    s.add_argument("character_id")
+    s.add_argument("--execute", action="store_true")
+    s.add_argument("--max-calls", type=int, default=None)
+    s.set_defaults(fn=cmd_ref_faces)
 
     hero = sub.add_parser("hero").add_subparsers(dest="sub", required=True)
     s = hero.add_parser(
-        "run", help="S2: G1 외모군·참조 사진 → 대표 이미지 후보 → G2 대기(D-0022, D-0023)"
+        "run",
+        help=(
+            "S2: G1에서 고른 얼굴 → 기준 이미지·외모 명세 자동 고정"
+            '(관문 없음, D-0042. [stages.s2] base_photo = "picked")'
+        ),
     )
     s.add_argument("character_id")
     s.add_argument("--execute", action="store_true")
@@ -448,7 +479,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_frames_run)
 
     video = sub.add_parser("video").add_subparsers(dest="sub", required=True)
-    s = video.add_parser("intro", help="S5: G2 대표 이미지 → 소개 영상 후보 → G5 사람 선택(D-0028)")
+    s = video.add_parser(
+        "intro", help="S5: S2 기준 이미지 → 소개 영상 후보 → G5 사람 선택(D-0028, D-0042)"
+    )
     s.add_argument("character_id")
     s.add_argument("--execute", action="store_true")
     s.add_argument("--max-calls", type=int, default=None)
@@ -465,7 +498,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--profile", default=None)
     s.set_defaults(fn=cmd_video_web_setup)
 
-    s = plan.add_parser("seed", help="G2 뒤 기획 씨앗을 고정한다(D-0033)")
+    s = plan.add_parser("seed", help="S2 뒤 기획 씨앗을 고정한다(D-0033, D-0042)")
     s.add_argument("character_id")
     s.add_argument(
         "--file", default=None, help="씨앗 JSON(personality, job, age, gender, background)"

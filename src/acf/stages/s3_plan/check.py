@@ -7,7 +7,8 @@ from acf.contracts.plan import PERSONALITY_FIELDS, CharacterPlan
 
 
 def check_plan_draft(brief_text: str, appearance_rev: str | None = None):
-    """appearance_rev가 있으면(G2 승인 뒤, D-0024) 그 값을 그대로 쓰고 챕터마다 조명·구도를 채웠는지 본다."""
+    """appearance_rev가 있으면(s2 승인 뒤, D-0024·D-0042) 그 값을 그대로 쓰고
+    챕터마다 조명·구도를 채웠는지 본다."""
 
     def _check(plan: CharacterPlan) -> list[str]:
         p: list[str] = []

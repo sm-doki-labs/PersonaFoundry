@@ -118,7 +118,7 @@ def _pending_rev(ctx: Context, cid: str) -> str | None:
 
 def run_s5(ctx: Context, cid: str) -> Path:
     state = ctx.state(cid)
-    state.require_deps("s5")  # G2 승인 필요
+    state.require_deps("s5")  # s2 승인(외모 명세) 필요(D-0042)
     spec, hero = load_appearance_spec(ctx, cid)
     cfg = s5_config(ctx)
     budget = ctx.budget()

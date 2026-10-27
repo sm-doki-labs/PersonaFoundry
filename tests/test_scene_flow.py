@@ -25,7 +25,7 @@ from acf.stages.s4b_poses.approve import load_scene_and_pose
 from acf.stages.s4b_poses.run import codex_checks as scene_checks
 from acf.stages.s4b_poses.run import plan_calls as pose_calls
 from acf.stages.s4b_poses.run import run_s4b
-from tests.support.flow import approve_plan_v2, make_ctx, through_g2
+from tests.support.flow import approve_plan_v2, make_ctx, through_s2
 from tests.test_agentic import BRIEF
 
 CH = ("ch1", "ch2", "ch3")
@@ -125,7 +125,7 @@ def flow(tmp_path):
     agents.set("s4a", backgrounds)
     agents.set("s4b-scene", scenes)
     agents.set("s4b-pose", poses)
-    cid = through_g2(ctx)
+    cid = through_s2(ctx)
     approve_plan_v2(ctx, cid)
     image = FakeImageModel()
     ctx.use_image(image)
@@ -215,7 +215,7 @@ def test_offline_flow_and_partial_regeneration(flow):
     assert len(image.requests) == 3
     assert ctx.state(cid).stage("s4").status == "AWAITING_HUMAN"
     for req, ch in zip(image.requests, scene_model.chapters, strict=True):
-        assert req.reference_images[0] == str(fr1 / "reference" / "h2.png")
+        assert req.reference_images[0] == str(fr1 / "reference" / "c2-1.png")
         assert Path(req.reference_images[1]).read_bytes() == (ps / ch.plate.path).read_bytes()
         assert len(req.reference_images) == 2 and "9:16" in req.prompt
         assert ch.place in req.prompt and "identity" in req.prompt and "not for pose" in req.prompt
@@ -226,7 +226,7 @@ def test_offline_flow_and_partial_regeneration(flow):
     inputs = read(fr1 / "inputs.json")
     assert inputs["schemaVersion"] == "frames-inputs-v2" and inputs["referenceCrop"] == "full"
     assert "찾지 못해" in inputs["cropNote"]
-    assert "reference/h2.png" in (fr1 / "gate-G4.html").read_text("utf-8")
+    assert "reference/c2-1.png" in (fr1 / "gate-G4.html").read_text("utf-8")
     approve_gate(
         ctx,
         cid,
@@ -277,7 +277,7 @@ def test_identity_crop(flow, monkeypatch, mode):
     out = run_s4(ctx, cid)
     inputs = read(out / "inputs.json")
     assert inputs["referenceCrop"] == mode
-    fname = "h2-face.png" if mode == "face" else "h2.png"
+    fname = "c2-1-face.png" if mode == "face" else "c2-1.png"
     assert all(r.reference_images[0] == str(out / "reference" / fname) for r in image.requests)
     assert f"reference/{fname}" in (out / "gate-G4.html").read_text("utf-8")
     assert main(["--root", str(ctx.config.root), "verify", cid]) == 0
@@ -289,7 +289,7 @@ def test_v1_plan_is_rejected(tmp_path):
 
     ctx, _ = make_ctx(tmp_path)
     ctx._text.add("AGENT", agent)
-    cid = through_g2(ctx)
+    cid = through_s2(ctx)
     run_s3_draft(ctx, cid, BRIEF)
     approve_gate(ctx, cid, "G3", {"decision": "APPROVE", "reviewer": "u"})
     with pytest.raises(CheckFailed, match="character-plan-v2"):
@@ -378,7 +378,7 @@ def test_dependencies(tmp_path):
 
     ctx, _ = make_ctx(tmp_path)
     cid = new_character(ctx, "deps")
-    for run, gate in [(run_s4a, "G2"), (run_s4b, "G4a"), (run_s4, "G2")]:
+    for run, gate in [(run_s4a, "G3"), (run_s4b, "G4a"), (run_s4, "G4b")]:
         with pytest.raises(GateNotApprovedError, match=gate):
             run(ctx, cid)
 
@@ -456,7 +456,7 @@ def test_cli_dry_run_has_no_side_effects(flow, capsys):
 
 def test_later_dependencies_require_approved_gates(tmp_path):
     ctx, _ = make_ctx(tmp_path)
-    cid = through_g2(ctx)
+    cid = through_s2(ctx)
     with pytest.raises(GateNotApprovedError, match="G3"):
         run_s4a(ctx, cid)
     with pytest.raises(GateNotApprovedError, match="G4b"):
