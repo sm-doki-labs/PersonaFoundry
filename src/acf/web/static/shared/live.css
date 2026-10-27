@@ -1,0 +1,52 @@
+/* 실제 공장 현황 패널. 시안의 유리 질감 위에 얹되 색·간격은 이 파일에서만 정한다. */
+.cf-live{padding:14px 16px 18px;border-radius:20px;background:rgba(255,255,255,.045);border:1px solid var(--line);display:flex;flex-direction:column;gap:12px}
+.cf-live--compact{gap:8px;padding:12px 14px 14px}
+.cf-live-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.cf-live-head h2{margin:0;font-size:15px;font-weight:700;letter-spacing:-.01em}
+.cf-live-sub{margin:2px 0 0;font-size:12px;color:var(--faint)}
+.cf-live-actions{display:flex;align-items:center;gap:8px}
+.cf-conn{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--faint)}
+.cf-conn::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--faint);opacity:.5}
+.cf-conn.is-on{color:var(--ok)}
+.cf-conn.is-on::before{background:var(--ok);opacity:1}
+.cf-btn{height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--line-2);background:rgba(255,255,255,.08);font-size:12px;font-weight:600;color:var(--text);transition:background 160ms,opacity 160ms}
+.cf-btn:hover{background:rgba(255,255,255,.16)}
+.cf-btn:disabled{opacity:.35;cursor:not-allowed}
+.cf-btn--primary{background:rgba(255,255,255,.9);color:#16181d;border-color:transparent}
+.cf-char{border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:8px}
+.cf-chars .cf-char:first-child{border-top:0;padding-top:2px}
+.cf-char--compact{border-top:0;padding-top:0}
+.cf-char-top{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.cf-name{font-size:15px;font-weight:700}
+.cf-id{font-size:11px;color:var(--faint)}
+.cf-meta{font-size:12px;color:var(--muted)}
+.cf-prog{margin-left:auto;font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.cf-bar{height:3px;border-radius:9px;background:rgba(255,255,255,.12);overflow:hidden}
+.cf-bar i{display:block;height:100%;border-radius:9px;background:var(--ok);transition:width 320ms var(--ease-out,ease)}
+.cf-rail{display:flex;flex-wrap:wrap;gap:6px}
+.cf-step{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:999px;font-size:11px;color:var(--faint);background:rgba(255,255,255,.05);border:1px solid var(--line)}
+.cf-step b{font-size:10px;font-weight:700;letter-spacing:.02em;opacity:.8}
+.cf-step.is-approved,.cf-step.is-skipped{color:var(--ok);border-color:rgba(147,181,161,.35);background:var(--ok-soft)}
+.cf-step.is-awaiting_human{color:var(--warn);border-color:rgba(201,176,126,.4);background:var(--warn-soft)}
+.cf-step.is-running{color:var(--text);border-color:var(--line-2);background:rgba(255,255,255,.16)}
+.cf-step.is-check_failed,.cf-step.is-rejected{color:var(--bad);border-color:rgba(201,147,141,.4);background:var(--bad-soft)}
+.cf-gates{font-size:12px;color:var(--muted);display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.cf-gate{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;text-decoration:none;color:var(--text);background:var(--warn-soft);border:1px solid rgba(201,176,126,.4);font-size:11.5px}
+.cf-gate:hover{background:rgba(201,176,126,.2)}
+.cf-gate b{font-weight:800;letter-spacing:.02em}
+.cf-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11.5px;color:var(--faint)}
+.cf-until{display:inline-flex;align-items:center;gap:6px}
+.cf-until select{height:28px;padding:0 6px;border-radius:8px;background:rgba(0,0,0,.28);border:1px solid var(--line-2);color:var(--text);font:inherit;font-size:11.5px}
+.cf-job{font-size:11.5px;color:var(--muted)}
+.cf-job.is-running{color:var(--text)}
+.cf-quiet{color:var(--faint);font-size:11.5px}
+.cf-warn{color:var(--warn);font-size:11.5px}
+.cf-error{margin:2px 0 0;font-size:12px;color:var(--bad)}
+.cf-note{margin:0;font-size:11.5px;color:var(--faint);line-height:1.5}
+.cf-empty{margin:0;font-size:12px;color:var(--faint)}
+.cf-brief-block h3{margin:4px 0 6px;font-size:12px;font-weight:700;color:var(--muted)}
+.cf-briefs{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.cf-brief{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid var(--line);font-size:11px;color:var(--muted)}
+.cf-brief code{font-size:10.5px;color:var(--faint)}
+.cf-brief span{color:var(--text);opacity:.85}
+@media (max-width:720px){.cf-live{padding:12px}.cf-prog{margin-left:0}.cf-live-actions{width:100%}}
