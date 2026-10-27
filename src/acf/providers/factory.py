@@ -74,6 +74,18 @@ def make_video_model(cfg: ProviderConfig) -> VideoModel:
             timeout_s=float(x.get("timeout_s", 600)),
             prices=x.get("price_per_second"),
         )
+    if cfg.adapter == "grok_oauth":
+        from acf.providers.grok_oauth import GrokOAuthVideoModel
+
+        return GrokOAuthVideoModel(
+            model=cfg.model or "grok-imagine-video-1.5-lite",
+            token_file=x.get("token_file") or None,
+            token_env=str(x.get("token_env") or ""),
+            base_url=cfg.base_url or "https://api.x.ai/v1",
+            poll_interval_s=float(x.get("poll_interval_s", 5)),
+            timeout_s=float(x.get("timeout_s", 600)),
+            prices=x.get("price_per_second"),
+        )
     if cfg.adapter == "grok_web":
         # D-0029: xAI 이용 정책은 봇·스크립트 접근을 금지한다. 위험을 알고 켠다는 표시가 있어야 만든다.
         if x.get("accept_terms_risk") is not True:
@@ -91,5 +103,6 @@ def make_video_model(cfg: ProviderConfig) -> VideoModel:
             timeout_s=float(x.get("timeout_s", 600)),
         )
     raise ValueError(
-        f"알 수 없는 영상 어댑터: '{cfg.adapter}'. xai_video(공식 API), grok_web(웹, 기본 꺼짐), fake 중 하나다"
+        f"알 수 없는 영상 어댑터: '{cfg.adapter}'. xai_video(공식 API), "
+        "grok_oauth(OAuth 로그인 토큰), grok_web(웹, 기본 꺼짐), fake 중 하나다"
     )
