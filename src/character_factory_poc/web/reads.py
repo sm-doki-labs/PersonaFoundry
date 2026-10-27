@@ -12,8 +12,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from character_factory_poc.common.config import load_config
 from character_factory_poc.pipeline.graph import GATES, STAGES
 from character_factory_poc.pipeline.queue import gate_queue
+from character_factory_poc.pipeline.rework import rework_status
 from character_factory_poc.web.errors import WebError
 from character_factory_poc.web.gate_items import build_gate_items, file_url
 
@@ -535,6 +537,7 @@ def gate_view(root: Path, character_id: str, gate: str) -> dict[str, Any]:
         "previews": previews,
         "stateError": error,
         "generatedAt": now_iso(),
+        "rework": rework_status(char_dir, gate, load_config(root).rework),
     }
 
 

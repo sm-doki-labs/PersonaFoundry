@@ -119,6 +119,22 @@ def _training_ready(ctx: Context, cid: str) -> bool:
     return False
 
 
+def _last_gate_decision(ctx: Context, cid: str, gate: str) -> str | None:
+    """관문 상태가 가리키는 마지막 결정 기록의 decision. 없으면 None."""
+    from character_factory_poc.common.store import read_json
+
+    g = ctx.state(cid).gate(gate)
+    if not g.recordRef:
+        return None
+    path = ctx.character_dir(cid) / g.recordRef
+    if not path.exists():
+        return None
+    try:
+        return read_json(path).get("decision")
+    except (OSError, ValueError):
+        return None
+
+
 def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callable[[], Path | None]]:
     from character_factory_poc.stages.s1_reference.run import run_s1
     from character_factory_poc.stages.s2_hero.run import run_s2
@@ -204,6 +220,12 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
     }
     if opt.ranking is not None:
         runners["s1"] = lambda: run_s1(ctx, cid, opt.ranking)
+    elif _last_gate_decision(ctx, cid, "G1") == "REQUEST_CHANGES":
+        # D-0049(LLD §6.9): G1 수정 요청 뒤에는 같은 순위·특징으로 얼굴 미리보기만 다시 만든다
+        # (cfp ref faces 경로). --ranking이 없어도 s1을 돈다.
+        from character_factory_poc.stages.s1_reference.faces import run_faces
+
+        runners["s1"] = lambda: run_faces(ctx, cid)
     if appearance:
         runners["s2"] = lambda: run_s2(ctx, cid)
         runners["s5"] = lambda: run_s5(ctx, cid)

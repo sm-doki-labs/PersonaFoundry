@@ -43,6 +43,41 @@ def validate_choices(answer: dict, options: dict[str, set[str]], gate: str) -> t
     return dict(picks), {ch: text.strip() for ch, text in custom.items()}
 
 
+def validate_requested_changes(answer: dict, gate: str) -> list[dict[str, str]]:
+    """챕터별 수정 요청(LLD §6.9). s4_frames/approve.py의 G4 검사와 같은 규칙이다."""
+    changes = answer.get("requestedChanges")
+    if changes is None:
+        # 옛 답 형식: 챕터를 고르지 않고 reasons에 고칠 점만 적는다. 재작업 브리프는 이유를
+        # 단일 메모로 받아 전체를 다시 만든다.
+        reasons = answer.get("reasons")
+        if not isinstance(reasons, str) or not reasons.strip():
+            raise FactoryError(
+                f"{gate}: REQUEST_CHANGES에는 챕터별 requestedChanges 또는 "
+                "고칠 점 reasons가 필요하다"
+            )
+        return []
+    if not isinstance(changes, list) or not changes:
+        raise FactoryError(f"{gate}: requestedChanges에 수정할 챕터와 note를 적는다")
+    seen: set[str] = set()
+    out: list[dict[str, str]] = []
+    for change in changes:
+        if (
+            not isinstance(change, dict)
+            or set(change) != {"field", "note"}
+            or not isinstance(change["field"], str)
+            or change["field"] not in CHAPTERS
+            or change["field"] in seen
+            or not isinstance(change["note"], str)
+            or not change["note"].strip()
+        ):
+            raise FactoryError(
+                f"{gate}: requestedChanges는 중복 없는 ch1·ch2·ch3와 비어 있지 않은 note가 필요하다"
+            )
+        seen.add(change["field"])
+        out.append({"field": change["field"], "note": change["note"]})
+    return out
+
+
 def approve_g4a(ctx: Context, cid: str, answer: dict) -> Path:
     state = ctx.state(cid)
     gate = state.gate("G4a")
@@ -56,6 +91,7 @@ def approve_g4a(ctx: Context, cid: str, answer: dict) -> Path:
     decision = answer.get("decision")
     selected = None
     selections = []
+    changes: list[dict[str, str]] = []
     if decision in {"SELECT", "APPROVE"}:
         options = {
             ch.chapterId: {c.candidateId for c in ch.candidates} for ch in backgrounds.chapters
@@ -70,7 +106,9 @@ def approve_g4a(ctx: Context, cid: str, answer: dict) -> Path:
         picks, custom = validate_choices(choices, options, "G4a")
         selected = BackgroundSelection(backgroundRev=gate.rev, picks=picks, custom=custom)
         selections = list(picks.values()) + [f"custom:{ch}" for ch in custom]
-    elif decision not in {"REQUEST_CHANGES", "REJECT"}:
+    elif decision == "REQUEST_CHANGES":
+        changes = validate_requested_changes(answer, "G4a")
+    elif decision != "REJECT":
         raise FactoryError("G4a 결정은 SELECT·APPROVE·REQUEST_CHANGES·REJECT 중 하나다")
     if selected:
         write_once_json(rev_dir / "selection.json", dump(selected))
@@ -83,6 +121,7 @@ def approve_g4a(ctx: Context, cid: str, answer: dict) -> Path:
         shown=[rev_dir / "background-candidates.json", rev_dir / "gate-G4a.html"],
         decision=decision,
         selections=selections,
+        requested_changes=changes,
         **details,
     )
     ctx.ledger(cid).record_human(gate="G4a", minutes=rec.minutes, ref=f"{cid}/{gate.rev}")

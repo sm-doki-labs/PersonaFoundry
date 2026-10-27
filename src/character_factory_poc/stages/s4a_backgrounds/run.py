@@ -23,9 +23,11 @@ from character_factory_poc.common.store import (
     write_once_text,
 )
 from character_factory_poc.contracts.qa import QaSummary
+from character_factory_poc.contracts.rework import ReworkBrief
 from character_factory_poc.contracts.scene import BackgroundOutput
 from character_factory_poc.pipeline.agent import AgentSpec, run_agent
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.rework import load_rework
 from character_factory_poc.providers.base import ImageRequest
 from character_factory_poc.stages.image_qa import (
     RUBRICS,
@@ -42,6 +44,7 @@ from character_factory_poc.stages.s4a_backgrounds.page import render_g4a_page
 from character_factory_poc.stages.s4a_backgrounds.prompt import PLATE_NEGATIVE, build_plate_prompt
 
 DEFAULTS = {"candidates_per_chapter": 3, "plates": True, "aspect_ratio": "9:16"}
+CHAPTERS = ("ch1", "ch2", "ch3")
 PERSON_WORD = re.compile(r"\b(woman|man|person|people|girl|boy)\b", re.I)
 
 
@@ -255,12 +258,48 @@ def _example(count: int) -> dict:
     }
 
 
+def rework_scope(ctx: Context, cid: str) -> tuple[ReworkBrief | None, Path | None, list[str]]:
+    """수정 요청 재작업이면 (브리프, 직전 rev 폴더, 다시 만들 챕터)를, 아니면 (None, None, 전부).
+
+    브리프의 `targets[].field`가 챕터 ID다(LLD §6.9). 직전 revision이 없거나 대상 챕터가
+    하나도 없으면 전체를 다시 만든다.
+    """
+    brief = load_rework(ctx, cid, "G4a")
+    if brief is None:
+        return None, None, list(CHAPTERS)
+    previous = ctx.character_dir(cid) / "s4a-backgrounds" / brief.fromRev
+    if not (previous / "background-candidates.json").exists():
+        return None, None, list(CHAPTERS)
+    fields = {t.field for t in brief.targets}
+    regenerate = [ch for ch in CHAPTERS if ch in fields]
+    if not regenerate:
+        return None, None, list(CHAPTERS)
+    return brief, previous, regenerate
+
+
+def carry_chapter(src_dir: Path, chapter_set: Any, rev_dir: Path) -> dict:
+    """직전 revision의 챕터 후보·배경 사진·자동 검사 보고서를 바이트 그대로 이월한다."""
+    carried = dump(chapter_set)
+    for candidate in carried["candidates"]:
+        plate = candidate.get("plate")
+        if plate:
+            src = src_dir / plate["path"]
+            if sha256_file(src) != plate["sha256"]:
+                raise CheckFailed("s4a", [f"{plate['path']} 해시가 직전 revision과 다르다"])
+            write_once_bytes(rev_dir / plate["path"], src.read_bytes())
+        raw_qa = candidate.get("qa")
+        if raw_qa:
+            carry_qa(src_dir, rev_dir, QaSummary.model_validate(raw_qa))
+    return carried
+
+
 def run_s4a(ctx: Context, cid: str) -> Path:
     state = ctx.state(cid)
     state.require_deps("s4a")
     plan, _ = load_approved_plan_v2(ctx, cid)
     appearance, _ = load_appearance_spec(ctx, cid)
     cfg = s4a_config(ctx)
+    brief, previous, regenerate = rework_scope(ctx, cid)
     budget = ctx.budget()
     budget.check_plan(plan_calls(ctx))
     settings = qa_settings(ctx)
@@ -282,6 +321,19 @@ def run_s4a(ctx: Context, cid: str) -> Path:
                 "의미를 지킨다. 외모로 성격을 추정하지 않는다. plateBrief는 인물 없는 빈 장면이다."
             ),
         }
+        if brief is not None:
+            inputs["revision"] = {
+                "gate": brief.gate,
+                "round": brief.round,
+                "targets": [t.field for t in brief.targets],
+                "notes": {t.field: t.note for t in brief.targets},
+                "instructions": brief.instructions,
+                "keep": brief.keep,
+            }
+            inputs["rules.md"] += (
+                " 이번 실행은 수정 요청 대상 챕터만 고친다. "
+                "대상이 아닌 챕터는 직전 후보를 그대로 쓴다."
+            )
         out = call_agent(
             ctx,
             cid,
@@ -295,8 +347,19 @@ def run_s4a(ctx: Context, cid: str) -> Path:
             _example(count),
         )
         arc = {c.chapterId: c for c in plan.chapterArc}
+        carried: dict[str, Any] = {}
+        if previous is not None:
+            prev_set = validate(
+                "background-candidates-v1", read_json(previous / "background-candidates.json")
+            )
+            carried = {ch.chapterId: ch for ch in prev_set.chapters}
+        fresh = {ch.chapterId: ch for ch in out.chapters}
         chapters = []
-        for ch in out.chapters:
+        for chapter_id in CHAPTERS:
+            if previous is not None and chapter_id not in regenerate:
+                chapters.append(carry_chapter(previous, carried[chapter_id], rev_dir))
+                continue
+            ch = fresh[chapter_id]
             candidates = []
             for candidate in ch.candidates:
                 plate, qa = (
