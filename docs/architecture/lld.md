@@ -1,10 +1,10 @@
 # 에이전틱 캐릭터 공장 상세 설계 (LLD)
 
-- 문서 버전: v1.4
+- 문서 버전: v1.5
 - 작성일: 2026-10-14
 - 상태: 초안, 사용자 검토 전
 - 근거: [PRD v1.3](../product/prd.md), [시스템 명세 v1.3](spec.md). 이 문서는 명세를 코드로 옮기는 세부만 정하고 다른 결정을 담지 않는다. 절마다 근거가 되는 명세 절을 `(명세 §n)`으로 적는다.
-- 변경 이력: v0.1 최초 작성 / v0.2(2026-10-20) S1을 화제성 순위 → 외모 특징 프록시로 바꾸고 §2~§5·§8.1·§9~§13을 고쳤다(D-0017, D-0018) / v0.3(2026-10-20) 인물 인상 칸과 계약 v2(§5.2·§5.5·§8.1·§10, D-0020, D-0021) / v0.4(2026-10-21) G1 참조 사진·S2 구현(§2~§5·§5.7·§5.8·§8.1·§8.2·§9·§10·§12·§13, D-0022, D-0023) / v0.5(2026-10-21) S3 외모 연결, S4·G4 구현(§2~§5·§5.10·§8.3·§8.4·§12, D-0024~D-0026) / v0.6(2026-10-21) S5·G5와 xai_video·grok_web 어댑터(§2~§5·§5.11·§8.5·§9·§10·§12·§13, D-0028~D-0030) / v0.7(2026-10-21) 9:16 세로 첫 프레임과 `intro-inputs-v2`(§3·§4·§5.11·§8.5, D-0031), 실제 grok.com 화면에 맞춘 `grok_web`(§9, D-0032) / v0.8(2026-10-22) 씨앗 → 변형 기획, S3r 참고 자료, S4a·S4b·S4 배경 → 자세 → 완성 이미지, 갈래별 진행 오케스트레이터(§2~§6·§8.3·§8.3a·§8.4·§11·§12, D-0033~D-0035) / v0.9(2026-10-22) 이미지 자동 검사·수정 루프(§2·§3·§5.10b·§8.4a·§9·§11·§12, D-0036, D-0037) / v1.0(2026-10-22) S6 동작 영상 골격과 G5b(§2~§5·§5.11a·§6.1·§8.5a·§11·§12, D-0038, D-0039) / v1.1(2026-10-22) 앱 통화 영상 카탈로그, 무표정 첫 프레임, 계약 v2(§2~§4·§5.11a·§8.5·§11·§12, D-0040, D-0041) / v1.2(2026-10-27) 얼굴은 G1에서 한 장만 고르고 S2를 자동 기준 사진·동일인 검사로 바꿔 G2를 없앴다. 아직 코드에는 반영하지 않았다(§2~§4·§5.7·§5.8·§5.9·§5.17·§6.1·§8.1~§8.5·§11~§13, D-0042, D-0043) / v1.3(2026-10-27) 3일 PoC 계약: §4 명령(S1 수집·S9~S11·내보내기·웹앱), §5.14·§5.15·§5.17을 새 계약(`data-plan-v1` 등, `training-run-v2` 등, `character-package-v1`·`export-result-v1`)으로 바꾸고, §6.5 워크숍 API, §8.8~§8.11(S9 샘플·대량 두 단계와 G7a, S10 학습·평가 분리, 패키지, 우리 앱 내보내기), §9 어댑터(`grok_oauth`, 순위 수집기, `gemma_qlora`, `vertex_gemini`), §12 M8을 더했다(D-0044, D-0045) / v1.4(2026-10-28) 학습 없이 긴 프롬프트로 패키지까지 가는 G8 결정(§8.9), 학습 제출 분리(`--submit-training`), G8 답 형식(§6.5)(D-0048)
+- 변경 이력: v0.1 최초 작성 / v0.2(2026-10-20) S1을 화제성 순위 → 외모 특징 프록시로 바꾸고 §2~§5·§8.1·§9~§13을 고쳤다(D-0017, D-0018) / v0.3(2026-10-20) 인물 인상 칸과 계약 v2(§5.2·§5.5·§8.1·§10, D-0020, D-0021) / v0.4(2026-10-21) G1 참조 사진·S2 구현(§2~§5·§5.7·§5.8·§8.1·§8.2·§9·§10·§12·§13, D-0022, D-0023) / v0.5(2026-10-21) S3 외모 연결, S4·G4 구현(§2~§5·§5.10·§8.3·§8.4·§12, D-0024~D-0026) / v0.6(2026-10-21) S5·G5와 xai_video·grok_web 어댑터(§2~§5·§5.11·§8.5·§9·§10·§12·§13, D-0028~D-0030) / v0.7(2026-10-21) 9:16 세로 첫 프레임과 `intro-inputs-v2`(§3·§4·§5.11·§8.5, D-0031), 실제 grok.com 화면에 맞춘 `grok_web`(§9, D-0032) / v0.8(2026-10-22) 씨앗 → 변형 기획, S3r 참고 자료, S4a·S4b·S4 배경 → 자세 → 완성 이미지, 갈래별 진행 오케스트레이터(§2~§6·§8.3·§8.3a·§8.4·§11·§12, D-0033~D-0035) / v0.9(2026-10-22) 이미지 자동 검사·수정 루프(§2·§3·§5.10b·§8.4a·§9·§11·§12, D-0036, D-0037) / v1.0(2026-10-22) S6 동작 영상 골격과 G5b(§2~§5·§5.11a·§6.1·§8.5a·§11·§12, D-0038, D-0039) / v1.1(2026-10-22) 앱 통화 영상 카탈로그, 무표정 첫 프레임, 계약 v2(§2~§4·§5.11a·§8.5·§11·§12, D-0040, D-0041) / v1.2(2026-10-27) 얼굴은 G1에서 한 장만 고르고 S2를 자동 기준 사진·동일인 검사로 바꿔 G2를 없앴다. 아직 코드에는 반영하지 않았다(§2~§4·§5.7·§5.8·§5.9·§5.17·§6.1·§8.1~§8.5·§11~§13, D-0042, D-0043) / v1.3(2026-10-27) 3일 PoC 계약: §4 명령(S1 수집·S9~S11·내보내기·웹앱), §5.14·§5.15·§5.17을 새 계약(`data-plan-v1` 등, `training-run-v2` 등, `character-package-v1`·`export-result-v1`)으로 바꾸고, §6.5 워크숍 API, §8.8~§8.11(S9 샘플·대량 두 단계와 G7a, S10 학습·평가 분리, 패키지, 우리 앱 내보내기), §9 어댑터(`grok_oauth`, 순위 수집기, `gemma_qlora`, `vertex_gemini`), §12 M8을 더했다(D-0044, D-0045) / v1.4(2026-10-28) 학습 없이 긴 프롬프트로 패키지까지 가는 G8 결정(§8.9), 학습 제출 분리(`--submit-training`), G8 답 형식(§6.5)(D-0048) / v1.5(2026-10-28) 에이전틱 실행: §3 설정, §4 명령, §5.16 관문 기록 선택 칸, §5.19~§5.21 새 계약, §6.6~§6.10 물결 실행·자동 재개·사전 검토·재작업·대기열, §11 시험, §12 M9(D-0049)
 
 ## 1. 범위와 기준
 
@@ -116,6 +116,10 @@ character-factory-poc/
 [stages.s4b]           candidates_per_chapter = 3   # D-0034 확정
 [stages.s4]            aspect_ratio = "9:16"; reference_crop = "face"; face_crop_scale = 1.4   # 챕터당 1장(D-0034), D-0027
 [stages.s8]            short_prompt_max_chars = 1500
+[orchestrator]         max_parallel = 3; auto_resume = true; resume_until = "sx"   # D-0049 제안. max_parallel = 1이면 지금의 순차 실행(§6.6·§6.7)
+[review]               enabled = true; vision = false; gates = ["G1", "G3", "G4a", "G4b", "G4", "G5", "G5b", "G6", "G7", "G9"]   # D-0049. vision은 Q-0020 확인 뒤 켠다(§6.8)
+[rework]               max_rounds = 3; normalize = true   # D-0049 제안. normalize = false면 메모 원문을 지시로 그대로 쓴다(§6.9)
+                       # 공급자 표에 paid = true를 두면 워크숍 실행에서 그 공급자를 쓰는 단계는 실행 확인을 받는다(§6.7). 예: [providers.video] paid = true. fake 공급자는 무시한다
 ```
 
 모델 이름·수치는 전부 제안이다. 키는 `api_key_env`에 적힌 환경변수 이름으로만 읽는다. 생성(`text`)과 판정(`judge`)의 모델 계열이 같으면 시작 시 경고한다(D-0010).
@@ -166,6 +170,9 @@ character-factory-poc/
 | `cfp release build <character_id>` | S11(§8.10). 승인된 revision으로 `character-package-v1` 패키지를 만들고 G9 대기로 둔다. |
 | `cfp export doki-app <character_id> [--verify]` | 우리 앱 변환(§8.11). G9 승인 패키지를 api-svc 시드 묶음과 chat-svc 콘텐츠 트리로 바꾸고 `export-result-v1`을 쓴다. `--verify`는 일회용 PostgreSQL 두 개에 적재해 확인한다. |
 | `python -m character_factory_poc.web --root <공장 루트> [--port 8765]` | 워크숍 웹앱(§6.5). |
+| `cfp run <character_id> ... [--parallel N]` | 동시에 돌릴 단계 수 상한(§6.6). 기본은 `[orchestrator] max_parallel`이고 `1`이면 지금의 순차 실행이다(D-0049). |
+| `cfp review <character_id> <gate> [--execute]` | 열린 관문의 사전 검토(§6.8). 기본은 호출 계획만 낸다. 그 관문 revision의 검토 기록이 이미 있으면 그대로 둔다. G7a·G8은 거절한다(D-0049). |
+| `cfp report hil <character_id>` | 사람 관문 보고서 `hil-report-v1`(§5.21, §6.10)을 표로 출력하고 `runs/characters/<id>/reports/hil-<UTC 시각>.json`에 쓴다. 외부 호출이 없다(D-0049). |
 | `cfp ledger report <id>` | 원장으로 비용·시간 보고서를 만든다. |
 | `cfp verify <id>` | 모든 revision 폴더의 manifest.sha256을 확인한다. |
 
@@ -279,7 +286,7 @@ v1(동작 카탈로그 8개, D-0039)은 실제 산출물 없이 v2로 바뀌었�
 
 ### 5.16 `gate-record-v1`
 
-`{schemaVersion, characterId|briefId, gate, shownArtifacts[{ref, sha256}], decision, selections[], reasons, requestedChanges[{field, note}], reviewer, minutes, decidedAt}`
+`{schemaVersion, characterId|briefId, gate, shownArtifacts[{ref, sha256}], decision, selections[], reasons, requestedChanges[{field, note}], reviewer, minutes, decidedAt, reviewRef?, followedReview?}`. `reviewRef`·`followedReview`는 D-0049(§6.8)에서 더한 선택 칸이고, 옛 기록은 두 칸 없이 읽힌다.
 
 ### 5.17 `character-package-v1` / `export-result-v1` (D-0011, D-0044)
 
@@ -294,6 +301,18 @@ v1(동작 카탈로그 8개, D-0039)은 실제 산출물 없이 v2로 바뀌었�
 ### 5.18 원장
 
 `calls.jsonl` 한 줄: `{callId, at, stage, kind, provider, model, inputTokens, outputTokens, images, seconds, ms, ok, estCostUsd, ref}`. `human-time.jsonl` 한 줄: `{at, gate, minutes, ref}`.
+
+### 5.19 `gate-review-v1` (D-0049, 명세 §7.2)
+
+`{schemaVersion, subjectId, gate, rev, reviewer{provider, model, family}, mode: "llm"|"vision"|"deterministic", shownArtifacts[{ref, sha256}], items[{candidateId, chapterId?, rank?, verdict: "RECOMMEND"|"OK"|"CONCERN", reasons[], defects[{field, note}]}], summary, createdAt}`. 저장 위치는 관문 단계 폴더의 `<rev>/review-<gate>.json`이고 한 번만 쓴다. `candidateId`는 관문 화면 항목 ID(`web/gate_items.py`가 만드는 ID)와 같다. 고르기 관문은 챕터(또는 동작)마다 `rank` 1이 정확히 하나다. 승인 관문(G4·G6·G7·G9)은 `rank` 없이 `verdict`·`defects`만 쓴다.
+
+### 5.20 `rework-brief-v1` (D-0049, 명세 §7.3)
+
+`{schemaVersion, subjectId, gate, stage, fromRev, round, recordRef, targets[{field, note}], keep[], instructions, normalizedBy{provider, model}|null, createdAt}`. `targets[].note`는 관문 기록의 `requestedChanges[].note` 원문 그대로다. `instructions`는 `[rework] normalize = true`면 텍스트 모델이 단계 지시로 바꾼 문장이고, 꺼져 있거나 그 호출이 실패하면 메모 원문을 줄마다 이은 문장이다. 저장 위치는 `<캐릭터 폴더>/rework/<gate>-<fromRev>.json`이고 한 번만 쓴다. `round`는 그 관문의 `REQUEST_CHANGES` 관문 기록 수다(이번 것 포함).
+
+### 5.21 `hil-report-v1` (D-0049, 명세 §7.4)
+
+`{schemaVersion, subjectId, createdAt, gates[{gate, rounds[{rev, openedAt?, decidedAt?, waitMinutes?, reviewMinutes, decision?, followedReview?, reviewRef?}], requestChangesCount, reworkCapReached}], totals{gatesDecided, waitMinutes, reviewMinutes, requestChanges, followedReviewRate?}}`. 열린 시각·결정 시각은 원장 `ledger/gate-events.jsonl`(§6.6)에서, 검토 시간·결정·일치 여부는 관문 기록에서 읽는다. G7a·G8의 `followedReview`는 늘 비어 있다.
 
 ## 6. 오케스트레이터 (명세 §2·§7)
 
@@ -335,6 +354,61 @@ S9~S11은 다음 단계로 둔다(D-0044, §8.8~§8.11): `s9s` 데이터 샘플(
 새 관문의 답 형식: G7a `{"decision": "SELECT"|"REQUEST_CHANGES", "cluster": "<clusterId>", "verdicts": {"<conversationId>": "ADOPT"|"FIX"|"REJECT"}, "notes": {...}}`, G7 `{"decision": "APPROVE"|"REQUEST_CHANGES", "verdicts": {...}}`(무작위 표본 20개), G8 `{"decision": "SELECT", "adopted": "LONG_BASE"|"<model_binding ref>", "humanPicks": [{"pairId", "pick"}]}`(학습 없이 진행 화면이면 `{"decision": "SELECT", "adopted": "LONG_BASE"}` 또는 `{"decision": "REJECT"}`), G9 `{"decision": "APPROVE"|"REJECT", "reasons": "..."}`.
 
 구현 메모(2026-10-27, M8 1차): `/api/projects`는 `characters[]`(단계·관문·대기 관문·진행률·마지막 작업)와 `briefs[]`·`totals`를, `/api/characters/{id}`는 원본 `state` + `lanes`·`pendingGates`를, 관문 항목은 `files`·`previews`(URL)·`record`·`records`를 돌려준다. 작업 ID는 `job-<시각>-<hex>`, 상태는 `queued|running|succeeded|failed`이고 `[web] jobs_dir`(기본 `work/web-jobs`)에 남으며 재시작 때 끝나지 않은 작업은 실패로 정리한다. SSE 이벤트 이름은 `hello|job|state|gate`다. 오류: 없음 404, 형식 400, 이미 결정된 관문·동시 작업 409, 아직 구현되지 않은 관문 501, 캐릭터 폴더 밖 파일 400. 관문 결정과 작업은 캐릭터별 잠금으로 순서를 지킨다. 관문별 상세 화면은 아직 없고(K-0037), 대기 관문 칩은 검토 항목 JSON을 연다.
+
+### 6.6 물결 실행 (D-0049, 명세 §7.1)
+
+**상태 파일 잠금.** `StateFile.transition`·`set_gate`는 `state.json.lock`에 `fcntl.flock(LOCK_EX)`을 잡고 디스크의 `state.json`을 다시 읽어 그 위에 변경을 적용한 뒤 저장한다. 메모리의 `self.state`도 다시 읽은 값으로 바꾼다. 같은 스레드에서 잠금을 다시 잡지 않는다.
+
+**관문 사건 기록.** `set_gate`는 관문 상태가 `AWAITING_HUMAN`이 되면 `{"at", "gate", "rev", "event": "opened"}`를, `APPROVED`·`REJECTED`가 되면 `"event": "decided"`를 `<캐릭터 폴더>/ledger/gate-events.jsonl`에 원장과 같은 방식(파일 잠금 덧붙이기)으로 남긴다.
+
+**`Context` 지연 생성.** 공급자 객체를 처음 만드는 부분(`_text`·`_judge`·`_image`·`_video`·`_vision`·`_codex`)을 `threading.Lock` 하나로 감싼다. 예산(`Budget`)은 단계 실행 함수가 `ctx.budget()`으로 따로 만들기 때문에 공유하지 않는다.
+
+**계산 함수.** `pipeline/scheduler.py`의 `ready_stages(state: StateFile, runners: Mapping[str, Callable], attempted: set[str]) -> list[str]`. `STAGES` 순서를 유지해 다음을 모두 만족하는 단계를 돌려준다. 실행 함수가 있고 `implemented`다. 상태가 `PENDING`·`RUNNING`·`CHECK_FAILED`·`REJECTED` 가운데 하나다. `require_deps`를 통과한다. `attempted`에 없다.
+
+**물결 실행.** `run_waves(ctx: Context, cid: str, opt: RunOptions) -> RunLog`. 순서는 다음과 같다. (1) `run_until`과 같은 건너뜀 기록(외모 축 없음·`--ranking` 없음)을 남긴다. (2) `ready_stages`로 이번 물결을 고르고, 워크숍 실행이면 유료 단계를 덜어 `RunLog.held`에 넣는다(§6.7). (3) `ThreadPoolExecutor(max_workers=opt.max_parallel)`로 동시에 돈다. 단계마다 기존 `run_until`의 한 단계 처리(실행·예외별 기록·관문 대기 처리·자동 승인)를 그대로 쓰는 `_run_one(ctx, cid, sid, opt, runners) -> StageOutcome`를 부른다. (4) 물결이 끝나면 단계별 기록 줄을 `STAGES` 순서로 `RunLog.steps`에 붙여 기록이 실행 순서와 상관없이 같게 한다. (5) `--until`에 닿았거나 고를 단계가 없으면 멈춘다. 끝에 `run_until`과 같은 형식으로 기다리는 관문·시작하지 못한 단계를 보고한다.
+
+`run_until`은 `opt.max_parallel <= 1`이면 지금의 순차 훑기를 그대로 돌고, 그보다 크면 `run_waves`를 부른다. 두 방식의 최종 상태는 같아야 한다(§11).
+
+**`RunOptions`에 더하는 칸.** `max_parallel: int = 1`, `web: bool = False`(워크숍 실행), `confirmed: set[str]`(사람이 실행을 확인한 단계, 반복 상한을 한 번 넘기는 허락도 같은 칸으로 받는다). **`RunLog`에 더하는 칸.** `held: list[str]`(실행 확인 대기), `waves: list[list[str]]`(물결마다 동시에 시작한 단계), `timings: dict[str, dict[str, str]]`(단계별 `start`·`end`, UTC ISO).
+
+**훅.** `_run_one`은 두 자리에서 다른 갈래의 함수를 부른다. 단계가 `REJECTED`에서 다시 돌기 직전에 `pipeline.rework.prepare_rework(ctx, cid, sid, opt) -> bool`(§6.9)을 부른다. `False`면 단계를 돌리지 않고 `RunLog.blocked`에 "<gate> 반복 상한" 사유로 올린다. 관문이 `AWAITING_HUMAN`이 된 뒤에는 `pipeline.review.review_on_open(ctx, cid, gate) -> Path | None`(§6.8)을 부른다. 이 함수는 예외를 밖으로 내지 않는다. A 갈래는 두 함수를 아무 일도 하지 않는 형태(각각 `True`·`None`를 돌려줌)로 먼저 두고, B·C 갈래가 내용을 채운다. 순차 훑기(`max_parallel = 1`)도 같은 두 자리에서 같은 함수를 부른다.
+
+### 6.7 워크숍 자동 재개와 실행 확인 (D-0049, 명세 §7.1)
+
+`JobManager.submit(character_id, action="run", until=None, *, confirm: list[str] | None = None, trigger: "manual" | "gate" = "manual")`. `Job`에 `trigger`·`confirm`·`held`를 더해 기록과 SSE `job` 이벤트에 싣는다. `_run_default`는 `RunOptions(until, max_parallel=[orchestrator] max_parallel, web=True, confirmed=set(confirm))`로 실행한다.
+
+`JobManager.request_resume(character_id) -> dict | None`. `[orchestrator] auto_resume`가 꺼져 있으면 `None`. 그 캐릭터 작업이 돌고 있으면 `_rerun[character_id] = True`만 남기고 `None`. 아니면 `submit(character_id, until=resume_until, trigger="gate")`. 작업이 끝날 때(`_run`의 `finally`) 표시가 있으면 지우고 같은 방식으로 한 번 더 넣는다. `POST .../gates/{gate}/decision`은 결정을 기록한 뒤 `request_resume`을 부르고, 응답에 `resumeJob`(넣은 작업 또는 `null`)을 싣는다.
+
+**유료 단계.** `STAGE_PROVIDERS`(`pipeline/scheduler.py`)는 단계가 쓰는 공급자 종류다. s1 `{text, image}`, s2 `{image, vision}`, s3·s3r·s7·s9s·s9 `{text}`, s4a·s4b `{text, image}`, s4 `{image}`, s5·s6 `{video, image}`, s8·s10 `{text, judge}`, s10t `{tuning}`, s11·sx는 없음. `paid_stage(ctx, sid) -> bool`은 그 가운데 `adapter != "fake"`이고 공급자 표의 `paid = true`인 것이 있으면 참이다. 워크숍 실행(`opt.web`)에서 `paid_stage`이고 `sid not in opt.confirmed`면 단계를 돌리지 않고 `RunLog.held`에 넣는다. `GET /api/characters/{id}`는 마지막 작업의 `held`와, held 단계마다 `plan_calls`로 만든 호출 계획 문장(가능한 단계만)을 `held[]: {stage, plan}`으로 싣는다. 화면의 "실행" 버튼은 `POST /api/jobs {characterId, action: "run", confirm: [stage]}`를 보낸다.
+
+### 6.8 관문 사전 검토 (D-0049, 명세 §7.2)
+
+`pipeline/review.py`: `NO_REVIEW_GATES = {"G7a", "G8"}`, `REVIEWERS: dict[str, ReviewSpec]`(관문별 모드·입력 조립 함수·프롬프트 파일 `prompts/review/<gate>.md`), `review_gate(ctx, cid, gate) -> Path | None`, `review_on_open(ctx, cid, gate) -> Path | None`, `load_review(char_dir: Path, gate: str, rev: str) -> GateReview | None`, `plan_review_calls(ctx, cid, gate) -> list[CallPlan]`.
+
+- 입력 조립: 후보 목록과 파일은 `web/gate_items.py`의 `build_gate_items`가 화면에 내는 항목을 그대로 쓴다. 그래야 `candidateId`가 화면과 같다. 텍스트 관문은 항목 본문(JSON 칸)을, 비전 관문은 이미지 파일을, 영상 관문은 첫 프레임 이미지와 메타데이터를 넣는다. 사람 이름·순위 목록 이름은 넣지 않는다(FR-35).
+- 호출: 텍스트는 `ctx.judge_model`(생성 계열과 같으면 지금 규칙대로 막음), 비전은 `ctx.vision_model`(`vision_family_warning`가 비어 있지 않으면 막음)로 관문 하나, 챕터가 있으면 챕터 하나당 한 번이다. G9는 `release` 검사 결과를 요약하는 결정적 검토다.
+- 검증: 답에서 JSON을 뽑아(`extract_json_object`) `candidateId`가 보여 준 항목 안에 있는지, 고르기 관문이면 단위마다 `rank` 1이 하나인지 본다. 실패하면 사유를 붙여 한 번 더 부르고, 그래도 실패하면 기록을 쓰지 않는다.
+- `review_on_open`: `[review] enabled`와 `gates`를 보고, 비전 관문이면 `[review] vision`도 본다. `ctx.execute`가 아니면 돌지 않는다. 예외는 잡아서 원장(`kind=REVIEW`, `ok=false`)에 남기고 `None`.
+- 관문 기록: `write_gate_record`가 `load_review(char_dir, gate, rev)`로 검토를 찾으면 `reviewRef`를 채운다. `followedReview`는 고르기 관문에서 단위마다 `rank` 1인 `candidateId`가 모두 `selections`에 들어 있으면 참, 하나라도 빠지면 거짓, 검토가 없거나 승인 관문이면 비운다.
+- 화면: `reads.gate_view`가 `review`(현재 관문 rev와 같은 것만)를 돌려준다. 관문 화면은 후보 카드에 "추천"·"걸리는 점" 표시와 근거 한두 줄을 붙이고, 검토가 없으면 "검토 없음"을 쓴다. G7a·G8 화면은 바꾸지 않는다.
+
+### 6.9 수정 요청 재작업 (D-0049, 명세 §7.3)
+
+`pipeline/rework.py`: `REWORK_GATES = {"G1", "G4a", "G4b", "G4", "G5", "G5b", "G6"}`, `prepare_rework(ctx, cid, sid, opt) -> bool`, `load_rework(ctx, cid, gate) -> ReworkBrief | None`, `rework_rounds(char_dir, gate) -> int`.
+
+- `prepare_rework`: 단계의 관문이 `REWORK_GATES`에 있고 그 관문의 마지막 기록이 `REQUEST_CHANGES`일 때만 일한다(아니면 `True`). `round > max_rounds`이고 `sid not in opt.confirmed`면 `False`. 아니면 `rework-brief-v1`을 쓰고(이미 있으면 그대로) `True`.
+- `load_rework`: 관문 상태의 `rev`(거절된 rev)와 `fromRev`가 같은 브리프를 돌려준다. 단계 실행 함수가 시작할 때 부른다.
+- 단계별 부분 재생성: s4a·s4b는 `targets[].field`가 챕터 ID(`ch1`~`ch3`)이고 그 챕터만 다시 만들며, 다른 챕터의 후보 파일은 직전 rev에서 바이트 그대로 복사한다. s5는 소개 영상 후보 전체를 다시 만들되 메모를 영상 지시에 붙인다. s8은 프롬프트 쌍을 다시 만들되 메모를 Prompter 입력에 붙인다. 이미 메모를 읽는 G1(`cfp ref faces` 경로)·G4·G5b는 지금 동작을 유지하고 반복 상한만 같이 쓴다. 실행기는 G1이 `REQUEST_CHANGES`면 s1 실행 함수로 `run_faces`를 쓴다(`--ranking`이 없어도).
+- 관문 페이지·답 검사: G4a·G4b는 `REQUEST_CHANGES`에 `requestedChanges[{field: chN, note}]`를 받는다(중복 없는 챕터, 빈 메모 거절). 워크숍 관문 화면은 수정 차수("수정 2/3")와 상한 도달을 보여 준다.
+
+### 6.10 대기열과 사람 시간 보고서 (D-0049, 명세 §7.4)
+
+`pipeline/queue.py`: `QueueItem(gate, stage, rev, openedAt, unblocks: int, unblockedStages: list[str])`, `downstream_stages(gate: str) -> list[str]`, `gate_queue(char_dir: Path, state: State) -> list[QueueItem]`.
+
+- `downstream_stages`: `STAGES`의 `deps`(관문 → 단계)와 `needs`·`after`(단계 → 단계), 단계의 `gate`(단계 → 관문)를 따라 닿는 단계를 `STAGES` 순서로 돌려준다.
+- `gate_queue`: `AWAITING_HUMAN` 관문마다 아직 `APPROVED`·`SKIPPED`가 아닌 뒤쪽 단계 수를 `unblocks`로 센다. `unblocks` 내림차순, 같으면 `openedAt`(원장 관문 사건, 없으면 단계 `updatedAt`) 오름차순, 그다음 `GATES` 순서로 정렬한다.
+- 화면: `reads.character_detail`와 `list_projects`의 캐릭터 항목에 `queue`를 싣고, 작업실·운영 화면의 대기 관문 목록을 이 순서로 그린다. `held`(§6.7)를 "실행 확인 대기" 칩과 "실행" 버튼으로 그린다.
+- `pipeline/hil_report.py`의 `build_hil_report(char_dir: Path) -> HilReport`와 `cfp report hil`. 대기 시간은 `decided.at - opened.at`(분)이다.
 
 ## 7. 에이전트 러너 (명세 §4)
 
@@ -553,6 +627,7 @@ G9 승인 패키지를 우리 앱 두 시스템의 공식 적재 입력으로 �
 | 오프라인 기획·장면 흐름(D-0033) | `tests/test_plan_variants.py`(씨앗·변형·직접 쓴 안·G3 선택과 수정·검사 재시도·이름 유출), `tests/test_refs.py`(색인·검색·선별·원문 미복사·건너뛰기), `tests/test_scene_flow.py`(배경 사진 9:16, G4a 직접 정의, 장면 사실, 자세 검사 재시도, G4b 수정, 완성 이미지 참조 두 장, 챕터별 부분 재생성), `tests/test_orchestrator_flow.py`(씨앗 대기 중 S5 갈래 진행 → 씨앗 뒤 G4까지). |
 | 오프라인 전체 흐름 | `tests/test_reference.py`: 합성 순위 목록 → S1 → G1 import(현재 구현 범위). `tests/test_offline_pipeline.py`(목표): 합성 브리프 → S1(합성 순위 목록) → G1 import(얼굴 한 장) → S2(자동 동일인 검사) → S3 → G3 → S4·S5·S7 병렬 → G4·G5·G6 → S6 → S8 → S9 → G7 → S10 → G8 → S11 → G9. 네트워크는 소켓 차단 fixture로 막는다. |
 | 통합(선택) | `pytest -m live`: 실제 중계로 S1 태깅 1건, S3 초안 1건. 환경변수가 있을 때만 실행하고 원장에 남긴다. |
+| 에이전틱 실행(D-0049) | `tests/test_state_concurrency.py`(두 스레드 전이 손실 없음, 관문 사건 기록), `tests/test_scheduler.py`(차례별 `ready_stages`, 유료 단계 판정), `tests/test_run_waves.py`(장벽으로 동시 실행 확인, 한 갈래 검사 실패 중 다른 갈래 진행, 순차·물결 최종 상태 같음, 기록 순서 결정성), `tests/test_web_auto_resume.py`(결정 POST 하나로 다음 물결, 실행 중 결정은 한 번 더, 유료 단계 held와 호출 0회, 확인 뒤 실행, 꺼짐), `tests/test_review.py`(가짜 판정 순위 기록·화면, G7a·G8 거절, 형식 오류 뒤 검토 없음, 기록만으로 상태 불변, `followedReview`, 옛 rev 숨김, 같은 계열 거절, 비전 꺼짐이면 이미지 관문 건너뜀), `tests/test_rework.py`(G4a 챕터 부분 재생성과 해시 보존, 메모 원문 전달, 상한과 허락, G6 재작업 뒤 s9s 대기, REJECT는 브리프 없음, G1 자동 얼굴 재생성), `tests/test_gate_queue.py`·`tests/test_report_hil.py`(G3가 G5보다 앞, 보고서 관문 수와 G7a·G8 빈 일치율), 전체 흐름(워크숍 API로 결정만 보내 두 브리프가 sx까지, 수정 요청 2회 포함, SFT·학습 없이 두 경로) |
 
 반드시 고정할 위험: (1) 승인되지 않은 관문의 산출물을 다음 단계가 읽지 못한다. (2) 판정 프롬프트에 후보 식별 정보가 없다. (3) 같은 특징·설정이면 군집이 같다. (4) 성격 칸의 근거에 외모 명세가 들어가면 실패한다. (5) 섹션 집합이 다르면 프롬프트 쌍이 고정되지 않는다. (6) 평가 분할 예시가 학습 생성 입력에 들어가면 실패한다. (7) 비밀값이 원장·보고서·표준 출력에 없다. (8) 순위 목록의 이름이 S1 보고서·미리보기 프롬프트·S2 입력에 없다(FR-35). (9) G1은 얼굴 정확히 한 장만 받는다. (10) S2 판정이 상한까지 FAIL이면 외모 명세 없이 `CHECK_FAILED`이고, 판정 공급자가 없으면 `generate`는 아무것도 쓰기 전에 거절되며, `picked`는 이미지 호출 0회로 고정된다(D-0042, D-0043).
 
@@ -575,6 +650,7 @@ G9 승인 패키지를 우리 앱 두 시스템의 공식 적재 입력으로 �
 | M6 | S6 동작 영상(D-0038, D-0040, D-0041): G4 승인 이미지 → 미소·무표정 첫 프레임 → 앱 통화 영상 표준 세트(`l2` 6편·`standard` 37편) → G5b 선택·제외·부분 재생성, `cfp video actions`. 다음: 특별 행동 제안 에이전트, 영상 자동 검사 | 골격: 오프라인 통과(2026-10-22). 남은 것: 영상 공급자 사용량 확보(Q-0018) 뒤 `l2` 18편 실제 실행과 G5b 승인 | R0 골격·R1 |
 | M7 | SNS 재작성·NIKL·합성·분할, 학습 제출·수집, 사전 등록·블라인드 평가, 릴리즈 매니페스트, G7~G9 | 사전 등록 기준 판정 보고서와 `release_rev` 1개. | R1 |
 | M8 (PoC, D-0044·D-0045) | 3일 PoC: A 외모 흐름(M2b의 `picked`까지), B 순위 수집기, C S9 데이터셋, D S10 학습(dry run)·평가, E 패키지·우리 앱 변환기, F Grok OAuth, G 워크숍 웹앱, H 그래프에 `s9s`·`s9`·`s10t`·`s10`·`s11`·내보내기 연결과 `tests/test_offline_pipeline.py` | 여성·남성 합성 브리프 두 개가 가짜 공급자로 S1 → G9 → 패키지 → 일회용 DB 적재까지 네트워크 없이 통과하고, 워크숍 화면에서 관문만 눌러 같은 흐름을 끝까지 간다. 실제 호출은 순위 수집·이미지·LLM 1회씩 | PoC |
+| M9 (D-0049) | 에이전틱 실행: A 상태 잠금·관문 사건·`ready_stages`·`run_waves`·자동 재개·유료 단계 확인, B 사전 검토(`gate-review-v1`·검토 실행기·화면), C 수정 요청 재작업(`rework-brief-v1`·G4a·G4b·G5·G6 부분 재생성·반복 상한), D 대기열·`hil-report-v1`·화면, E 통합 | 워크숍에서 관문 결정만으로 여성·남성 합성 브리프가 가짜 공급자로 sx 적재 확인까지 가고, 고르기 관문에 추천이 붙고, 수정 요청이 요청한 부분만 다시 만들고, 유료 단계는 확인 전 호출 0회다 | PoC 뒤 |
 
 구현 순서는 M0 → M4(선행) → M1 → M2 → M3 → M5 → M6 → M7이다(D-0013). M2b는 워크숍 화면 연결 전에 한다. 각 노드의 현재 성숙도(L0~L4)와 올리는 규칙은 [현재 상태](../status/current-state.md)와 [인계 규칙](../status/README.md#노드-성숙도-규칙)에 있다. 마일스톤의 "끝나는 조건"은 대부분 L1(오프라인)이고, L2 이상은 그 규칙을 따른다. M4의 실제 실행은 `cfp plan import`로 들여온 기획서의 G3 기록이 있으면 된다.
 
