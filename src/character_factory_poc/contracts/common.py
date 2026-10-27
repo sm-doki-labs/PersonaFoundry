@@ -40,6 +40,9 @@ class GateRecord(Strict):
     reviewer: str
     minutes: float = 0.0
     decidedAt: str
+    # D-0049(LLD §5.16·§6.8): 관문 사전 검토 참조와 추천 일치 여부. 옛 기록에는 두 칸이 없다.
+    reviewRef: str | None = None
+    followedReview: bool | None = None
 
 
 StageStatus = Literal[

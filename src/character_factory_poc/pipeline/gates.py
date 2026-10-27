@@ -12,6 +12,7 @@ from character_factory_poc.common.canonical import sha256_file
 from character_factory_poc.common.schema import dump, validate
 from character_factory_poc.common.store import write_once_json
 from character_factory_poc.contracts.common import GateRecord
+from character_factory_poc.pipeline.review import review_fields
 from character_factory_poc.pipeline.state import StateFile
 
 
@@ -38,6 +39,7 @@ def write_gate_record(
     requested_changes: list[dict[str, str]] | None = None,
     minutes: float = 0.0,
 ) -> GateRecord:
+    review = review_fields(char_dir, gate, rev, selections)
     rec = GateRecord(
         subjectId=state.state.subjectId,
         gate=gate,
@@ -52,6 +54,8 @@ def write_gate_record(
         reviewer=reviewer,
         minutes=minutes,
         decidedAt=now_iso(),
+        reviewRef=review["reviewRef"],
+        followedReview=review["followedReview"],
     )
     p = record_path(char_dir, gate, rev)
     write_once_json(p, dump(rec))

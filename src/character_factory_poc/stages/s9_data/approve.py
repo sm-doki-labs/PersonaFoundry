@@ -19,6 +19,7 @@ from character_factory_poc.contracts.common import GateRecord
 from character_factory_poc.contracts.dataset import DataQa
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.gates import now_iso
+from character_factory_poc.pipeline.review import review_fields
 from character_factory_poc.stages.s9_data import plan as plan_mod
 from character_factory_poc.stages.s9_data import samples as writer
 from character_factory_poc.stages.s9_data.plan import CLUSTERS
@@ -53,6 +54,7 @@ def _record(
         reviewer=reviewer,
         minutes=minutes,
         decidedAt=now_iso(),
+        **review_fields(char_dir, gate, rev, []),
     )
     path = char_dir / "gates" / f"{gate}-{rev}{suffix}.json"
     write_once_json(path, dump(rec))

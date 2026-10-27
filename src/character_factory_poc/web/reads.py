@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from character_factory_poc.pipeline.graph import GATES, STAGES
+from character_factory_poc.pipeline.review import load_review
 from character_factory_poc.web.errors import WebError
 from character_factory_poc.web.gate_items import build_gate_items, file_url
 
@@ -511,6 +512,8 @@ def gate_view(root: Path, character_id: str, gate: str) -> dict[str, Any]:
             f"{stage_dir}/{rev or '<rev>'}/ 폴더가 없다. 단계를 먼저 돌리거나 state.json의 "
             "revision을 확인한다"
         )
+    # D-0049(LLD §6.8): 현재 관문 revision의 사전 검토만 보여 준다. 옛 revision 기록은 숨긴다.
+    review = load_review(char_dir, gate, rev) if rev else None
     return {
         "characterId": character_id,
         "gate": gate,
@@ -526,6 +529,7 @@ def gate_view(root: Path, character_id: str, gate: str) -> dict[str, Any]:
         "recordRef": record_ref,
         "record": current,
         "records": records,
+        "review": review.model_dump(mode="json") if review is not None else None,
         "stage": stage_row,
         "stageDir": (f"{CHARACTERS_DIR}/{character_id}/{stage_dir}/{rev}" if rev_dir else None),
         "files": files,
