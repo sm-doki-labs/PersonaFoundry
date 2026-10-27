@@ -428,6 +428,44 @@ def cmd_ledger_report(args) -> int:
     return 0
 
 
+def _short_time(value: str | None) -> str:
+    if not isinstance(value, str) or not value:
+        return "-"
+    return value[:16].replace("T", " ")
+
+
+def cmd_report_hil(args) -> int:
+    """사람 관문 보고서(hil-report-v1)를 표로 내고 reports/에 쓴다(LLD §5.21·§6.10)."""
+    from character_factory_poc.pipeline.hil_report import write_hil_report
+
+    ctx = Context.load(_root(args), execute=False)
+    report, path = write_hil_report(ctx.character_dir(args.character_id))
+    print(f"{report.subjectId} 사람 관문 보고서 (hil-report-v1) · {report.createdAt}")
+    print(f"{'관문':<5}{'rev':<6}{'열림':<18}{'결정':<18}{'대기(분)':>9}{'검토(분)':>9}  결정")
+    for gate in report.gates:
+        if not gate.rounds:
+            continue
+        for round_ in gate.rounds:
+            extra = " · 반복 상한" if gate.reworkCapReached else ""
+            if gate.requestChangesCount:
+                extra += f" · 수정 요청 {gate.requestChangesCount}회"
+            wait = "-" if round_.waitMinutes is None else f"{round_.waitMinutes}"
+            print(
+                f"{gate.gate:<5}{round_.rev:<6}"
+                f"{_short_time(round_.openedAt):<18}{_short_time(round_.decidedAt):<18}"
+                f"{wait:>9}{round_.reviewMinutes:>9}  {round_.decision or '대기'}{extra}"
+            )
+    totals = report.totals
+    rate = "-" if totals.followedReviewRate is None else f"{totals.followedReviewRate:.3f}"
+    print(
+        f"합계: 결정한 관문 {totals.gatesDecided} · 대기 {totals.waitMinutes}분 · "
+        f"검토 {totals.reviewMinutes}분 · 수정 요청 {totals.requestChanges}회 · "
+        f"추천 일치율 {rate}"
+    )
+    print(f"보고서: {path}")
+    return 0
+
+
 def cmd_verify(args) -> int:
     ctx = Context.load(_root(args), execute=False)
     base = ctx.character_dir(args.character_id)
@@ -834,6 +872,13 @@ def build_parser() -> argparse.ArgumentParser:
     s = ledger.add_parser("report")
     s.add_argument("character_id")
     s.set_defaults(fn=cmd_ledger_report)
+
+    report = sub.add_parser("report", help="사람 시간 보고서").add_subparsers(
+        dest="sub", required=True
+    )
+    s = report.add_parser("hil", help="사람 관문 보고서 hil-report-v1을 쓰고 표로 낸다")
+    s.add_argument("character_id")
+    s.set_defaults(fn=cmd_report_hil)
 
     s = sub.add_parser("verify")
     s.add_argument("character_id")

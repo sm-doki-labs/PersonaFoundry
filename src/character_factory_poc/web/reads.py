@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from character_factory_poc.pipeline.graph import GATES, STAGES
+from character_factory_poc.pipeline.queue import gate_queue
 from character_factory_poc.web.errors import WebError
 from character_factory_poc.web.gate_items import build_gate_items, file_url
 
@@ -329,6 +330,7 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
         "gates": gates,
         "lanes": _lanes(stages),
         "pendingGates": pending,
+        "queue": [item.as_dict() for item in gate_queue(char_dir, state)],
         "progress": _progress(stages),
         "awaitingHuman": bool(pending),
         "updatedAt": _mtime_iso(char_dir / "state.json"),
@@ -400,6 +402,7 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
         "gates": summary["gates"],
         "lanes": summary["lanes"],
         "pendingGates": summary["pendingGates"],
+        "queue": summary["queue"],
         "progress": summary["progress"],
         "updatedAt": summary["updatedAt"],
     }
@@ -597,6 +600,7 @@ def list_projects(root: Path) -> dict[str, Any]:
                         "stages": [],
                         "gates": [],
                         "pendingGates": [],
+                        "queue": [],
                         "progress": {"done": 0, "total": 0, "percent": 0, "currentStage": None},
                         "awaitingHuman": False,
                         "updatedAt": None,

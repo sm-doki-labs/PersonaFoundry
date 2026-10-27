@@ -63,9 +63,10 @@
         body: JSON.stringify(answer)
       });
     },
-    startRun: function (id, until) {
+    startRun: function (id, until, confirm) {
       var body = { characterId: id, action: 'run' };
       if (until) body.until = until;
+      if (confirm && confirm.length) body.confirm = confirm.slice();
       return request('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

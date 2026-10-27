@@ -37,7 +37,15 @@
   };
   var UNTIL_CHOICES = ['G3', 'G4a', 'G4b', 'G4', 'G5', 'G5b', 'G6'];
 
-  var view = { data: null, error: '', connected: false, timer: null, source: null };
+  var view = {
+    data: null,
+    details: {},
+    mode: 'ops',
+    error: '',
+    connected: false,
+    timer: null,
+    source: null
+  };
   var refreshTimer = null;
 
   function esc(value) {
@@ -83,8 +91,36 @@
     );
   }
 
+  // 대기 관문은 서버가 정한 대기열 순서(queue)를 그대로 쓴다(LLD §6.10).
+  // queue에 없는 대기 관문(옛 기록 등)은 뒤에 붙인다.
+  function orderedGates(character) {
+    var pending = character.pendingGates || [];
+    var queue = character.queue || [];
+    var left = {};
+    pending.forEach(function (g) {
+      left[g.id] = g;
+    });
+    var out = [];
+    queue.forEach(function (q) {
+      var g = left[q.gate];
+      if (!g) return;
+      out.push({ id: g.id, title: g.title, unblocks: q.unblocks });
+      delete left[q.gate];
+    });
+    pending.forEach(function (g) {
+      if (left[g.id]) out.push({ id: g.id, title: g.title, unblocks: null });
+    });
+    return out;
+  }
+
+  // 그 관문을 결정하면 풀리는 뒤쪽 단계 수를 짧은 문장으로 쓴다.
+  function unblocksLabel(count) {
+    if (typeof count !== 'number') return '';
+    return count > 0 ? '뒤쪽 ' + count + '단계' : '뒤 단계 없음';
+  }
+
   function gateLinks(character) {
-    var gates = character.pendingGates || [];
+    var gates = orderedGates(character);
     if (!gates.length) return '<span class="cf-quiet">기다리는 관문 없음</span>';
     return gates
       .map(function (g) {
@@ -94,16 +130,19 @@
           '&gate=' +
           encodeURIComponent(g.id);
         var json = api.base + '/api/characters/' + encodeURIComponent(character.id) + '/gates/' + encodeURIComponent(g.id);
+        var wait = unblocksLabel(g.unblocks);
+        var title = g.id + ' ' + (g.title || '') + (wait ? ' · ' + wait : '') + ' 상세 화면을 연다';
         return (
           '<span class="cf-gatewrap"><a class="cf-gate" href="' +
           href +
           '" title="' +
-          esc(g.id + ' ' + (g.title || '') + ' 상세 화면을 연다') +
+          esc(title) +
           '">' +
           '<b>' +
           esc(g.id) +
           '</b>' +
           esc(g.title || '') +
+          (wait ? '<span class="cf-gate-wait">' + esc(wait) + '</span>' : '') +
           ' <em>열기</em></a>' +
           '<a class="cf-gate-json" href="' +
           json +
@@ -113,6 +152,31 @@
         );
       })
       .join(' ');
+  }
+
+  // 유료 공급자를 쓰는 단계는 사람이 실행을 확인하기 전에는 돌지 않는다(LLD §6.7).
+  function heldChips(character) {
+    var detail = view.details[character.id];
+    var held = (detail && detail.held) || [];
+    if (!held.length) return '';
+    var items = held
+      .map(function (h) {
+        var plan = (h.providers || []).join(', ');
+        return (
+          '<span class="cf-held-item" role="listitem"><b>실행 확인 대기</b>' +
+          '<span class="cf-held-stage">' +
+          esc(STAGE_KO[h.stage] || h.stage) +
+          '</span>' +
+          (plan ? '<span class="cf-held-plan">' + esc(plan) + '</span>' : '') +
+          '<button type="button" class="cf-btn cf-btn--primary cf-btn--small" data-live-confirm="' +
+          esc(character.id) +
+          '" data-stage="' +
+          esc(h.stage) +
+          '">실행</button></span>'
+        );
+      })
+      .join('');
+    return '<div class="cf-held" role="list" aria-label="실행 확인 대기">' + items + '</div>';
   }
 
   function laneBars(character) {
@@ -295,6 +359,7 @@
       stageChips(character) +
       laneBars(character) +
       '<div class="cf-gates">대기 관문 ' + gateLinks(character) + '</div>' +
+      heldChips(character) +
       runControls(character) +
       (character.stateError ? '<p class="cf-warn">' + esc(character.stateError) + '</p>' : '') +
       '</article>'
@@ -434,7 +499,51 @@
       .catch(function (err) {
         setError('공장 상태를 읽지 못했다: ' + err.message);
         throw err;
+      })
+      .then(function (data) {
+        return loadDetails(data).then(function () {
+          return data;
+        });
       });
+  }
+
+  // 실행 확인 대기(held)와 상세 값은 GET /api/characters/{id}에만 있다.
+  function wantedDetails(data) {
+    var ids = [];
+    (data.characters || []).forEach(function (c) {
+      var last = c.lastJob || null;
+      if (last && last.held && last.held.length) ids.push(c.id);
+    });
+    if (view.mode === 'workroom') {
+      var picked = pickCharacter(data);
+      if (picked) ids.push(picked.id);
+    }
+    return ids.filter(function (id, i) {
+      return ids.indexOf(id) === i;
+    });
+  }
+
+  function loadDetails(data) {
+    var ids = wantedDetails(data);
+    if (!ids.length) {
+      view.details = {};
+      render();
+      return Promise.resolve();
+    }
+    return Promise.all(
+      ids.map(function (id) {
+        return api.character(id).catch(function () {
+          return null;
+        });
+      })
+    ).then(function (list) {
+      var next = {};
+      list.forEach(function (item) {
+        if (item && item.id) next[item.id] = item;
+      });
+      view.details = next;
+      render();
+    });
   }
 
   function startRun(characterId, until) {
@@ -446,6 +555,19 @@
       })
       .catch(function (err) {
         setError('작업을 시작하지 못했다: ' + err.message);
+      });
+  }
+
+  // "실행" 버튼: 이 단계만 실행을 확인했다고 함께 보낸다(POST /api/jobs confirm).
+  function confirmRun(characterId, stage) {
+    setError('');
+    api
+      .startRun(characterId, null, [stage])
+      .then(function () {
+        return refresh();
+      })
+      .catch(function (err) {
+        setError('실행을 시작하지 못했다: ' + err.message);
       });
   }
 
@@ -493,9 +615,18 @@
       var id = runButton.getAttribute('data-live-run');
       var select = document.querySelector('[data-live-until="' + id + '"]');
       startRun(id, select ? select.value : null);
+      return;
+    }
+    var confirmButton = event.target.closest('[data-live-confirm]');
+    if (confirmButton) {
+      confirmRun(
+        confirmButton.getAttribute('data-live-confirm'),
+        confirmButton.getAttribute('data-stage')
+      );
     }
   });
 
+  view.mode = modeOf(roots[0]);
   refresh().catch(function () {});
   connect();
 })();
