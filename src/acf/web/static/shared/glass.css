@@ -1,0 +1,130 @@
+/* 작업실과 운영 현황이 함께 쓰는 글래스 디자인 기준 */
+.theme-glass{
+  --bg:#16181d;
+  --text:#e3e5e9;--muted:rgba(227,229,233,.66);--faint:rgba(227,229,233,.58);--line:rgba(255,255,255,.09);--line-2:rgba(255,255,255,.16);
+  --solid:#cfd3da;--solid-ink:#15171c;--accent:#cfd3da;--accent-ink:#15171c;
+  --ok:#93b5a1;--warn:#c9b07e;--bad:#c9938d;
+  --ok-soft:rgba(147,181,161,.14);--warn-soft:rgba(201,176,126,.09);--bad-soft:rgba(201,147,141,.10);
+  --well:rgba(0,0,0,.18);--well-line:rgba(255,255,255,.07);
+  --glass-bg:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025));
+  --glass-blur:blur(24px) saturate(110%);
+  --glass-shadow:inset 0 1px 0 rgba(255,255,255,.28),inset 0 -1px 0 rgba(255,255,255,.05),0 24px 60px -24px rgba(0,0,0,.55);
+  --r-panel:22px;--r-card:16px;--r-inner:12px;--r-ctl:999px;
+  --fs-2xs:11px;--fs-xs:12px;--fs-sm:13px;--fs-md:14px;--fs-base:15px;--fs-lg:18px;--fs-xl:24px;--fs-2xl:40px;
+  --ctl-h-xs:24px;--ctl-h-sm:30px;--ctl-h-md:36px;--ctl-h-nav:38px;--ctl-h-lg:44px;
+  --ic-xs:12px;--ic-sm:14px;--ic-md:17px;
+  --font-body:"Pretendard Variable",Pretendard,-apple-system,"Apple SD Gothic Neo",sans-serif;
+}
+.theme-glass{overflow:hidden}
+.ambient{position:fixed;inset:0;z-index:0;overflow:hidden;background:var(--bg)}
+.amb{position:absolute;inset:-12%;background-size:cover;background-position:center;filter:blur(90px) saturate(.3) brightness(.42);transform:scale(1.15);opacity:0;transition:opacity 1400ms var(--ease-out),transform 6s ease-out}
+.amb.is-on{opacity:.55;transform:scale(1.05)}
+.amb-veil{position:absolute;inset:0;background:linear-gradient(180deg,rgba(22,24,29,.35),rgba(22,24,29,.7))}
+.glass{background:var(--glass-bg);border:1px solid var(--line);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);box-shadow:var(--glass-shadow)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;white-space:nowrap}
+.brand-mark{display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:var(--solid);color:var(--solid-ink)}
+.brand-mark .ic{width:18px;height:18px}
+.brand small{font-weight:500;font-size:12px;color:var(--faint)}
+.pills{display:flex;gap:4px;padding:4px;border-radius:999px;background:var(--well);border:1px solid rgba(255,255,255,.08)}
+.pill-tab{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 16px;border-radius:999px;color:var(--faint);font-size:14px;font-weight:600;text-decoration:none;transition:background 300ms var(--ease-out),color 300ms}
+.pill-tab:hover{color:var(--text)}
+.pill-tab .ic{width:15px;height:15px}
+.pill-tab.is-active{background:var(--solid);color:var(--solid-ink);box-shadow:0 6px 20px -6px rgba(0,0,0,.32)}
+
+
+/* 공통 상단바: 작업실과 캐릭터 화면이 같은 자리에 같은 길잡이를 둔다 */
+.appbar{font-size:var(--fs-sm);line-height:1.5;grid-column:1/-1;display:flex;align-items:center;gap:14px;padding:0 10px 0 16px;border-radius:var(--r-panel);position:relative;z-index:5;min-width:0}
+.appbar .top-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.tab-badge{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;margin-left:2px;border-radius:999px;background:var(--warn);color:#2a1a00;font-size:11px;font-weight:800;font-variant-numeric:tabular-nums}
+.tab-badge:empty{display:none}
+.pill-tab.is-active .tab-badge{background:var(--solid-ink);color:var(--warn)}
+.icon-btn{position:relative;display:grid;place-items:center;width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:rgba(255,255,255,.06);color:var(--muted)}
+.icon-btn:hover{color:var(--text);background:rgba(255,255,255,.12)}
+.icon-btn .ic{width:17px;height:17px}
+.icon-btn .badge{position:absolute;top:-3px;right:-3px;min-width:17px;height:17px;padding:0 5px;border-radius:999px;background:var(--warn);color:#2a1a00;font-size:var(--fs-2xs);font-weight:800;display:grid;place-items:center}
+.icon-btn .badge:empty{display:none}
+.me{display:flex;align-items:center;gap:8px;padding-left:6px}
+.me-av{display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,.12);font-weight:700;font-size:12.5px}
+.me-text{display:flex;flex-direction:column;line-height:1.25}
+.me-text b{font-size:12.5px;font-weight:600}
+.me-text small{font-size:11px;color:var(--faint)}
+
+.crumbs{display:flex;align-items:center;gap:6px;height:38px;padding:0 14px 0 12px;border-radius:999px;background:var(--well);border:1px solid rgba(255,255,255,.08);color:var(--muted);white-space:nowrap;min-width:0}
+.crumbs a{color:var(--muted);text-decoration:none}
+.crumbs a:hover{color:var(--text)}
+.crumbs .sep{width:12px;height:12px;color:var(--faint)}
+.crumb-char{display:inline-flex;align-items:center;gap:7px}
+.crumb-char b{color:var(--text);font-weight:600}
+.crumb-av{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;overflow:hidden;background:rgba(255,255,255,.1);font-size:11px;font-weight:700;color:var(--text)}
+.crumb-av img{width:100%;height:100%;object-fit:cover}
+.crumb-job{display:inline-flex;align-items:center;gap:7px;color:var(--text);font-weight:600}
+
+
+.crumb-gate{display:inline-flex;align-items:center;gap:7px;color:var(--text);font-weight:600}
+.crumbs code{font:600 var(--fs-2xs)/1 ui-monospace,SFMono-Regular,Menlo,monospace;padding:3px 6px;border-radius:6px;background:rgba(255,255,255,.06);color:var(--faint)}
+.crumb-gate code{background:var(--warn-soft);color:var(--warn)}
+.appbar .brand{font-size:var(--fs-md)}
+.appbar .icon-btn{width:var(--ctl-h-md);height:var(--ctl-h-md)}
+.appbar .me-av{width:var(--ctl-h-md);height:var(--ctl-h-md)}
+.theme-glass a:focus-visible{outline:2px solid var(--focus,var(--solid));outline-offset:3px;border-radius:inherit}
+
+a.icon-btn{text-decoration:none}
+@media (max-width:1360px){.me-text{display:none}.brand small{display:none}}
+
+/* 알림 */
+.notes{position:fixed;top:88px;right:16px;z-index:40;width:340px;max-height:420px;overflow:auto;padding:12px;border-radius:var(--r-card);background:rgba(28,31,37,.96)}
+.notes h3{margin:2px 4px 8px;font-size:14px}
+.notes ul{list-style:none;margin:0;padding:0}
+.note{display:grid;grid-template-columns:8px 1fr auto;gap:9px;align-items:baseline;padding:8px 4px;border-top:1px solid var(--well-line);font-size:12.5px;color:var(--muted)}
+.note:first-child{border-top:0}
+.note b{color:var(--text);font-weight:600}
+.note .dot{align-self:center}
+.note.k-gate .dot{background:var(--warn)}.note.k-human .dot{background:var(--bad)}.note.k-done .dot{background:var(--ok)}
+.note .num{font-size:11px;color:var(--faint)}
+
+.note.is-empty{color:var(--faint)}
+
+/* ---------- 공통 부품. 두 화면은 여기 정의된 종류와 크기만 골라 쓴다 ---------- */
+
+/* 버튼: 기본(유리) · --primary · --danger / 크기 --sm 30 · 기본 36 · --lg 44 / 눌림 .is-on 또는 .is-active
+   .btn--ghost는 기본과 같다(처음 시안 호환용 이름). */
+.theme-glass .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:var(--ctl-h-md);padding:0 14px;border-radius:var(--r-ctl);font-weight:600;font-size:var(--fs-sm);white-space:nowrap;text-decoration:none;border:1px solid var(--line);background:rgba(255,255,255,.08);color:var(--text);box-shadow:none;min-width:0;transition:background 160ms,border-color 160ms,opacity 160ms,transform 140ms var(--ease-out)}
+.theme-glass .btn:hover:not(:disabled):not(.is-on):not(.is-active){background:rgba(255,255,255,.14)}
+.theme-glass .btn:active:not(:disabled){transform:scale(.97)}
+.theme-glass .btn .ic{width:var(--ic-sm);height:var(--ic-sm)}
+.theme-glass .btn.is-on,.theme-glass .btn.is-active{background:rgba(255,255,255,.16);border-color:rgba(227,229,233,.45)}
+.theme-glass .btn--primary{background:var(--solid);color:var(--solid-ink);border-color:transparent;box-shadow:0 8px 24px -10px rgba(0,0,0,.4)}
+.theme-glass .btn--primary:hover:not(:disabled){background:#dde0e5}
+.theme-glass .btn--danger{background:var(--bad);color:#1e1412;border-color:transparent}
+.theme-glass .btn--danger:hover:not(:disabled){background:#d6a29c}
+.theme-glass .btn--sm{height:var(--ctl-h-sm);padding:0 11px;font-size:var(--fs-xs)}
+.theme-glass .btn--lg{height:var(--ctl-h-lg);padding:0 18px;font-size:var(--fs-md)}
+.theme-glass .btn--lg .ic{width:16px;height:16px}
+.theme-glass .btn:disabled{opacity:.5;box-shadow:none;cursor:not-allowed}
+
+/* 칩: 고르는 칩 .chip(눌림 .is-on · .is-active · aria-pressed) / 크기 기본 30 · --md 36 / 표시만 하는 칩 .chip--static 24 */
+.theme-glass .chip{display:inline-flex;align-items:center;gap:6px;height:var(--ctl-h-sm);padding:0 12px;border-radius:var(--r-ctl);font-size:var(--fs-xs);font-weight:600;color:var(--muted);background:rgba(255,255,255,.07);border:1px solid var(--line);white-space:nowrap;transition:background 160ms,color 160ms,border-color 160ms,transform 140ms var(--ease-out)}
+.theme-glass button.chip:hover:not(.is-on):not(.is-active):not([aria-pressed=true]){background:rgba(255,255,255,.12);color:var(--text)}
+.theme-glass button.chip:active{transform:scale(.96)}
+.theme-glass .chip.is-on,.theme-glass .chip.is-active,.theme-glass .chip[aria-pressed=true]{background:var(--solid);color:var(--solid-ink);border-color:transparent}
+.theme-glass .chip--md{height:var(--ctl-h-md);padding:0 16px;font-size:var(--fs-sm)}
+.theme-glass .chip--static{height:var(--ctl-h-xs);padding:0 10px;font-weight:500;background:rgba(255,255,255,.06);border-color:transparent}
+
+/* 상태 칩: 이름과 색은 shared/status.js 상태 표가 정한다. 색 단계 t-muted · t-active · t-warn · t-ok · t-ok-strong · t-bad · t-alert / 작은 크기 --sm */
+.theme-glass .pill{display:inline-flex;align-items:center;gap:6px;height:var(--ctl-h-xs);padding:0 10px;border-radius:var(--r-ctl);font-size:var(--fs-xs);font-weight:600;white-space:nowrap;color:var(--muted);background:rgba(255,255,255,.06)}
+.theme-glass .pill .dot{width:6px;height:6px;border-radius:50%;background:var(--faint);flex:none}
+.theme-glass .pill--sm{height:20px;padding:0 8px;font-size:var(--fs-2xs);gap:5px}
+.theme-glass .pill.t-active{background:rgba(255,255,255,.1);color:var(--text)}
+.theme-glass .pill.t-active .dot{background:var(--text);animation:breathe 2.4s ease-in-out infinite}
+.theme-glass .pill.t-warn{background:var(--warn-soft);color:var(--warn)}.theme-glass .pill.t-warn .dot{background:var(--warn)}
+.theme-glass .pill.t-ok{background:var(--ok-soft);color:var(--ok)}.theme-glass .pill.t-ok .dot{background:var(--ok)}
+.theme-glass .pill.t-ok-strong{background:var(--ok-soft);color:var(--ok);box-shadow:inset 0 0 0 1px rgba(147,181,161,.45)}.theme-glass .pill.t-ok-strong .dot{background:var(--ok)}
+.theme-glass .pill.t-bad{background:var(--bad-soft);color:var(--bad)}.theme-glass .pill.t-bad .dot{background:var(--bad)}
+.theme-glass .pill.t-alert{background:rgba(201,147,141,.2);color:#e2b3ad;box-shadow:inset 0 0 0 1px rgba(201,147,141,.45)}.theme-glass .pill.t-alert .dot{background:var(--bad)}
+@keyframes breathe{50%{opacity:.35}}
+
+/* 패널 머리: 제목 h2 + 오른쪽 보조 글 .count. 바깥 여백은 쓰는 쪽 배치에서 정한다. */
+.theme-glass .panel-head{display:flex;align-items:baseline;gap:8px;padding:0 2px}
+.theme-glass .panel-head h2{margin:0;font-size:var(--fs-base);font-weight:700}
+.theme-glass .panel-head .count{margin-left:auto;font-size:var(--fs-xs);color:var(--muted)}
+
