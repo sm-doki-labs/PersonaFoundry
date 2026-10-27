@@ -1,0 +1,69 @@
+"""내보내기 설정 (`[export]` 절, LLD §8.11).
+
+`acf/common/config.py`는 `[stages]`·`[providers]` 등 정해진 절만 읽는다. `[export]`는 이
+모듈이 `factory.toml`에서 직접 읽는다(설정 로더 확장은 통합 담당 몫으로 남긴다).
+"""
+
+from __future__ import annotations
+
+import os
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+
+from acf.pipeline.context import Context
+
+# 대상 저장소의 적재 스키마. 실제 head와 다르면 적재 전에 멈춘다(LLD §8.11).
+API_SVC_HEAD = "149_android_content_switches"
+CHAT_SVC_HEAD = "0028_authoring_project_locale"
+
+DEFAULT_ADMIN_URL_ENV = "ACF_PG_ADMIN_URL"
+
+
+@dataclass(frozen=True)
+class ExportSettings:
+    api_svc_repo: Path
+    chat_svc_repo: Path
+    admin_url_env: str = DEFAULT_ADMIN_URL_ENV
+    sql_python: str = ""
+    timeout_s: float = 900.0
+
+
+def _table(payload: dict, name: str) -> dict:
+    value = payload.get(name)
+    return value if isinstance(value, dict) else {}
+
+
+def _path(value: object, default: Path) -> Path:
+    if isinstance(value, str) and value.strip():
+        return Path(value).expanduser()
+    return default
+
+
+def load_export_settings(ctx: Context) -> ExportSettings:
+    """factory.toml의 `[export.doki_app]`·`[export.verify]`와 환경변수를 합친다."""
+    data: dict = {}
+    source = ctx.config.source_path
+    if source is not None and Path(source).is_file():
+        data = tomllib.loads(Path(source).read_text(encoding="utf-8"))
+    export = _table(data, "export")
+    doki = _table(export, "doki_app")
+    verify = _table(export, "verify")
+    api_default = Path(os.environ.get("ACF_API_SVC_REPO", "~/projects/api-svc"))
+    chat_default = Path(os.environ.get("ACF_CHAT_SVC_REPO", "~/projects/relationship-quest-chat"))
+    return ExportSettings(
+        api_svc_repo=_path(doki.get("api_svc_repo"), api_default.expanduser()),
+        chat_svc_repo=_path(doki.get("chat_svc_repo"), chat_default.expanduser()),
+        admin_url_env=str(verify.get("admin_url_env") or DEFAULT_ADMIN_URL_ENV),
+        sql_python=str(verify.get("sql_python") or ""),
+        timeout_s=float(verify.get("timeout_s", 900.0)),
+    )
+
+
+__all__ = [
+    "API_SVC_HEAD",
+    "CHAT_SVC_HEAD",
+    "DEFAULT_ADMIN_URL_ENV",
+    "ExportSettings",
+    "load_export_settings",
+]
