@@ -23,7 +23,7 @@ from acf.stages.s4_frames.run import run_s4
 from acf.stages.s4a_backgrounds.run import plan_calls as background_calls
 from acf.stages.s4a_backgrounds.run import run_s4a
 from acf.stages.s4b_poses.run import run_s4b
-from tests.support.flow import approve_plan_v2, make_ctx, through_g2
+from tests.support.flow import approve_plan_v2, make_ctx, through_s2
 from tests.test_scene_flow import backgrounds, choose_bg, flow, poses, read, scenes, through_pose
 
 # flow fixture를 이 모듈에서도 쓴다.
@@ -329,7 +329,7 @@ def test_judge_configuration_checked_before_writes(tmp_path, stage, allow):
     agents.set("s4a", backgrounds)
     agents.set("s4b-scene", scenes)
     agents.set("s4b-pose", poses)
-    cid = through_g2(ctx)
+    cid = through_s2(ctx)
     approve_plan_v2(ctx, cid)
     if stage == "s4b":
         choose_bg(ctx, cid, custom=True)

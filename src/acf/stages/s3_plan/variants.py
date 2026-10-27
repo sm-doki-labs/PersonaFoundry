@@ -11,7 +11,6 @@ from acf.common.errors import (
     AgentFormatError,
     CheckFailed,
     FactoryError,
-    GateNotApprovedError,
     NeedsInputError,
 )
 from acf.common.schema import dump, validate
@@ -51,8 +50,8 @@ def plan_calls(ctx: Context) -> list[CallPlan]:
 
 
 def _preflight(ctx: Context, cid: str) -> tuple[PlanSeed, dict, list[dict]]:
-    if ctx.state(cid).gate("G2").status != "APPROVED":
-        raise GateNotApprovedError(f"{cid}: 상세 기획에는 G2 승인이 필요하다")
+    # D-0042: 외모 명세는 G2가 아니라 s2 승인이 기준이다.
+    spec, _ = load_appearance_spec(ctx, cid)
     seed = load_latest_seed(ctx, cid)
     if seed is None:
         raise NeedsInputError(
@@ -63,7 +62,6 @@ def _preflight(ctx: Context, cid: str) -> tuple[PlanSeed, dict, list[dict]]:
             f"{cid}: G3 검토 대기 중이다. 기존 안에 REQUEST_CHANGES 또는 REJECT를 기록한 뒤 "
             "새 revision을 만든다"
         )
-    spec, _ = load_appearance_spec(ctx, cid)
     path = ctx.character_dir(cid) / "s1-reference" / spec.sourceReferenceRev / "ranking.json"
     names = all_names(load_ranking(read_json(path))) if path.exists() else []
     return seed, appearance_input(ctx, cid), name_guard(names)

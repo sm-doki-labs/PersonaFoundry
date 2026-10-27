@@ -33,16 +33,23 @@ model = "gpt-6.1-sol"
 reasoning_effort = "low"
 timeout_s = 600
 
-# S1 기본값은 D-0018 제안이다.
+# S1 기본값은 D-0018 제안, G1은 외모군마다 얼굴 한 장이다(D-0043 (1)).
 [stages.s1]
 cluster_k = 4
 min_members_per_cluster = 3
 min_common_fields = 2
-previews_per_cluster = 3
+previews_per_cluster = 1   # 외모군마다 얼굴 1장. 다시 만들기는 acf ref faces(D-0043 (2))
 max_check_retries = 3
 image_size = "1024x1024"
 min_list_size_for_percentile = 3
 
+# S2 기준 사진(D-0042, D-0043 (6)). 사람 관문 없이 자동으로 외모 명세를 고정한다.
+# picked: G1에서 고른 얼굴을 그대로 기준 이미지로 쓴다(이미지·판정 호출 0회).
+# generate: 기준 사진 생성 + identity-v1 동일인 검사. 이번 PoC 범위 밖이므로 실행 전에 거절하고
+#           picked를 안내한다(K-0034). LLD §3의 문서상 기본값은 generate지만 PoC는 picked로 돌린다.
+[stages.s2]
+base_photo = "picked"
+image_size = "1024x1024"
 
 
 # S5 소개 영상(D-0028). 어댑터는 xai_video(공식 API, 유료) / grok_web(웹, 기본 꺼짐) / fake.

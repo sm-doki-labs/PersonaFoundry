@@ -27,7 +27,7 @@ def test_seed_wait_runs_intro_video_lane_then_full_scene_flow(tmp_path):
     agents.set("s4b-pose", poses)
 
     # 1차: 씨앗 없음. S3는 입력을 기다리고, 같은 실행에서 S5 소개 영상이 G5까지 간다.
-    log = run_until(ctx, cid, RunOptions(until="G6", ranking=RANKING, auto_approve={"G1", "G2"}))
+    log = run_until(ctx, cid, RunOptions(until="G6", ranking=RANKING, auto_approve={"G1"}))
     st = ctx.state(cid)
     assert "s3" in log.blocked and any("사람 입력 대기" in s for s in log.steps)
     assert st.stage("s5").status == "AWAITING_HUMAN" and log.waiting == ["G5"]

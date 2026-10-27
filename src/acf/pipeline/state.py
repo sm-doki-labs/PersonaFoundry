@@ -64,12 +64,17 @@ class StateFile:
         self.save()
 
     def require_deps(self, sid: str) -> None:
-        """의존 관문이 승인됐고 선행 단계가 끝났는지 (FR-02)."""
+        """의존 관문·단계가 승인됐고 선행 단계가 끝났는지 (FR-02, D-0042)."""
         s = STAGES[sid]
         for g in sorted(s.deps):
             if self.gate(g).status != "APPROVED":
                 raise GateNotApprovedError(
                     f"{sid}는 {g} 승인이 필요하다(현재 {self.gate(g).status})"
+                )
+        for n in sorted(s.needs):
+            if self.stage(n).status != "APPROVED":
+                raise GateNotApprovedError(
+                    f"{sid}는 {n} 승인이 필요하다(현재 {self.stage(n).status})"
                 )
         for a in sorted(s.after):
             if self.stage(a).status not in {"AWAITING_HUMAN", "APPROVED"}:

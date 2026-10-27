@@ -25,7 +25,7 @@ from acf.stages.s3_plan.own import plan_calls as own_calls
 from acf.stages.s3_plan.own import run_s3_own
 from acf.stages.s3_plan.seed import load_latest_seed, write_seed
 from acf.stages.s3_plan.variants import plan_calls, run_s3_variants
-from tests.support.flow import make_ctx, sample_plan_v2, through_g2
+from tests.support.flow import make_ctx, sample_plan_v2, through_s2
 from tests.support.synthetic import RANKING
 
 SEED = {"personality": "조용하지만 단단함", "job": "책방 직원", "age": 24}
@@ -49,7 +49,7 @@ def output(cid, n=3):
 @pytest.fixture
 def ready(tmp_path):
     ctx, agents = make_ctx(tmp_path)
-    cid = through_g2(ctx)
+    cid = through_s2(ctx)
     write_seed(ctx, cid, SEED)
     agents.set("s3-variants", lambda req: output(cid))
     agents.set("s3-own", lambda req: sample_plan_v2(cid))
@@ -58,7 +58,7 @@ def ready(tmp_path):
 
 def test_seed_revision_and_gender_prefill(tmp_path):
     ctx, _ = make_ctx(tmp_path)
-    cid = through_g2(ctx)
+    cid = through_s2(ctx)
     assert load_latest_seed(ctx, cid) is None
     seed = write_seed(ctx, cid, SEED)
     path = ctx.character_dir(cid) / "s3-plan/seeds/sd1.json"
@@ -73,12 +73,12 @@ def test_seed_revision_and_gender_prefill(tmp_path):
 
 
 @pytest.mark.parametrize("runner", [run_s3_variants, lambda c, i: run_s3_own(c, i, "상세 기획")])
-def test_requires_g2_and_seed(tmp_path, runner):
+def test_requires_s2_and_seed(tmp_path, runner):
     ctx, agents = make_ctx(tmp_path)
     cid = new_character(ctx, "not-ready")
-    with pytest.raises(GateNotApprovedError):
+    with pytest.raises(GateNotApprovedError, match="s2"):
         runner(ctx, cid)
-    cid = through_g2(ctx)
+    cid = through_s2(ctx)
     calls = len(agents.calls)
     with pytest.raises(NeedsInputError, match="acf plan seed"):
         runner(ctx, cid)
@@ -253,7 +253,7 @@ def test_select_requires_one_candidate(ready, selections):
 
 def test_configured_count_and_retry_limit(tmp_path):
     ctx, agents = make_ctx(tmp_path, "[stages.s3]\nvariants = 2\nmax_check_retries = 0\n")
-    cid = through_g2(ctx)
+    cid = through_s2(ctx)
     write_seed(ctx, cid, SEED)
     agents.set("s3-variants", lambda req: output(cid, 2))
     folder = run_s3_variants(ctx, cid)

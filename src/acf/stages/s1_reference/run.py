@@ -26,12 +26,12 @@ from acf.stages.s1_reference.preview import generate_previews
 from acf.stages.s1_reference.ranking import all_names, build_people, load_ranking, ranking_sha
 from acf.stages.s1_reference.report import build_report
 
-# D-0018 제안값. factory.toml [stages.s1]로 바꾼다.
+# D-0018·D-0043 제안값. factory.toml [stages.s1]로 바꾼다. G1은 외모군마다 얼굴 한 장을 견준다.
 DEFAULTS: dict[str, Any] = {
     "cluster_k": 4,
     "min_members_per_cluster": 3,
     "min_common_fields": 2,
-    "previews_per_cluster": 3,
+    "previews_per_cluster": 1,
     "max_check_retries": 3,
     "image_size": "1024x1024",
     "min_list_size_for_percentile": 3,

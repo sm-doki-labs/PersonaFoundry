@@ -1,20 +1,20 @@
-"""G2 결정과 외모 명세 고정 (명세 §7, LLD §8.2, FR-12). appearance_rev = S2 rev(ar<k>)."""
+"""외모 명세 읽기와 고정 (LLD §5.8, D-0042). appearance_rev = S2 rev(ar<k>).
+
+S2는 사람 관문 없이 자동으로 고정되므로 G2 기록이 없다. 여기서는 `s2` 단계가 `APPROVED`인지와
+그 `currentRev`를 본다. 옛 상태 파일(ar2를 G2로 승인한 캐릭터)은 `s2`도 이미 `APPROVED`라
+그대로 읽히고, 혹시 `s2` 표시가 빠진 옛 파일은 G2 승인을 읽기 전용으로 되짚는다.
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from acf.common.canonical import sha256_file
-from acf.common.errors import FactoryError, GateNotApprovedError
-from acf.common.schema import dump, validate
-from acf.common.store import write_manifest, write_once_json
+from acf.common.errors import GateNotApprovedError
+from acf.common.schema import validate
 from acf.contracts.hero import AppearanceSpec, HeroCandidate, HeroInputs
 from acf.contracts.reference import MULTI_FIELDS, SINGLE_FIELDS
 from acf.pipeline.context import Context
-from acf.pipeline.gates import write_gate_record
-from acf.stages.s1_reference.features import load_vocab
-from acf.stages.s1_reference.page import summary
 
 FORBIDDEN = [
     "문자·워터마크·로고",
@@ -23,11 +23,13 @@ FORBIDDEN = [
 
 
 def load_candidates(rev_dir: Path) -> list[HeroCandidate]:
+    """옛 `generate` rev의 기준 사진 시도 기록(읽기 전용)."""
     objs = json.loads((rev_dir / "candidates.json").read_text("utf-8"))
     return [validate("hero-candidate-v1", o) for o in objs]  # type: ignore[misc]
 
 
 def load_inputs(rev_dir: Path) -> HeroInputs:
+    """S2 실행 입력 고정본. 옛 기록에는 `basePhoto`가 없으므로 generate로 읽힌다."""
     obj = json.loads((rev_dir / "inputs.json").read_text("utf-8"))
     return validate("hero-inputs-v1", obj)  # type: ignore[return-value]
 
@@ -42,85 +44,29 @@ def description_en(tags: dict, vocab: dict) -> str:
     return ", ".join(out)
 
 
-def approve_g2(ctx: Context, cid: str, answer: dict) -> Path:
-    char_dir = ctx.character_dir(cid)
+def appearance_rev(ctx: Context, cid: str) -> str:
+    """외모 명세를 고정한 S2 rev. `s2` 승인이 기준이고 옛 G2 기록은 읽기만 한다."""
     state = ctx.state(cid)
-    g = state.gate("G2")
-    if g.status != "AWAITING_HUMAN" or not g.rev:
-        raise FactoryError(f"{cid}: G2가 대기 상태가 아니다({g.status})")
-    rev_dir = char_dir / "s2-hero" / g.rev
-    candidates = load_candidates(rev_dir)
-    ids = [c.candidateId for c in candidates]
-    decision = answer["decision"]
-    selections = list(answer.get("selections") or [])
-    reasons = answer.get("reasons", "")
-    if decision == "APPROVE":  # --auto-approve G2 (D-0015)
-        selections = selections or [ids[0]]
-        reasons = (reasons + " " if reasons else "") + f"첫 후보 {selections[0]}을 골랐다."
-        decision = "SELECT"
-    if decision == "SELECT":
-        if len(selections) != 1 or selections[0] not in ids:
-            raise FactoryError(
-                f"G2 SELECT는 후보 하나를 selections에 담아야 한다({', '.join(ids)})"
-            )
-    elif decision in {"REJECT", "REQUEST_CHANGES"}:
-        selections = []
-    else:
-        raise FactoryError(f"G2 결정은 SELECT·REQUEST_CHANGES·REJECT 중 하나다: {decision}")
-    rec = write_gate_record(
-        char_dir,
-        state,
-        gate="G2",
-        rev=g.rev,
-        stage_id="s2",
-        shown=[rev_dir / "candidates.json", rev_dir / "gate-G2.html"],
-        decision=decision,
-        reviewer=answer["reviewer"],
-        reasons=reasons,
-        selections=selections,
-        minutes=float(answer.get("minutes", 0)),
-        requested_changes=answer.get("requestedChanges"),
+    st = state.stage("s2")
+    if st.status == "APPROVED" and st.currentRev:
+        return st.currentRev
+    g2 = state.gate("G2")
+    if g2.status == "APPROVED" and g2.rev:
+        return g2.rev
+    raise GateNotApprovedError(
+        f"{cid}: 외모 명세가 없다. G1 승인 뒤 S2를 돌린다(현재 s2 {st.status}). acf hero run {cid}"
     )
-    ctx.ledger(cid).record_human(gate="G2", minutes=rec.minutes, ref=f"{cid}/{g.rev}")
-    if decision == "SELECT":
-        chosen = next(c for c in candidates if c.candidateId == selections[0])
-        inputs = load_inputs(rev_dir)
-        vocab = load_vocab()
-        spec = validate(
-            "appearance-spec-v1",
-            {
-                "characterId": cid,
-                "appearanceRev": g.rev,
-                "sourceReferenceRev": inputs.sourceReferenceRev,
-                "clusterId": inputs.clusterId,
-                "scope": dump(inputs.scope),
-                "tags": inputs.commonTags,
-                "descriptionKo": summary(inputs.commonTags, vocab),
-                "descriptionEn": description_en(inputs.commonTags, vocab),
-                "referenceImage": {
-                    "id": chosen.candidateId,
-                    "path": chosen.filePath,
-                    "sha256": sha256_file(rev_dir / chosen.filePath),
-                },
-                "referencePreviews": [dump(r) for r in inputs.referencePreviews],
-                "heroPrompt": chosen.prompt,
-                "forbidden": FORBIDDEN,
-                "notes": reasons,
-            },
-        )
-        write_once_json(rev_dir / "appearance-spec.json", dump(spec))
-        write_manifest(rev_dir)
-    return rev_dir
 
 
 def load_appearance_spec(ctx: Context, cid: str) -> tuple[AppearanceSpec, Path]:
-    """G2에서 고정한 외모 명세와 기준 이미지 경로(S4·S5·S6 입력)."""
-    g = ctx.state(cid).gate("G2")
-    if g.status != "APPROVED" or not g.rev:
-        raise GateNotApprovedError(f"{cid}: G2 승인이 필요하다(현재 {g.status})")
-    rev_dir = ctx.character_dir(cid) / "s2-hero" / g.rev
+    """S2가 고정한 외모 명세와 기준 이미지 경로(S4·S5·S6 입력, D-0042)."""
+    rev = appearance_rev(ctx, cid)
+    rev_dir = ctx.character_dir(cid) / "s2-hero" / rev
     p = rev_dir / "appearance-spec.json"
     if not p.exists():
-        raise GateNotApprovedError(f"{cid}: G2가 후보를 고르지 않았다(외모 명세 없음)")
+        raise GateNotApprovedError(f"{cid}: {rev}에 외모 명세 파일이 없다(appearance-spec.json)")
     spec = validate("appearance-spec-v1", json.loads(p.read_text("utf-8")))
-    return spec, rev_dir / spec.referenceImage.path  # type: ignore[union-attr]
+    reference = spec.referenceImage  # type: ignore[union-attr]
+    if reference is None:
+        raise GateNotApprovedError(f"{cid}: {rev} 외모 명세에 기준 이미지가 없다")
+    return spec, rev_dir / reference.path  # type: ignore[union-attr]

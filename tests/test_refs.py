@@ -25,7 +25,7 @@ from acf.stages.s3r_refs.select import (
     retrieve,
     run_s3r,
 )
-from tests.support.flow import approve_plan_v2, make_ctx, through_g2
+from tests.support.flow import approve_plan_v2, make_ctx, through_s2
 from tests.support.synthetic import PLAN
 from tests.test_agentic import CATALOG
 
@@ -83,7 +83,7 @@ def _selected(item_id: str = "AUTHORED:synthetic-r1:traits", use: str = "TRAITS"
 def _ready(tmp_path: Path, extra_toml: str = "", *, dim: int = 256):
     path = _index(tmp_path, dim=dim)
     ctx, agents = make_ctx(tmp_path, f'reference_index = "{path}"\n{extra_toml}')
-    cid = through_g2(ctx)
+    cid = through_s2(ctx)
     approve_plan_v2(ctx, cid)
     return ctx, agents, cid, path
 
@@ -224,7 +224,7 @@ def test_long_excerpts_are_truncated(tmp_path):
     index_path = tmp_path / "idx.json"
     write_index(index_path, build_index("idx", jsonl=[(path, "OTHER")], embedder=HashEmbedder()))
     ctx, agents = make_ctx(tmp_path, f'reference_index = "{index_path}"\n')
-    cid = through_g2(ctx)
+    cid = through_s2(ctx)
     approve_plan_v2(ctx, cid)
     agents.set("s3r", lambda req: _selected("OTHER:long", "DATA"))
     rev_dir = run_s3r(ctx, cid)
@@ -235,7 +235,7 @@ def test_long_excerpts_are_truncated(tmp_path):
 
 def test_skipped_without_index_and_g3_is_required(tmp_path):
     ctx, agents = make_ctx(tmp_path)
-    cid = through_g2(ctx)
+    cid = through_s2(ctx)
     with pytest.raises(GateNotApprovedError):
         run_s3r(ctx, cid)
     assert ctx.state(cid).stage("s3r").status == "PENDING"

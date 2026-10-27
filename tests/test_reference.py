@@ -76,19 +76,26 @@ def test_s1_offline_to_g1_select(ctx):
     assert "가상 하윤" in (out / "gate-G1.html").read_text("utf-8")
 
     previews = json.loads((out / "previews.json").read_text("utf-8"))
-    assert len(previews) == 9
+    assert len(previews) == 3  # 외모군마다 얼굴 1장(D-0043 (1))
     assert all((out / p["filePath"]).read_bytes().startswith(b"\x89PNG") for p in previews)
     assert "not based on any real individual" in previews[0]["prompt"]
     assert "a fictional Korean woman in their 20s" in previews[0]["prompt"]
+    assert "Variation" not in previews[0]["prompt"]
     assert "인물 인상 한국인" in (out / "gate-G1.html").read_text("utf-8")
     kinds = [c["kind"] for c in ctx.ledger(cid).calls()]
-    assert kinds.count("AGENT") == 1 and kinds.count("IMAGE") == 9
+    assert kinds.count("AGENT") == 1 and kinds.count("IMAGE") == 3
 
     approve_gate(
         ctx,
         cid,
         "G1",
-        {"decision": "SELECT", "selections": ["c2"], "reviewer": "user", "minutes": 3},
+        {
+            "decision": "SELECT",
+            "selections": ["c2"],
+            "referencePreviews": ["c2-1"],
+            "reviewer": "user",
+            "minutes": 3,
+        },
     )
     assert ctx.state(cid).gate("G1").status == "APPROVED"
     assert ctx.state(cid).stage("s1").status == "APPROVED"
@@ -105,6 +112,26 @@ def test_g1_select_requires_one_candidate(ctx):
         approve_gate(ctx, cid, "G1", {"decision": "SELECT", "selections": ["c9"], "reviewer": "u"})
     with pytest.raises(FactoryError):
         approve_gate(ctx, cid, "G1", {"decision": "SELECT", "reviewer": "u"})
+    # 얼굴은 정확히 한 장이다(D-0042, D-0043 (2))
+    with pytest.raises(FactoryError, match="얼굴 정확히 한 장"):
+        approve_gate(
+            ctx,
+            cid,
+            "G1",
+            {"decision": "SELECT", "selections": ["c2"], "referencePreviews": [], "reviewer": "u"},
+        )
+    with pytest.raises(FactoryError, match="얼굴 정확히 한 장"):
+        approve_gate(
+            ctx,
+            cid,
+            "G1",
+            {
+                "decision": "SELECT",
+                "selections": ["c2"],
+                "referencePreviews": ["c2-1", "c2-2"],
+                "reviewer": "u",
+            },
+        )
     assert ctx.state(cid).gate("G1").status == "AWAITING_HUMAN"
 
 
@@ -167,7 +194,7 @@ def test_name_in_preview_prompt_stops_before_image_call(ctx, monkeypatch):
     image = FakeImageModel()
     ctx.use_image(image)
     monkeypatch.setattr(
-        preview_mod, "build_prompt", lambda c, s, v, n, t: "portrait inspired by 가상하윤"
+        preview_mod, "build_prompt", lambda c, s, v, n, t, **kw: "portrait inspired by 가상하윤"
     )
     cid = new_character(ctx, "leak")
     with pytest.raises(NameLeakError):
@@ -179,7 +206,12 @@ def test_name_in_preview_prompt_stops_before_image_call(ctx, monkeypatch):
 def test_rerun_after_request_changes_reports_agreement(ctx):
     cid = new_character(ctx, "again")
     run_s1(ctx, cid, RANKING)
-    approve_gate(ctx, cid, "G1", {"decision": "REQUEST_CHANGES", "reviewer": "user"})
+    approve_gate(
+        ctx,
+        cid,
+        "G1",
+        {"decision": "REQUEST_CHANGES", "reviewer": "user", "note": "얼굴이 너무 어려 보인다"},
+    )
     assert ctx.state(cid).stage("s1").status == "REJECTED"
     out = run_s1(ctx, cid, RANKING)
     assert out.name == "rf2"
@@ -214,7 +246,7 @@ def test_ranking_validation_and_dry_run(tmp_path, capsys):
     path.write_text(json.dumps(RANKING, ensure_ascii=False), encoding="utf-8")
     assert main(["--root", str(tmp_path), "ref", "run", "x", "--ranking", str(path)]) == 0
     printed = capsys.readouterr().out
-    assert "인물 14명" in printed and "합계 16회" in printed
+    assert "인물 14명" in printed and "합계 8회" in printed
     assert find_name_leaks(printed, NAMES) == []
     assert not (tmp_path / "runs").exists()
 

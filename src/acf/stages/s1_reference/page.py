@@ -1,6 +1,8 @@
-"""G1 검토 페이지 (LLD §8.1 page, FR-09). 정적 HTML 한 장, 네트워크 요청 없음.
+"""G1 검토 페이지 (LLD §8.1 page, FR-09, D-0042·D-0043). 정적 HTML 한 장, 네트워크 없음.
 
-구성원 이름은 사람 검토용으로만 이 페이지에 보여 준다. 이 페이지는 S2 입력이 아니다(FR-35).
+외모군마다 얼굴 한 장을 보여 주고, 정렬 1위 외모군에 추천 표시를 붙인다. 사람은 얼굴 하나를
+고르고(외모군은 그 얼굴에서 정해진다) 고칠 점 메모를 쓴다. 구성원 이름은 이 페이지에만 있고
+S2 입력·이미지 프롬프트로 넘어가지 않는다(FR-35).
 """
 
 from __future__ import annotations
@@ -50,6 +52,7 @@ def render_g1_page(
     vocab: dict[str, Any],
 ) -> str:
     by_id = {p.personId: p for p in people.people}
+    recommended = report.ordering[0].clusterId if report.ordering else ""
 
     def person_line(pid: str) -> str:
         p = by_id[pid]
@@ -59,33 +62,45 @@ def render_g1_page(
     rationale = {o.clusterId: o.rationale for o in report.ordering}
     out = [
         '<!doctype html><html lang="ko"><head><meta charset="utf-8">',
-        f"<title>G1 외모군 선택 · {_e(subject_id)} · {_e(rev)}</title>",
-        "<style>body{font-family:-apple-system,system-ui,sans-serif;max-width:1100px;margin:2rem auto;padding:0 1rem;line-height:1.5;color:#222}"
-        "h2{margin-top:2rem;border-bottom:1px solid #ddd}.card{border:1px solid #ddd;border-radius:8px;padding:1rem;margin:1rem 0}"
-        ".imgs{display:flex;gap:.5rem;flex-wrap:wrap}.imgs img{width:160px;height:160px;object-fit:cover;border-radius:6px;background:#eee}"
-        ".hint{color:#666;font-size:.9em}ul{margin:.25rem 0}pre{white-space:pre-wrap;background:#f6f6f6;padding:1rem;border-radius:6px}"
+        f"<title>G1 얼굴 고르기 · {_e(subject_id)} · {_e(rev)}</title>",
+        "<style>body{font-family:-apple-system,system-ui,sans-serif;max-width:1100px;margin:2rem auto;"
+        "padding:0 1rem;line-height:1.5;color:#222}"
+        "h2{margin-top:2rem;border-bottom:1px solid #ddd}.card{border:1px solid #ddd;"
+        "border-radius:8px;padding:1rem;margin:1rem 0}"
+        ".imgs{display:flex;gap:.5rem;flex-wrap:wrap}.imgs img{width:200px;height:200px;"
+        "object-fit:cover;border-radius:6px;background:#eee}"
+        ".face{display:inline-block;margin:0 1rem 1rem 0;cursor:pointer}"
+        ".badge{display:inline-block;background:#e8f3ec;color:#1d6b3d;border-radius:999px;"
+        "padding:0 .5rem;font-size:.85em;margin-left:.4rem}"
+        ".hint{color:#666;font-size:.9em}ul{margin:.25rem 0}"
+        "pre{white-space:pre-wrap;background:#f6f6f6;padding:1rem;border-radius:6px}"
         "label{display:block;margin:.5rem 0}textarea{width:100%;min-height:4rem}</style></head><body>",
-        "<h1>G1 외모군 선택</h1>",
-        f'<p class="hint">{_e(subject_id)} · {_e(rev)} · 비교 범위: {_e(report.scope.characterGender)}, '
-        f"{_e(report.scope.ageRange)}, {_e(report.scope.artStyle)}, "
-        f"인물 인상 {_e(ORIGIN_KO[report.scope.appearanceOrigin])}</p>",
-        '<p class="hint">구성원 이름은 검토용으로만 보여 준다. 다음 단계(S2)와 이미지 생성에는 아래 공통 특징만 넘어간다.</p>',
-        "<h2>후보</h2>",
+        "<h1>G1 얼굴 고르기</h1>",
+        f'<p class="hint">{_e(subject_id)} · {_e(rev)} · 비교 범위: '
+        f"{_e(report.scope.characterGender)}, {_e(report.scope.ageRange)}, "
+        f"{_e(report.scope.artStyle)}, 인물 인상 {_e(ORIGIN_KO[report.scope.appearanceOrigin])}</p>",
+        '<p class="hint">외모군마다 얼굴 한 장이다. 고른 얼굴이 외모군을 정하고, S2 기준 이미지와 '
+        "이후 모든 장면·영상의 얼굴 기준이 된다(D-0042). 구성원 이름은 검토용으로만 보여 준다.</p>",
+        "<h2>얼굴 후보</h2>",
     ]
     for c in report.candidates:
-        imgs = "".join(
-            f'<label class="ref"><img src="{_e(p.filePath)}" alt="{_e(p.previewId)}" '
-            f'title="{_e(p.prompt)}"><br><input type="checkbox" name="ref" '
-            f'value="{_e(p.previewId)}"> {_e(p.previewId)} 참조로 쓰기</label>'
-            for p in previews
-            if p.clusterId == c.clusterId
+        faces = [p for p in previews if p.clusterId == c.clusterId]
+        imgs = (
+            "".join(
+                f'<label class="face"><img src="{_e(p.filePath)}" alt="{_e(p.previewId)}" '
+                f'title="{_e(p.prompt)}"><br><input type="radio" name="face" '
+                f'value="{_e(p.previewId)}" data-cluster="{_e(c.clusterId)}"> {_e(p.previewId)}</label>'
+                for p in faces
+            )
+            or '<p class="hint">이 외모군의 얼굴 미리보기가 없다. acf ref faces로 다시 만든다.</p>'
         )
+        badge = '<span class="badge">추천</span>' if c.clusterId == recommended else ""
         tags = "".join(f"<li>{_e(tag_label(f, v, vocab))}</li>" for f, v in c.commonTags.items())
         lims = "".join(f"<li>{_e(x)}</li>" for x in c.limitations) or "<li>없음</li>"
         members = "".join(f"<li>{person_line(m)}</li>" for m in c.members)
         out.append(
-            f'<div class="card"><label><input type="radio" name="pick" value="{_e(c.clusterId)}"> '
-            f"<b>{_e(c.clusterId)}</b> · {_e(summary(c.commonTags, vocab))}</label>"
+            f'<div class="card"><p><b>{_e(c.clusterId)}</b>{badge} · '
+            f"{_e(summary(c.commonTags, vocab))}</p>"
             f'<p>{_e(rationale[c.clusterId])}</p><div class="imgs">{imgs}</div>'
             f"<p><b>공통 특징</b></p><ul>{tags}</ul><p><b>한계</b></p><ul>{lims}</ul>"
             f"<details><summary>구성원 {c.memberCount}명 (검토용)</summary><ul>{members}</ul></details></div>"
@@ -110,21 +125,27 @@ def render_g1_page(
         )
     out.append(
         "<h2>결정</h2>"
-        '<p class="hint">외모군 하나를 고르고, 그 외모군의 미리보기 가운데 마음에 드는 사진을 0~2장 체크한다. '
-        "체크한 사진은 다음 단계(S2)에서 같은 얼굴을 유지하는 참조 이미지로 쓰인다.</p>"
-        '<label>결정 <select id="decision"><option>SELECT</option><option>REQUEST_CHANGES</option><option>REJECT</option></select></label>'
+        '<p class="hint">얼굴 하나를 고른다(외모군은 그 얼굴에서 정해진다). 마음에 드는 얼굴이 '
+        "없으면 REQUEST_CHANGES에 고칠 점을 적는다. 그러면 acf ref faces가 같은 특징·군집으로 "
+        "얼굴만 다시 만든다(D-0043).</p>"
+        '<label>결정 <select id="decision"><option>SELECT</option><option>REQUEST_CHANGES</option>'
+        "<option>REJECT</option></select></label>"
         '<label>검토자 <input id="reviewer" value="user"></label>'
         '<label>소요 분 <input id="minutes" type="number" value="0"></label>'
-        '<label>사유·수정 요청 <textarea id="reasons"></textarea></label>'
+        '<label>고칠 점 메모(REQUEST_CHANGES) <textarea id="note"></textarea></label>'
+        '<label>사유 <textarea id="reasons"></textarea></label>'
         '<button onclick="copyAnswer()">답 JSON 복사</button> '
         '<span class="hint">복사한 JSON을 answer.json으로 저장하고 '
         f"<code>acf gate import {_e(subject_id)} G1 --answer answer.json</code>을 실행한다.</span>"
         '<pre id="out"></pre>'
         "<script>function copyAnswer(){const d=document.getElementById('decision').value;"
-        "const p=document.querySelector('input[name=pick]:checked');"
-        "const r=[...document.querySelectorAll('input[name=ref]:checked')].map(x=>x.value).filter(v=>p&&v.startsWith(p.value+'-'));"
-        "const o={decision:d,selections:(d==='SELECT'&&p)?[p.value]:[],referencePreviews:d==='SELECT'?r:[],reviewer:document.getElementById('reviewer').value,"
-        "minutes:Number(document.getElementById('minutes').value),reasons:document.getElementById('reasons').value};"
+        "const p=document.querySelector('input[name=face]:checked');"
+        "const o={decision:d,selections:(d==='SELECT'&&p)?[p.dataset.cluster]:[],"
+        "referencePreviews:(d==='SELECT'&&p)?[p.value]:[],"
+        "note:document.getElementById('note').value,"
+        "reviewer:document.getElementById('reviewer').value,"
+        "minutes:Number(document.getElementById('minutes').value),"
+        "reasons:document.getElementById('reasons').value};"
         "const t=JSON.stringify(o,null,2);document.getElementById('out').textContent=t;"
         "if(navigator.clipboard){navigator.clipboard.writeText(t);}}</script></body></html>"
     )

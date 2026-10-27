@@ -28,7 +28,7 @@ from acf.providers.fake_video import FakeVideoModel
 from acf.stages.s4_frames.approve import load_approved_frames
 from acf.stages.s4_frames.run import run_s4
 from acf.stages.s6_actions.app_clips import APP_CLIPS
-from tests.support.flow import approve_plan_v2, make_ctx, through_g2
+from tests.support.flow import approve_plan_v2, make_ctx, through_s2
 from tests.test_scene_flow import backgrounds, poses, scenes, through_pose
 
 
@@ -38,7 +38,7 @@ def flow(tmp_path):
     agents.set("s4a", backgrounds)
     agents.set("s4b-scene", scenes)
     agents.set("s4b-pose", poses)
-    cid = through_g2(ctx)
+    cid = through_s2(ctx)
     approve_plan_v2(ctx, cid)
     through_pose(ctx, cid)
     run_s4(ctx, cid)
@@ -72,7 +72,7 @@ def request_changes(ctx, cid, aid="ch2-glad_good"):
 
 def test_s6_requires_g4(tmp_path):
     ctx, _ = make_ctx(tmp_path)
-    cid = through_g2(ctx)
+    cid = through_s2(ctx)
     with pytest.raises(GateNotApprovedError, match="G4"):
         run(ctx, cid)
     assert not (ctx.character_dir(cid) / "s6-actions").exists()

@@ -31,6 +31,7 @@ from acf.providers.fake_video import FAKE_MP4, FakeVideoModel
 from acf.providers.grok_web import GrokWebVideoModel
 from acf.providers.xai_video import XaiVideoModel, estimate_cost
 from acf.stages.s1_reference.run import run_s1
+from acf.stages.s2_hero.approve import load_appearance_spec
 from acf.stages.s2_hero.run import run_s2
 from acf.stages.s3_plan.draft import new_character
 from acf.stages.s5_intro.approve import load_approved_intro
@@ -44,7 +45,9 @@ from tests.test_frames import agent
 def _ctx(root: Path, extra: str = "") -> Context:
     (root / "catalog.json").write_text(json.dumps(CATALOG, ensure_ascii=False), "utf-8")
     (root / "factory.toml").write_text(
-        f'[resources]\nstanford_presets_json = "{root / "catalog.json"}"\n{extra}', encoding="utf-8"
+        f'[resources]\nstanford_presets_json = "{root / "catalog.json"}"\n{extra}'
+        '\n[stages.s2]\nbase_photo = "picked"\n',
+        encoding="utf-8",
     )
     c = Context.load(root, execute=True)
     text = FakeTextModel()
@@ -60,7 +63,7 @@ def ctx(tmp_path: Path) -> Context:
     return _ctx(tmp_path)
 
 
-def _through_g2(ctx: Context) -> str:
+def _through_s2(ctx: Context) -> str:
     cid = new_character(ctx, "intro")
     run_s1(ctx, cid, RANKING)
     approve_gate(
@@ -75,16 +78,15 @@ def _through_g2(ctx: Context) -> str:
         },
     )
     run_s2(ctx, cid)
-    approve_gate(ctx, cid, "G2", {"decision": "SELECT", "selections": ["h2"], "reviewer": "u"})
     return cid
 
 
 # ---------------------------------------------------------------- S5·G5
 
 
-def test_s5_requires_g2(ctx):
+def test_s5_requires_s2(ctx):
     cid = new_character(ctx, "nog2")
-    with pytest.raises(GateNotApprovedError, match="G2"):
+    with pytest.raises(GateNotApprovedError, match="s2"):
         run_s5(ctx, cid)
 
 
@@ -98,13 +100,13 @@ def test_s5_offline_to_g5_human_select(ctx):
     image = FakeImageModel()
     ctx.use_video(video)
     ctx.use_image(image)
-    cid = _through_g2(ctx)
+    cid = _through_s2(ctx)
     out = run_s5(ctx, cid)
     st = ctx.state(cid)
     assert out.name == "vi1" and st.stage("s5").status == "AWAITING_HUMAN"
     assert st.gate("G5").status == "AWAITING_HUMAN"
-    # 첫 프레임은 대표 이미지를 참조로 새로 만든 9:16 세로 사진(D-0031)
-    hero = ctx.character_dir(cid) / "s2-hero" / "ar1" / "candidates" / "h2.png"
+    # 첫 프레임은 기준 이미지(S2 picked = G1 얼굴)를 참조로 새로 만든 9:16 세로 사진(D-0031)
+    _, hero = load_appearance_spec(ctx, cid)
     assert (out / "hero.png").read_bytes() == hero.read_bytes()
     img_req = [r for r in image.requests if r.stage == "s5"]
     assert len(img_req) == 1 and img_req[0].size == "1024x1536"
@@ -163,7 +165,7 @@ class Flaky(FakeVideoModel):
 
 
 def test_s5_resumes_same_job_after_timeout(ctx):
-    cid = _through_g2(ctx)
+    cid = _through_s2(ctx)
     flaky = Flaky()
     ctx.use_video(flaky)
     with pytest.raises(VideoTimeoutError):
@@ -180,14 +182,14 @@ def test_s5_resumes_same_job_after_timeout(ctx):
     assert image.requests == []  # 첫 프레임도 다시 만들지 않았다
 
 
-def test_s5_hero_mode_uses_g2_image_as_is(tmp_path):
+def test_s5_hero_mode_uses_picked_image_as_is(tmp_path):
     ctx = _ctx(tmp_path, '\n[stages.s5]\nfirst_frame = "hero"\naspect_ratio = ""\n')
     image = FakeImageModel()
     ctx.use_image(image)
-    cid = _through_g2(ctx)
+    cid = _through_s2(ctx)
     image.requests.clear()
     out = run_s5(ctx, cid)
-    hero = ctx.character_dir(cid) / "s2-hero" / "ar1" / "candidates" / "h2.png"
+    _, hero = load_appearance_spec(ctx, cid)
     assert (out / "first-frame.png").read_bytes() == hero.read_bytes() and image.requests == []
     src = json.loads((out / "inputs.json").read_text("utf-8"))["firstFrameSource"]
     assert src["mode"] == "hero" and src["rawSize"] is None
@@ -201,7 +203,7 @@ def test_s5_square_first_frame_is_rejected_not_cropped(ctx):
     ctx.use_image(Square())
     video = FakeVideoModel()
     ctx.use_video(video)
-    cid = _through_g2(ctx)
+    cid = _through_s2(ctx)
     with pytest.raises(CheckFailed, match="너무 벗어났다"):
         run_s5(ctx, cid)
     assert ctx.state(cid).stage("s5").status == "CHECK_FAILED" and video.submits == []
@@ -217,7 +219,7 @@ def test_crop_to_ratio_center_crops():
 
 
 def test_s5_resumes_after_interrupted_process(ctx):
-    cid = _through_g2(ctx)
+    cid = _through_s2(ctx)
 
     class Interrupted(FakeVideoModel):
         def submit(self, request):
@@ -234,7 +236,7 @@ def test_s5_resumes_after_interrupted_process(ctx):
 
 
 def test_s5_failed_job_is_recorded(ctx):
-    cid = _through_g2(ctx)
+    cid = _through_s2(ctx)
 
     class Broken(FakeVideoModel):
         def collect(self, job_id, request):
@@ -255,7 +257,7 @@ def test_s5_cost_cap_rejects_before_submit(tmp_path):
     )
     video = FakeVideoModel()
     ctx.use_video(video)
-    cid = _through_g2(ctx)
+    cid = _through_s2(ctx)
     with pytest.raises(BudgetExceeded, match="USD"):
         run_s5(ctx, cid)
     assert video.submits == []
@@ -263,9 +265,7 @@ def test_s5_cost_cap_rejects_before_submit(tmp_path):
 
 def test_run_until_g5_with_auto_frames(ctx):
     cid = new_character(ctx, "orch5")
-    opt = RunOptions(
-        until="G6", ranking=RANKING, brief_text=BRIEF, auto_approve={"G1", "G2", "G3", "G4"}
-    )
+    opt = RunOptions(until="G6", ranking=RANKING, brief_text=BRIEF, auto_approve={"G1", "G3", "G4"})
     log = run_until(ctx, cid, opt)
     assert log.stopped_at == "G5" and ctx.state(cid).gate("G5").status == "AWAITING_HUMAN"
 
@@ -275,7 +275,7 @@ def test_video_dry_run_shows_cost(tmp_path, capsys):
         tmp_path,
         '\n[providers.video]\nadapter = "xai_video"\nmodel = "grok-imagine-video-1.5-lite"\n',
     )
-    cid = _through_g2(ctx)
+    cid = _through_s2(ctx)
     assert main(["--root", str(tmp_path), "video", "intro", cid]) == 0
     out = capsys.readouterr().out
     # 2편 × (8초 × $0.03 + 입력 이미지 $0.01) = $0.50, 첫 프레임은 구독·가짜라 0
@@ -493,7 +493,7 @@ def test_grok_web_rejects_unsupported_settings_and_paywall(tmp_path):
 
 
 def test_s5_checks_web_settings_before_first_frame(ctx):
-    cid = _through_g2(ctx)
+    cid = _through_s2(ctx)
     image = FakeImageModel()
     ctx.use_image(image)
     ctx.use_video(GrokWebVideoModel(driver_factory=lambda url: 1 / 0))
