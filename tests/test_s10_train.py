@@ -10,22 +10,25 @@ from pathlib import Path
 import httpx
 import pytest
 
-import acf.contracts  # noqa: F401
-from acf.common.canonical import sha256_file
-from acf.common.config import ProviderConfig
-from acf.common.schema import dump
-from acf.contracts.dataset import ClusterCount, DatasetRev, SplitFile
-from acf.contracts.training import TrainingRun
-from acf.pipeline.context import Context
-from acf.providers.training import make_training_provider
-from acf.providers.training.errors import TrainingIntegrityError, TrainingLimitError
-from acf.providers.training.gemma_qlora import GemmaQLoraProvider
-from acf.providers.training.port import TrainRequest
-from acf.providers.training.vertex_gemini import VertexGeminiProvider
-from acf.stages.s10_train.collect import collect_s10t
-from acf.stages.s10_train.io import latest_rev, read_run, run_path
-from acf.stages.s10_train.plan import plan_s10t
-from acf.stages.s10_train.submit import submit_s10t
+import character_factory_poc.contracts  # noqa: F401
+from character_factory_poc.common.canonical import sha256_file
+from character_factory_poc.common.config import ProviderConfig
+from character_factory_poc.common.schema import dump
+from character_factory_poc.contracts.dataset import ClusterCount, DatasetRev, SplitFile
+from character_factory_poc.contracts.training import TrainingRun
+from character_factory_poc.pipeline.context import Context
+from character_factory_poc.providers.training import make_training_provider
+from character_factory_poc.providers.training.errors import (
+    TrainingIntegrityError,
+    TrainingLimitError,
+)
+from character_factory_poc.providers.training.gemma_qlora import GemmaQLoraProvider
+from character_factory_poc.providers.training.port import TrainRequest
+from character_factory_poc.providers.training.vertex_gemini import VertexGeminiProvider
+from character_factory_poc.stages.s10_train.collect import collect_s10t
+from character_factory_poc.stages.s10_train.io import latest_rev, read_run, run_path
+from character_factory_poc.stages.s10_train.plan import plan_s10t
+from character_factory_poc.stages.s10_train.submit import submit_s10t
 
 CID = "cf-1"
 
@@ -301,7 +304,7 @@ def test_gemma_submit_resumes_matching_chunks(tmp_path: Path) -> None:
     provider = gemma(host)
     request = request_for(tmp_path, dataset, ds_dir)
     run = provider.plan(request)
-    job = "/workspace/acf/cf-1/ds1/tr1"
+    job = "/workspace/cfp/cf-1/ds1/tr1"
     first = (ds_dir / "train.jsonl").read_bytes()[:8]
     host.files[f"{job}/train.jsonl.part000000"] = first
 
@@ -320,7 +323,7 @@ def test_gemma_submit_resumes_matching_chunks(tmp_path: Path) -> None:
 
 def test_gemma_submit_stops_when_remote_hash_differs(tmp_path: Path) -> None:
     dataset, ds_dir = make_dataset(tmp_path)
-    job = "/workspace/acf/cf-1/ds1/tr1"
+    job = "/workspace/cfp/cf-1/ds1/tr1"
     host = LyingHost(f"{job}/train.jsonl")
     provider = gemma(host)
     request = request_for(tmp_path, dataset, ds_dir)

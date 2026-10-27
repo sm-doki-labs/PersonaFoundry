@@ -86,7 +86,7 @@
 
 ## 3. 채택안과 구현 연결
 
-- 어댑터: `src/acf/collectors/rankify.py`의 `RankifySource`. 분류는 `idolFemale`(여성),
+- 어댑터: `src/character_factory_poc/collectors/rankify.py`의 `RankifySource`. 분류는 `idolFemale`(여성),
   `idolMale`(남성), `actor`(혼성, `gender="any"`) 셋이다.
 - 성별 처리: 수집 결과의 각 목록에 `gender`를 달고, `collect.select_lists`가 캐릭터
   성별(`scope.characterGender`)과 같은 목록만 남긴다. 혼성 목록은 `any` 범위에서만 쓴다.

@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-import acf.contracts  # noqa: F401
-from acf.cli import main
-from acf.common.canonical import sha256_of
-from acf.common.errors import CheckFailed, FactoryError, GateNotApprovedError
-from acf.common.schema import dump, validate
-from acf.contracts.dataset import Conversation, Message
-from acf.stages.s9_data import build, checks, plan, samples, split
-from acf.stages.s9_data.approve import approve_g7, approve_g7a
-from acf.stages.s9_data.plan import CLUSTERS
+import character_factory_poc.contracts  # noqa: F401
+from character_factory_poc.cli import main
+from character_factory_poc.common.canonical import sha256_of
+from character_factory_poc.common.errors import CheckFailed, FactoryError, GateNotApprovedError
+from character_factory_poc.common.schema import dump, validate
+from character_factory_poc.contracts.dataset import Conversation, Message
+from character_factory_poc.stages.s9_data import build, checks, plan, samples, split
+from character_factory_poc.stages.s9_data.approve import approve_g7, approve_g7a
+from character_factory_poc.stages.s9_data.plan import CLUSTERS
 from tests.support.data_fakes import (
     FakeWriterModel,
     make_s9_ctx,
@@ -441,7 +441,7 @@ def test_checks_flag_sns_and_forbidden():
 
 
 def _cfg_for_split():
-    from acf.stages.s9_data.plan import S9Config
+    from character_factory_poc.stages.s9_data.plan import S9Config
 
     return S9Config(
         target=10,
@@ -468,7 +468,7 @@ def _cfg_for_split():
 
 
 def _plan_for_split():
-    from acf.stages.s9_data import plan as plan_mod
+    from character_factory_poc.stages.s9_data import plan as plan_mod
 
     targets = plan_mod.cluster_targets(10, _cfg_for_split().shares)
     return dump(

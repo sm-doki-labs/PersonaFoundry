@@ -1,5 +1,5 @@
 [project]
-name = "agentic-character-factory"
+name = "character-factory-poc"
 version = "0.1.0"
 description = "Agentic character factory: brief to release bundle with human gates"
 readme = "README.md"
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-acf = "acf.cli:main"
+cfp = "character_factory_poc.cli:main"
 
 [project.optional-dependencies]
 # grok_web 어댑터(D-0029, 기본 꺼짐). 기존 Chrome에 CDP로 붙으므로 브라우저 다운로드는 필요 없다.
@@ -34,7 +34,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-acf = ["prompts/*.md", "resources/*.json", "web/static/**/*"]
+cfp = ["prompts/*.md", "resources/*.json", "web/static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -49,20 +49,20 @@ select = ["E", "F", "I", "UP", "B"]
 
 # 한국어 안내문·HTML 템플릿 문자열은 포매터가 줄바꿈할 수 없으므로 해당 파일만 줄 길이를 면제한다.
 [tool.ruff.lint.per-file-ignores]
-"src/acf/pipeline/gates.py" = ["E501"]
-"src/acf/pipeline/agent.py" = ["E501"]
-"src/acf/common/budget.py" = ["E501"]
-"src/acf/stages/s7_traits/sheet.py" = ["E501"]
-"src/acf/stages/s8_prompts/build.py" = ["E501"]
-"src/acf/stages/s1_reference/page.py" = ["E501"]
-"src/acf/stages/s1_reference/report.py" = ["E501"]
-"src/acf/stages/s1_reference/features.py" = ["E501"]
-"src/acf/stages/s2_hero/page.py" = ["E501"]
-"src/acf/stages/s4_frames/page.py" = ["E501"]
-"src/acf/stages/s5_intro/page.py" = ["E501"]
-"src/acf/providers/xai_video.py" = ["E501"]
-"src/acf/providers/grok_web.py" = ["E501"]
-"src/acf/providers/factory.py" = ["E501"]
-"src/acf/stages/s5_intro/run.py" = ["E501"]
+"src/character_factory_poc/pipeline/gates.py" = ["E501"]
+"src/character_factory_poc/pipeline/agent.py" = ["E501"]
+"src/character_factory_poc/common/budget.py" = ["E501"]
+"src/character_factory_poc/stages/s7_traits/sheet.py" = ["E501"]
+"src/character_factory_poc/stages/s8_prompts/build.py" = ["E501"]
+"src/character_factory_poc/stages/s1_reference/page.py" = ["E501"]
+"src/character_factory_poc/stages/s1_reference/report.py" = ["E501"]
+"src/character_factory_poc/stages/s1_reference/features.py" = ["E501"]
+"src/character_factory_poc/stages/s2_hero/page.py" = ["E501"]
+"src/character_factory_poc/stages/s4_frames/page.py" = ["E501"]
+"src/character_factory_poc/stages/s5_intro/page.py" = ["E501"]
+"src/character_factory_poc/providers/xai_video.py" = ["E501"]
+"src/character_factory_poc/providers/grok_web.py" = ["E501"]
+"src/character_factory_poc/providers/factory.py" = ["E501"]
+"src/character_factory_poc/stages/s5_intro/run.py" = ["E501"]
 "tests/test_video.py" = ["E501"]
-"src/acf/stages/s3_plan/check.py" = ["E501"]
+"src/character_factory_poc/stages/s3_plan/check.py" = ["E501"]

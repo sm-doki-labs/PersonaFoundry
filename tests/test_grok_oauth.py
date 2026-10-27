@@ -8,13 +8,13 @@ from pathlib import Path
 import httpx
 import pytest
 
-from acf.common.config import ProviderConfig
-from acf.common.errors import VideoGenerationError, VideoTimeoutError
-from acf.providers.base import VideoRequest
-from acf.providers.factory import make_video_model
-from acf.providers.fake_image import solid_png
-from acf.providers.fake_video import FAKE_MP4
-from acf.providers.grok_oauth import GrokOAuthVideoModel, TokenSource
+from character_factory_poc.common.config import ProviderConfig
+from character_factory_poc.common.errors import VideoGenerationError, VideoTimeoutError
+from character_factory_poc.providers.base import VideoRequest
+from character_factory_poc.providers.factory import make_video_model
+from character_factory_poc.providers.fake_image import solid_png
+from character_factory_poc.providers.fake_video import FAKE_MP4
+from character_factory_poc.providers.grok_oauth import GrokOAuthVideoModel, TokenSource
 
 TOKEN = "oauth-access-token-for-tests-123456"
 FUTURE_MS = 4_000_000_000_000  # 2096년쯤. epoch 밀리초로 해석되는지 확인하는 값
@@ -194,9 +194,9 @@ def test_token_env_takes_precedence_over_file(tmp_path: Path, monkeypatch: pytes
         seen.append(request)
         return httpx.Response(200, json={"request_id": "req-env"})
 
-    monkeypatch.setenv("ACF_TEST_XAI_OAUTH", "env-token-value-123456")
+    monkeypatch.setenv("CFP_TEST_XAI_OAUTH", "env-token-value-123456")
     m = _model(
-        token_env="ACF_TEST_XAI_OAUTH",
+        token_env="CFP_TEST_XAI_OAUTH",
         token_file=tmp_path / "missing.json",
         handler=handler,
     )
@@ -249,14 +249,15 @@ def test_factory_registers_grok_oauth_and_lists_it_in_error(tmp_path: Path):
 def test_token_source_from_helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     auth = _auth(tmp_path / "auth.json", [_account("acc-1")], "acc-1")
     assert TokenSource.from_file(auth).token() == TOKEN
-    monkeypatch.setenv("ACF_TEST_XAI_HELPER", "helper-token-123456")
-    assert TokenSource.from_env("ACF_TEST_XAI_HELPER").token() == "helper-token-123456"
+    monkeypatch.setenv("CFP_TEST_XAI_HELPER", "helper-token-123456")
+    assert TokenSource.from_env("CFP_TEST_XAI_HELPER").token() == "helper-token-123456"
 
 
 def test_default_token_path_is_lazy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """모델을 만들 때 실제 ~/.opencodex/auth.json을 읽지 않는다."""
     missing = tmp_path / "missing-auth.json"
-    monkeypatch.setattr("acf.providers.grok_oauth.default_token_file", lambda: missing)
+    target = "character_factory_poc.providers.grok_oauth.default_token_file"
+    monkeypatch.setattr(target, lambda: missing)
     m = _model()
     assert m.token_source.token_file == missing
     with pytest.raises(VideoGenerationError, match="인증 파일을 읽지 못했다"):

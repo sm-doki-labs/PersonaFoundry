@@ -6,21 +6,21 @@ import json
 
 import pytest
 
-import acf.contracts  # noqa: F401
-from acf.cli import main
-from acf.common.canonical import sha256_file
-from acf.common.errors import FactoryError, GateNotApprovedError, NameLeakError
-from acf.pipeline.approve import approve_gate
-from acf.pipeline.context import Context
-from acf.pipeline.graph import GATES, STAGES
-from acf.pipeline.orchestrator import RunOptions, run_until
-from acf.providers.fake_image import FakeImageModel
-from acf.stages.s1_reference.approve import selected_cluster
-from acf.stages.s1_reference.faces import run_faces
-from acf.stages.s1_reference.run import run_s1
-from acf.stages.s2_hero.approve import load_appearance_spec
-from acf.stages.s2_hero.run import run_s2
-from acf.stages.s3_plan.draft import new_character
+import character_factory_poc.contracts  # noqa: F401
+from character_factory_poc.cli import main
+from character_factory_poc.common.canonical import sha256_file
+from character_factory_poc.common.errors import FactoryError, GateNotApprovedError, NameLeakError
+from character_factory_poc.pipeline.approve import approve_gate
+from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.graph import GATES, STAGES
+from character_factory_poc.pipeline.orchestrator import RunOptions, run_until
+from character_factory_poc.providers.fake_image import FakeImageModel
+from character_factory_poc.stages.s1_reference.approve import selected_cluster
+from character_factory_poc.stages.s1_reference.faces import run_faces
+from character_factory_poc.stages.s1_reference.run import run_s1
+from character_factory_poc.stages.s2_hero.approve import load_appearance_spec
+from character_factory_poc.stages.s2_hero.run import run_s2
+from character_factory_poc.stages.s3_plan.draft import new_character
 from tests.support.flow import make_ctx
 from tests.support.synthetic import RANKING
 
@@ -177,7 +177,7 @@ def _old_char(ctx: Context, *, s2_marked: bool) -> str:
     png = rev_dir / "candidates" / "h2.png"
     png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"old")
     ref = {"id": "h2", "path": "candidates/h2.png", "sha256": sha256_file(png)}
-    from acf.common.schema import dump, validate
+    from character_factory_poc.common.schema import dump, validate
 
     spec = validate(
         "appearance-spec-v1",

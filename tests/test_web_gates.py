@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from acf.web import create_app, reads
+from character_factory_poc.web import create_app, reads
 from tests.support.web_gates import answer_for, build
 
 GATE_CASES = [

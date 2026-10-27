@@ -7,20 +7,20 @@ from pathlib import Path
 
 import pytest
 
-import acf.contracts  # noqa: F401
-from acf.cli import main
-from acf.common.errors import FactoryError, GateNotApprovedError
-from acf.common.names import find_name_leaks
-from acf.pipeline.approve import approve_gate
-from acf.pipeline.context import Context
-from acf.providers.fake import FakeTextModel
-from acf.providers.fake_image import FakeImageModel
-from acf.stages.s1_reference.approve import selected_face, selected_references
-from acf.stages.s1_reference.ranking import all_names, load_ranking
-from acf.stages.s1_reference.run import run_s1
-from acf.stages.s2_hero.approve import load_appearance_spec
-from acf.stages.s2_hero.run import run_s2
-from acf.stages.s3_plan.draft import new_character
+import character_factory_poc.contracts  # noqa: F401
+from character_factory_poc.cli import main
+from character_factory_poc.common.errors import FactoryError, GateNotApprovedError
+from character_factory_poc.common.names import find_name_leaks
+from character_factory_poc.pipeline.approve import approve_gate
+from character_factory_poc.pipeline.context import Context
+from character_factory_poc.providers.fake import FakeTextModel
+from character_factory_poc.providers.fake_image import FakeImageModel
+from character_factory_poc.stages.s1_reference.approve import selected_face, selected_references
+from character_factory_poc.stages.s1_reference.ranking import all_names, load_ranking
+from character_factory_poc.stages.s1_reference.run import run_s1
+from character_factory_poc.stages.s2_hero.approve import load_appearance_spec
+from character_factory_poc.stages.s2_hero.run import run_s2
+from character_factory_poc.stages.s3_plan.draft import new_character
 from tests.support.synthetic import RANKING, scout_features
 
 NAMES = all_names(load_ranking(RANKING))

@@ -1,7 +1,7 @@
 """S11 릴리즈 패키지와 우리 앱(doki-app) 변환기 (LLD §5.17·§8.10·§8.11).
 
 가짜 공급자·합성 자료로 패키지 생성·해시 검사·G9·변환 규칙·head 거절·적재 순서를 확인하고,
-`ACF_PG_ADMIN_URL`이 있을 때만 일회용 PostgreSQL 실제 적재를 한 번 돌린다.
+`CFP_PG_ADMIN_URL`이 있을 때만 일회용 PostgreSQL 실제 적재를 한 번 돌린다.
 """
 
 from __future__ import annotations
@@ -12,14 +12,14 @@ from pathlib import Path
 
 import pytest
 
-from acf.common.errors import CheckFailed, FactoryError
-from acf.common.store import read_json, verify_manifest
-from acf.stages.export.doki_app import api_svc, chat_svc
-from acf.stages.export.export import TargetHeads, ensure_heads, export_doki_app
-from acf.stages.export.pg_admin import CommandResult, PostgresAdmin
-from acf.stages.export.settings import API_SVC_HEAD, CHAT_SVC_HEAD, ExportSettings
-from acf.stages.s11_release.approve import approve_g9
-from acf.stages.s11_release.package import (
+from character_factory_poc.common.errors import CheckFailed, FactoryError
+from character_factory_poc.common.store import read_json, verify_manifest
+from character_factory_poc.stages.export.doki_app import api_svc, chat_svc
+from character_factory_poc.stages.export.export import TargetHeads, ensure_heads, export_doki_app
+from character_factory_poc.stages.export.pg_admin import CommandResult, PostgresAdmin
+from character_factory_poc.stages.export.settings import API_SVC_HEAD, CHAT_SVC_HEAD, ExportSettings
+from character_factory_poc.stages.s11_release.approve import approve_g9
+from character_factory_poc.stages.s11_release.package import (
     build_package,
     load_package,
     verify_package_files,
@@ -97,7 +97,7 @@ def _settings(tmp_path: Path) -> ExportSettings:
             ),
             encoding="utf-8",
         )
-    return ExportSettings(api_svc_repo=api, chat_svc_repo=chat, admin_url_env="ACF_TEST_ADMIN_URL")
+    return ExportSettings(api_svc_repo=api, chat_svc_repo=chat, admin_url_env="CFP_TEST_ADMIN_URL")
 
 
 @pytest.fixture
@@ -279,7 +279,7 @@ def test_verify_order_and_drop(flow, tmp_path):
     runner = FakeRunner()
     sql = FakeSql(clips=_action_clips(ctx, cid))
     os.environ[settings.admin_url_env] = (
-        "postgresql://acf_admin:acf-verify-local@127.0.0.1:55439/postgres"
+        "postgresql://cfp_admin:cfp-verify-local@127.0.0.1:55439/postgres"
     )
     try:
         result, _ = export_doki_app(
@@ -309,7 +309,7 @@ def test_verify_drops_database_when_load_fails(flow, tmp_path):
     runner = FakeRunner(fail_on="content_release")
     sql = FakeSql()
     os.environ[settings.admin_url_env] = (
-        "postgresql://acf_admin:acf-verify-local@127.0.0.1:55439/postgres"
+        "postgresql://cfp_admin:cfp-verify-local@127.0.0.1:55439/postgres"
     )
     try:
         with pytest.raises(CheckFailed):
@@ -343,14 +343,14 @@ def test_verify_without_admin_env(flow, tmp_path):
 
 
 def test_admin_url_rejects_dev_containers():
-    from acf.stages.export.pg_admin import PostgresAdminError
+    from character_factory_poc.stages.export.pg_admin import PostgresAdminError
 
     with pytest.raises(PostgresAdminError):
         PostgresAdmin.parse("postgresql://dokilabs:dokilabs-local@localhost:5432/api_svc")
     with pytest.raises(PostgresAdminError):
         PostgresAdmin.parse("postgresql://dokilabs:dokilabs-local@localhost:54329/chat_svc")
-    admin = PostgresAdmin.parse("postgresql://acf_admin:acf-verify-local@127.0.0.1:55439/postgres")
-    assert "acf-verify-local" not in admin.redacted
+    admin = PostgresAdmin.parse("postgresql://cfp_admin:cfp-verify-local@127.0.0.1:55439/postgres")
+    assert "cfp-verify-local" not in admin.redacted
 
 
 def _action_clips(ctx, cid) -> int:
@@ -359,12 +359,12 @@ def _action_clips(ctx, cid) -> int:
 
 
 @pytest.mark.skipif(
-    not os.environ.get("ACF_PG_ADMIN_URL"),
-    reason="ACF_PG_ADMIN_URL이 없어 실제 적재를 건너뛴다",
+    not os.environ.get("CFP_PG_ADMIN_URL"),
+    reason="CFP_PG_ADMIN_URL이 없어 실제 적재를 건너뛴다",
 )
 def test_real_load_into_disposable_postgres(flow, tmp_path):
     """일회용 PostgreSQL 두 개에 실제로 적재하고 우리 캐릭터로 좁혀 확인한다."""
-    from acf.stages.export.settings import load_export_settings
+    from character_factory_poc.stages.export.settings import load_export_settings
 
     ctx, cid = flow
     build_package(ctx, cid)

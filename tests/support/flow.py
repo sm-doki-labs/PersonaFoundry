@@ -13,18 +13,18 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import acf.contracts  # noqa: F401
-from acf.common.schema import dump, validate
-from acf.common.store import next_rev, write_manifest, write_once_json
-from acf.pipeline.approve import approve_gate
-from acf.pipeline.context import Context
-from acf.pipeline.gates import write_gate_record
-from acf.providers.fake import FakeTextModel
-from acf.providers.fake_image import FakeImageModel
-from acf.providers.fake_video import FakeVideoModel
-from acf.stages.s1_reference.run import run_s1
-from acf.stages.s2_hero.run import run_s2
-from acf.stages.s3_plan.draft import new_character
+import character_factory_poc.contracts  # noqa: F401
+from character_factory_poc.common.schema import dump, validate
+from character_factory_poc.common.store import next_rev, write_manifest, write_once_json
+from character_factory_poc.pipeline.approve import approve_gate
+from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.gates import write_gate_record
+from character_factory_poc.providers.fake import FakeTextModel
+from character_factory_poc.providers.fake_image import FakeImageModel
+from character_factory_poc.providers.fake_video import FakeVideoModel
+from character_factory_poc.stages.s1_reference.run import run_s1
+from character_factory_poc.stages.s2_hero.run import run_s2
+from character_factory_poc.stages.s3_plan.draft import new_character
 from tests.support.synthetic import RANKING, scout_features
 from tests.test_agentic import CATALOG
 

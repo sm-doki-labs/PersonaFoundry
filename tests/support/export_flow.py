@@ -10,16 +10,16 @@ import json
 from pathlib import Path
 from typing import Any
 
-from acf.common.schema import dump, validate
-from acf.common.store import next_rev, write_manifest, write_once_json
-from acf.pipeline.approve import approve_gate
-from acf.pipeline.context import Context
-from acf.pipeline.gates import write_gate_record
-from acf.stages.s4_frames.run import run_s4
-from acf.stages.s5_intro.run import run_s5
-from acf.stages.s6_actions.run import run_s6
-from acf.stages.s7_traits.sheet import run_s7
-from acf.stages.s8_prompts.build import run_s8
+from character_factory_poc.common.schema import dump, validate
+from character_factory_poc.common.store import next_rev, write_manifest, write_once_json
+from character_factory_poc.pipeline.approve import approve_gate
+from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.gates import write_gate_record
+from character_factory_poc.stages.s4_frames.run import run_s4
+from character_factory_poc.stages.s5_intro.run import run_s5
+from character_factory_poc.stages.s6_actions.run import run_s6
+from character_factory_poc.stages.s7_traits.sheet import run_s7
+from character_factory_poc.stages.s8_prompts.build import run_s8
 from tests.support.flow import approve_plan_v2, make_ctx, sample_plan_v2, through_s2
 from tests.support.synthetic import prompter_output, trait_sheet
 from tests.test_scene_flow import backgrounds, poses, scenes, through_pose
@@ -145,7 +145,7 @@ def fix_sft(ctx: Context, cid: str, *, adopted: str = "gemma-binding") -> dict[s
 
 
 def approve_package(ctx: Context, cid: str) -> str:
-    from acf.stages.s11_release.approve import approve_g9
+    from character_factory_poc.stages.s11_release.approve import approve_g9
 
     rev = ctx.state(cid).gate("G9").rev or ""
     approve_g9(ctx, cid, {"decision": "APPROVE", "reasons": "시험 승인", "reviewer": "test"})

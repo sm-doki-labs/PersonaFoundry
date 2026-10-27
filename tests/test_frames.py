@@ -8,18 +8,18 @@ from pathlib import Path
 
 import pytest
 
-import acf.contracts  # noqa: F401
-from acf.common.names import find_name_leaks
-from acf.common.schema import validate
-from acf.pipeline.approve import approve_gate
-from acf.pipeline.context import Context
-from acf.providers.fake import FakeTextModel
-from acf.providers.fake_image import FakeImageModel
-from acf.stages.s1_reference.ranking import all_names, load_ranking
-from acf.stages.s1_reference.run import run_s1
-from acf.stages.s2_hero.run import run_s2
-from acf.stages.s3_plan.check import check_plan_draft
-from acf.stages.s3_plan.draft import new_character, run_s3_draft
+import character_factory_poc.contracts  # noqa: F401
+from character_factory_poc.common.names import find_name_leaks
+from character_factory_poc.common.schema import validate
+from character_factory_poc.pipeline.approve import approve_gate
+from character_factory_poc.pipeline.context import Context
+from character_factory_poc.providers.fake import FakeTextModel
+from character_factory_poc.providers.fake_image import FakeImageModel
+from character_factory_poc.stages.s1_reference.ranking import all_names, load_ranking
+from character_factory_poc.stages.s1_reference.run import run_s1
+from character_factory_poc.stages.s2_hero.run import run_s2
+from character_factory_poc.stages.s3_plan.check import check_plan_draft
+from character_factory_poc.stages.s3_plan.draft import new_character, run_s3_draft
 from tests.support.synthetic import RANKING, scout_features
 from tests.test_agentic import BRIEF, CATALOG, _plan_from_preset
 
@@ -134,7 +134,7 @@ def _png(w: int, h: int) -> bytes:
 
 
 def test_face_crop_box_and_crop():
-    from acf.common.face_crop import crop_box, crop_face
+    from character_factory_poc.common.face_crop import crop_box, crop_face
 
     # 얼굴 상자를 1.4배 정사각형으로 넓히고 위로 올리며, 이미지 밖으로 나가지 않는다
     assert crop_box((500, 200, 380, 380), 1254, 1254, 1.4, 0.12) == (424, 78, 532, 532)

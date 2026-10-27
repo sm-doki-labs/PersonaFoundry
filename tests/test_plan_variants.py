@@ -7,24 +7,24 @@ import json
 
 import pytest
 
-from acf.common.canonical import sha256_file
-from acf.common.errors import (
+from character_factory_poc.common.canonical import sha256_file
+from character_factory_poc.common.errors import (
     BudgetExceeded,
     CheckFailed,
     FactoryError,
     GateNotApprovedError,
     NeedsInputError,
 )
-from acf.common.schema import dump, validate
-from acf.common.store import verify_manifest
-from acf.pipeline.approve import approve_gate
-from acf.stages.s3_plan.check_v2 import codex_checks
-from acf.stages.s3_plan.draft import new_character
-from acf.stages.s3_plan.importer import load_approved_plan_v2
-from acf.stages.s3_plan.own import plan_calls as own_calls
-from acf.stages.s3_plan.own import run_s3_own
-from acf.stages.s3_plan.seed import load_latest_seed, write_seed
-from acf.stages.s3_plan.variants import plan_calls, run_s3_variants
+from character_factory_poc.common.schema import dump, validate
+from character_factory_poc.common.store import verify_manifest
+from character_factory_poc.pipeline.approve import approve_gate
+from character_factory_poc.stages.s3_plan.check_v2 import codex_checks
+from character_factory_poc.stages.s3_plan.draft import new_character
+from character_factory_poc.stages.s3_plan.importer import load_approved_plan_v2
+from character_factory_poc.stages.s3_plan.own import plan_calls as own_calls
+from character_factory_poc.stages.s3_plan.own import run_s3_own
+from character_factory_poc.stages.s3_plan.seed import load_latest_seed, write_seed
+from character_factory_poc.stages.s3_plan.variants import plan_calls, run_s3_variants
 from tests.support.flow import make_ctx, sample_plan_v2, through_s2
 from tests.support.synthetic import RANKING
 
@@ -80,7 +80,7 @@ def test_requires_s2_and_seed(tmp_path, runner):
         runner(ctx, cid)
     cid = through_s2(ctx)
     calls = len(agents.calls)
-    with pytest.raises(NeedsInputError, match="acf plan seed"):
+    with pytest.raises(NeedsInputError, match="cfp plan seed"):
         runner(ctx, cid)
     assert len(agents.calls) == calls
     assert not (ctx.character_dir(cid) / "s3-plan/pr1").exists()
@@ -286,7 +286,7 @@ def test_own_user_evidence_must_quote_source(ready):
 
 def test_edit_name_leak_is_rejected(ready):
     ctx, _, cid = ready
-    from acf.stages.s1_reference.ranking import all_names, load_ranking
+    from character_factory_poc.stages.s1_reference.ranking import all_names, load_ranking
 
     folder = run_s3_variants(ctx, cid)
     with pytest.raises(CheckFailed, match="이름"):
@@ -337,7 +337,7 @@ def test_codex_own_check_matches_api(ready):
 
 @pytest.mark.parametrize("stage", ["s3-variants", "s3-own"])
 def test_fake_codex_backend_retries_and_approves(ready, stage):
-    from acf.providers.fake_codex import FakeCodexAgent
+    from character_factory_poc.providers.fake_codex import FakeCodexAgent
 
     ctx, _, cid = ready
 
@@ -415,7 +415,7 @@ def test_decline_writes_no_plan(ready, decision):
 )
 def test_name_leak_rejected(ready, runner, stage):
     ctx, agents, cid = ready
-    from acf.stages.s1_reference.ranking import all_names, load_ranking
+    from character_factory_poc.stages.s1_reference.ranking import all_names, load_ranking
 
     name = all_names(load_ranking(RANKING))[0]
     p = sample_plan_v2(cid, name=" ".join(name))

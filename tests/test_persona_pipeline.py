@@ -7,15 +7,15 @@ from pathlib import Path
 
 import pytest
 
-import acf.contracts  # noqa: F401
-from acf.cli import main
-from acf.common.errors import GateNotApprovedError
-from acf.pipeline.context import Context
-from acf.providers.fake import FakeTextModel
-from acf.stages.s3_plan.importer import import_plan
-from acf.stages.s7_traits.sheet import run_s7
-from acf.stages.s8_prompts.approve import approve_g6
-from acf.stages.s8_prompts.build import run_s8
+import character_factory_poc.contracts  # noqa: F401
+from character_factory_poc.cli import main
+from character_factory_poc.common.errors import GateNotApprovedError
+from character_factory_poc.pipeline.context import Context
+from character_factory_poc.providers.fake import FakeTextModel
+from character_factory_poc.stages.s3_plan.importer import import_plan
+from character_factory_poc.stages.s7_traits.sheet import run_s7
+from character_factory_poc.stages.s8_prompts.approve import approve_g6
+from character_factory_poc.stages.s8_prompts.build import run_s8
 from tests.support.synthetic import PLAN, prompter_output, trait_sheet
 
 

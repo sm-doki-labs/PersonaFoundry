@@ -2,7 +2,7 @@
 
 가짜 공급자로 S1부터 필요한 관문까지 실제 단계를 돌린다. 네트워크·실제 공급자는 쓰지 않는다.
 마지막 관문만 대기로 남기고 앞 관문은 기본 답으로 통과시켜, 결정 API를 그 관문에서 시험한다.
-답 형식은 화면이 만드는 것과 같은 모양이다(`src/acf/stages/*/approve.py` 참고).
+답 형식은 화면이 만드는 것과 같은 모양이다(`src/character_factory_poc/stages/*/approve.py` 참고).
 """
 
 from __future__ import annotations
@@ -11,22 +11,22 @@ import copy
 import json
 from pathlib import Path
 
-from acf.pipeline.approve import approve_gate
-from acf.pipeline.context import Context
-from acf.providers.fake import FakeTextModel
-from acf.stages.s1_reference.run import run_s1
-from acf.stages.s2_hero.run import run_s2
-from acf.stages.s3_plan.draft import new_character
-from acf.stages.s3_plan.own import run_s3_own
-from acf.stages.s3_plan.seed import write_seed
-from acf.stages.s3_plan.variants import run_s3_variants
-from acf.stages.s4_frames.run import run_s4
-from acf.stages.s4a_backgrounds.run import run_s4a
-from acf.stages.s4b_poses.run import run_s4b
-from acf.stages.s5_intro.run import run_s5
-from acf.stages.s6_actions.run import run_s6
-from acf.stages.s7_traits.sheet import run_s7
-from acf.stages.s8_prompts.build import run_s8
+from character_factory_poc.pipeline.approve import approve_gate
+from character_factory_poc.pipeline.context import Context
+from character_factory_poc.providers.fake import FakeTextModel
+from character_factory_poc.stages.s1_reference.run import run_s1
+from character_factory_poc.stages.s2_hero.run import run_s2
+from character_factory_poc.stages.s3_plan.draft import new_character
+from character_factory_poc.stages.s3_plan.own import run_s3_own
+from character_factory_poc.stages.s3_plan.seed import write_seed
+from character_factory_poc.stages.s3_plan.variants import run_s3_variants
+from character_factory_poc.stages.s4_frames.run import run_s4
+from character_factory_poc.stages.s4a_backgrounds.run import run_s4a
+from character_factory_poc.stages.s4b_poses.run import run_s4b
+from character_factory_poc.stages.s5_intro.run import run_s5
+from character_factory_poc.stages.s6_actions.run import run_s6
+from character_factory_poc.stages.s7_traits.sheet import run_s7
+from character_factory_poc.stages.s8_prompts.build import run_s8
 from tests.support.flow import make_ctx, sample_plan_v2
 from tests.support.synthetic import RANKING, prompter_output, trait_sheet
 from tests.test_plan_variants import output as plan_variants

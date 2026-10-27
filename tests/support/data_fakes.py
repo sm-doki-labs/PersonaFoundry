@@ -11,13 +11,13 @@ import re
 from pathlib import Path
 from typing import Any
 
-import acf.contracts  # noqa: F401
-from acf.pipeline.context import Context
-from acf.providers.fake import FakeTextModel
-from acf.stages.s3_plan.importer import import_plan
-from acf.stages.s7_traits.sheet import run_s7
-from acf.stages.s8_prompts.approve import approve_g6
-from acf.stages.s8_prompts.build import run_s8
+import character_factory_poc.contracts  # noqa: F401
+from character_factory_poc.pipeline.context import Context
+from character_factory_poc.providers.fake import FakeTextModel
+from character_factory_poc.stages.s3_plan.importer import import_plan
+from character_factory_poc.stages.s7_traits.sheet import run_s7
+from character_factory_poc.stages.s8_prompts.approve import approve_g6
+from character_factory_poc.stages.s8_prompts.build import run_s8
 from tests.support.synthetic import PLAN, prompter_output, trait_sheet
 
 WORDS = ("창가", "골목", "버스", "노을", "서가", "커피", "우산", "기타", "테라스", "계단")

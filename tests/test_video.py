@@ -9,10 +9,10 @@ from pathlib import Path
 import httpx
 import pytest
 
-import acf.contracts  # noqa: F401
-from acf.cli import main
-from acf.common.config import ProviderConfig
-from acf.common.errors import (
+import character_factory_poc.contracts  # noqa: F401
+from character_factory_poc.cli import main
+from character_factory_poc.common.config import ProviderConfig
+from character_factory_poc.common.errors import (
     BudgetExceeded,
     CheckFailed,
     FactoryError,
@@ -20,23 +20,23 @@ from acf.common.errors import (
     VideoGenerationError,
     VideoTimeoutError,
 )
-from acf.pipeline.approve import approve_gate
-from acf.pipeline.context import Context
-from acf.pipeline.orchestrator import RunOptions, run_until
-from acf.providers.base import VideoRequest
-from acf.providers.factory import make_video_model
-from acf.providers.fake import FakeTextModel
-from acf.providers.fake_image import FakeImageModel, solid_png
-from acf.providers.fake_video import FAKE_MP4, FakeVideoModel
-from acf.providers.grok_web import GrokWebVideoModel
-from acf.providers.xai_video import XaiVideoModel, estimate_cost
-from acf.stages.s1_reference.run import run_s1
-from acf.stages.s2_hero.approve import load_appearance_spec
-from acf.stages.s2_hero.run import run_s2
-from acf.stages.s3_plan.draft import new_character
-from acf.stages.s5_intro.approve import load_approved_intro
-from acf.stages.s5_intro.first_frame import crop_to_ratio, parse_ratio
-from acf.stages.s5_intro.run import run_s5
+from character_factory_poc.pipeline.approve import approve_gate
+from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.orchestrator import RunOptions, run_until
+from character_factory_poc.providers.base import VideoRequest
+from character_factory_poc.providers.factory import make_video_model
+from character_factory_poc.providers.fake import FakeTextModel
+from character_factory_poc.providers.fake_image import FakeImageModel, solid_png
+from character_factory_poc.providers.fake_video import FAKE_MP4, FakeVideoModel
+from character_factory_poc.providers.grok_web import GrokWebVideoModel
+from character_factory_poc.providers.xai_video import XaiVideoModel, estimate_cost
+from character_factory_poc.stages.s1_reference.run import run_s1
+from character_factory_poc.stages.s2_hero.approve import load_appearance_spec
+from character_factory_poc.stages.s2_hero.run import run_s2
+from character_factory_poc.stages.s3_plan.draft import new_character
+from character_factory_poc.stages.s5_intro.approve import load_approved_intro
+from character_factory_poc.stages.s5_intro.first_frame import crop_to_ratio, parse_ratio
+from character_factory_poc.stages.s5_intro.run import run_s5
 from tests.support.synthetic import RANKING
 from tests.test_agentic import BRIEF, CATALOG
 from tests.test_frames import agent

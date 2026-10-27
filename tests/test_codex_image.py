@@ -8,17 +8,17 @@ from pathlib import Path
 
 import pytest
 
-import acf.contracts  # noqa: F401
-from acf.common.config import ProviderConfig
-from acf.common.errors import ImageGenerationError
-from acf.pipeline.context import Context
-from acf.providers.base import ImageRequest
-from acf.providers.codex_image import CodexImageModel
-from acf.providers.factory import make_image_model
-from acf.providers.fake import FakeTextModel
-from acf.providers.fake_image import solid_png
-from acf.stages.s1_reference.run import run_s1
-from acf.stages.s3_plan.draft import new_character
+import character_factory_poc.contracts  # noqa: F401
+from character_factory_poc.common.config import ProviderConfig
+from character_factory_poc.common.errors import ImageGenerationError
+from character_factory_poc.pipeline.context import Context
+from character_factory_poc.providers.base import ImageRequest
+from character_factory_poc.providers.codex_image import CodexImageModel
+from character_factory_poc.providers.factory import make_image_model
+from character_factory_poc.providers.fake import FakeTextModel
+from character_factory_poc.providers.fake_image import solid_png
+from character_factory_poc.stages.s1_reference.run import run_s1
+from character_factory_poc.stages.s3_plan.draft import new_character
 from tests.support.synthetic import RANKING, scout_features
 
 

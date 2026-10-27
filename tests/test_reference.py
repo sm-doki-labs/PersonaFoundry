@@ -8,29 +8,37 @@ from pathlib import Path
 
 import pytest
 
-import acf.contracts  # noqa: F401
-from acf.cli import main
-from acf.common.errors import (
+import character_factory_poc.contracts  # noqa: F401
+from character_factory_poc.cli import main
+from character_factory_poc.common.errors import (
     BudgetExceeded,
     CheckFailed,
     FactoryError,
     NameLeakError,
     ValidationFailed,
 )
-from acf.common.names import find_name_leaks
-from acf.common.schema import validate
-from acf.pipeline.approve import approve_gate
-from acf.pipeline.context import Context
-from acf.pipeline.orchestrator import RunOptions, run_until
-from acf.providers.fake import FakeTextModel
-from acf.providers.fake_image import FakeImageModel
-from acf.stages.s1_reference import preview as preview_mod
-from acf.stages.s1_reference.approve import selected_cluster
-from acf.stages.s1_reference.cluster import adjusted_rand_index, agglomerate, vectorize
-from acf.stages.s1_reference.features import check_features, load_vocab, scout_people_input
-from acf.stages.s1_reference.ranking import all_names, build_people, load_ranking
-from acf.stages.s1_reference.run import run_s1
-from acf.stages.s3_plan.draft import new_character
+from character_factory_poc.common.names import find_name_leaks
+from character_factory_poc.common.schema import validate
+from character_factory_poc.pipeline.approve import approve_gate
+from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.orchestrator import RunOptions, run_until
+from character_factory_poc.providers.fake import FakeTextModel
+from character_factory_poc.providers.fake_image import FakeImageModel
+from character_factory_poc.stages.s1_reference import preview as preview_mod
+from character_factory_poc.stages.s1_reference.approve import selected_cluster
+from character_factory_poc.stages.s1_reference.cluster import (
+    adjusted_rand_index,
+    agglomerate,
+    vectorize,
+)
+from character_factory_poc.stages.s1_reference.features import (
+    check_features,
+    load_vocab,
+    scout_people_input,
+)
+from character_factory_poc.stages.s1_reference.ranking import all_names, build_people, load_ranking
+from character_factory_poc.stages.s1_reference.run import run_s1
+from character_factory_poc.stages.s3_plan.draft import new_character
 from tests.support.synthetic import RANKING, scout_features
 
 NAMES = all_names(load_ranking(RANKING))
@@ -323,7 +331,7 @@ def test_negative_prompt_avoids_celebrity_wording():
 
 
 def test_blocked_image_marks_s1_check_failed(ctx):
-    from acf.common.errors import ImageGenerationError
+    from character_factory_poc.common.errors import ImageGenerationError
 
     class Blocked:
         name, model = "blocked", "x"

@@ -100,7 +100,9 @@ def trait_sheet(cid: str, rev: str) -> dict:
 
 def prompter_output() -> dict:
     sections = json.loads(
-        resources.files("acf.resources").joinpath("prompt-sections-v1.json").read_text("utf-8")
+        resources.files("character_factory_poc.resources")
+        .joinpath("prompt-sections-v1.json")
+        .read_text("utf-8")
     )["sections"]
     long = {}
     short = {}
@@ -239,8 +241,8 @@ _OVERRIDES = {
 
 def scout_features(ranking: dict) -> dict:
     """가짜 Scout 출력. 그룹 A·B·C(각 4명), 동떨어진 1명, 모르는 1명(가상 무명)."""
-    from acf.common.names import normalize_name
-    from acf.stages.s1_reference.ranking import build_people, load_ranking
+    from character_factory_poc.common.names import normalize_name
+    from character_factory_poc.stages.s1_reference.ranking import build_people, load_ranking
 
     people = build_people(load_ranking(ranking), 3)
     feats = []

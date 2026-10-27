@@ -1,20 +1,20 @@
-# 일회용 PostgreSQL: 우리 앱 내보내기 적재 확인(acf export doki-app --verify, LLD §8.11) 전용.
+# 일회용 PostgreSQL: 우리 앱 내보내기 적재 확인(cfp export doki-app --verify, LLD §8.11) 전용.
 # 로컬 개발 DB(dokilabs-local-*)와 별개 컨테이너·포트다. 데이터는 tmpfs라 내리면 모두 사라진다.
 # 비밀번호는 이 컨테이너 안에서만 쓰는 로컬 값이고 127.0.0.1에만 열린다.
-name: acf-verify
+name: cfp-verify
 services:
   pg:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: acf_admin
-      POSTGRES_PASSWORD: acf-verify-local
+      POSTGRES_USER: cfp_admin
+      POSTGRES_PASSWORD: cfp-verify-local
       POSTGRES_DB: postgres
     ports:
       - "127.0.0.1:55439:5432"
     tmpfs:
       - /var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U acf_admin -d postgres"]
+      test: ["CMD-SHELL", "pg_isready -U cfp_admin -d postgres"]
       interval: 2s
       timeout: 3s
       retries: 30

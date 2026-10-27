@@ -9,20 +9,25 @@ from pathlib import Path
 import httpx
 import pytest
 
-from acf.cli import main
-from acf.common.errors import BudgetExceeded, CheckFailed
-from acf.common.schema import dump
-from acf.contracts.qa import QaSummary
-from acf.pipeline.approve import approve_gate
-from acf.providers.base import ImageRequest, VisionRequest
-from acf.providers.fake_image import FakeImageModel, solid_png
-from acf.providers.fake_vision import FakeVisionModel, all_pass
-from acf.providers.openai_compat import OpenAICompatVisionModel
-from acf.stages.image_qa import RUBRICS, QaSettings, generate_checked, parse_verdict
-from acf.stages.s4_frames.run import run_s4
-from acf.stages.s4a_backgrounds.run import plan_calls as background_calls
-from acf.stages.s4a_backgrounds.run import run_s4a
-from acf.stages.s4b_poses.run import run_s4b
+from character_factory_poc.cli import main
+from character_factory_poc.common.errors import BudgetExceeded, CheckFailed
+from character_factory_poc.common.schema import dump
+from character_factory_poc.contracts.qa import QaSummary
+from character_factory_poc.pipeline.approve import approve_gate
+from character_factory_poc.providers.base import ImageRequest, VisionRequest
+from character_factory_poc.providers.fake_image import FakeImageModel, solid_png
+from character_factory_poc.providers.fake_vision import FakeVisionModel, all_pass
+from character_factory_poc.providers.openai_compat import OpenAICompatVisionModel
+from character_factory_poc.stages.image_qa import (
+    RUBRICS,
+    QaSettings,
+    generate_checked,
+    parse_verdict,
+)
+from character_factory_poc.stages.s4_frames.run import run_s4
+from character_factory_poc.stages.s4a_backgrounds.run import plan_calls as background_calls
+from character_factory_poc.stages.s4a_backgrounds.run import run_s4a
+from character_factory_poc.stages.s4b_poses.run import run_s4b
 from tests.support.flow import approve_plan_v2, make_ctx, through_s2
 from tests.test_scene_flow import backgrounds, choose_bg, flow, poses, read, scenes, through_pose
 
@@ -234,7 +239,7 @@ def test_s4b_custom_and_copied_plate_qa(flow):
 
 @pytest.mark.parametrize("mode", ["face", "full"])
 def test_s4_reference_order_badge_and_carry(flow, monkeypatch, mode):
-    import acf.stages.s4_frames.run as runner
+    import character_factory_poc.stages.s4_frames.run as runner
 
     ctx, _, cid, image = flow
     through_pose(ctx, cid)
@@ -337,7 +342,7 @@ def test_judge_configuration_checked_before_writes(tmp_path, stage, allow):
         through_pose(ctx, cid)
     # 승인된 입력을 먼저 준비하고 검사 대상 단계에만 실제 공급자 설정을 적용한다.
     (tmp_path / "factory.toml").write_text(extra)
-    from acf.pipeline.context import Context
+    from character_factory_poc.pipeline.context import Context
 
     ctx.config = Context.load(tmp_path, execute=False).config
     if allow is not None:
@@ -383,7 +388,7 @@ def test_s4a_cli_plan_defaults(flow, capsys):
 
 @pytest.mark.parametrize("status", ["PASS", "FAIL"])
 def test_badge_escapes_reasons_and_lists_unsure(status):
-    from acf.stages.s4a_backgrounds.page import render_qa
+    from character_factory_poc.stages.s4a_backgrounds.page import render_qa
 
     qa = QaSummary(
         status=status,

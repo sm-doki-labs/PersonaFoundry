@@ -8,10 +8,10 @@ from dataclasses import replace
 import cv2
 import pytest
 
-from acf.cli import main
-from acf.common.canonical import sha256_file
-from acf.common.config import ProviderConfig
-from acf.common.errors import (
+from character_factory_poc.cli import main
+from character_factory_poc.common.canonical import sha256_file
+from character_factory_poc.common.config import ProviderConfig
+from character_factory_poc.common.errors import (
     BudgetExceeded,
     CheckFailed,
     FactoryError,
@@ -19,15 +19,15 @@ from acf.common.errors import (
     VideoGenerationError,
     VideoTimeoutError,
 )
-from acf.common.store import read_json, verify_manifest
-from acf.contracts.video import VIDEO_ID
-from acf.pipeline.approve import approve_gate
-from acf.pipeline.orchestrator import RunOptions, run_until
-from acf.providers.fake_image import FakeImageModel, solid_png
-from acf.providers.fake_video import FakeVideoModel
-from acf.stages.s4_frames.approve import load_approved_frames
-from acf.stages.s4_frames.run import run_s4
-from acf.stages.s6_actions.app_clips import APP_CLIPS
+from character_factory_poc.common.store import read_json, verify_manifest
+from character_factory_poc.contracts.video import VIDEO_ID
+from character_factory_poc.pipeline.approve import approve_gate
+from character_factory_poc.pipeline.orchestrator import RunOptions, run_until
+from character_factory_poc.providers.fake_image import FakeImageModel, solid_png
+from character_factory_poc.providers.fake_video import FakeVideoModel
+from character_factory_poc.stages.s4_frames.approve import load_approved_frames
+from character_factory_poc.stages.s4_frames.run import run_s4
+from character_factory_poc.stages.s6_actions.app_clips import APP_CLIPS
 from tests.support.flow import approve_plan_v2, make_ctx, through_s2
 from tests.test_scene_flow import backgrounds, poses, scenes, through_pose
 
@@ -49,7 +49,7 @@ def flow(tmp_path):
 
 
 def run(ctx, cid):
-    from acf.stages.s6_actions.run import run_s6
+    from character_factory_poc.stages.s6_actions.run import run_s6
 
     return run_s6(ctx, cid)
 
@@ -79,7 +79,7 @@ def test_s6_requires_g4(tmp_path):
 
 
 def test_offline_l2_pins_good_and_neutral_frames_and_records_18_clips(flow):
-    from acf.stages.s6_actions.catalog import STAGE_NOTES
+    from character_factory_poc.stages.s6_actions.catalog import STAGE_NOTES
 
     ctx, cid, video = flow
     before_images = len(ctx._image.requests)
@@ -145,7 +145,7 @@ def test_offline_l2_pins_good_and_neutral_frames_and_records_18_clips(flow):
         assert read_json(out / "assets" / name) == asset
     page = (out / "gate-G5b.html").read_text("utf-8")
     assert page.count("<video ") == 18 and page.count("<img ") == 6
-    assert "G5b 동작 영상 선택" in page and f"acf gate import {cid} G5b" in page
+    assert "G5b 동작 영상 선택" in page and f"cfp gate import {cid} G5b" in page
     for text in (
         "REQUEST_CHANGES",
         "제외",
@@ -167,7 +167,7 @@ def test_offline_l2_pins_good_and_neutral_frames_and_records_18_clips(flow):
 
 
 def test_select_can_exclude_actions_and_load_approved_videos(flow):
-    from acf.stages.s6_actions.approve import load_approved_actions
+    from character_factory_poc.stages.s6_actions.approve import load_approved_actions
 
     ctx, cid, _ = flow
     with pytest.raises(GateNotApprovedError):
@@ -268,7 +268,7 @@ def test_invalid_change_request_does_not_decide_gate(flow, changes):
 
 
 def test_request_changes_regenerates_one_action_and_copies_other_assets(flow):
-    from acf.stages.s6_actions.run import plan_calls, s6_config
+    from character_factory_poc.stages.s6_actions.run import plan_calls, s6_config
 
     ctx, cid, video = flow
     first = run(ctx, cid)
@@ -344,7 +344,7 @@ def test_repeated_partial_regeneration_preserves_reused_prompt_and_note(flow):
     ],
 )
 def test_changed_inputs_or_reject_regenerate_full_set(flow, changed):
-    from acf.stages.s6_actions.run import plan_calls, s6_config
+    from character_factory_poc.stages.s6_actions.run import plan_calls, s6_config
 
     ctx, cid, video = flow
     run(ctx, cid)
@@ -520,7 +520,7 @@ def test_dry_run_shows_plan_without_side_effects(flow, capsys):
 
 
 def test_orchestrator_reaches_g5b_and_auto_approval_selects_v1(flow):
-    from acf.stages.s6_actions.approve import load_approved_actions
+    from character_factory_poc.stages.s6_actions.approve import load_approved_actions
 
     ctx, cid, _ = flow
     log = run_until(ctx, cid, RunOptions(until="G5b"))
@@ -532,8 +532,13 @@ def test_orchestrator_reaches_g5b_and_auto_approval_selects_v1(flow):
 
 
 def test_catalog_prompts_and_cost_plans(flow):
-    from acf.stages.s6_actions.catalog import CATALOG, PRESETS, STAGE_NOTES, build_prompt
-    from acf.stages.s6_actions.run import plan_calls, s6_config
+    from character_factory_poc.stages.s6_actions.catalog import (
+        CATALOG,
+        PRESETS,
+        STAGE_NOTES,
+        build_prompt,
+    )
+    from character_factory_poc.stages.s6_actions.run import plan_calls, s6_config
 
     ctx, _, _ = flow
     assert list(CATALOG) == [c["key"] for c in APP_CLIPS]
@@ -568,7 +573,7 @@ def test_catalog_prompts_and_cost_plans(flow):
 
 
 def test_good_only_override_needs_no_image_edit_and_merges_durations(flow):
-    from acf.stages.s6_actions.run import plan_calls, s6_config
+    from character_factory_poc.stages.s6_actions.run import plan_calls, s6_config
 
     ctx, cid, video = flow
     ctx.config.stages["s6"] = {

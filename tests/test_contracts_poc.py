@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-import acf.contracts  # noqa: F401
-from acf.common.errors import ValidationFailed
-from acf.common.schema import validate
+import character_factory_poc.contracts  # noqa: F401
+from character_factory_poc.common.errors import ValidationFailed
+from character_factory_poc.common.schema import validate
 
 H = "0" * 64
 REF = {"ref": "x.json", "sha256": H}

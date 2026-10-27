@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-import acf.contracts  # noqa: F401
-from acf.checks.cli import main as check_main
-from acf.cli import main
-from acf.pipeline.context import Context
-from acf.pipeline.orchestrator import RunOptions, run_until
-from acf.providers.codex_exec import find_tainted_paths
-from acf.providers.fake import FakeTextModel
-from acf.providers.fake_codex import FakeCodexAgent
+import character_factory_poc.contracts  # noqa: F401
+from character_factory_poc.checks.cli import main as check_main
+from character_factory_poc.cli import main
+from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.orchestrator import RunOptions, run_until
+from character_factory_poc.providers.codex_exec import find_tainted_paths
+from character_factory_poc.providers.fake import FakeTextModel
+from character_factory_poc.providers.fake_codex import FakeCodexAgent
 from tests.support.synthetic import PLAN, prompter_output, trait_sheet
 
 CATALOG = {
@@ -128,7 +128,7 @@ def test_run_until_g6_with_codex_backend(ctx, tmp_path):
     judge.add("JUDGE", {"pick": "B", "reasons": "x"})
     ctx.use_models(text, judge)
 
-    from acf.stages.s3_plan.draft import new_character
+    from character_factory_poc.stages.s3_plan.draft import new_character
 
     cid = new_character(ctx, "codexrun")
     opt = RunOptions(until="G6", auto_approve={"G3"}, brief_text=BRIEF, voice_probes=["안녕"])
@@ -154,7 +154,7 @@ def test_run_until_g6_with_codex_backend(ctx, tmp_path):
 
 
 def test_codex_backend_retries_with_feedback(ctx, tmp_path):
-    from acf.stages.s3_plan.draft import new_character, run_s3_draft
+    from character_factory_poc.stages.s3_plan.draft import new_character, run_s3_draft
 
     def writer(ws: Path, prompt: str, attempt: int):
         d = json.loads((ws / "inputs" / "ids.json").read_text("utf-8"))
@@ -203,8 +203,8 @@ def test_taint_detection(tmp_path):
 
 
 def test_plan_draft_rejects_appearance_and_requires_notes(ctx):
-    from acf.common.schema import validate
-    from acf.stages.s3_plan.check import check_plan_draft
+    from character_factory_poc.common.schema import validate
+    from character_factory_poc.stages.s3_plan.check import check_plan_draft
 
     p = _plan_from_preset("cf-20260101-x", "pr1")
     p["notes"] = ""

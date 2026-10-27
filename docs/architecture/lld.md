@@ -8,15 +8,15 @@
 
 ## 1. 범위와 기준
 
-R0(PRD §7)에 필요한 전부와, R1 단계의 계약·명령·알고리즘 골격을 정한다. R1 어댑터의 세부 인자는 착수 때 확인한다(§13). 언어·도구는 Python 3.12, `uv`, `ruff`, `pytest`, 명령 이름 `acf`다(D-0008).
+R0(PRD §7)에 필요한 전부와, R1 단계의 계약·명령·알고리즘 골격을 정한다. R1 어댑터의 세부 인자는 착수 때 확인한다(§13). 언어·도구는 Python 3.12, `uv`, `ruff`, `pytest`, 명령 이름 `cfp`다(D-0008).
 
 ## 2. 패키지 구조 (명세 §2)
 
 ```
-agentic-character-factory/
+character-factory-poc/
   pyproject.toml
   scripts/check.sh
-  src/acf/
+  src/character_factory_poc/
     __init__.py, __main__.py, cli.py
     common/
       canonical.py     JSON 정규화·sha256
@@ -93,9 +93,9 @@ agentic-character-factory/
 `factory.toml`(gitignored, 예시는 `factory.example.toml`)은 다음을 담는다.
 
 ```toml
-[providers.text]       adapter = "openai_compat"; base_url = "http://127.0.0.1:10100/v1"; model = "gpt-6.1-sol"; api_key_env = "ACF_TEXT_API_KEY"
-[providers.judge]      adapter = "openai_compat"; model = "anthropic/claude-opus-5-5"; api_key_env = "ACF_TEXT_API_KEY"
-[providers.vision]     adapter = "openai_compat"; base_url = "http://127.0.0.1:10100/v1"; model = "google-antigravity/gemini-3.1-pro"; api_key_env = "ACF_TEXT_API_KEY"   # 이미지 생성(gpt)과 다른 계열(D-0010). 중계의 이미지 입력은 Q-0020
+[providers.text]       adapter = "openai_compat"; base_url = "http://127.0.0.1:10100/v1"; model = "gpt-6.1-sol"; api_key_env = "CFP_TEXT_API_KEY"
+[providers.judge]      adapter = "openai_compat"; model = "anthropic/claude-opus-5-5"; api_key_env = "CFP_TEXT_API_KEY"
+[providers.vision]     adapter = "openai_compat"; base_url = "http://127.0.0.1:10100/v1"; model = "google-antigravity/gemini-3.1-pro"; api_key_env = "CFP_TEXT_API_KEY"   # 이미지 생성(gpt)과 다른 계열(D-0010). 중계의 이미지 입력은 Q-0020
 [stages.image_qa]      enabled = true; max_fix_rounds = 2; fix_mode = "edit"; allow_same_family = false   # D-0037 제안
 [providers.image]      adapter = "codex_image"; model = "gpt-6.1-sol"; reasoning_effort = "low"; timeout_s = 600   # D-0019. 테스트·데모는 "fake"
 [providers.video]      adapter = "xai_video"; model = "grok-imagine-video-1.5-lite"; api_key_env = "XAI_API_KEY"; poll_interval_s = 5; timeout_s = 600   # 테스트는 "fake"
@@ -126,48 +126,48 @@ agentic-character-factory/
 
 | 명령 | 동작 |
 |---|---|
-| `acf brief new <slug> --from brief.md` | 브리프 Markdown을 `brief-v1`로 변환·검증·고정한다. 미정 항목은 `assumptions`에 기록한다. |
-| `acf run <character_id> [--new-slug <slug>] --until <stage|gate> [--brief brief.md] [--seed seed.json] [--probes probes.txt] [--auto-approve G3] [--execute]` | 그래프를 따라 관문까지 연속 실행한다. 외모 축 캐릭터는 s1 → s2 → s3(씨앗·변형) → s5 → s3r → s4a → s4b → s4 → s7 → s8 순서이고, 한 갈래가 관문·씨앗을 기다리면 다른 갈래를 계속 돈다(D-0035). 이미 끝난 단계는 건너뛰고, 관문 대기나 CHECK_FAILED에서 멈춘다. `--auto-approve`는 실험 전용이며 기록에 남는다(D-0015). |
-| `acf plan draft <slug> --brief brief.md [--execute]` | Planner 에이전트가 브리프와 프리셋 카탈로그(`[resources] stanford_presets_json`)로 기획서를 쓰고 G3 대기로 둔다. |
-| `acf check <stage> <workspace>` | 작업 공간의 output.json을 계약·단계 검사로 확인한다. 에이전트가 `./check.sh`로 호출한다. |
-| `acf status <id>` | 단계·관문 상태, 최신 revision, 대기 중인 관문을 표로 낸다. |
-| `acf gate export <id> G<n>` | 검토 페이지 HTML을 만든다. |
-| `acf gate import <id> G<n> --answer answer.json` | 결정을 기록하고 상태를 전이한다. 사람 시간을 함께 받는다. |
-| `acf ref run <character_id> --ranking ranking.json [--new-slug <slug>] [--execute]` | S1 전체를 돈다: 순위 목록 고정 → 인물 묶기 → Scout 특징 태깅 → 정규화 → 군집 → 보고서 → 이름 유출 검사 → 미리보기 → G1 페이지. 결과는 G1 대기다. `acf run ... --ranking ranking.json`도 s1부터 돈다. `--ranking`이 없으면 `acf run`은 s1을 건너뛴다(페르소나 우선 경로, D-0013). |
-| `acf gate import <id> G1 --answer answer.json` | G1 결정. `{"decision": "SELECT", "selections": ["c2"], "referencePreviews": ["c2-1"], "reviewer": ..., "minutes": ..., "reasons": ...}`. `referencePreviews`는 정확히 한 장이고 `selections`의 외모군 미리보기여야 한다(외모군은 고른 얼굴에서 정한다, D-0042). `selections`를 비우면 얼굴의 외모군으로 채운다. `--auto-approve G1`은 정렬 1위 외모군의 첫 얼굴을 고른다. `REQUEST_CHANGES`는 `note`(고칠 점)를 받고, 다음 `acf ref faces`가 얼굴만 다시 만든다. `REJECT`이면 다음 `ref run`이 새 `rf<k>`를 만든다. `s2`가 아직 `APPROVED`가 아니면(대기·`CHECK_FAILED`) G1을 다시 받아 다른 얼굴로 바꿀 수 있다. |
-| `acf ref faces <character_id> [--execute]` | 얼굴 다시 만들기(D-0043). 직전 G1이 `REQUEST_CHANGES`일 때만 돈다. 같은 rf의 순위·인물·특징·보고서를 바이트 그대로 가져와 새 `rf<k>`를 만들고, 얼굴 미리보기만 메모를 붙여 다시 만든다. Scout를 부르지 않는다. 결과는 G1 대기다. |
-| `acf hero run <character_id> [--execute]` | S2 기준 사진(D-0042, D-0043). G1 승인이 필요하다. G1 얼굴을 rev 폴더로 복사한다. `generate`면 기준 사진을 만들고 동일인 검사를 돌려 통과하면 외모 명세를 고정하고 `s2`를 `APPROVED`로 둔다. 끝까지 통과하지 못하면 `CHECK_FAILED`다. `picked`면 이미지 호출 없이 G1 얼굴로 바로 고정한다. 기본은 호출 계획(`generate`: 이미지 최대 3회, 판정 최대 6회)만 낸다. `acf run ... --until s2`도 s2를 돈다(외모 축을 탄 캐릭터만). |
-| `acf gate import <id> G2 ...` | 없앴다(D-0042). "G2는 결번이다. 외모는 G1에서 고르고 S2는 자동으로 고정된다"는 오류를 낸다. `--auto-approve G2`도 받지 않는다. |
-| `acf plan seed <character_id> [--file seed.json] [--personality ..] [--job ..] [--age N] [--gender female|male|other] [--background ..]` | 기획 씨앗을 `sd<k>`로 고정한다(D-0033). 대표 성격은 필수, 나머지는 비우면 에이전트가 채운다. |
-| `acf plan variants <character_id> [--execute]` | S3 변형. 외모 명세(`s2` 승인)와 씨앗이 필요하다. 변형 3안과 G3 페이지를 만든다. |
-| `acf plan own <character_id> --file mine.md [--execute]` | 직접 쓴 상세안을 Normalizer가 `u1` 하나로 정리하고 G3 대기로 둔다. |
-| `acf gate import <id> G3 --answer answer.json` | 새 흐름 G3 결정. `{"decision": "SELECT", "selections": ["v2"], "edits": {"tagline": "..."}, ...}`. `APPROVE`는 첫 안. |
-| `acf refs index --out index.json [--stanford catalog.json] [--personas <dir>] [--jsonl path:SNS14 ...]` | 참고 자료 색인을 `hash-v1`로 만든다(Git 밖 경로에 쓴다). |
-| `acf refs select <character_id> [--execute]` | S3r. G3 승인이 필요하다. 색인이 없으면 건너뛴다. |
-| `acf scene backgrounds <character_id> [--execute]` | S4a. 배경 후보와 배경 사진, G4a 페이지. |
-| `acf gate import <id> G4a --answer answer.json` | `{"decision": "SELECT", "picks": {"ch1": "ch1-b2", "ch2": "ch2-b1"}, "custom": {"ch3": "한강 공원 벤치, 해질녘"}, ...}`. `APPROVE`는 챕터마다 b1. |
-| `acf scene poses <character_id> [--execute]` | S4b. 장면 사실 작성(직접 정의 배경의 배경 사진 포함)과 자세 후보, G4b 페이지. |
-| `acf gate import <id> G4b --answer answer.json` | `{"decision": "SELECT", "picks": {"ch1": "ch1-p2", "ch2": "ch2-p1"}, "custom": {"ch3": "..."}, "tweaks": {"ch1": {"hands": "..."}}, ...}`. `APPROVE`는 챕터마다 p1. |
-| `acf frames run <character_id> [--execute]` | S4. 외모 명세(`s2` 승인)와 G4b 승인이 필요하다. 챕터마다 완성 이미지 1장(9:16). 직전 G4가 챕터별 수정 요청이면 그 챕터만 다시 만든다. |
-| `acf gate import <id> G4 --answer answer.json` | `{"decision": "APPROVE"}` 또는 `{"decision": "REQUEST_CHANGES", "requestedChanges": [{"field": "ch2", "note": "..."}]}`. 승인하면 `approved-frames.json`을 쓴다. |
-| `acf video intro <character_id> [--execute]` | S5. 외모 명세(`s2` 승인)가 필요하다. 기본은 후보 수·모델·해상도·길이와 예상 비용(USD)만 보여 준다. dry run에는 세로 첫 프레임 이미지 1장도 함께 나온다. 실행하면 세로 첫 프레임을 만들어 고정하고 후보를 제출·수집해 G5 대기로 둔다. 직전 실행이 원격 대기·실패로 멈췄으면 같은 rev에서 이어 간다. |
-| `acf gate import <id> G5 --answer answer.json` | G5 결정. `{"decision": "SELECT", "selections": ["v2"], ...}`. SELECT면 `approved-intro.json`을 쓴다. |
-| `acf video web-setup [--port 9222] [--profile ~/.acf/grok-chrome]` | `grok_web` 준비 안내: 전용 프로필 Chrome 실행 명령, 한 번 로그인, 설정 항목, `uv sync --extra web`. |
-| `acf video actions <character_id> [--execute]` | S6. G4 승인이 필요하다. 기본은 무표정 첫 프레임 이미지 수와 동작 영상 편수(3챕터 × 동작 수 × 후보 수, 수정 요청 뒤에는 다시 만들 동작만)·모델·해상도·길이별 예상 비용만 보여 준다. 실행하면 G4 승인 이미지를 미소 첫 프레임으로 복사하고, 무표정 출발 영상이 있으면 챕터마다 무표정 첫 프레임을 만든 뒤 동작마다 제출·수집해 G5b 대기로 둔다. 직전 실행이 원격 대기·실패로 멈췄으면 같은 rev에서 이어 간다. |
-| `acf gate import <id> G5b --answer answer.json` | G5b 결정. `{"decision": "SELECT", "picks": {"ch1-idle_good": "v1", ...}, "excluded": ["ch2-shy_good"]}` 또는 `{"decision": "REQUEST_CHANGES", "requestedChanges": [{"field": "ch1-glad_good", "note": "..."}]}`. `APPROVE`(자동 승인)는 모든 동작의 v1을 고른다. SELECT면 `approved-actions.json`을 쓴다. |
-| `acf plan import <slug> --from plan.json [--brief brief.json]` | 사용자가 직접 쓴 기획서를 `character-plan-v1`로 검증·고정하고 `character_id`·`plan_rev`를 발급한다. G3를 `reviewer=user, decision=APPROVE, note=manual-plan`으로 기록한다(D-0013). 성격 칸 evidence는 `BRIEF` 또는 `USER`만 허용한다. |
-| `acf persona traits [--references refs.json] [--reference-doc card.json ...]` | S7. 참조 ID 목록과 카드 본문을 에이전트 입력에 넣는다. |
-| `acf persona prompts --probes probes.txt` | S8. 프롬프트 쌍·말투 확인 표본·G6 페이지. 직전 실행이 표본 단계에서 끊겼으면 같은 rev에서 이어 간다. |
-| `acf persona probe --probes probes.txt` | 고정된 프롬프트 쌍은 두고 표본만 다시 돌린다. 결과는 `prompt-probe-r<k>.json`으로 누적되고 G6 페이지는 다시 만든다. |
-| `acf ref collect --source <source_id> [--categories female,male] [--execute]` | S1 실제 순위 수집(D-0044 (4)). 기본은 호출 계획(어떤 URL을 몇 번)만 낸다. 실행하면 `popularity-ranking-v2`를 쓰고 출처·수집 시각·이용 조건 확인 기록을 남긴다. 이용 조건이 자동 수집을 허용하지 않는 출처는 거절한다. |
-| `acf data plan|samples|build <character_id> [--execute]` | S9(§8.8). `plan`은 G6 승인 프롬프트 쌍으로 `data-plan-v1`을 고정한다. `samples`는 클러스터별 인계안(`data-handoff-v1`)과 샘플(`data-sample-v1`)을 만들고 G7a 대기로 둔다. `build`는 G7a 승인 뒤 나머지를 작성·검사·분할해 `dataset-rev-v2`를 만들고 G7 대기로 둔다. 기본은 호출 계획만, `--execute`로 작성 모델을 부른다. |
-| `acf train plan|submit|collect <character_id> --provider gemma_qlora|vertex_gemini` | S10 학습(§8.9). `plan`은 `training-run-v2`(`dryRun=true`: 요청 설정·전송 파일·비용 추정)을 쓴다. PoC는 여기까지다(D-0044 (9)). `submit`·`collect`는 `--execute`와 사용자 지시가 있어야 하고, 비용 추정이 상한을 넘으면 제출하지 않는다. |
-| `acf eval prereg|run|judge|report <character_id>` | S10 평가(§8.9). 사전 등록 → 조건별 응답 수집(`eval-run-v1`) → LLM 짝 판정 → 보고서(`eval-report-v2`) → G8 대기. |
-| `acf release build <character_id>` | S11(§8.10). 승인된 revision으로 `character-package-v1` 패키지를 만들고 G9 대기로 둔다. |
-| `acf export doki-app <character_id> [--verify]` | 우리 앱 변환(§8.11). G9 승인 패키지를 api-svc 시드 묶음과 chat-svc 콘텐츠 트리로 바꾸고 `export-result-v1`을 쓴다. `--verify`는 일회용 PostgreSQL 두 개에 적재해 확인한다. |
-| `python -m acf.web --root <공장 루트> [--port 8765]` | 워크숍 웹앱(§6.5). |
-| `acf ledger report <id>` | 원장으로 비용·시간 보고서를 만든다. |
-| `acf verify <id>` | 모든 revision 폴더의 manifest.sha256을 확인한다. |
+| `cfp brief new <slug> --from brief.md` | 브리프 Markdown을 `brief-v1`로 변환·검증·고정한다. 미정 항목은 `assumptions`에 기록한다. |
+| `cfp run <character_id> [--new-slug <slug>] --until <stage|gate> [--brief brief.md] [--seed seed.json] [--probes probes.txt] [--auto-approve G3] [--execute]` | 그래프를 따라 관문까지 연속 실행한다. 외모 축 캐릭터는 s1 → s2 → s3(씨앗·변형) → s5 → s3r → s4a → s4b → s4 → s7 → s8 순서이고, 한 갈래가 관문·씨앗을 기다리면 다른 갈래를 계속 돈다(D-0035). 이미 끝난 단계는 건너뛰고, 관문 대기나 CHECK_FAILED에서 멈춘다. `--auto-approve`는 실험 전용이며 기록에 남는다(D-0015). |
+| `cfp plan draft <slug> --brief brief.md [--execute]` | Planner 에이전트가 브리프와 프리셋 카탈로그(`[resources] stanford_presets_json`)로 기획서를 쓰고 G3 대기로 둔다. |
+| `cfp check <stage> <workspace>` | 작업 공간의 output.json을 계약·단계 검사로 확인한다. 에이전트가 `./check.sh`로 호출한다. |
+| `cfp status <id>` | 단계·관문 상태, 최신 revision, 대기 중인 관문을 표로 낸다. |
+| `cfp gate export <id> G<n>` | 검토 페이지 HTML을 만든다. |
+| `cfp gate import <id> G<n> --answer answer.json` | 결정을 기록하고 상태를 전이한다. 사람 시간을 함께 받는다. |
+| `cfp ref run <character_id> --ranking ranking.json [--new-slug <slug>] [--execute]` | S1 전체를 돈다: 순위 목록 고정 → 인물 묶기 → Scout 특징 태깅 → 정규화 → 군집 → 보고서 → 이름 유출 검사 → 미리보기 → G1 페이지. 결과는 G1 대기다. `cfp run ... --ranking ranking.json`도 s1부터 돈다. `--ranking`이 없으면 `cfp run`은 s1을 건너뛴다(페르소나 우선 경로, D-0013). |
+| `cfp gate import <id> G1 --answer answer.json` | G1 결정. `{"decision": "SELECT", "selections": ["c2"], "referencePreviews": ["c2-1"], "reviewer": ..., "minutes": ..., "reasons": ...}`. `referencePreviews`는 정확히 한 장이고 `selections`의 외모군 미리보기여야 한다(외모군은 고른 얼굴에서 정한다, D-0042). `selections`를 비우면 얼굴의 외모군으로 채운다. `--auto-approve G1`은 정렬 1위 외모군의 첫 얼굴을 고른다. `REQUEST_CHANGES`는 `note`(고칠 점)를 받고, 다음 `cfp ref faces`가 얼굴만 다시 만든다. `REJECT`이면 다음 `ref run`이 새 `rf<k>`를 만든다. `s2`가 아직 `APPROVED`가 아니면(대기·`CHECK_FAILED`) G1을 다시 받아 다른 얼굴로 바꿀 수 있다. |
+| `cfp ref faces <character_id> [--execute]` | 얼굴 다시 만들기(D-0043). 직전 G1이 `REQUEST_CHANGES`일 때만 돈다. 같은 rf의 순위·인물·특징·보고서를 바이트 그대로 가져와 새 `rf<k>`를 만들고, 얼굴 미리보기만 메모를 붙여 다시 만든다. Scout를 부르지 않는다. 결과는 G1 대기다. |
+| `cfp hero run <character_id> [--execute]` | S2 기준 사진(D-0042, D-0043). G1 승인이 필요하다. G1 얼굴을 rev 폴더로 복사한다. `generate`면 기준 사진을 만들고 동일인 검사를 돌려 통과하면 외모 명세를 고정하고 `s2`를 `APPROVED`로 둔다. 끝까지 통과하지 못하면 `CHECK_FAILED`다. `picked`면 이미지 호출 없이 G1 얼굴로 바로 고정한다. 기본은 호출 계획(`generate`: 이미지 최대 3회, 판정 최대 6회)만 낸다. `cfp run ... --until s2`도 s2를 돈다(외모 축을 탄 캐릭터만). |
+| `cfp gate import <id> G2 ...` | 없앴다(D-0042). "G2는 결번이다. 외모는 G1에서 고르고 S2는 자동으로 고정된다"는 오류를 낸다. `--auto-approve G2`도 받지 않는다. |
+| `cfp plan seed <character_id> [--file seed.json] [--personality ..] [--job ..] [--age N] [--gender female|male|other] [--background ..]` | 기획 씨앗을 `sd<k>`로 고정한다(D-0033). 대표 성격은 필수, 나머지는 비우면 에이전트가 채운다. |
+| `cfp plan variants <character_id> [--execute]` | S3 변형. 외모 명세(`s2` 승인)와 씨앗이 필요하다. 변형 3안과 G3 페이지를 만든다. |
+| `cfp plan own <character_id> --file mine.md [--execute]` | 직접 쓴 상세안을 Normalizer가 `u1` 하나로 정리하고 G3 대기로 둔다. |
+| `cfp gate import <id> G3 --answer answer.json` | 새 흐름 G3 결정. `{"decision": "SELECT", "selections": ["v2"], "edits": {"tagline": "..."}, ...}`. `APPROVE`는 첫 안. |
+| `cfp refs index --out index.json [--stanford catalog.json] [--personas <dir>] [--jsonl path:SNS14 ...]` | 참고 자료 색인을 `hash-v1`로 만든다(Git 밖 경로에 쓴다). |
+| `cfp refs select <character_id> [--execute]` | S3r. G3 승인이 필요하다. 색인이 없으면 건너뛴다. |
+| `cfp scene backgrounds <character_id> [--execute]` | S4a. 배경 후보와 배경 사진, G4a 페이지. |
+| `cfp gate import <id> G4a --answer answer.json` | `{"decision": "SELECT", "picks": {"ch1": "ch1-b2", "ch2": "ch2-b1"}, "custom": {"ch3": "한강 공원 벤치, 해질녘"}, ...}`. `APPROVE`는 챕터마다 b1. |
+| `cfp scene poses <character_id> [--execute]` | S4b. 장면 사실 작성(직접 정의 배경의 배경 사진 포함)과 자세 후보, G4b 페이지. |
+| `cfp gate import <id> G4b --answer answer.json` | `{"decision": "SELECT", "picks": {"ch1": "ch1-p2", "ch2": "ch2-p1"}, "custom": {"ch3": "..."}, "tweaks": {"ch1": {"hands": "..."}}, ...}`. `APPROVE`는 챕터마다 p1. |
+| `cfp frames run <character_id> [--execute]` | S4. 외모 명세(`s2` 승인)와 G4b 승인이 필요하다. 챕터마다 완성 이미지 1장(9:16). 직전 G4가 챕터별 수정 요청이면 그 챕터만 다시 만든다. |
+| `cfp gate import <id> G4 --answer answer.json` | `{"decision": "APPROVE"}` 또는 `{"decision": "REQUEST_CHANGES", "requestedChanges": [{"field": "ch2", "note": "..."}]}`. 승인하면 `approved-frames.json`을 쓴다. |
+| `cfp video intro <character_id> [--execute]` | S5. 외모 명세(`s2` 승인)가 필요하다. 기본은 후보 수·모델·해상도·길이와 예상 비용(USD)만 보여 준다. dry run에는 세로 첫 프레임 이미지 1장도 함께 나온다. 실행하면 세로 첫 프레임을 만들어 고정하고 후보를 제출·수집해 G5 대기로 둔다. 직전 실행이 원격 대기·실패로 멈췄으면 같은 rev에서 이어 간다. |
+| `cfp gate import <id> G5 --answer answer.json` | G5 결정. `{"decision": "SELECT", "selections": ["v2"], ...}`. SELECT면 `approved-intro.json`을 쓴다. |
+| `cfp video web-setup [--port 9222] [--profile ~/.cfp/grok-chrome]` | `grok_web` 준비 안내: 전용 프로필 Chrome 실행 명령, 한 번 로그인, 설정 항목, `uv sync --extra web`. |
+| `cfp video actions <character_id> [--execute]` | S6. G4 승인이 필요하다. 기본은 무표정 첫 프레임 이미지 수와 동작 영상 편수(3챕터 × 동작 수 × 후보 수, 수정 요청 뒤에는 다시 만들 동작만)·모델·해상도·길이별 예상 비용만 보여 준다. 실행하면 G4 승인 이미지를 미소 첫 프레임으로 복사하고, 무표정 출발 영상이 있으면 챕터마다 무표정 첫 프레임을 만든 뒤 동작마다 제출·수집해 G5b 대기로 둔다. 직전 실행이 원격 대기·실패로 멈췄으면 같은 rev에서 이어 간다. |
+| `cfp gate import <id> G5b --answer answer.json` | G5b 결정. `{"decision": "SELECT", "picks": {"ch1-idle_good": "v1", ...}, "excluded": ["ch2-shy_good"]}` 또는 `{"decision": "REQUEST_CHANGES", "requestedChanges": [{"field": "ch1-glad_good", "note": "..."}]}`. `APPROVE`(자동 승인)는 모든 동작의 v1을 고른다. SELECT면 `approved-actions.json`을 쓴다. |
+| `cfp plan import <slug> --from plan.json [--brief brief.json]` | 사용자가 직접 쓴 기획서를 `character-plan-v1`로 검증·고정하고 `character_id`·`plan_rev`를 발급한다. G3를 `reviewer=user, decision=APPROVE, note=manual-plan`으로 기록한다(D-0013). 성격 칸 evidence는 `BRIEF` 또는 `USER`만 허용한다. |
+| `cfp persona traits [--references refs.json] [--reference-doc card.json ...]` | S7. 참조 ID 목록과 카드 본문을 에이전트 입력에 넣는다. |
+| `cfp persona prompts --probes probes.txt` | S8. 프롬프트 쌍·말투 확인 표본·G6 페이지. 직전 실행이 표본 단계에서 끊겼으면 같은 rev에서 이어 간다. |
+| `cfp persona probe --probes probes.txt` | 고정된 프롬프트 쌍은 두고 표본만 다시 돌린다. 결과는 `prompt-probe-r<k>.json`으로 누적되고 G6 페이지는 다시 만든다. |
+| `cfp ref collect --source <source_id> [--categories female,male] [--execute]` | S1 실제 순위 수집(D-0044 (4)). 기본은 호출 계획(어떤 URL을 몇 번)만 낸다. 실행하면 `popularity-ranking-v2`를 쓰고 출처·수집 시각·이용 조건 확인 기록을 남긴다. 이용 조건이 자동 수집을 허용하지 않는 출처는 거절한다. |
+| `cfp data plan|samples|build <character_id> [--execute]` | S9(§8.8). `plan`은 G6 승인 프롬프트 쌍으로 `data-plan-v1`을 고정한다. `samples`는 클러스터별 인계안(`data-handoff-v1`)과 샘플(`data-sample-v1`)을 만들고 G7a 대기로 둔다. `build`는 G7a 승인 뒤 나머지를 작성·검사·분할해 `dataset-rev-v2`를 만들고 G7 대기로 둔다. 기본은 호출 계획만, `--execute`로 작성 모델을 부른다. |
+| `cfp train plan|submit|collect <character_id> --provider gemma_qlora|vertex_gemini` | S10 학습(§8.9). `plan`은 `training-run-v2`(`dryRun=true`: 요청 설정·전송 파일·비용 추정)을 쓴다. PoC는 여기까지다(D-0044 (9)). `submit`·`collect`는 `--execute`와 사용자 지시가 있어야 하고, 비용 추정이 상한을 넘으면 제출하지 않는다. |
+| `cfp eval prereg|run|judge|report <character_id>` | S10 평가(§8.9). 사전 등록 → 조건별 응답 수집(`eval-run-v1`) → LLM 짝 판정 → 보고서(`eval-report-v2`) → G8 대기. |
+| `cfp release build <character_id>` | S11(§8.10). 승인된 revision으로 `character-package-v1` 패키지를 만들고 G9 대기로 둔다. |
+| `cfp export doki-app <character_id> [--verify]` | 우리 앱 변환(§8.11). G9 승인 패키지를 api-svc 시드 묶음과 chat-svc 콘텐츠 트리로 바꾸고 `export-result-v1`을 쓴다. `--verify`는 일회용 PostgreSQL 두 개에 적재해 확인한다. |
+| `python -m character_factory_poc.web --root <공장 루트> [--port 8765]` | 워크숍 웹앱(§6.5). |
+| `cfp ledger report <id>` | 원장으로 비용·시간 보고서를 만든다. |
+| `cfp verify <id>` | 모든 revision 폴더의 manifest.sha256을 확인한다. |
 
 ## 5. 파일 형식 (명세 §5)
 
@@ -251,7 +251,7 @@ v1(동작 카탈로그 8개, D-0039)은 실제 산출물 없이 v2로 바뀌었�
 
 ### 5.14 S9 데이터셋 계약 (D-0044, D-0045)
 
-코드는 `src/acf/contracts/dataset.py`다. `dataset-rev-v1`·`data-qa-v1`을 대체한다(실제 산출물 없이 바뀜).
+코드는 `src/character_factory_poc/contracts/dataset.py`다. `dataset-rev-v1`·`data-qa-v1`을 대체한다(실제 산출물 없이 바뀜).
 
 | 계약 | 내용 |
 |---|---|
@@ -266,7 +266,7 @@ v1(동작 카탈로그 8개, D-0039)은 실제 산출물 없이 v2로 바뀌었�
 
 ### 5.15 S10 학습·평가 계약 (D-0044, D-0045)
 
-코드는 `src/acf/contracts/training.py`다. `training-run-v1`·`eval-prereg-v1`·`eval-report-v1`을 대체한다.
+코드는 `src/character_factory_poc/contracts/training.py`다. `training-run-v1`·`eval-prereg-v1`·`eval-report-v1`을 대체한다.
 
 | 계약 | 내용 |
 |---|---|
@@ -283,7 +283,7 @@ v1(동작 카탈로그 8개, D-0039)은 실제 산출물 없이 v2로 바뀌었�
 
 ### 5.17 `character-package-v1` / `export-result-v1` (D-0011, D-0044)
 
-코드는 `src/acf/contracts/release.py`다. `release-manifest-v1`을 대체한다.
+코드는 `src/character_factory_poc/contracts/release.py`다. `release-manifest-v1`을 대체한다.
 
 패키지(형식 중립): `{characterId, packageRev(pk<k>), locale: ko, builtAt, profile{name, gender, age, job, tagline, description, hobby, likes, dislikes, mbti, tags[≤4], tmiItems[{text, revealStage}]}, appearance{appearanceRev, heroImage, spec}, chapters[{chapterNo, chapterId, title, relationshipStage, intro, goal, facts, frame, background}], videos[{videoId, kind: INTRO|ACTION, chapterNo, clipKey, title, description, useWhen, expression, durationS, file, provider, synthetic}], persona{personaVersion, traitSheet, longPrompt, shortPrompt}, sft{datasetRev, datasetDigest, trainingRuns, evalReport, adoptedBinding}, gates[{gate, rev, decision, recordRef}], files[{path, sha256, bytes}]}`. 경로는 모두 패키지 루트 기준 상대 경로이고 `files`에 있어야 한다. G2는 결번이다(D-0042). 옛 캐릭터의 G2 기록이 있으면 `gates`에 함께 담는다.
 
@@ -319,7 +319,7 @@ S9~S11은 다음 단계로 둔다(D-0044, §8.8~§8.11): `s9s` 데이터 샘플(
 
 ### 6.5 워크숍 웹앱 API (D-0044 (6), PoC 계획서 §6)
 
-`src/acf/web/`(FastAPI)이다. 화면은 워크숍 시안(`c-glass.html` 작업실, `d-ops.html` 운영)을 `src/acf/web/static/`에 두고 API로 데이터를 읽는다. 로그인은 없고, 공장 루트·포트·저장 위치는 설정값이다(배포 대비).
+`src/character_factory_poc/web/`(FastAPI)이다. 화면은 워크숍 시안(`c-glass.html` 작업실, `d-ops.html` 운영)을 `src/character_factory_poc/web/static/`에 두고 API로 데이터를 읽는다. 로그인은 없고, 공장 루트·포트·저장 위치는 설정값이다(배포 대비).
 
 | 경로 | 동작 |
 |---|---|
@@ -328,7 +328,7 @@ S9~S11은 다음 단계로 둔다(D-0044, §8.8~§8.11): `s9s` 데이터 샘플(
 | `GET /api/characters/{id}` | `state.json` 전체, 갈래별 진행 요약, 대기 관문 |
 | `GET /api/characters/{id}/gates/{gate}` | 그 관문 검토 항목(파일 목록, 미리보기 URL, 기존 기록) |
 | `GET /api/files/{id}/{path}` | 캐릭터 폴더 안 파일만. 경로 탈출은 거절한다 |
-| `POST /api/characters/{id}/gates/{gate}/decision` | 본문은 `acf gate import`의 답 JSON과 같다. 같은 코드 경로로 관문 기록을 남긴다 |
+| `POST /api/characters/{id}/gates/{gate}/decision` | 본문은 `cfp gate import`의 답 JSON과 같다. 같은 코드 경로로 관문 기록을 남긴다 |
 | `POST /api/jobs`, `GET /api/jobs/{jobId}` | `{characterId, action: run, until}`로 오케스트레이터를 백그라운드에서 돌린다. 캐릭터당 동시에 하나 |
 | `GET /api/events` | SSE. `{type: job|state|gate, characterId, ...}` |
 
@@ -338,7 +338,7 @@ S9~S11은 다음 단계로 둔다(D-0044, §8.8~§8.11): `s9s` 데이터 샘플(
 
 ## 7. 에이전트 러너 (명세 §4)
 
-구현(D-0014): 백엔드는 둘이다. `[agent] backend = "codex_exec"`이면 아래 codex 경로, 아니면 API 경로(한 번 호출·러너 재시도)다. codex 경로의 작업 공간은 `AGENTS.md`(역할 프롬프트 + `prompts/common-procedure.md` + 입력 목록 + 계약 이름), `inputs/`, `contract-example.json`, `check.sh`(현재 venv의 python으로 `acf.checks.cli <stage> .` 실행)로 이루어진다. 실행은 `codex exec --json --skip-git-repo-check -m <model> -s workspace-write -C <workspace> -c model_reasoning_effort=... [-c mcp_servers={}]`이다. 이벤트에서 `command_execution` 명령·`agent_message`·`turn.completed` 사용량을 모으고, 명령 문자열의 절대 경로·`~`·`../`가 작업 공간 밖이면 `TaintedOutputError`다. 러너는 실행 뒤 `acf.checks.registry.run_checks`로 다시 검사하고, 실패하면 사유를 프롬프트에 붙여 같은 작업 공간에서 재실행한다(최대 `max_check_retries`). 단계별 검사 묶음은 `checks/registry.py`가 작업 공간 inputs에서 재구성하므로 에이전트와 러너가 같은 검사를 쓴다.
+구현(D-0014): 백엔드는 둘이다. `[agent] backend = "codex_exec"`이면 아래 codex 경로, 아니면 API 경로(한 번 호출·러너 재시도)다. codex 경로의 작업 공간은 `AGENTS.md`(역할 프롬프트 + `prompts/common-procedure.md` + 입력 목록 + 계약 이름), `inputs/`, `contract-example.json`, `check.sh`(현재 venv의 python으로 `character_factory_poc.checks.cli <stage> .` 실행)로 이루어진다. 실행은 `codex exec --json --skip-git-repo-check -m <model> -s workspace-write -C <workspace> -c model_reasoning_effort=... [-c mcp_servers={}]`이다. 이벤트에서 `command_execution` 명령·`agent_message`·`turn.completed` 사용량을 모으고, 명령 문자열의 절대 경로·`~`·`../`가 작업 공간 밖이면 `TaintedOutputError`다. 러너는 실행 뒤 `character_factory_poc.checks.registry.run_checks`로 다시 검사하고, 실패하면 사유를 프롬프트에 붙여 같은 작업 공간에서 재실행한다(최대 `max_check_retries`). 단계별 검사 묶음은 `checks/registry.py`가 작업 공간 inputs에서 재구성하므로 에이전트와 러너가 같은 검사를 쓴다.
 
 ```python
 @dataclass(frozen=True)
@@ -384,7 +384,7 @@ def run_agent(spec, workspace, inputs, checks, provider) -> AgentResult
 
 **faces(다시 만들기, D-0043).** `REQUEST_CHANGES` 기록의 `note`를 받아 새 `rf<k>`를 만든다. `ranking.json`·`people.json`·`features.json`·`report.json`는 직전 rf에서 바이트 그대로 복사하고(`settings.carriedFrom`), 미리보기 프롬프트 끝에 `Revision note: <메모>`를 붙여 얼굴만 다시 만든다. 메모도 이미지 호출 전에 이름 유출 검사를 한다.
 
-구현 메모(2026-10-27, M8 1차, D-0042·D-0043·D-0046): G1 페이지는 외모군마다 얼굴 라디오(`name="face"`)·추천 표시·고칠 점 메모 칸을 보여 준다. `SELECT`는 `referencePreviews` 정확히 한 장이고 외모군은 그 얼굴에서 정한다(`selections` 생략 가능, 기록은 `[외모군, 얼굴]`). `REQUEST_CHANGES`는 `note`가 필수다. `acf ref faces`는 새 `rf<k>`에 순위·인물·특징·보고서를 바이트 그대로 복사하고 `carried-from.json`(`fromRev`, 파일별 sha256, 메모)을 쓴다(보고서를 고칠 수 없으므로 `settings.carriedFrom` 대신). 순위 목록 입수는 `acf ref collect` → `runs/rankings/<시각>-<출처>/ranking.json` + `collection-record.json` → `acf ref run --ranking`이다. 목록 `gender`가 캐릭터 성별과 같을 때만 쓰고, 혼성 목록(배우)은 `characterGender = any`에서만 쓴다. 계약에 항목별 출처 칸이 없어 `listId`와 수집 기록으로 근거를 되짚는다. 수집 목록은 분류당 10명이라 기본 군집 설정(`cluster_k = 4`, `min_members_per_cluster = 3`)과 맞지 않는다(K-0035).
+구현 메모(2026-10-27, M8 1차, D-0042·D-0043·D-0046): G1 페이지는 외모군마다 얼굴 라디오(`name="face"`)·추천 표시·고칠 점 메모 칸을 보여 준다. `SELECT`는 `referencePreviews` 정확히 한 장이고 외모군은 그 얼굴에서 정한다(`selections` 생략 가능, 기록은 `[외모군, 얼굴]`). `REQUEST_CHANGES`는 `note`가 필수다. `cfp ref faces`는 새 `rf<k>`에 순위·인물·특징·보고서를 바이트 그대로 복사하고 `carried-from.json`(`fromRev`, 파일별 sha256, 메모)을 쓴다(보고서를 고칠 수 없으므로 `settings.carriedFrom` 대신). 순위 목록 입수는 `cfp ref collect` → `runs/rankings/<시각>-<출처>/ranking.json` + `collection-record.json` → `cfp ref run --ranking`이다. 목록 `gender`가 캐릭터 성별과 같을 때만 쓰고, 혼성 목록(배우)은 `characterGender = any`에서만 쓴다. 계약에 항목별 출처 칸이 없어 `listId`와 수집 기록으로 근거를 되짚는다. 수집 목록은 분류당 10명이라 기본 군집 설정(`cluster_k = 4`, `min_members_per_cluster = 3`)과 맞지 않는다(K-0035).
 
 ### 8.2 S2 기준 사진 (D-0042, D-0043)
 
@@ -398,7 +398,7 @@ def run_agent(spec, workspace, inputs, checks, provider) -> AgentResult
 
 **generate.** 먼저 `ensure_judge`로 판정 공급자를 확인한다. 이미지 공급자가 실제인데 판정 공급자가 없거나 `[stages.image_qa] enabled = false`면 아무것도 쓰기 전에 `CheckFailed`이고, 메시지에 `base_photo = "picked"`를 안내한다. 프롬프트의 이름 유출을 검사한 뒤 `image_qa.generate_checked`로 한 장을 만든다. 기준표는 `identity-v1` = same_identity, hair_kept, hands_off_face, single_person_no_text다. 판정 요청 이미지는 `("candidate image", 시도 파일)`, `("identity reference (G1 face)", G1 얼굴)` 순서다. 수정은 `fix_mode` 설정과 상관없이 `regenerate`다(G1 얼굴을 참조로 원래 요청 끝에 "Fix: …"만 붙인다). 시도는 최대 `1 + max_fix_rounds`(기본 3)번이다.
 
-**고정.** 통과하면 통과한 시도를 `candidates/h1.png`로 복사하고 `candidates.json`, `appearance-spec.json`(설명은 어휘의 한국어·영어 표기를 이어 붙인다. 금지 요소 기본값은 문자·워터마크·로고와 "실존 인물의 이름이나 사진을 생성 지시로 쓰지 않는다(D-0017)"), `manifest.sha256`을 쓰고 `s2`를 `APPROVED`로 둔다. 관문 기록은 만들지 않는다. 끝까지 통과하지 못하면 D-0037 (4)와 달리 가장 나은 시도를 넘기지 않는다. `s2`는 `CHECK_FAILED`이고 `lastError`에 FAIL 항목과 `qa/` 보고서 경로를 적는다. 외모 명세는 쓰지 않는다. 다시 실행(`acf hero run`)은 새 `ar<k>`를 만든다. 이미지 실패·이름 유출도 `CHECK_FAILED`다.
+**고정.** 통과하면 통과한 시도를 `candidates/h1.png`로 복사하고 `candidates.json`, `appearance-spec.json`(설명은 어휘의 한국어·영어 표기를 이어 붙인다. 금지 요소 기본값은 문자·워터마크·로고와 "실존 인물의 이름이나 사진을 생성 지시로 쓰지 않는다(D-0017)"), `manifest.sha256`을 쓰고 `s2`를 `APPROVED`로 둔다. 관문 기록은 만들지 않는다. 끝까지 통과하지 못하면 D-0037 (4)와 달리 가장 나은 시도를 넘기지 않는다. `s2`는 `CHECK_FAILED`이고 `lastError`에 FAIL 항목과 `qa/` 보고서 경로를 적는다. 외모 명세는 쓰지 않는다. 다시 실행(`cfp hero run`)은 새 `ar<k>`를 만든다. 이미지 실패·이름 유출도 `CHECK_FAILED`다.
 
 **워크숍 화면 연결.** 시안(`d-ops.html`)은 S2를 결재가 아닌 자동 작업으로 보이고, 시도마다 실패·자동 재시도를 작업 기록에 남기며, 최종 실패는 "사람 확인 필요" 문제로 다시 실행·G1 얼굴 그대로 쓰기(`picked`)를 제시한다. 연결층은 `qa/` 보고서와 `state.json`의 `s2` 상태를 그대로 읽는다.
 
@@ -506,9 +506,9 @@ G9 승인 패키지를 우리 앱 두 시스템의 공식 적재 입력으로 �
 | `openai_compat` | `httpx`로 `<base_url>/chat/completions`(텍스트·비전)과 `/images/generations`·`/images/edits`(이미지)를 부른다. 429·5xx는 지수 대기 3회. 비용은 설정의 단가표로 추정한다. |
 | `codex_exec` | §7 참조. |
 | `xai_video` | `POST {base}/videos/generations`에 `{model, prompt, image: {url: data URI}, duration, resolution, generate_audio[, aspect_ratio]}`를 보내 `request_id`를 받는다. `GET {base}/videos/{id}`를 `poll_interval_s`마다 조회해 status가 done이면 `video.url`을 키 없이 바로 내려받고, failed·expired·error면 사유와 함께 실패, `timeout_s`를 넘으면 `VideoTimeoutError(job_id)`. 429·5xx는 지수 대기 3회. 키는 `api_key_env`(기본 `XAI_API_KEY`)로만 읽고 없으면 호출 전에 실패. 비용은 단가표(1.5: 480p $0.08·720p $0.14·1080p $0.25/초, 1.5-lite: $0.02·$0.03·$0.14/초, 2026-10-21) × 실제 초 + 입력 이미지 $0.01. |
-| `grok_web` | 기본 꺼짐(`accept_terms_risk = true` 필요, D-0029). `playwright`(`--extra web`)의 `connect_over_cdp(cdp_url)`로 사용자가 띄운 전용 프로필 Chrome에 붙어 새 탭을 앞으로 가져와 Imagine을 연다. 화면 흐름은 2026-10-21 로그인 화면에 맞췄다(D-0032): 입력 폼(`form:has(button[type=submit])`) 안에서 비디오 모드 버튼 → 해상도 라디오(`480p`·`720p`) → 길이 라디오(`6s`·`10s`·`15s`) → 소리 버튼(`aria-pressed`를 요청과 맞춤) → 파일 입력에 첫 프레임 업로드(이미지 제거 버튼이 보일 때까지 대기, 업로드 뒤 종횡비 버튼이 사라지고 영상은 이미지 비율을 따름) → 편집기(`[contenteditable]`)에 프롬프트(들어갔는지 확인) → 제출. 제출 뒤 주소가 `/imagine/post/<id>`로 바뀌면 그 id가 든 `<video>`의 주소(assets.grok.com의 `generated_video.mp4`)를 로그인 세션 요청으로 받는다(다운로드 버튼은 다운로드 이벤트가 오지 않아 쓰지 않는다). 옵션 클릭이나 제출 뒤 주소에 `#subscribe`가 붙으면(결제 창) 등급 제한·사용량 소진으로 바로 실패한다. 90초 안에 결과 페이지로 넘어가지 않으면 제출 안 됨으로 실패한다. 웹에 없는 길이·해상도는 S5가 첫 프레임을 만들기 전에 `check_settings`로 거절한다. 어느 단계든 실패하면 `~/.acf/grok-web-work/<job>/error-<단계>.png` 스크린샷을 남기고 `VideoGenerationError`. 탭만 닫고 사용자의 Chrome은 닫지 않는다. 재개 불가(`resumable = False`), 비용 0, 작업 ID는 `web-<hex>:<post id>`. 복구층(Stagehand `act()`)은 자리만 둔다. |
+| `grok_web` | 기본 꺼짐(`accept_terms_risk = true` 필요, D-0029). `playwright`(`--extra web`)의 `connect_over_cdp(cdp_url)`로 사용자가 띄운 전용 프로필 Chrome에 붙어 새 탭을 앞으로 가져와 Imagine을 연다. 화면 흐름은 2026-10-21 로그인 화면에 맞췄다(D-0032): 입력 폼(`form:has(button[type=submit])`) 안에서 비디오 모드 버튼 → 해상도 라디오(`480p`·`720p`) → 길이 라디오(`6s`·`10s`·`15s`) → 소리 버튼(`aria-pressed`를 요청과 맞춤) → 파일 입력에 첫 프레임 업로드(이미지 제거 버튼이 보일 때까지 대기, 업로드 뒤 종횡비 버튼이 사라지고 영상은 이미지 비율을 따름) → 편집기(`[contenteditable]`)에 프롬프트(들어갔는지 확인) → 제출. 제출 뒤 주소가 `/imagine/post/<id>`로 바뀌면 그 id가 든 `<video>`의 주소(assets.grok.com의 `generated_video.mp4`)를 로그인 세션 요청으로 받는다(다운로드 버튼은 다운로드 이벤트가 오지 않아 쓰지 않는다). 옵션 클릭이나 제출 뒤 주소에 `#subscribe`가 붙으면(결제 창) 등급 제한·사용량 소진으로 바로 실패한다. 90초 안에 결과 페이지로 넘어가지 않으면 제출 안 됨으로 실패한다. 웹에 없는 길이·해상도는 S5가 첫 프레임을 만들기 전에 `check_settings`로 거절한다. 어느 단계든 실패하면 `~/.cfp/grok-web-work/<job>/error-<단계>.png` 스크린샷을 남기고 `VideoGenerationError`. 탭만 닫고 사용자의 Chrome은 닫지 않는다. 재개 불가(`resumable = False`), 비용 0, 작업 ID는 `web-<hex>:<post id>`. 복구층(Stagehand `act()`)은 자리만 둔다. |
 | `grok_oauth` | `VideoModel`. 요청·상태 처리는 `xai_video`와 같고 인증만 OAuth 접근 토큰(Bearer)이다. 토큰은 `token_file`(기본 opencodex 인증 파일의 활성 xAI 계정)이나 `token_env`에서 읽고, 값을 출력·기록하지 않는다. 만료면 다시 로그인하라는 오류를 낸다(새로 고침 없음). 명시해야 켜진다. 실제 호출 확인 전이다(D-0044 (3)). 토큰 해석 순서: `token_env` → `token_file`의 `xai.accounts[id == xai.activeAccountId].credential.access`, `credential.expires`는 epoch 밀리초로 본다(로컬 파일 기준 가정). 요청·상태·비용은 `XaiVideoModel`을 상속해 같다. 공급자 응답에 토큰이 섞여 와도 오류 메시지에서 지운다. |
-| 순위 수집기(`src/acf/collectors/`) | 출처별 어댑터 + 가짜. 이용 조건 확인 기록이 없는 출처는 거절하고, 호출 계획(dry run)을 먼저 낸다. 요청 간격·User-Agent·재시도는 설정값. 출처 조사는 `docs/research/2026-10-27-ranking-sources.md`. |
+| 순위 수집기(`src/character_factory_poc/collectors/`) | 출처별 어댑터 + 가짜. 이용 조건 확인 기록이 없는 출처는 거절하고, 호출 계획(dry run)을 먼저 낸다. 요청 간격·User-Agent·재시도는 설정값. 출처 조사는 `docs/research/2026-10-27-ranking-sources.md`. |
 | `gemma_qlora` | `TrainingProvider`: 임대 GPU QLoRA(§8.9). |
 | `vertex_gemini` | `TrainingProvider`: Vertex 튜닝(§8.9). `gemini-sft-poc`의 구현을 참고하되 코드는 복사하지 않는다. 옛 이름 `vertex_tuning`을 대체한다. |
 | `fake_image` | `ImageGen` 가짜. 프롬프트 해시로 색을 정한 64×64 단색 PNG를 돌려준다. |
@@ -533,7 +533,7 @@ G9 승인 패키지를 우리 앱 두 시스템의 공식 적재 입력으로 �
 | 군집 근거 필드가 비었다. | 보고서 생성 실패. G1에 올리지 않는다. |
 | 이름이 보고서·미리보기 프롬프트에 있다. | 프롬프트면 이미지 호출 전에 중단, 산출물이면 단계 `CHECK_FAILED`(FR-35). |
 | 예산 상한에 닿는다. | 실행 전이면 거절, 실행 중이면 남은 작업 중단. |
-| 영상 공급자 작업이 시간 안에 끝나지 않는다. | 작업 ID를 SUBMITTED로 남기고 단계 `CHECK_FAILED`. 다음 `acf video intro --execute`가 같은 rev에서 같은 작업을 다시 수집한다(재제출 없음). |
+| 영상 공급자 작업이 시간 안에 끝나지 않는다. | 작업 ID를 SUBMITTED로 남기고 단계 `CHECK_FAILED`. 다음 `cfp video intro --execute`가 같은 rev에서 같은 작업을 다시 수집한다(재제출 없음). |
 | 영상 예상 비용이 상한을 넘는다. | 제출 전에 `BudgetExceeded`. |
 | 영상 공급자가 실패를 돌려준다(정책 차단 등). | 작업을 FAILED와 사유로 남기고 단계 `CHECK_FAILED`. |
 | `grok_web`에서 화면 요소를 못 찾는다. | 단계 이름이 든 오류와 스크린샷. 선택자를 고친다. |
@@ -560,21 +560,21 @@ G9 승인 패키지를 우리 앱 두 시스템의 공식 적재 입력으로 �
 
 | 단계 | 내용 | 끝나는 조건 | 릴리스 |
 |---|---|---|---|
-| M0 | 골격: `pyproject`, `common/`, 포트와 가짜 어댑터, 원장·예산, 상태 파일, `graph.py`, `check.sh` | 검사 스크립트 통과. `acf status`가 빈 상태를 표시한다. | R0 |
-| M4 (선행, D-0013) | `acf plan import`, S7 특질 시트·검사, S8 프롬프트 조립·정렬·표본, G6 페이지, 오프라인 흐름 테스트 | 오프라인 통과. 실제 모델로 `persona_version` 1개 발급(사용자 지시 뒤). | R0 |
-| M1 | S1(D-0017): 순위 목록 고정·인물 묶기, Scout 특징 태깅과 검사, 정규화, 군집(구성원 수 기준), 보고서, 이름 유출 검사, ImageGen 포트(가짜·`codex_image`)로 미리보기, G1 페이지·선택, `acf ref run`·`acf run --ranking` | 오프라인 골격: 합성 순위 목록으로 G1 선택까지 통과. `codex_image` 실제 호출 확인(D-0019). 다음: 사용자 지시 뒤 실제 순위 목록으로 J2 실험 보고서. | R0 |
-| M2 | S2(D-0022, D-0023): G1 참조 사진 선택, 참조 이미지 입력 후보 생성, G2 페이지·선택, 외모 명세, `acf hero run`·`acf run --until G2`. S3: 기획 초안이 외모 명세를 참조(남음). 짝 비교(FR-11)는 보류 | S2 오프라인 통과와 실제 구독 호출로 G2 → `appearance_rev` 확인(2026-10-21). 남은 것: 실제 순위 목록으로 S1→S2 한 번, S3 연결 | R0 |
-| M2b | 외모 한 번 고르기(D-0042, D-0043): S1 외모군당 얼굴 1장, G1 얼굴 한 장 선택·고칠 점 메모, `acf ref faces`, S2 기준 사진 + `identity-v1` 동일인 검사(재생성 최대 3번 시도), `base_photo = "picked"`, G2 제거와 `needs` 의존, `load_appearance_spec`의 `s2` 기준, 옛 G2 칸 읽기 호환 | 오프라인 통과(가짜 판정으로 통과·재시도·최종 실패·판정 없음 거절·picked 네 경로). 남은 것: 판정 경로 확인(Q-0020) 뒤 실제 S1 얼굴 → S2 `generate` 1회 | R0 |
-| M3 | S3 외모 연결(D-0024), S4 프레임 생성과 G4 사람 승인(D-0025, D-0026), `acf frames run`. 일관성 판정·챕터별 재생성은 보류 | 오프라인 통과. 실제 구독으로 3챕터 프레임 생성과 G4 승인 확인(2026-10-21). 남은 것: 실제 Planner로 S3, 판정 모델 참고 자료 | R0 |
-| M3b | 기획·장면 흐름(D-0033~D-0035): 씨앗 → 변형 → G3, S3r 참고 자료(hash-v1 색인), S4a 배경 → G4a → S4b 장면 사실·자세 → G4b → S4 완성 이미지 → G4(챕터별 부분 재생성), 갈래별 진행 오케스트레이터, `acf plan seed/variants/own`·`refs index/select`·`scene backgrounds/poses` | 오프라인 통과(2026-10-22, 182 passed). 남은 것: 실제 Planner·Scout·Writer·Pose 모델과 구독 이미지로 데모 캐릭터 한 번, 실제 임베딩(Q-0019) | R0 |
+| M0 | 골격: `pyproject`, `common/`, 포트와 가짜 어댑터, 원장·예산, 상태 파일, `graph.py`, `check.sh` | 검사 스크립트 통과. `cfp status`가 빈 상태를 표시한다. | R0 |
+| M4 (선행, D-0013) | `cfp plan import`, S7 특질 시트·검사, S8 프롬프트 조립·정렬·표본, G6 페이지, 오프라인 흐름 테스트 | 오프라인 통과. 실제 모델로 `persona_version` 1개 발급(사용자 지시 뒤). | R0 |
+| M1 | S1(D-0017): 순위 목록 고정·인물 묶기, Scout 특징 태깅과 검사, 정규화, 군집(구성원 수 기준), 보고서, 이름 유출 검사, ImageGen 포트(가짜·`codex_image`)로 미리보기, G1 페이지·선택, `cfp ref run`·`cfp run --ranking` | 오프라인 골격: 합성 순위 목록으로 G1 선택까지 통과. `codex_image` 실제 호출 확인(D-0019). 다음: 사용자 지시 뒤 실제 순위 목록으로 J2 실험 보고서. | R0 |
+| M2 | S2(D-0022, D-0023): G1 참조 사진 선택, 참조 이미지 입력 후보 생성, G2 페이지·선택, 외모 명세, `cfp hero run`·`cfp run --until G2`. S3: 기획 초안이 외모 명세를 참조(남음). 짝 비교(FR-11)는 보류 | S2 오프라인 통과와 실제 구독 호출로 G2 → `appearance_rev` 확인(2026-10-21). 남은 것: 실제 순위 목록으로 S1→S2 한 번, S3 연결 | R0 |
+| M2b | 외모 한 번 고르기(D-0042, D-0043): S1 외모군당 얼굴 1장, G1 얼굴 한 장 선택·고칠 점 메모, `cfp ref faces`, S2 기준 사진 + `identity-v1` 동일인 검사(재생성 최대 3번 시도), `base_photo = "picked"`, G2 제거와 `needs` 의존, `load_appearance_spec`의 `s2` 기준, 옛 G2 칸 읽기 호환 | 오프라인 통과(가짜 판정으로 통과·재시도·최종 실패·판정 없음 거절·picked 네 경로). 남은 것: 판정 경로 확인(Q-0020) 뒤 실제 S1 얼굴 → S2 `generate` 1회 | R0 |
+| M3 | S3 외모 연결(D-0024), S4 프레임 생성과 G4 사람 승인(D-0025, D-0026), `cfp frames run`. 일관성 판정·챕터별 재생성은 보류 | 오프라인 통과. 실제 구독으로 3챕터 프레임 생성과 G4 승인 확인(2026-10-21). 남은 것: 실제 Planner로 S3, 판정 모델 참고 자료 | R0 |
+| M3b | 기획·장면 흐름(D-0033~D-0035): 씨앗 → 변형 → G3, S3r 참고 자료(hash-v1 색인), S4a 배경 → G4a → S4b 장면 사실·자세 → G4b → S4 완성 이미지 → G4(챕터별 부분 재생성), 갈래별 진행 오케스트레이터, `cfp plan seed/variants/own`·`refs index/select`·`scene backgrounds/poses` | 오프라인 통과(2026-10-22, 182 passed). 남은 것: 실제 Planner·Scout·Writer·Pose 모델과 구독 이미지로 데모 캐릭터 한 번, 실제 임베딩(Q-0019) | R0 |
 | M3c | 이미지 자동 검사 루프(D-0036, D-0037): 비전 포트·가짜·OpenAI 호환 어댑터, 기준표, 편집 수정 반복, 배지, 원장 VISION | 오프라인 통과(2026-10-22, 221 passed). 남은 것: 실제 판정 경로 확인(Q-0020), 사람 판단과의 일치율 | R0 |
 | M5 | S5·S6·S9·S10·S11 뼈대를 가짜 어댑터로 연결, 전체 오프라인 흐름 테스트, 원장 보고서 | PRD §14 수용 조건 1·4 충족. | R0 |
-| M5 | S5 소개 영상(D-0028~D-0032): 9:16 세로 첫 프레임, `xai_video`·`grok_web` 어댑터, 제출·재개·실측, G5 사람 선택, `acf video intro`·`web-setup` | 오프라인 통과. 2026-10-21 실제: 세로 첫 프레임 생성 확인, grok.com 화면 맞춤과 웹 영상 1편 생성·받기 확인, S5 전체 웹 실행은 무료 등급 한도(결제 창)로 막힘. 남은 것: 웹 한도 또는 유료 등급(Q-0018) 뒤 S5 전체 실행, 실제 API 1회(사용자가 보류) | R0 |
-| M6 | S6 동작 영상(D-0038, D-0040, D-0041): G4 승인 이미지 → 미소·무표정 첫 프레임 → 앱 통화 영상 표준 세트(`l2` 6편·`standard` 37편) → G5b 선택·제외·부분 재생성, `acf video actions`. 다음: 특별 행동 제안 에이전트, 영상 자동 검사 | 골격: 오프라인 통과(2026-10-22). 남은 것: 영상 공급자 사용량 확보(Q-0018) 뒤 `l2` 18편 실제 실행과 G5b 승인 | R0 골격·R1 |
+| M5 | S5 소개 영상(D-0028~D-0032): 9:16 세로 첫 프레임, `xai_video`·`grok_web` 어댑터, 제출·재개·실측, G5 사람 선택, `cfp video intro`·`web-setup` | 오프라인 통과. 2026-10-21 실제: 세로 첫 프레임 생성 확인, grok.com 화면 맞춤과 웹 영상 1편 생성·받기 확인, S5 전체 웹 실행은 무료 등급 한도(결제 창)로 막힘. 남은 것: 웹 한도 또는 유료 등급(Q-0018) 뒤 S5 전체 실행, 실제 API 1회(사용자가 보류) | R0 |
+| M6 | S6 동작 영상(D-0038, D-0040, D-0041): G4 승인 이미지 → 미소·무표정 첫 프레임 → 앱 통화 영상 표준 세트(`l2` 6편·`standard` 37편) → G5b 선택·제외·부분 재생성, `cfp video actions`. 다음: 특별 행동 제안 에이전트, 영상 자동 검사 | 골격: 오프라인 통과(2026-10-22). 남은 것: 영상 공급자 사용량 확보(Q-0018) 뒤 `l2` 18편 실제 실행과 G5b 승인 | R0 골격·R1 |
 | M7 | SNS 재작성·NIKL·합성·분할, 학습 제출·수집, 사전 등록·블라인드 평가, 릴리즈 매니페스트, G7~G9 | 사전 등록 기준 판정 보고서와 `release_rev` 1개. | R1 |
 | M8 (PoC, D-0044·D-0045) | 3일 PoC: A 외모 흐름(M2b의 `picked`까지), B 순위 수집기, C S9 데이터셋, D S10 학습(dry run)·평가, E 패키지·우리 앱 변환기, F Grok OAuth, G 워크숍 웹앱, H 그래프에 `s9s`·`s9`·`s10t`·`s10`·`s11`·내보내기 연결과 `tests/test_offline_pipeline.py` | 여성·남성 합성 브리프 두 개가 가짜 공급자로 S1 → G9 → 패키지 → 일회용 DB 적재까지 네트워크 없이 통과하고, 워크숍 화면에서 관문만 눌러 같은 흐름을 끝까지 간다. 실제 호출은 순위 수집·이미지·LLM 1회씩 | PoC |
 
-구현 순서는 M0 → M4(선행) → M1 → M2 → M3 → M5 → M6 → M7이다(D-0013). M2b는 워크숍 화면 연결 전에 한다. 각 노드의 현재 성숙도(L0~L4)와 올리는 규칙은 [현재 상태](../status/current-state.md)와 [인계 규칙](../status/README.md#노드-성숙도-규칙)에 있다. 마일스톤의 "끝나는 조건"은 대부분 L1(오프라인)이고, L2 이상은 그 규칙을 따른다. M4의 실제 실행은 `acf plan import`로 들여온 기획서의 G3 기록이 있으면 된다.
+구현 순서는 M0 → M4(선행) → M1 → M2 → M3 → M5 → M6 → M7이다(D-0013). M2b는 워크숍 화면 연결 전에 한다. 각 노드의 현재 성숙도(L0~L4)와 올리는 규칙은 [현재 상태](../status/current-state.md)와 [인계 규칙](../status/README.md#노드-성숙도-규칙)에 있다. 마일스톤의 "끝나는 조건"은 대부분 L1(오프라인)이고, L2 이상은 그 규칙을 따른다. M4의 실제 실행은 `cfp plan import`로 들여온 기획서의 G3 기록이 있으면 된다.
 
 ## 13. 착수 때 확인할 사항
 

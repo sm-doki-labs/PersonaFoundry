@@ -1,5 +1,5 @@
 {
-  "_note": "acf plan import <slug> --from plan.json 으로 들여온다. _note 필드는 지운다. age는 18 이상. evidence를 비우면 공장이 {kind: USER}로 채운다. 성격 칸(coreTraits, contrastTrait)의 근거로 외모(APPEARANCE)는 쓸 수 없다(D-0005).",
+  "_note": "cfp plan import <slug> --from plan.json 으로 들여온다. _note 필드는 지운다. age는 18 이상. evidence를 비우면 공장이 {kind: USER}로 채운다. 성격 칸(coreTraits, contrastTrait)의 근거로 외모(APPEARANCE)는 쓸 수 없다(D-0005).",
   "name": "캐릭터 이름",
   "age": 24,
   "job": "직업",

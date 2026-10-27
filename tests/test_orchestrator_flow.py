@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 
-from acf.pipeline.orchestrator import RunOptions, run_until
-from acf.stages.s4_frames.approve import load_approved_frames
+from character_factory_poc.pipeline.orchestrator import RunOptions, run_until
+from character_factory_poc.stages.s4_frames.approve import load_approved_frames
 from tests.support.flow import make_ctx
 from tests.support.synthetic import RANKING
 from tests.test_plan_variants import SEED, output
@@ -18,7 +18,7 @@ from tests.test_scene_flow import backgrounds, poses, scenes
 
 def test_seed_wait_runs_intro_video_lane_then_full_scene_flow(tmp_path):
     ctx, agents = make_ctx(tmp_path)
-    from acf.stages.s3_plan.draft import new_character
+    from character_factory_poc.stages.s3_plan.draft import new_character
 
     cid = new_character(ctx, "lanes")
     agents.set("s3-variants", lambda req: output(cid))

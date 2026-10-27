@@ -9,22 +9,22 @@ from typing import Any
 
 import pytest
 
-import acf.contracts  # noqa: F401  계약 등록
-from acf.common.canonical import sha256_text
-from acf.common.errors import FactoryError
-from acf.common.schema import dump, known_contracts, validate
-from acf.common.store import write_once_json
-from acf.contracts.training import EvalRun, HumanPick
-from acf.pipeline.context import Context
-from acf.pipeline.gates import write_gate_record
-from acf.providers.base import ChatRequest
-from acf.providers.fake import FakeTextModel
-from acf.stages.s10_eval import judge as eval_judge
-from acf.stages.s10_eval import metrics as eval_metrics
-from acf.stages.s10_eval import prereg as eval_prereg
-from acf.stages.s10_eval import report as eval_report
-from acf.stages.s10_eval import run as eval_run
-from acf.stages.s10_eval.approve import approve_g8
+import character_factory_poc.contracts  # noqa: F401  계약 등록
+from character_factory_poc.common.canonical import sha256_text
+from character_factory_poc.common.errors import FactoryError
+from character_factory_poc.common.schema import dump, known_contracts, validate
+from character_factory_poc.common.store import write_once_json
+from character_factory_poc.contracts.training import EvalRun, HumanPick
+from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.gates import write_gate_record
+from character_factory_poc.providers.base import ChatRequest
+from character_factory_poc.providers.fake import FakeTextModel
+from character_factory_poc.stages.s10_eval import judge as eval_judge
+from character_factory_poc.stages.s10_eval import metrics as eval_metrics
+from character_factory_poc.stages.s10_eval import prereg as eval_prereg
+from character_factory_poc.stages.s10_eval import report as eval_report
+from character_factory_poc.stages.s10_eval import run as eval_run
+from character_factory_poc.stages.s10_eval.approve import approve_g8
 from tests.support.flow import approve_plan_v2, make_ctx, through_s2
 
 

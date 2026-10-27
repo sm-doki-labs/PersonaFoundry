@@ -1,11 +1,11 @@
-"""acf ref collect 연결(B 갈래 통합): 기본 실행은 네트워크 없이 호출 계획만 낸다."""
+"""cfp ref collect 연결(B 갈래 통합): 기본 실행은 네트워크 없이 호출 계획만 낸다."""
 
 from __future__ import annotations
 
 import httpx
 import pytest
 
-from acf.cli import main
+from character_factory_poc.cli import main
 
 
 def test_ref_collect_dry_run_prints_plan_without_network(tmp_path, capsys, monkeypatch) -> None:

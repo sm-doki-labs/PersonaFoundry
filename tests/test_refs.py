@@ -10,14 +10,19 @@ from pathlib import Path
 
 import pytest
 
-from acf.common.errors import BudgetExceeded, CheckFailed, GateNotApprovedError, ImmutableWriteError
-from acf.common.schema import validate
-from acf.common.store import verify_manifest
-from acf.providers.embed import HashEmbedder, cosine, make_embedder
-from acf.providers.fake_codex import FakeCodexAgent
-from acf.stages.s3_plan.importer import import_plan, load_approved_plan
-from acf.stages.s3r_refs.index import build_index, load_index, write_index
-from acf.stages.s3r_refs.select import (
+from character_factory_poc.common.errors import (
+    BudgetExceeded,
+    CheckFailed,
+    GateNotApprovedError,
+    ImmutableWriteError,
+)
+from character_factory_poc.common.schema import validate
+from character_factory_poc.common.store import verify_manifest
+from character_factory_poc.providers.embed import HashEmbedder, cosine, make_embedder
+from character_factory_poc.providers.fake_codex import FakeCodexAgent
+from character_factory_poc.stages.s3_plan.importer import import_plan, load_approved_plan
+from character_factory_poc.stages.s3r_refs.index import build_index, load_index, write_index
+from character_factory_poc.stages.s3r_refs.select import (
     build_queries,
     codex_checks,
     load_latest_reference_set,
@@ -334,7 +339,7 @@ def test_legacy_plan_queries_and_curator(tmp_path):
 
 def test_codex_checks_use_same_constraints(tmp_path, monkeypatch):
     ctx, _, cid, _ = _ready(tmp_path)
-    from acf.checks import registry
+    from character_factory_poc.checks import registry
 
     original = registry.stage_checks
     monkeypatch.setattr(

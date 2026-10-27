@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 import pytest
 
-from acf.collectors import (
+from character_factory_poc.collectors import (
     CollectionConfigError,
     CollectionNotAllowed,
     CollectionParseError,
@@ -27,8 +27,8 @@ from acf.collectors import (
     parse_rank_page,
     plan_collection,
 )
-from acf.contracts.reference import RankingScope
-from acf.stages.s1_reference.ranking import load_ranking
+from character_factory_poc.contracts.reference import RankingScope
+from character_factory_poc.stages.s1_reference.ranking import load_ranking
 
 FEMALE = ("idolFemale", "idolMale")
 
@@ -200,7 +200,7 @@ def test_dry_run_plans_requests_without_network() -> None:
     assert "https://rankify.site/idolFemale" in text
     assert "https://rankify.site/idolMale" in text
     assert "재시도 2회" in text
-    assert "acf-rankings" in text
+    assert "cfp-rankings" in text
     assert "사람 확인 필요" in text
     assert "2026-10-27" in text  # 이용 조건 확인 날짜
     assert seen == []
@@ -358,9 +358,9 @@ def test_request_carries_configured_user_agent_and_timeout() -> None:
         seen.append(request.headers)
         return httpx.Response(200, text=FEMALE_PAGE)
 
-    client = fetcher(httpx.MockTransport(handler), FakeClock(), user_agent="acf-test/1.0")
+    client = fetcher(httpx.MockTransport(handler), FakeClock(), user_agent="cfp-test/1.0")
     client.fetch("idolFemale", "https://rankify.site/idolFemale")
-    assert seen[0]["user-agent"] == "acf-test/1.0"
+    assert seen[0]["user-agent"] == "cfp-test/1.0"
 
 
 def test_retry_exhausted_raises_fetch_error() -> None:

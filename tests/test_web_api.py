@@ -15,12 +15,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from acf.pipeline.orchestrator import RunLog
-from acf.web import create_app
-from acf.web.errors import WebError
-from acf.web.events import EventHub, format_sse
-from acf.web.jobs import JobManager
-from acf.web.settings import load_settings
+from character_factory_poc.pipeline.orchestrator import RunLog
+from character_factory_poc.web import create_app
+from character_factory_poc.web.errors import WebError
+from character_factory_poc.web.events import EventHub, format_sse
+from character_factory_poc.web.jobs import JobManager
+from character_factory_poc.web.settings import load_settings
 
 CID = "cf-20261027-seoha"
 BRIEF = "bf-20261027-seoha"

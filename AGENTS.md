@@ -1,6 +1,6 @@
-# agentic-character-factory 작업 진입점
+# character-factory-poc 작업 진입점
 
-캐릭터 한 명을 기획 브리프에서 릴리즈 번들까지 에이전트가 단계별로 만들고, 사람은 정해진 관문에서만 고르고 승인하는 "에이전틱 캐릭터 공장"이다. 독립된 Python 3.12 프로젝트(`src/acf`, 명령 `acf`)이고 문서와 코드가 함께 있다. 다른 저장소의 Python 코드를 import하지 않는다.
+캐릭터 한 명을 기획 브리프에서 릴리즈 번들까지 에이전트가 단계별로 만들고, 사람은 정해진 관문에서만 고르고 승인하는 "에이전틱 캐릭터 공장"이다. 독립된 Python 3.12 프로젝트(`src/character_factory_poc`, 명령 `cfp`)이고 문서와 코드가 함께 있다. 다른 저장소의 Python 코드를 import하지 않는다.
 
 출발점은 [캐릭터 공장 기획·시각화 핸드오프 2026-10-14](/Users/johnhuh619/Documents/Codex/2026-10-13/new-chat-5/outputs/2026-10-14-character-factory-planning-visualization-handoff.md)다. 10월 2일자 `/Users/johnhuh619/projects/character-factory`(chat-svc 캐릭터 팩 검증 공장)와는 범위가 다른 별도 프로젝트다.
 

@@ -2,15 +2,24 @@ import json
 
 import pytest
 
-import acf.contracts  # noqa: F401
-from acf.common.budget import Budget, CallPlan
-from acf.common.config import BudgetConfig
-from acf.common.errors import BudgetExceeded, ImmutableWriteError, ValidationFailed
-from acf.common.ids import character_id, is_valid
-from acf.common.schema import validate
-from acf.common.store import next_rev, verify_manifest, write_manifest, write_once_json
-from acf.common.textstats import looks_like_bare_adjectives, section_names
-from acf.providers.base import extract_json_object
+import character_factory_poc.contracts  # noqa: F401
+from character_factory_poc.common.budget import Budget, CallPlan
+from character_factory_poc.common.config import BudgetConfig
+from character_factory_poc.common.errors import (
+    BudgetExceeded,
+    ImmutableWriteError,
+    ValidationFailed,
+)
+from character_factory_poc.common.ids import character_id, is_valid
+from character_factory_poc.common.schema import validate
+from character_factory_poc.common.store import (
+    next_rev,
+    verify_manifest,
+    write_manifest,
+    write_once_json,
+)
+from character_factory_poc.common.textstats import looks_like_bare_adjectives, section_names
+from character_factory_poc.providers.base import extract_json_object
 
 
 def test_write_once(tmp_path):

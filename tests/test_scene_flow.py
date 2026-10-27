@@ -9,22 +9,27 @@ from pathlib import Path
 
 import pytest
 
-from acf.cli import main
-from acf.common.errors import BudgetExceeded, CheckFailed, FactoryError, GateNotApprovedError
-from acf.common.schema import validate
-from acf.pipeline.approve import approve_gate
-from acf.providers.fake_image import FakeImageModel, solid_png
-from acf.stages.s4_frames.approve import load_approved_frames
-from acf.stages.s4_frames.run import plan_calls as frame_calls
-from acf.stages.s4_frames.run import run_s4
-from acf.stages.s4a_backgrounds.approve import load_background_selection
-from acf.stages.s4a_backgrounds.run import codex_checks as scout_checks
-from acf.stages.s4a_backgrounds.run import plan_calls as background_calls
-from acf.stages.s4a_backgrounds.run import run_s4a
-from acf.stages.s4b_poses.approve import load_scene_and_pose
-from acf.stages.s4b_poses.run import codex_checks as scene_checks
-from acf.stages.s4b_poses.run import plan_calls as pose_calls
-from acf.stages.s4b_poses.run import run_s4b
+from character_factory_poc.cli import main
+from character_factory_poc.common.errors import (
+    BudgetExceeded,
+    CheckFailed,
+    FactoryError,
+    GateNotApprovedError,
+)
+from character_factory_poc.common.schema import validate
+from character_factory_poc.pipeline.approve import approve_gate
+from character_factory_poc.providers.fake_image import FakeImageModel, solid_png
+from character_factory_poc.stages.s4_frames.approve import load_approved_frames
+from character_factory_poc.stages.s4_frames.run import plan_calls as frame_calls
+from character_factory_poc.stages.s4_frames.run import run_s4
+from character_factory_poc.stages.s4a_backgrounds.approve import load_background_selection
+from character_factory_poc.stages.s4a_backgrounds.run import codex_checks as scout_checks
+from character_factory_poc.stages.s4a_backgrounds.run import plan_calls as background_calls
+from character_factory_poc.stages.s4a_backgrounds.run import run_s4a
+from character_factory_poc.stages.s4b_poses.approve import load_scene_and_pose
+from character_factory_poc.stages.s4b_poses.run import codex_checks as scene_checks
+from character_factory_poc.stages.s4b_poses.run import plan_calls as pose_calls
+from character_factory_poc.stages.s4b_poses.run import run_s4b
 from tests.support.flow import approve_plan_v2, make_ctx, through_s2
 from tests.test_agentic import BRIEF
 
@@ -262,7 +267,7 @@ def test_offline_flow_and_partial_regeneration(flow):
 
 @pytest.mark.parametrize("mode", ["face", "full"])
 def test_identity_crop(flow, monkeypatch, mode):
-    import acf.stages.s4_frames.run as runner
+    import character_factory_poc.stages.s4_frames.run as runner
 
     ctx, _, cid, image = flow
     through_pose(ctx, cid)
@@ -284,7 +289,7 @@ def test_identity_crop(flow, monkeypatch, mode):
 
 
 def test_v1_plan_is_rejected(tmp_path):
-    from acf.stages.s3_plan.draft import run_s3_draft
+    from character_factory_poc.stages.s3_plan.draft import run_s3_draft
     from tests.test_frames import agent
 
     ctx, _ = make_ctx(tmp_path)
@@ -374,7 +379,7 @@ def test_dry_run_and_budget_before_writes(flow):
 
 
 def test_dependencies(tmp_path):
-    from acf.stages.s3_plan.draft import new_character
+    from character_factory_poc.stages.s3_plan.draft import new_character
 
     ctx, _ = make_ctx(tmp_path)
     cid = new_character(ctx, "deps")
@@ -434,7 +439,7 @@ def test_ratio_drift_marks_failure(flow):
 
 
 def test_orchestrator_waits_at_each_scene_gate(flow):
-    from acf.pipeline.orchestrator import RunOptions, run_until
+    from character_factory_poc.pipeline.orchestrator import RunOptions, run_until
 
     ctx, _, cid, _ = flow
     for gate in ("G4a", "G4b", "G4"):
@@ -530,7 +535,7 @@ def test_earlier_gate_rejection_allows_new_revision(flow, gate, decision):
 
 
 def test_ranking_names_never_reach_image_calls(flow):
-    from acf.stages.s1_reference.ranking import all_names, load_ranking
+    from character_factory_poc.stages.s1_reference.ranking import all_names, load_ranking
     from tests.support.synthetic import RANKING
 
     ctx, agents, cid, image = flow
@@ -547,8 +552,8 @@ def test_ranking_names_never_reach_image_calls(flow):
 
 @pytest.mark.parametrize("stage", ["s4a", "s4b-scene", "s4b-pose"])
 def test_bad_agent_contract_semantics(stage, flow):
-    from acf.stages.s4a_backgrounds.run import check_backgrounds
-    from acf.stages.s4b_poses.run import check_poses, check_scenes
+    from character_factory_poc.stages.s4a_backgrounds.run import check_backgrounds
+    from character_factory_poc.stages.s4b_poses.run import check_poses, check_scenes
 
     if stage == "s4a":
         out = backgrounds()
