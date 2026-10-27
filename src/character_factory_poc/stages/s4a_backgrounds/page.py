@@ -133,6 +133,26 @@ def custom_control(ch: str, label: str) -> str:
     )
 
 
+def change_control(ch: str, what: str) -> str:
+    """챕터별 수정 요청 입력. REQUEST_CHANGES 결정에서만 읽는다(LLD §6.9)."""
+    return (
+        f'<label><input type="checkbox" id="change-{ch}"> {esc(ch)} {esc(what)} 수정</label>'
+        f'<label for="note-{ch}">{esc(ch)}에서 바꿀 내용 (수정할 때 필수)</label>'
+        f'<textarea id="note-{ch}"></textarea>'
+    )
+
+
+def change_script() -> str:
+    return (
+        "function changeList(){const out=[];for(const ch of CH){"
+        "if(!$('change-'+ch).checked)continue;const note=$('note-'+ch).value.trim();"
+        "if(!note)throw Error(ch+'에서 바꿀 내용을 적어 주세요.');"
+        "out.push({field:ch,note});}"
+        "if(!out.length)throw Error('수정할 챕터를 하나 이상 고르세요.');"
+        "return out;}"
+    )
+
+
 def render_g4a_page(cid: str, rev: str, backgrounds) -> str:
     sections = ["<p>챕터마다 배경 하나를 고르거나 원하는 배경을 직접 적어 주세요.</p>"]
     for ch in backgrounds.chapters:
@@ -172,8 +192,16 @@ def render_g4a_page(cid: str, rev: str, backgrounds) -> str:
             + custom_control(ch.chapterId, "배경 직접 정의")
             + "</fieldset>"
         )
-    script = (
+    sections.append(
+        "<fieldset><legend>챕터별 수정 요청</legend>"
+        "<p>결정을 REQUEST_CHANGES로 고르고 고친 챕터의 메모를 적으면, 그 챕터의 후보·배경 사진만 "
+        "새 revision으로 다시 만듭니다.</p>"
+        + "".join(change_control(ch, "배경") for ch in ("ch1", "ch2", "ch3"))
+        + "</fieldset>"
+    )
+    script = change_script() + (
         "function buildAnswer(){const o=metadata();"
+        "if(o.decision==='REQUEST_CHANGES')return {...o,requestedChanges:changeList()};"
         "return o.decision==='SELECT'?{...o,...choices()}:o;}"
     )
     return page_shell("G4a 챕터 배경 선택", cid, rev, sections, script)

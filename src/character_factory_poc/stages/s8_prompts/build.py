@@ -24,6 +24,7 @@ from character_factory_poc.contracts.persona import PromptPair, PromptProbe, Tra
 from character_factory_poc.pipeline.agent import AgentSpec, run_agent
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.gates import render_gate_page
+from character_factory_poc.pipeline.rework import load_rework
 from character_factory_poc.providers.base import ChatRequest, Message, extract_json_object
 from character_factory_poc.stages.s3_plan.importer import load_approved_plan
 
@@ -146,6 +147,7 @@ def run_s8(
     char_dir = ctx.character_dir(cid)
     state = ctx.state(cid)
     state.require_deps("s8")
+    brief = load_rework(ctx, cid, "G6")
     s8cfg = ctx.config.stage("s8")
     retries = int(s8cfg.get("max_check_retries", 3))
     short_max = int(s8cfg.get("short_prompt_max_chars", 1500))
@@ -171,15 +173,25 @@ def run_s8(
     spec = AgentSpec(
         role="prompter", output_contract="prompter-output-v1", stage="s8", max_check_retries=retries
     )
+    inputs: dict[str, Any] = {
+        "trait-sheet": dump(sheet),
+        "sections": sections,
+        "shortBudget": short_budget,
+        "character-name.txt": plan.name,
+    }
+    if brief is not None:
+        inputs["revision"] = {
+            "gate": brief.gate,
+            "round": brief.round,
+            "targets": [t.field for t in brief.targets],
+            "notes": {t.field: t.note for t in brief.targets},
+            "instructions": brief.instructions,
+            "keep": brief.keep,
+        }
     result = run_agent(
         spec,
         rev_dir / "workspace",
-        {
-            "trait-sheet": dump(sheet),
-            "sections": sections,
-            "shortBudget": short_budget,
-            "character-name.txt": plan.name,
-        },
+        inputs,
         [make_section_checks(sections, short_budget)],
         model,
         ref=f"{cid}/{rev}",

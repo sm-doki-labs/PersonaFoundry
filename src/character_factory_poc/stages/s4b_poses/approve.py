@@ -16,7 +16,11 @@ from character_factory_poc.contracts.scene import (
 )
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.gates import write_gate_record
-from character_factory_poc.stages.s4a_backgrounds.approve import answer_details, validate_choices
+from character_factory_poc.stages.s4a_backgrounds.approve import (
+    answer_details,
+    validate_choices,
+    validate_requested_changes,
+)
 from character_factory_poc.stages.s4b_poses.run import hands_problems
 
 
@@ -31,6 +35,7 @@ def approve_g4b(ctx: Context, cid: str, answer: dict) -> Path:
     decision = answer.get("decision")
     selections = []
     selected = resolved = None
+    changes: list[dict[str, str]] = []
     if decision in {"SELECT", "APPROVE"}:
         by_chapter = {ch.chapterId: {p.poseId: p for p in ch.candidates} for ch in poses.chapters}
         options = {ch: set(candidates) for ch, candidates in by_chapter.items()}
@@ -81,7 +86,9 @@ def approve_g4b(ctx: Context, cid: str, answer: dict) -> Path:
             "pose-plan-v1", {"characterId": cid, "sceneRev": gate.rev, "chapters": chapters}
         )
         selections = list(picks.values()) + [f"custom:{ch}" for ch in custom]
-    elif decision not in {"REQUEST_CHANGES", "REJECT"}:
+    elif decision == "REQUEST_CHANGES":
+        changes = validate_requested_changes(answer, "G4b")
+    elif decision != "REJECT":
         raise FactoryError("G4b 결정은 SELECT·APPROVE·REQUEST_CHANGES·REJECT 중 하나다")
     if selected:
         write_once_json(rev_dir / "selection.json", dump(selected))
@@ -99,6 +106,7 @@ def approve_g4b(ctx: Context, cid: str, answer: dict) -> Path:
         ],
         decision=decision,
         selections=selections,
+        requested_changes=changes,
         **details,
     )
     ctx.ledger(cid).record_human(gate="G4b", minutes=rec.minutes, ref=f"{cid}/{gate.rev}")

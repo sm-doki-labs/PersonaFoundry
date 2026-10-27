@@ -18,8 +18,10 @@ from character_factory_poc.common.store import (
     write_once_text,
 )
 from character_factory_poc.contracts.qa import QaSummary
+from character_factory_poc.contracts.rework import ReworkBrief
 from character_factory_poc.contracts.scene import PoseOutput, SceneWriterOutput
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.rework import load_rework
 from character_factory_poc.stages.image_qa import ensure_judge, qa_settings, worst_case_calls
 from character_factory_poc.stages.s2_hero.approve import load_appearance_spec
 from character_factory_poc.stages.s3_plan.importer import load_approved_plan_v2
@@ -38,6 +40,7 @@ from character_factory_poc.stages.s4a_backgrounds.run import (
 from character_factory_poc.stages.s4b_poses.page import render_g4b_page
 
 DEFAULTS = {"candidates_per_chapter": 3}
+CHAPTERS = ("ch1", "ch2", "ch3")
 FACE_CONTACT = re.compile(r"턱|볼|얼굴에|얼굴을|입가|chin|cheek|face|mouth", re.I)
 
 
@@ -182,6 +185,49 @@ def _pose_example(count: int) -> dict:
     }
 
 
+def rework_scope(ctx: Context, cid: str) -> tuple[ReworkBrief | None, Path | None, list[str]]:
+    """G4b 수정 요청이면 (브리프, 직전 rev 폴더, 다시 만들 챕터), 아니면 (None, None, 전부)."""
+    brief = load_rework(ctx, cid, "G4b")
+    if brief is None:
+        return None, None, list(CHAPTERS)
+    previous = ctx.character_dir(cid) / "s4b-poses" / brief.fromRev
+    if (
+        not (previous / "scene-plan.json").exists()
+        or not (previous / "pose-candidates.json").exists()
+    ):
+        return None, None, list(CHAPTERS)
+    fields = {t.field for t in brief.targets}
+    regenerate = [ch for ch in CHAPTERS if ch in fields]
+    if not regenerate:
+        return None, None, list(CHAPTERS)
+    return brief, previous, regenerate
+
+
+def revision_input(brief: ReworkBrief) -> dict:
+    return {
+        "gate": brief.gate,
+        "round": brief.round,
+        "targets": [t.field for t in brief.targets],
+        "notes": {t.field: t.note for t in brief.targets},
+        "instructions": brief.instructions,
+        "keep": brief.keep,
+    }
+
+
+def carry_scene_chapter(src_dir: Path, chapter, rev_dir: Path) -> dict:
+    """직전 revision의 장면 사실·배경 사진·자동 검사 보고서를 바이트 그대로 이월한다."""
+    carried = dump(chapter)
+    plate = carried["plate"]
+    src = src_dir / plate["path"]
+    if sha256_file(src) != plate["sha256"]:
+        raise CheckFailed("s4b", [f"{plate['path']} 해시가 직전 revision과 다르다"])
+    write_once_bytes(rev_dir / plate["path"], src.read_bytes())
+    raw_qa = carried.get("qa")
+    if raw_qa:
+        carry_qa(src_dir, rev_dir, QaSummary.model_validate(raw_qa))
+    return carried
+
+
 def run_s4b(ctx: Context, cid: str) -> Path:
     state = ctx.state(cid)
     state.require_deps("s4b")
@@ -191,6 +237,7 @@ def run_s4b(ctx: Context, cid: str) -> Path:
         raise CheckFailed("s4b", ["G3 기획이 바뀌었다. S4a에서 배경을 다시 고른다"])
     appearance, _ = load_appearance_spec(ctx, cid)
     cfg = s4b_config(ctx)
+    brief, previous, regenerate = rework_scope(ctx, cid)
     budget = ctx.budget()
     budget.check_plan(plan_calls(ctx))
     settings = qa_settings(ctx)
@@ -231,6 +278,8 @@ def run_s4b(ctx: Context, cid: str) -> Path:
             "chosen-backgrounds": chosen,
             "name-guard": guard,
         }
+        if brief is not None:
+            scene_inputs["revision"] = revision_input(brief)
         scene = call_agent(
             ctx,
             cid,
@@ -243,8 +292,17 @@ def run_s4b(ctx: Context, cid: str) -> Path:
             [check_scenes(chosen, guard)],
             _scene_example(chosen),
         )
+        prior_scene: dict[str, object] = {}
+        if previous is not None:
+            prev_plan = validate("scene-plan-v1", read_json(previous / "scene-plan.json"))
+            prior_scene = {ch.chapterId: ch for ch in prev_plan.chapters}
+        fresh_scene = {ch.chapterId: ch for ch in scene.chapters}
         chapters = []
-        for chapter in scene.chapters:
+        for chapter_id in CHAPTERS:
+            if previous is not None and chapter_id not in regenerate:
+                chapters.append(carry_scene_chapter(previous, prior_scene[chapter_id], rev_dir))
+                continue
+            chapter = fresh_scene[chapter_id]
             picked = next(ch for ch in chosen if ch["chapterId"] == chapter.chapterId)
             plate = picked.get("candidate", {}).get("plate")
             if plate:
@@ -295,6 +353,8 @@ def run_s4b(ctx: Context, cid: str) -> Path:
             "settings": {"count": cfg["candidates_per_chapter"]},
             "name-guard": guard,
         }
+        if brief is not None:
+            pose_inputs["revision"] = revision_input(brief)
         pose_out = call_agent(
             ctx,
             cid,
@@ -307,12 +367,25 @@ def run_s4b(ctx: Context, cid: str) -> Path:
             [check_poses(cfg["candidates_per_chapter"], guard)],
             _pose_example(cfg["candidates_per_chapter"]),
         )
+        prior_pose: dict[str, object] = {}
+        if previous is not None:
+            prev_pose_set = validate(
+                "pose-candidates-v1", read_json(previous / "pose-candidates.json")
+            )
+            prior_pose = {ch.chapterId: ch for ch in prev_pose_set.chapters}
+        fresh_pose = {ch.chapterId: ch for ch in pose_out.chapters}
+        pose_chapters = []
+        for chapter_id in CHAPTERS:
+            if previous is not None and chapter_id not in regenerate:
+                pose_chapters.append(dump(prior_pose[chapter_id]))
+            else:
+                pose_chapters.append(dump(fresh_pose[chapter_id]))
         pose_set = validate(
             "pose-candidates-v1",
             {
                 "characterId": cid,
                 "sceneRev": rev,
-                "chapters": [dump(ch) for ch in pose_out.chapters],
+                "chapters": pose_chapters,
             },
         )
         assert_no_names(scene_plan, guard)

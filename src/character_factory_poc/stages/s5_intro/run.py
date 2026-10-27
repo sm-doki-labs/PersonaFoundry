@@ -22,8 +22,10 @@ from character_factory_poc.common.store import (
     write_once_json,
     write_once_text,
 )
+from character_factory_poc.contracts.rework import ReworkBrief
 from character_factory_poc.contracts.video import IntroInputs, VideoAsset
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.rework import load_rework
 from character_factory_poc.providers.base import ImageRequest, VideoRequest
 from character_factory_poc.providers.xai_video import estimate_cost
 from character_factory_poc.stages.s2_hero.approve import load_appearance_spec
@@ -83,6 +85,26 @@ def estimate(ctx: Context, cfg: dict[str, Any]) -> float:
     return round(each * int(cfg["candidates"]), 4)
 
 
+def rework_prompt_block(brief: ReworkBrief) -> str:
+    """수정 요청을 영상 지시에 붙일 문장. 사람 메모 원문은 줄마다 그대로 남긴다(FR-46)."""
+    notes = [t.note for t in brief.targets]
+    parts = []
+    if notes:
+        parts.append("Revision notes (keep these in the regenerated clip):")
+        parts.extend(f"- {note}" for note in notes)
+    if brief.normalizedBy is not None and brief.instructions.strip():
+        parts.append("Revision instruction: " + brief.instructions.strip())
+    return "\n".join(parts)
+
+
+def motion_prompt(brief: ReworkBrief | None) -> str:
+    base = build_motion_prompt()
+    if brief is None:
+        return base
+    block = rework_prompt_block(brief)
+    return f"{base}\n\n{block}" if block else base
+
+
 def plan_calls(ctx: Context, cfg: dict[str, Any]) -> list[CallPlan]:
     pcfg = ctx.config.provider("video")
     n = int(cfg["candidates"])
@@ -126,6 +148,7 @@ def run_s5(ctx: Context, cid: str) -> Path:
     state.require_deps("s5")  # s2 승인(외모 명세) 필요(D-0042)
     spec, hero = load_appearance_spec(ctx, cid)
     cfg = s5_config(ctx)
+    brief = load_rework(ctx, cid, "G5")
     budget = ctx.budget()
     budget.check_plan(plan_calls(ctx, cfg))
     char_dir = ctx.character_dir(cid)
@@ -133,7 +156,7 @@ def run_s5(ctx: Context, cid: str) -> Path:
     rev_dir = char_dir / "s5-intro" / rev
     state.transition("s5", "RUNNING", rev=rev)
     try:
-        _run(ctx, cid, rev, rev_dir, spec, hero, cfg, budget)
+        _run(ctx, cid, rev, rev_dir, spec, hero, cfg, budget, brief)
     except (CheckFailed, VideoGenerationError, ImageGenerationError) as e:
         ctx.state(cid).transition("s5", "CHECK_FAILED", rev=rev, error=str(e))
         raise
@@ -192,7 +215,7 @@ def _first_frame(ctx, cid, rev, rev_dir, spec, hero, cfg, budget) -> tuple[dict,
     return first, source
 
 
-def _run(ctx, cid, rev, rev_dir, spec, hero, cfg, budget) -> None:
+def _run(ctx, cid, rev, rev_dir, spec, hero, cfg, budget, brief: ReworkBrief | None = None) -> None:
     video = ctx.video_model(cid, budget)
     video.check_settings(int(cfg["duration"]), str(cfg["resolution"]))  # 첫 프레임을 만들기 전에
     inputs_path = rev_dir / "inputs.json"
@@ -217,7 +240,7 @@ def _run(ctx, cid, rev, rev_dir, spec, hero, cfg, budget) -> None:
                 "provider": video.name,
                 "model": video.model,
                 "settings": {
-                    "prompt": build_motion_prompt(),
+                    "prompt": motion_prompt(brief),
                     "duration": int(cfg["duration"]),
                     "resolution": str(cfg["resolution"]),
                     "aspectRatio": cfg["aspect_ratio"],
