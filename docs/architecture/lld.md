@@ -363,7 +363,7 @@ S9~S11은 다음 단계로 둔다(D-0044, §8.8~§8.11): `s9s` 데이터 샘플(
 
 **`Context` 지연 생성.** 공급자 객체를 처음 만드는 부분(`_text`·`_judge`·`_image`·`_video`·`_vision`·`_codex`)을 `threading.Lock` 하나로 감싼다. 예산(`Budget`)은 단계 실행 함수가 `ctx.budget()`으로 따로 만들기 때문에 공유하지 않는다.
 
-**계산 함수.** `pipeline/scheduler.py`의 `ready_stages(state: StateFile, runners: Mapping[str, Callable], attempted: set[str]) -> list[str]`. `STAGES` 순서를 유지해 다음을 모두 만족하는 단계를 돌려준다. 실행 함수가 있고 `implemented`다. 상태가 `PENDING`·`RUNNING`·`CHECK_FAILED`·`REJECTED` 가운데 하나다. `require_deps`를 통과한다. `attempted`에 없다.
+**계산 함수.** `pipeline/scheduler.py`의 `ready_stages(state: StateFile, runners: Mapping[str, Callable], attempted: set[str]) -> list[str]`. `STAGES` 순서를 유지해 다음을 모두 만족하는 단계를 돌려준다. 실행 함수가 있고 `implemented`다. 상태가 `PENDING`·`RUNNING`·`CHECK_FAILED`·`REJECTED` 가운데 하나다. `require_deps`를 통과한다. `attempted`에 없다. 그래프에 없지만 실행 함수가 직접 확인하는 선행 단계는 `extra_needs`로 받는다. 외모 축 캐릭터의 s3는 s2 승인이 필요하다(`extra_needs_for(appearance_axis)`). 순차 훑기는 `STAGES` 순서라 이 조건이 저절로 지켜진다.
 
 **물결 실행.** `run_waves(ctx: Context, cid: str, opt: RunOptions) -> RunLog`. 순서는 다음과 같다. (1) `run_until`과 같은 건너뜀 기록(외모 축 없음·`--ranking` 없음)을 남긴다. (2) `ready_stages`로 이번 물결을 고르고, 워크숍 실행이면 유료 단계를 덜어 `RunLog.held`에 넣는다(§6.7). (3) `ThreadPoolExecutor(max_workers=opt.max_parallel)`로 동시에 돈다. 단계마다 기존 `run_until`의 한 단계 처리(실행·예외별 기록·관문 대기 처리·자동 승인)를 그대로 쓰는 `_run_one(ctx, cid, sid, opt, runners) -> StageOutcome`를 부른다. (4) 물결이 끝나면 단계별 기록 줄을 `STAGES` 순서로 `RunLog.steps`에 붙여 기록이 실행 순서와 상관없이 같게 한다. (5) `--until`에 닿았거나 고를 단계가 없으면 멈춘다. 끝에 `run_until`과 같은 형식으로 기다리는 관문·시작하지 못한 단계를 보고한다.
 
@@ -377,7 +377,7 @@ S9~S11은 다음 단계로 둔다(D-0044, §8.8~§8.11): `s9s` 데이터 샘플(
 
 `JobManager.submit(character_id, action="run", until=None, *, confirm: list[str] | None = None, trigger: "manual" | "gate" = "manual")`. `Job`에 `trigger`·`confirm`·`held`를 더해 기록과 SSE `job` 이벤트에 싣는다. `_run_default`는 `RunOptions(until, max_parallel=[orchestrator] max_parallel, web=True, confirmed=set(confirm))`로 실행한다.
 
-`JobManager.request_resume(character_id) -> dict | None`. `[orchestrator] auto_resume`가 꺼져 있으면 `None`. 그 캐릭터 작업이 돌고 있으면 `_rerun[character_id] = True`만 남기고 `None`. 아니면 `submit(character_id, until=resume_until, trigger="gate")`. 작업이 끝날 때(`_run`의 `finally`) 표시가 있으면 지우고 같은 방식으로 한 번 더 넣는다. `POST .../gates/{gate}/decision`은 결정을 기록한 뒤 `request_resume`을 부르고, 응답에 `resumeJob`(넣은 작업 또는 `null`)을 싣는다.
+`JobManager.request_resume(character_id) -> dict | None`. `[orchestrator] auto_resume`가 꺼져 있으면 `None`. 그 캐릭터 작업이 돌고 있으면 `_rerun[character_id] = True`만 남기고 `None`. 아니면 `submit(character_id, until=resume_until, trigger="gate")`. 작업이 끝나 캐릭터 잠금을 놓은 뒤 표시가 있으면 지우고 같은 방식으로 한 번 더 넣는다. 작업 목록은 `(createdAt, 만든 순서)`로 정렬해 같은 초에 만든 작업도 순서가 맞다. 물결 실행의 작업 스레드는 `RunOptions.wrap_worker`로 감싸 작업 로그에 출력이 모인다. `POST .../gates/{gate}/decision`은 결정을 기록한 뒤 `request_resume`을 부르고, 응답에 `resumeJob`(넣은 작업 또는 `null`)을 싣는다.
 
 **유료 단계.** `STAGE_PROVIDERS`(`pipeline/scheduler.py`)는 단계가 쓰는 공급자 종류다. s1 `{text, image}`, s2 `{image, vision}`, s3·s3r·s7·s9s·s9 `{text}`, s4a·s4b `{text, image}`, s4 `{image}`, s5·s6 `{video, image}`, s8·s10 `{text, judge}`, s10t `{tuning}`, s11·sx는 없음. `paid_stage(ctx, sid) -> bool`은 그 가운데 `adapter != "fake"`이고 공급자 표의 `paid = true`인 것이 있으면 참이다. 워크숍 실행(`opt.web`)에서 `paid_stage`이고 `sid not in opt.confirmed`면 단계를 돌리지 않고 `RunLog.held`에 넣는다. `GET /api/characters/{id}`는 마지막 작업의 `held`와, held 단계마다 `plan_calls`로 만든 호출 계획 문장(가능한 단계만)을 `held[]: {stage, plan}`으로 싣는다. 화면의 "실행" 버튼은 `POST /api/jobs {characterId, action: "run", confirm: [stage]}`를 보낸다.
 
