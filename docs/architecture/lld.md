@@ -304,7 +304,7 @@ v1(동작 카탈로그 8개, D-0039)은 실제 산출물 없이 v2로 바뀌었�
 
 ### 5.19 `gate-review-v1` (D-0049, 명세 §7.2)
 
-`{schemaVersion, subjectId, gate, rev, reviewer{provider, model, family}, mode: "llm"|"vision"|"deterministic", shownArtifacts[{ref, sha256}], items[{candidateId, chapterId?, rank?, verdict: "RECOMMEND"|"OK"|"CONCERN", reasons[], defects[{field, note}]}], summary, createdAt}`. 저장 위치는 관문 단계 폴더의 `<rev>/review-<gate>.json`이고 한 번만 쓴다. `candidateId`는 관문 화면 항목 ID(`web/gate_items.py`가 만드는 ID)와 같다. 고르기 관문은 챕터(또는 동작)마다 `rank` 1이 정확히 하나다. 승인 관문(G4·G6·G7·G9)은 `rank` 없이 `verdict`·`defects`만 쓴다.
+`{schemaVersion, subjectId, gate, rev, reviewer{provider, model, family}, mode: "llm"|"vision"|"deterministic", shownArtifacts[{ref, sha256}], items[{candidateId, chapterId?, rank?, verdict: "RECOMMEND"|"OK"|"CONCERN", reasons[], defects[{field, note}]}], summary, createdAt}`. 저장 위치는 `<캐릭터 폴더>/reviews/<gate>-<rev>.json`이고 한 번만 쓴다. 단계 revision 폴더 안에 두면 매니페스트·패키지 파일 목록에 없는 파일이 생겨 해시 검사가 깨진다(통합 시험에서 G9 검토가 내보내기 해시 검사를 깨뜨려 옮겼다). `candidateId`는 관문 화면 항목 ID(`web/gate_items.py`가 만드는 ID)와 같다. 고르기 관문은 챕터(또는 동작)마다 `rank` 1이 정확히 하나다. 승인 관문(G4·G6·G7·G9)은 `rank` 없이 `verdict`·`defects`만 쓴다. G5b는 후보 ID가 동작마다 겹쳐 `candidateId`를 `<actionId>:<candidateId>`로 쓴다(관문 기록 `selections`와 같은 형식). G9는 화면 후보가 없어 `items`를 비우고 `summary`에 패키지 검사 결과를 요약한다.
 
 ### 5.20 `rework-brief-v1` (D-0049, 명세 §7.3)
 
@@ -379,7 +379,7 @@ S9~S11은 다음 단계로 둔다(D-0044, §8.8~§8.11): `s9s` 데이터 샘플(
 
 `JobManager.request_resume(character_id) -> dict | None`. `[orchestrator] auto_resume`가 꺼져 있으면 `None`. 그 캐릭터 작업이 돌고 있으면 `_rerun[character_id] = True`만 남기고 `None`. 아니면 `submit(character_id, until=resume_until, trigger="gate")`. 작업이 끝나 캐릭터 잠금을 놓은 뒤 표시가 있으면 지우고 같은 방식으로 한 번 더 넣는다. 작업 목록은 `(createdAt, 만든 순서)`로 정렬해 같은 초에 만든 작업도 순서가 맞다. 물결 실행의 작업 스레드는 `RunOptions.wrap_worker`로 감싸 작업 로그에 출력이 모인다. `POST .../gates/{gate}/decision`은 결정을 기록한 뒤 `request_resume`을 부르고, 응답에 `resumeJob`(넣은 작업 또는 `null`)을 싣는다.
 
-**유료 단계.** `STAGE_PROVIDERS`(`pipeline/scheduler.py`)는 단계가 쓰는 공급자 종류다. s1 `{text, image}`, s2 `{image, vision}`, s3·s3r·s7·s9s·s9 `{text}`, s4a·s4b `{text, image}`, s4 `{image}`, s5·s6 `{video, image}`, s8·s10 `{text, judge}`, s10t `{tuning}`, s11·sx는 없음. `paid_stage(ctx, sid) -> bool`은 그 가운데 `adapter != "fake"`이고 공급자 표의 `paid = true`인 것이 있으면 참이다. 워크숍 실행(`opt.web`)에서 `paid_stage`이고 `sid not in opt.confirmed`면 단계를 돌리지 않고 `RunLog.held`에 넣는다. `GET /api/characters/{id}`는 마지막 작업의 `held`와, held 단계마다 `plan_calls`로 만든 호출 계획 문장(가능한 단계만)을 `held[]: {stage, plan}`으로 싣는다. 화면의 "실행" 버튼은 `POST /api/jobs {characterId, action: "run", confirm: [stage]}`를 보낸다.
+**유료 단계.** `STAGE_PROVIDERS`(`pipeline/scheduler.py`)는 단계가 쓰는 공급자 종류다. s1 `{text, image}`, s2 `{image, vision}`, s3·s3r·s7·s9s·s9 `{text}`, s4a·s4b `{text, image}`, s4 `{image}`, s5·s6 `{video, image}`, s8·s10 `{text, judge}`, s10t `{tuning}`, s11·sx는 없음. `paid_stage(ctx, sid) -> bool`은 그 가운데 `adapter != "fake"`이고 공급자 표의 `paid = true`인 것이 있으면 참이다. 워크숍 실행(`opt.web`)에서 `paid_stage`이고 `sid not in opt.confirmed`면 단계를 돌리지 않고 `RunLog.held`에 넣는다. `GET /api/characters/{id}`는 마지막 작업의 `held`와, held 단계마다 그 단계가 쓰는 유료 공급자(`paid_providers`, "종류: 어댑터/모델")를 `held[]: {stage, providers}`로 싣는다. 정확한 호출 수·비용은 그 단계 명령의 dry run이 낸다. 화면의 "실행" 버튼은 `POST /api/jobs {characterId, action: "run", until: "sx", confirm: [stage]}`를 보낸다.
 
 ### 6.8 관문 사전 검토 (D-0049, 명세 §7.2)
 
@@ -390,7 +390,7 @@ S9~S11은 다음 단계로 둔다(D-0044, §8.8~§8.11): `s9s` 데이터 샘플(
 - 검증: 답에서 JSON을 뽑아(`extract_json_object`) `candidateId`가 보여 준 항목 안에 있는지, 고르기 관문이면 단위마다 `rank` 1이 하나인지 본다. 실패하면 사유를 붙여 한 번 더 부르고, 그래도 실패하면 기록을 쓰지 않는다.
 - `review_on_open`: `[review] enabled`와 `gates`를 보고, 비전 관문이면 `[review] vision`도 본다. `ctx.execute`가 아니면 돌지 않는다. 예외는 잡아서 원장(`kind=REVIEW`, `ok=false`)에 남기고 `None`.
 - 관문 기록: `write_gate_record`가 `load_review(char_dir, gate, rev)`로 검토를 찾으면 `reviewRef`를 채운다. `followedReview`는 고르기 관문에서 단위마다 `rank` 1인 `candidateId`가 모두 `selections`에 들어 있으면 참, 하나라도 빠지면 거짓, 검토가 없거나 승인 관문이면 비운다.
-- 화면: `reads.gate_view`가 `review`(현재 관문 rev와 같은 것만)를 돌려준다. 관문 화면은 후보 카드에 "추천"·"걸리는 점" 표시와 근거 한두 줄을 붙이고, 검토가 없으면 "검토 없음"을 쓴다. G7a·G8 화면은 바꾸지 않는다.
+- 화면: `reads.gate_view`가 `review`(현재 관문 rev와 같은 것만)를 돌려준다. 관문 화면은 후보 카드에 "추천"·"걸리는 점" 표시와 근거 한두 줄을 붙이고, 검토가 없으면 "검토 없음"을 쓴다. G7a·G8 화면은 바꾸지 않는다. 구현 메모: G7 기록은 `s9_data/approve.py`가 직접 쓰므로 그 경로에서도 `review_fields`로 검토 참조를 채운다. `cfp review --execute`는 사람이 직접 부른 명령이라 `[review] enabled`·`gates`를 건너뛰지만 이미지 관문은 `vision = true`를 계속 요구한다. G4b 자세 후보는 그린 이미지가 없어 챕터 배경 사진과 자세 글을 함께 넣는다. `review_on_open`은 관문이 `AWAITING_HUMAN`일 때만 돈다.
 
 ### 6.9 수정 요청 재작업 (D-0049, 명세 §7.3)
 
@@ -399,14 +399,14 @@ S9~S11은 다음 단계로 둔다(D-0044, §8.8~§8.11): `s9s` 데이터 샘플(
 - `prepare_rework`: 단계의 관문이 `REWORK_GATES`에 있고 그 관문의 마지막 기록이 `REQUEST_CHANGES`일 때만 일한다(아니면 `True`). `round > max_rounds`이고 `sid not in opt.confirmed`면 `False`. 아니면 `rework-brief-v1`을 쓰고(이미 있으면 그대로) `True`.
 - `load_rework`: 관문 상태의 `rev`(거절된 rev)와 `fromRev`가 같은 브리프를 돌려준다. 단계 실행 함수가 시작할 때 부른다.
 - 단계별 부분 재생성: s4a·s4b는 `targets[].field`가 챕터 ID(`ch1`~`ch3`)이고 그 챕터만 다시 만들며, 다른 챕터의 후보 파일은 직전 rev에서 바이트 그대로 복사한다. s5는 소개 영상 후보 전체를 다시 만들되 메모를 영상 지시에 붙인다. s8은 프롬프트 쌍을 다시 만들되 메모를 Prompter 입력에 붙인다. 이미 메모를 읽는 G1(`cfp ref faces` 경로)·G4·G5b는 지금 동작을 유지하고 반복 상한만 같이 쓴다. 실행기는 G1이 `REQUEST_CHANGES`면 s1 실행 함수로 `run_faces`를 쓴다(`--ranking`이 없어도).
-- 관문 페이지·답 검사: G4a·G4b는 `REQUEST_CHANGES`에 `requestedChanges[{field: chN, note}]`를 받는다(중복 없는 챕터, 빈 메모 거절). 워크숍 관문 화면은 수정 차수("수정 2/3")와 상한 도달을 보여 준다.
+- 관문 페이지·답 검사: G4a·G4b는 `REQUEST_CHANGES`에 `requestedChanges[{field: chN, note}]`를 받는다(중복 없는 챕터, 빈 메모 거절). 워크숍 관문 화면은 수정 차수("수정 2/3")와 상한 도달을 보여 준다. 구현 메모: G1·G5·G6 화면은 메모를 `reasons`에 담으므로 `requestedChanges`가 비었으면 `reasons` 원문을 대상 하나로 담는다. G4a·G4b는 옛 형식(`reasons`만 있는 수정 요청)도 받고 그때는 세 챕터를 모두 다시 만든다. 워크숍 G4a·G4b 화면은 챕터별 메모 칸으로 `requestedChanges`를 보낸다. 단계 출력 계약이 세 챕터를 요구해 에이전트는 세 챕터를 다 내지만, 대상이 아닌 챕터의 후보·배경 사진은 직전 rev 파일을 그대로 옮긴다. s5 재작업은 첫 프레임도 새로 만든다. `capReached`는 `round >= max_rounds`(다음 수정 요청이 상한을 넘는 상태)이고, 막는 것은 `round > max_rounds`일 때다.
 
 ### 6.10 대기열과 사람 시간 보고서 (D-0049, 명세 §7.4)
 
 `pipeline/queue.py`: `QueueItem(gate, stage, rev, openedAt, unblocks: int, unblockedStages: list[str])`, `downstream_stages(gate: str) -> list[str]`, `gate_queue(char_dir: Path, state: State) -> list[QueueItem]`.
 
 - `downstream_stages`: `STAGES`의 `deps`(관문 → 단계)와 `needs`·`after`(단계 → 단계), 단계의 `gate`(단계 → 관문)를 따라 닿는 단계를 `STAGES` 순서로 돌려준다.
-- `gate_queue`: `AWAITING_HUMAN` 관문마다 아직 `APPROVED`·`SKIPPED`가 아닌 뒤쪽 단계 수를 `unblocks`로 센다. `unblocks` 내림차순, 같으면 `openedAt`(원장 관문 사건, 없으면 단계 `updatedAt`) 오름차순, 그다음 `GATES` 순서로 정렬한다.
+- `gate_queue`: `AWAITING_HUMAN` 관문마다 아직 `APPROVED`·`SKIPPED`가 아닌 뒤쪽 단계 수를 `unblocks`로 센다. `unblocks` 내림차순, 같으면 `openedAt`(원장 관문 사건, 없으면 단계 `updatedAt`) 오름차순, 그다음 `GATES` 순서로 정렬한다. `rev`·`openedAt`은 비어 있을 수 있다. 같은 rev가 여러 번 열렸으면 가장 이른 `opened`, 결정이 여러 번이면 가장 늦은 `decided`를 쓴다. 뒤쪽 단계 계산은 실행 함수가 직접 확인하는 선행(외모 축 s3 ← s2)도 따른다.
 - 화면: `reads.character_detail`와 `list_projects`의 캐릭터 항목에 `queue`를 싣고, 작업실·운영 화면의 대기 관문 목록을 이 순서로 그린다. `held`(§6.7)를 "실행 확인 대기" 칩과 "실행" 버튼으로 그린다.
 - `pipeline/hil_report.py`의 `build_hil_report(char_dir: Path) -> HilReport`와 `cfp report hil`. 대기 시간은 `decided.at - opened.at`(분)이다.
 

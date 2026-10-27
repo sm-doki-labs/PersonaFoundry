@@ -561,17 +561,37 @@
       .join('');
     return (
       '<section class="gate-body">' + sections + '</section>' +
-      changeNoteSection('다시 만들 때 고칠 점', '어떤 배경을 어떻게 바꿀지 챕터와 함께 적는다.')
+      chapterChangeSection(items.chapters, '다시 만들 챕터에만 적는다. 적지 않은 챕터는 그대로 둔다.')
     );
   }
 
-  function changeNoteSection(title, hint) {
+  // D-0049: 수정 요청은 챕터별 메모(requestedChanges)로 보내 요청한 챕터만 다시 만든다.
+  function chapterChangeSection(chapters, hint) {
+    var rows = list(chapters)
+      .map(function (chapter) {
+        var ch = chapter.chapterId;
+        return (
+          '<label class="card-sub">' + esc(ch) + (chapter.title ? ' · ' + esc(chapter.title) : '') +
+          '</label>' +
+          '<textarea data-chapter-note="' + esc(ch) + '" placeholder="' + esc(ch) +
+          '를 다시 만들 때만: 무엇을 바꿀지"></textarea>'
+        );
+      })
+      .join('');
     return (
-      '<section class="gate-section"><h2>' + esc(title) + '</h2>' +
-      '<p class="section-sub">' + esc(hint) + '</p>' +
-      '<textarea data-change-note placeholder="예: ch2를 낮 시간 실내로, 사람은 없이"></textarea>' +
-      '</section>'
+      '<section class="gate-section"><h2>다시 만들 때 고칠 점</h2>' +
+      '<p class="section-sub">' + esc(hint) + '</p>' + rows + '</section>'
     );
+  }
+
+  function collectChapterChanges() {
+    var changes = [];
+    qa('[data-chapter-note]').forEach(function (node) {
+      var note = node.value.trim();
+      if (note) changes.push({ field: node.getAttribute('data-chapter-note'), note: note });
+    });
+    if (!changes.length) throw Error('다시 만들 챕터에 고칠 점을 적어 주세요.');
+    return changes;
   }
 
   function collectPicks(container) {
@@ -596,9 +616,7 @@
     var answer = { decision: decision };
     if (decision === 'SELECT') Object.assign(answer, collectPicks(document));
     if (decision === 'REQUEST_CHANGES') {
-      var note = (q('[data-change-note]') || {}).value || '';
-      if (!note.trim()) throw Error('다시 만들 때 고칠 점을 적어 주세요.');
-      answer.reasons = details().reasons || note.trim();
+      answer.requestedChanges = collectChapterChanges();
     }
     return Object.assign(answer, details());
   }
@@ -666,7 +684,7 @@
       .join('');
     return (
       sections +
-      changeNoteSection('다시 만들 때 고칠 점', '어떤 자세를 어떻게 바꿀지 챕터와 함께 적는다.')
+      chapterChangeSection(items.chapters, '다시 만들 챕터에만 적는다. 적지 않은 챕터는 그대로 둔다.')
     );
   }
 
@@ -694,9 +712,7 @@
       answer.tweaks = collectTweaks(choices.picks);
     }
     if (decision === 'REQUEST_CHANGES') {
-      var note = (q('[data-change-note]') || {}).value || '';
-      if (!note.trim()) throw Error('다시 만들 때 고칠 점을 적어 주세요.');
-      answer.reasons = details().reasons || note.trim();
+      answer.requestedChanges = collectChapterChanges();
     }
     return Object.assign(answer, details());
   }

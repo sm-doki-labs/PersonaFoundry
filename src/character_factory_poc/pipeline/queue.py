@@ -76,7 +76,12 @@ def reachable_stages(gate: str) -> set[str]:
 
     deps(관문 → 단계)와 needs·after(단계 → 단계)로 단계에 닿고, 닿은 단계의 gate(단계 →
     관문)로 다음 관문에 이어진 뒤 다시 deps를 본다.
+    실행 함수가 직접 확인하는 선행(외모 축 s3 ← s2, scheduler.extra_needs_for)도 따른다.
+    s2는 외모 축 캐릭터에만 있으므로 이 간선을 늘 넣어도 페르소나 우선 경로에 영향이 없다.
     """
+    from character_factory_poc.pipeline.scheduler import extra_needs_for
+
+    hidden = extra_needs_for(True)
     stages: set[str] = set()
     gates: set[str] = {gate}
     changed = True
@@ -85,7 +90,8 @@ def reachable_stages(gate: str) -> set[str]:
         for sid, stage in STAGES.items():
             if sid in stages:
                 continue
-            if not (stage.deps & gates or stage.needs & stages or stage.after & stages):
+            needs = stage.needs | hidden.get(sid, frozenset())
+            if not (stage.deps & gates or needs & stages or stage.after & stages):
                 continue
             stages.add(sid)
             changed = True

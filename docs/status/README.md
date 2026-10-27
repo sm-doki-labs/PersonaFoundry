@@ -17,6 +17,7 @@
 
 | 날짜 | 문서 | 요지 |
 |---|---|---|
+| 2026-10-28 | [handoff-2026-10-28-agentic.md](handoffs/handoff-2026-10-28-agentic.md) | 에이전틱 실행(D-0049·D-0050): 결정 뒤 자동 재개·물결 실행, 관문 사전 검토, 수정 요청 재작업, 대기열·`cfp report hil`, 유료 단계 실행 확인. B·C·D는 하위 에이전트 병렬 구축. 515 passed. |
 | 2026-10-28 | [handoff-2026-10-28-prompt-only.md](handoffs/handoff-2026-10-28-prompt-only.md) | 학습 없이 긴 프롬프트로 패키지까지(D-0048, K-0038 해결), 학습 제출은 `--submit-training`만. G7a~G9 브라우저 확인과 화면 문제 7가지 수정. 464 passed. |
 | 2026-10-27 | [handoff-2026-10-27-poc-h.md](handoffs/handoff-2026-10-27-poc-h.md) | H 갈래: 그래프·관문·`cfp` 명령·웹 G7a~G9 연결(D-0047). 여성·남성 합성 브리프가 S1 → G9 → 일회용 DB 적재까지 통과, 462 passed. K-0011·K-0012·K-0037 해결, K-0038·K-0039. |
 | 2026-10-27 | [handoff-2026-10-27-poc-m8-2.md](handoffs/handoff-2026-10-27-poc-m8-2.md) | C·D1·D2·E·G2 합침, 이름 바꾸기(`character_factory_poc`·`cfp`·`CFP_`), 444 passed(일회용 Docker DB 실제 적재 포함). 다음은 H 갈래(그래프·관문·CLI 연결, 전체 흐름 테스트). |

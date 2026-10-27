@@ -559,10 +559,11 @@
   }
 
   // "실행" 버튼: 이 단계만 실행을 확인했다고 함께 보낸다(POST /api/jobs confirm).
+  // 자동 재개와 같이 끝(sx)까지 돌려 다른 갈래도 이어서 진행한다.
   function confirmRun(characterId, stage) {
     setError('');
     api
-      .startRun(characterId, null, [stage])
+      .startRun(characterId, 'sx', [stage])
       .then(function () {
         return refresh();
       })
