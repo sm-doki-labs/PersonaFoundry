@@ -63,12 +63,18 @@ STAGES: dict[str, Stage] = {
             gate="G6",
             implemented=True,
         ),
-        Stage("s9", "학습 데이터", deps=frozenset({"G6"}), gate="G7"),
-        Stage("s10", "SFT·평가", deps=frozenset({"G7"}), gate="G8"),
-        Stage("s11", "릴리즈", deps=frozenset({"G5", "G8"}), gate="G9"),
+        # D-0044·D-0045, LLD §6.1·§8.8~§8.11: 학습 가이드 절차대로 샘플(G7a) → 대량(G7),
+        # 학습(관문 없음, PoC는 dry run) → 평가(G8) → 패키지(G9) → 우리 앱 내보내기.
+        # implemented는 단계 코드가 연결되는 통합 갈래(H)에서 켠다.
+        Stage("s9s", "데이터 샘플", deps=frozenset({"G6"}), gate="G7a"),
+        Stage("s9", "학습 데이터", deps=frozenset({"G7a"}), gate="G7"),
+        Stage("s10t", "SFT 학습", deps=frozenset({"G7"})),
+        Stage("s10", "평가", deps=frozenset({"G7"}), after=frozenset({"s10t"}), gate="G8"),
+        Stage("s11", "릴리즈 패키지", deps=frozenset({"G4", "G5", "G5b", "G6", "G8"}), gate="G9"),
+        Stage("sx", "우리 앱 내보내기", deps=frozenset({"G9"})),
     ]
 }
 
 # G2는 결번이다(D-0042). 옛 state.json의 G2 칸은 읽기만 하고 쓰지 않는다.
-GATES = ["G1", "G3", "G4a", "G4b", "G4", "G5", "G5b", "G6", "G7", "G8", "G9"]
+GATES = ["G1", "G3", "G4a", "G4b", "G4", "G5", "G5b", "G6", "G7a", "G7", "G8", "G9"]
 RETIRED_GATES = {"G2": "G2는 결번이다(D-0042). 외모는 G1에서 한 번 고르고 S2가 자동으로 고정한다"}
