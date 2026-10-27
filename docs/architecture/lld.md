@@ -68,8 +68,8 @@ agentic-character-factory/
       s10_eval/        prereg.py, run.py, metrics.py, judge.py, page.py, approve.py   (G8, §8.9)
       s11_release/     package.py, page.py, approve.py   (G9, §8.10)
       export/          doki_app/api_svc.py, doki_app/chat_svc.py, verify.py   (§8.11)
-    collectors/        순위 수집기 포트·출처 어댑터·가짜(§9)
-    web/               워크숍 웹앱: app.py, jobs.py, events.py, static/(§6.5)
+    collectors/        순위 수집기: port.py(`RankingSource`), http.py(`FetchSettings`·`HttpFetcher`), rankify.py, fake.py, collect.py(`plan_collection`·`collect_ranking`), errors.py(§8.1, §9)
+    web/               워크숍 웹앱: app.py, reads.py(읽기 모델·경로 탈출 차단), jobs.py, events.py(SSE), settings.py(`[web]`), errors.py, static/(§6.5)
     checks/
       vision_judge.py  항목별 일관성 판정
       pair_judge.py    정순·역순 짝 판정과 합의
@@ -334,6 +334,8 @@ S9~S11은 다음 단계로 둔다(D-0044, §8.8~§8.11): `s9s` 데이터 샘플(
 
 새 관문의 답 형식: G7a `{"decision": "SELECT"|"REQUEST_CHANGES", "cluster": "<clusterId>", "verdicts": {"<conversationId>": "ADOPT"|"FIX"|"REJECT"}, "notes": {...}}`, G7 `{"decision": "APPROVE"|"REQUEST_CHANGES", "verdicts": {...}}`(무작위 표본 20개), G8 `{"decision": "SELECT", "adopted": "LONG_BASE"|"<model_binding ref>", "humanPicks": [{"pairId", "pick"}]}`, G9 `{"decision": "APPROVE"|"REJECT", "reasons": "..."}`.
 
+구현 메모(2026-10-27, M8 1차): `/api/projects`는 `characters[]`(단계·관문·대기 관문·진행률·마지막 작업)와 `briefs[]`·`totals`를, `/api/characters/{id}`는 원본 `state` + `lanes`·`pendingGates`를, 관문 항목은 `files`·`previews`(URL)·`record`·`records`를 돌려준다. 작업 ID는 `job-<시각>-<hex>`, 상태는 `queued|running|succeeded|failed`이고 `[web] jobs_dir`(기본 `work/web-jobs`)에 남으며 재시작 때 끝나지 않은 작업은 실패로 정리한다. SSE 이벤트 이름은 `hello|job|state|gate`다. 오류: 없음 404, 형식 400, 이미 결정된 관문·동시 작업 409, 아직 구현되지 않은 관문 501, 캐릭터 폴더 밖 파일 400. 관문 결정과 작업은 캐릭터별 잠금으로 순서를 지킨다. 관문별 상세 화면은 아직 없고(K-0037), 대기 관문 칩은 검토 항목 JSON을 연다.
+
 ## 7. 에이전트 러너 (명세 §4)
 
 구현(D-0014): 백엔드는 둘이다. `[agent] backend = "codex_exec"`이면 아래 codex 경로, 아니면 API 경로(한 번 호출·러너 재시도)다. codex 경로의 작업 공간은 `AGENTS.md`(역할 프롬프트 + `prompts/common-procedure.md` + 입력 목록 + 계약 이름), `inputs/`, `contract-example.json`, `check.sh`(현재 venv의 python으로 `acf.checks.cli <stage> .` 실행)로 이루어진다. 실행은 `codex exec --json --skip-git-repo-check -m <model> -s workspace-write -C <workspace> -c model_reasoning_effort=... [-c mcp_servers={}]`이다. 이벤트에서 `command_execution` 명령·`agent_message`·`turn.completed` 사용량을 모으고, 명령 문자열의 절대 경로·`~`·`../`가 작업 공간 밖이면 `TaintedOutputError`다. 러너는 실행 뒤 `acf.checks.registry.run_checks`로 다시 검사하고, 실패하면 사유를 프롬프트에 붙여 같은 작업 공간에서 재실행한다(최대 `max_check_retries`). 단계별 검사 묶음은 `checks/registry.py`가 작업 공간 inputs에서 재구성하므로 에이전트와 러너가 같은 검사를 쓴다.
@@ -382,6 +384,8 @@ def run_agent(spec, workspace, inputs, checks, provider) -> AgentResult
 
 **faces(다시 만들기, D-0043).** `REQUEST_CHANGES` 기록의 `note`를 받아 새 `rf<k>`를 만든다. `ranking.json`·`people.json`·`features.json`·`report.json`는 직전 rf에서 바이트 그대로 복사하고(`settings.carriedFrom`), 미리보기 프롬프트 끝에 `Revision note: <메모>`를 붙여 얼굴만 다시 만든다. 메모도 이미지 호출 전에 이름 유출 검사를 한다.
 
+구현 메모(2026-10-27, M8 1차, D-0042·D-0043·D-0046): G1 페이지는 외모군마다 얼굴 라디오(`name="face"`)·추천 표시·고칠 점 메모 칸을 보여 준다. `SELECT`는 `referencePreviews` 정확히 한 장이고 외모군은 그 얼굴에서 정한다(`selections` 생략 가능, 기록은 `[외모군, 얼굴]`). `REQUEST_CHANGES`는 `note`가 필수다. `acf ref faces`는 새 `rf<k>`에 순위·인물·특징·보고서를 바이트 그대로 복사하고 `carried-from.json`(`fromRev`, 파일별 sha256, 메모)을 쓴다(보고서를 고칠 수 없으므로 `settings.carriedFrom` 대신). 순위 목록 입수는 `acf ref collect` → `runs/rankings/<시각>-<출처>/ranking.json` + `collection-record.json` → `acf ref run --ranking`이다. 목록 `gender`가 캐릭터 성별과 같을 때만 쓰고, 혼성 목록(배우)은 `characterGender = any`에서만 쓴다. 계약에 항목별 출처 칸이 없어 `listId`와 수집 기록으로 근거를 되짚는다. 수집 목록은 분류당 10명이라 기본 군집 설정(`cluster_k = 4`, `min_members_per_cluster = 3`)과 맞지 않는다(K-0035).
+
 ### 8.2 S2 기준 사진 (D-0042, D-0043)
 
 구현: `stages/s2_hero/`, 진입점 `run.run_s2(ctx, cid)`. 단계 상태 `s2`, rev `ar<k>`, 사람 관문 없음. 지금 코드는 아직 옛 흐름(후보 4장 → G2)이다(K-0034).
@@ -397,6 +401,8 @@ def run_agent(spec, workspace, inputs, checks, provider) -> AgentResult
 **고정.** 통과하면 통과한 시도를 `candidates/h1.png`로 복사하고 `candidates.json`, `appearance-spec.json`(설명은 어휘의 한국어·영어 표기를 이어 붙인다. 금지 요소 기본값은 문자·워터마크·로고와 "실존 인물의 이름이나 사진을 생성 지시로 쓰지 않는다(D-0017)"), `manifest.sha256`을 쓰고 `s2`를 `APPROVED`로 둔다. 관문 기록은 만들지 않는다. 끝까지 통과하지 못하면 D-0037 (4)와 달리 가장 나은 시도를 넘기지 않는다. `s2`는 `CHECK_FAILED`이고 `lastError`에 FAIL 항목과 `qa/` 보고서 경로를 적는다. 외모 명세는 쓰지 않는다. 다시 실행(`acf hero run`)은 새 `ar<k>`를 만든다. 이미지 실패·이름 유출도 `CHECK_FAILED`다.
 
 **워크숍 화면 연결.** 시안(`d-ops.html`)은 S2를 결재가 아닌 자동 작업으로 보이고, 시도마다 실패·자동 재시도를 작업 기록에 남기며, 최종 실패는 "사람 확인 필요" 문제로 다시 실행·G1 얼굴 그대로 쓰기(`picked`)를 제시한다. 연결층은 `qa/` 보고서와 `state.json`의 `s2` 상태를 그대로 읽는다.
+
+구현 메모(2026-10-27, M8 1차): `base_photo = "picked"`를 구현했다. G1 얼굴을 기준 이미지로 복사하고(이미지·판정 호출 0회) `appearance-spec-v1`에 `basePhoto: picked`, `identityCheck: {status: SKIPPED, attempts: 0}`을 쓰며 `s2`는 바로 `APPROVED`다. `hero-candidate`는 만들지 않는다. `generate`는 아무것도 쓰기 전에 K-0034와 `picked` 안내로 거절한다(D-0045 (5)). 문서상 기본값은 `generate`이므로 PoC 설정은 `picked`를 명시한다. `load_appearance_spec`은 `s2` 승인을 읽고, G2 기록만 있는 옛 상태는 읽기 전용으로 받아 준다. `s2` 승인 뒤 G1 얼굴을 바꾸는 것은 막고 S1을 새 rev로 다시 돌리게 한다.
 
 ### 8.3 S3 기획
 
@@ -501,7 +507,7 @@ G9 승인 패키지를 우리 앱 두 시스템의 공식 적재 입력으로 �
 | `codex_exec` | §7 참조. |
 | `xai_video` | `POST {base}/videos/generations`에 `{model, prompt, image: {url: data URI}, duration, resolution, generate_audio[, aspect_ratio]}`를 보내 `request_id`를 받는다. `GET {base}/videos/{id}`를 `poll_interval_s`마다 조회해 status가 done이면 `video.url`을 키 없이 바로 내려받고, failed·expired·error면 사유와 함께 실패, `timeout_s`를 넘으면 `VideoTimeoutError(job_id)`. 429·5xx는 지수 대기 3회. 키는 `api_key_env`(기본 `XAI_API_KEY`)로만 읽고 없으면 호출 전에 실패. 비용은 단가표(1.5: 480p $0.08·720p $0.14·1080p $0.25/초, 1.5-lite: $0.02·$0.03·$0.14/초, 2026-10-21) × 실제 초 + 입력 이미지 $0.01. |
 | `grok_web` | 기본 꺼짐(`accept_terms_risk = true` 필요, D-0029). `playwright`(`--extra web`)의 `connect_over_cdp(cdp_url)`로 사용자가 띄운 전용 프로필 Chrome에 붙어 새 탭을 앞으로 가져와 Imagine을 연다. 화면 흐름은 2026-10-21 로그인 화면에 맞췄다(D-0032): 입력 폼(`form:has(button[type=submit])`) 안에서 비디오 모드 버튼 → 해상도 라디오(`480p`·`720p`) → 길이 라디오(`6s`·`10s`·`15s`) → 소리 버튼(`aria-pressed`를 요청과 맞춤) → 파일 입력에 첫 프레임 업로드(이미지 제거 버튼이 보일 때까지 대기, 업로드 뒤 종횡비 버튼이 사라지고 영상은 이미지 비율을 따름) → 편집기(`[contenteditable]`)에 프롬프트(들어갔는지 확인) → 제출. 제출 뒤 주소가 `/imagine/post/<id>`로 바뀌면 그 id가 든 `<video>`의 주소(assets.grok.com의 `generated_video.mp4`)를 로그인 세션 요청으로 받는다(다운로드 버튼은 다운로드 이벤트가 오지 않아 쓰지 않는다). 옵션 클릭이나 제출 뒤 주소에 `#subscribe`가 붙으면(결제 창) 등급 제한·사용량 소진으로 바로 실패한다. 90초 안에 결과 페이지로 넘어가지 않으면 제출 안 됨으로 실패한다. 웹에 없는 길이·해상도는 S5가 첫 프레임을 만들기 전에 `check_settings`로 거절한다. 어느 단계든 실패하면 `~/.acf/grok-web-work/<job>/error-<단계>.png` 스크린샷을 남기고 `VideoGenerationError`. 탭만 닫고 사용자의 Chrome은 닫지 않는다. 재개 불가(`resumable = False`), 비용 0, 작업 ID는 `web-<hex>:<post id>`. 복구층(Stagehand `act()`)은 자리만 둔다. |
-| `grok_oauth` | `VideoModel`. 요청·상태 처리는 `xai_video`와 같고 인증만 OAuth 접근 토큰(Bearer)이다. 토큰은 `token_file`(기본 opencodex 인증 파일의 활성 xAI 계정)이나 `token_env`에서 읽고, 값을 출력·기록하지 않는다. 만료면 다시 로그인하라는 오류를 낸다(새로 고침 없음). 명시해야 켜진다. 실제 호출 확인 전이다(D-0044 (3)). |
+| `grok_oauth` | `VideoModel`. 요청·상태 처리는 `xai_video`와 같고 인증만 OAuth 접근 토큰(Bearer)이다. 토큰은 `token_file`(기본 opencodex 인증 파일의 활성 xAI 계정)이나 `token_env`에서 읽고, 값을 출력·기록하지 않는다. 만료면 다시 로그인하라는 오류를 낸다(새로 고침 없음). 명시해야 켜진다. 실제 호출 확인 전이다(D-0044 (3)). 토큰 해석 순서: `token_env` → `token_file`의 `xai.accounts[id == xai.activeAccountId].credential.access`, `credential.expires`는 epoch 밀리초로 본다(로컬 파일 기준 가정). 요청·상태·비용은 `XaiVideoModel`을 상속해 같다. 공급자 응답에 토큰이 섞여 와도 오류 메시지에서 지운다. |
 | 순위 수집기(`src/acf/collectors/`) | 출처별 어댑터 + 가짜. 이용 조건 확인 기록이 없는 출처는 거절하고, 호출 계획(dry run)을 먼저 낸다. 요청 간격·User-Agent·재시도는 설정값. 출처 조사는 `docs/research/2026-10-27-ranking-sources.md`. |
 | `gemma_qlora` | `TrainingProvider`: 임대 GPU QLoRA(§8.9). |
 | `vertex_gemini` | `TrainingProvider`: Vertex 튜닝(§8.9). `gemini-sft-poc`의 구현을 참고하되 코드는 복사하지 않는다. 옛 이름 `vertex_tuning`을 대체한다. |

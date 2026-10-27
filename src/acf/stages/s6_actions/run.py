@@ -101,7 +101,7 @@ def _duration(cfg: dict, key: str) -> int:
 
 def estimate(ctx: Context, cfg: dict[str, Any], calls: int = 1) -> float:
     pcfg = ctx.config.provider("video")
-    if pcfg.adapter != "xai_video":
+    if pcfg.adapter not in {"xai_video", "grok_oauth"}:
         return 0.0
     each = estimate_cost(
         pcfg.model or "grok-imagine-video-1.5-lite",

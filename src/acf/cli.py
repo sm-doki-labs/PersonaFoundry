@@ -168,6 +168,51 @@ def cmd_ref_faces(args) -> int:
     return 0
 
 
+def cmd_ref_collect(args) -> int:
+    """S1 순위 수집(B 갈래). 결과는 acf ref run --ranking에 그대로 넘긴다."""
+    from acf.collectors import (
+        DEFAULT_CATEGORIES,
+        CollectRequest,
+        RankifySource,
+        collect_ranking,
+        now_utc,
+        plan_collection,
+    )
+    from acf.collectors.http import FetchSettings
+    from acf.common.config import load_config
+    from acf.common.store import write_once_json
+    from acf.contracts.reference import RankingScope
+
+    root = _root(args)
+    collect_cfg = dict(load_config(root).stage("s1").get("collect", {}))
+    scope = RankingScope(
+        characterGender=args.character_gender,
+        ageRange=args.age_range,
+        artStyle=args.art_style,
+        appearanceOrigin=args.origin,
+    )
+    if args.categories:
+        categories = tuple(c.strip() for c in args.categories.split(",") if c.strip())
+    else:
+        categories = tuple(collect_cfg.pop("categories", None) or DEFAULT_CATEGORIES)
+    collect_cfg.pop("categories", None)
+    request = CollectRequest(scope=scope, categories=categories)
+    settings = FetchSettings.from_mapping(collect_cfg)
+    source = RankifySource()
+    if not args.execute:
+        print(plan_collection(source, request, settings=settings))
+        return 0
+    result, record = collect_ranking(source, request, settings=settings)
+    stamp = now_utc().replace(":", "").replace("-", "")
+    out_dir = (
+        Path(args.out) if args.out else root / "runs" / "rankings" / f"{stamp}-{source.source_id}"
+    )
+    write_once_json(out_dir / "ranking.json", result.document())
+    write_once_json(out_dir / "collection-record.json", record)
+    print(f"순위 목록: {out_dir / 'ranking.json'}\n수집 기록: {out_dir / 'collection-record.json'}")
+    return 0
+
+
 def _run_stage(args, stage: str, module, fn_name: str, done: str) -> int:
     """단계 하나를 dry run(호출 계획) 또는 --execute로 돌린다(D-0033 흐름 공통)."""
     ctx = Context.load(_root(args), execute=args.execute, max_calls=args.max_calls)
@@ -455,6 +500,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--execute", action="store_true")
     s.add_argument("--max-calls", type=int, default=None)
     s.set_defaults(fn=cmd_ref_faces)
+    s = ref.add_parser(
+        "collect",
+        help="S1 화제성 순위 자동 수집(D-0044 (4)). 기본은 호출 계획만, --execute로 수집",
+    )
+    s.add_argument("--character-gender", required=True, choices=["female", "male", "any"])
+    s.add_argument("--age-range", default="20s")
+    s.add_argument("--art-style", default="photoreal")
+    s.add_argument("--origin", default="korean", choices=["korean", "east-asian", "unspecified"])
+    s.add_argument("--categories", default=None, help="쉼표 목록. 없으면 설정·기본값")
+    s.add_argument("--out", default=None, help="기본 runs/rankings/<시각>-<출처>/")
+    s.add_argument("--execute", action="store_true")
+    s.set_defaults(fn=cmd_ref_collect)
 
     hero = sub.add_parser("hero").add_subparsers(dest="sub", required=True)
     s = hero.add_parser(

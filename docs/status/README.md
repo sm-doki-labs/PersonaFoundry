@@ -17,6 +17,7 @@
 
 | 날짜 | 문서 | 요지 |
 |---|---|---|
+| 2026-10-27 | [handoff-2026-10-27-poc-m8-1.md](handoffs/handoff-2026-10-27-poc-m8-1.md) | 새 Git 프로젝트 `character-factory-poc`로 이동. PoC 계약(S9~S11·패키지·내보내기, LLD v1.3)과 A 외모 한 번 고르기(`picked`)·B 순위 수집(랭키파이, D-0046)·F Grok OAuth·G 워크숍 서버 뼈대 합침, 347 passed, 실제 호출 없음. K-0035~K-0037, Q-0022. |
 | 2026-10-27 | [handoff-2026-10-27-poc-plan.md](handoffs/handoff-2026-10-27-poc-plan.md) | 3일 PoC 계획 확정(D-0044 확정, D-0045 제안): 결과물은 캐릭터가 아닌 파이프라인 코드, S9~S11·워크숍 웹앱·패키지와 우리 앱 변환기·순위 수집·Grok OAuth 어댑터, 가짜 공급자로 끝까지 통과, 실제 호출은 순위 수집·이미지·LLM만. 코드 변경 없음. |
 | 2026-10-27 | [handoff-2026-10-27-face-once.md](handoffs/handoff-2026-10-27-face-once.md) | 외모를 G1에서 한 번만 고르고 S2를 자동 기준 사진·동일인 검사로, G2 제거(D-0042 확정, D-0043 제안). PRD·명세·LLD v1.2, K-0033(데모 G1 미리보기 9장이 같은 replay 그림)·K-0034(코드 미반영), Q-0021. 코드 변경·실제 호출 없음. |
 | 2026-10-22 | [handoff-2026-10-22-s6-clips.md](handoffs/handoff-2026-10-22-s6-clips.md) | S6 동작 목록을 앱 통화 영상으로 확정(D-0040, D-0041): 앱 `clip_key`·표준 37편·첫 실행 6편×3챕터, 무표정 첫 프레임, sexy 제외, 계약 v2, Q-0010 해결, 278 passed, 실제 호출 없음. |
@@ -26,7 +27,6 @@
 | 2026-10-22 | [handoff-2026-10-22-vision-qa.md](handoffs/handoff-2026-10-22-vision-qa.md) | 배경 사진·완성 이미지 비전 평가자 루프(D-0036, D-0037): 판정 → 편집 수정 최대 2회, 미통과도 경고와 함께 사람에게, 비전 포트·OpenAI 호환 판정 어댑터, 221 passed, 실제 판정 경로 미확인(Q-0020). |
 | 2026-10-22 | [handoff-2026-10-22-planning-flow.md](handoffs/handoff-2026-10-22-planning-flow.md) | 기획 씨앗 → 변형 3안 → G3, 참고 자료 선별, 배경 → G4a → 장면 사실·자세 → G4b → 완성 이미지 → G4(D-0033~D-0035), 갈래별 진행 오케스트레이터, 하위 에이전트 3개로 구현, 182 passed. |
 | 2026-10-21 | [handoff-2026-10-21-shorts.md](handoffs/handoff-2026-10-21-shorts.md) | 소개 영상 9:16 확정과 세로 첫 프레임 생성(D-0031), grok.com 실제 화면 맞춤과 웹 영상 1편 확인(D-0032), 무료 등급 한도로 S5 웹 전체 실행은 막힘(Q-0018), API 호출 없음, 89 passed. |
-| 2026-10-21 | [handoff-2026-10-21-video.md](handoffs/handoff-2026-10-21-video.md) | S5 소개 영상 R0 편입(D-0028), 공식 API 어댑터 `xai_video`와 Grok 웹 어댑터 `grok_web`(기본 꺼짐, D-0029), G5 사람 선택, 기본값 실행당 약 $0.50(D-0030), 유료 호출 없음, 83 passed. |
 
 새 인계를 쓰면 `handoffs/`에 두고 이 표의 맨 위에 한 줄을 추가한다. 표는 최근 10개만 유지하고 나머지는 `handoffs/` 파일 목록으로 찾는다.
 
