@@ -1,5 +1,5 @@
-// 시안 화면 위에 실제 공장 값을 얹는 얇은 패널. 프로젝트 목록·단계 진행·대기 관문·작업 실행.
-// 관문별 상세 화면은 다음 단계다. 여기서는 대기 관문과 검토 항목 JSON까지 연결한다.
+// 시안 화면 위에 실제 공장 값을 얹는 얇은 패널. 프로젝트 목록·갈래별 진행·대기 관문·작업 큐.
+// 대기 관문 칩은 관문 상세 화면(gate.html)을 연다. 값은 SSE(state·gate·job)로 갱신한다.
 (function () {
   'use strict';
   var api = window.CF_API;
@@ -28,9 +28,12 @@
     s6: '동작 영상',
     s7: '특질',
     s8: '프롬프트',
+    s9s: '데이터 샘플',
     s9: '데이터셋',
-    s10: '학습·평가',
-    s11: '출시'
+    s10t: '학습',
+    s10: '평가',
+    s11: '패키지',
+    sx: '내보내기'
   };
   var UNTIL_CHOICES = ['G3', 'G4a', 'G4b', 'G4', 'G5', 'G5b', 'G6'];
 
@@ -86,23 +89,125 @@
     return gates
       .map(function (g) {
         var href =
-          'c-glass.html?character=' +
+          'gate.html?character=' +
           encodeURIComponent(character.id) +
           '&gate=' +
           encodeURIComponent(g.id);
         var json = api.base + '/api/characters/' + encodeURIComponent(character.id) + '/gates/' + encodeURIComponent(g.id);
         return (
-          '<a class="cf-gate" href="' +
-          json +
-          '" target="_blank" rel="noopener" title="검토 항목 JSON을 연다. 관문 상세 화면은 다음 단계다.">' +
+          '<span class="cf-gatewrap"><a class="cf-gate" href="' +
+          href +
+          '" title="' +
+          esc(g.id + ' ' + (g.title || '') + ' 상세 화면을 연다') +
+          '">' +
           '<b>' +
           esc(g.id) +
           '</b>' +
           esc(g.title || '') +
-          '</a>'
+          ' <em>열기</em></a>' +
+          '<a class="cf-gate-json" href="' +
+          json +
+          '" target="_blank" rel="noopener" aria-label="' +
+          esc(g.id + ' 검토 항목 JSON') +
+          '">JSON</a></span>'
         );
       })
       .join(' ');
+  }
+
+  function laneBars(character) {
+    var lanes = character.lanes || [];
+    if (!lanes.length) return '';
+    return (
+      '<div class="cf-lanes" role="list" aria-label="갈래별 진행">' +
+      lanes
+        .map(function (lane) {
+          var percent = Number(lane.percent || 0);
+          var title = lane.label + ' · ' + lane.done + '/' + lane.total;
+          if (lane.pendingGates && lane.pendingGates.length) {
+            title += ' · 대기 ' + lane.pendingGates.join(', ');
+          }
+          return (
+            '<a class="cf-lane is-' +
+            esc(lane.status) +
+            '" role="listitem" href="' +
+            laneHref(character, lane) +
+            '" title="' +
+            esc(title) +
+            '">' +
+            '<span class="cf-lane-name">' +
+            esc(lane.label) +
+            '</span>' +
+            '<span class="cf-lane-bar"><i style="width:' +
+            percent +
+            '%"></i></span>' +
+            '<span class="cf-lane-num">' +
+            lane.done +
+            '/' +
+            lane.total +
+            '</span>' +
+            (lane.pendingGates && lane.pendingGates.length
+              ? '<span class="cf-lane-gate">' + esc(lane.pendingGates.join(' · ')) + '</span>'
+              : '') +
+            '</a>'
+          );
+        })
+        .join('') +
+      '</div>'
+    );
+  }
+
+  function laneHref(character, lane) {
+    var id = encodeURIComponent(character.id);
+    if (!lane.pendingGates || !lane.pendingGates.length) {
+      return 'c-glass.html?character=' + id;
+    }
+    return 'gate.html?character=' + id + '&gate=' + encodeURIComponent(lane.pendingGates[0]);
+  }
+
+  function jobChip(job) {
+    var active = job.status === 'running' || job.status === 'queued';
+    var label =
+      job.status === 'succeeded'
+        ? '완료'
+        : job.status === 'failed'
+          ? '실패'
+          : active
+            ? '진행 중'
+            : job.status;
+    var tail = job.stoppedAt ? ' · ' + job.stoppedAt + ' 멈춤' : '';
+    return (
+      '<li class="cf-queue-item is-' +
+      esc(active ? 'running' : job.status) +
+      '"><b>' +
+      esc(label) +
+      '</b><span>' +
+      esc(job.characterId) +
+      ' · ' +
+      esc(job.until) +
+      '까지' +
+      esc(tail) +
+      '</span><code>' +
+      esc(job.jobId) +
+      '</code></li>'
+    );
+  }
+
+  function queueList(data, characterId) {
+    var jobs = (data.jobs || []).filter(function (job) {
+      return !characterId || job.characterId === characterId;
+    });
+    var items = jobs.slice(0, 6);
+    var running = (data.totals || {}).runningJobs || 0;
+    return (
+      '<div class="cf-queue"><h3>작업 큐 <span class="cf-quiet">진행 ' +
+      running +
+      '</span></h3>' +
+      (items.length
+        ? '<ul>' + items.map(jobChip).join('') + '</ul>'
+        : '<p class="cf-quiet">최근 작업이 없다.</p>') +
+      '</div>'
+    );
   }
 
   function jobLine(character) {
@@ -188,6 +293,7 @@
       Number(progress.percent || 0) +
       '%"></i></div>' +
       stageChips(character) +
+      laneBars(character) +
       '<div class="cf-gates">대기 관문 ' + gateLinks(character) + '</div>' +
       runControls(character) +
       (character.stateError ? '<p class="cf-warn">' + esc(character.stateError) + '</p>' : '') +
@@ -236,6 +342,7 @@
       : '<p class="cf-empty">runs/briefs가 비어 있어요.</p>';
     return (
       '<div class="cf-chars">' + cards + '</div>' +
+      queueList(data) +
       '<div class="cf-brief-block"><h3>브리프</h3>' + briefList + '</div>'
     );
   }
@@ -263,10 +370,24 @@
     }
     var params = new URLSearchParams(location.search);
     var gate = params.get('gate');
+    var pending = (character.pendingGates || []).filter(function (g) {
+      return !gate || g.id === gate;
+    });
     var note = gate
-      ? '<p class="cf-note">' + esc(gate) + ' 검토 항목은 아래 대기 관문 링크에서 JSON으로 볼 수 있어요. 관문 화면은 다음 단계입니다.</p>'
-      : '<p class="cf-note">시안의 후보 고르기 흐름은 그대로 두고, 위쪽에는 실제 상태만 보여 줍니다.</p>';
-    return characterCard(character, true) + note;
+      ? '<p class="cf-note">' +
+        esc(gate) +
+        ' 상세 화면을 엽니다. 아래 관문 칩을 누르면 고르기·승인·수정 요청을 그 화면에서 합니다.</p>'
+      : '<p class="cf-note">대기 관문 칩을 누르면 관문 상세 화면이 열립니다. 갈래 막대를 누르면 그 갈래의 관문으로 갑니다.</p>';
+    var jump = pending.length
+      ? '<p class="cf-jump"><a class="cf-btn cf-btn--primary" href="gate.html?character=' +
+        encodeURIComponent(character.id) +
+        '&gate=' +
+        encodeURIComponent(pending[0].id) +
+        '">' +
+        esc(pending[0].id + ' ' + (pending[0].title || '') + ' 열기') +
+        '</a></p>'
+      : '';
+    return characterCard(character, true) + jump + queueList(data, character.id) + note;
   }
 
   function renderRoot(root) {

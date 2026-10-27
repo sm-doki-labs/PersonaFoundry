@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>캐릭터 공장 · 관문</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="shared/base.css">
+<link rel="stylesheet" href="shared/glass.css">
+<link rel="stylesheet" href="shared/gate.css">
+</head>
+<body class="theme-glass gate-page">
+<div class="ambient" aria-hidden="true"><div class="amb is-on" style="background-image:url('assets/hero-b.jpg')"></div><div class="amb-veil"></div></div>
+<div class="gate-wrap">
+  <header class="topbar appbar glass">
+    <div class="brand"><span class="brand-mark"><i data-icon="aperture">◆</i></span>Character Factory <small>캐릭터 공장</small></div>
+    <nav class="pills" aria-label="화면">
+      <a class="pill-tab" href="d-ops.html#chars">운영</a>
+      <a class="pill-tab" href="c-glass.html" data-workroom-link>작업실</a>
+    </nav>
+    <nav class="crumbs" data-crumbs aria-label="위치"><a href="c-glass.html">작업실</a></nav>
+    <div class="top-right"><span class="gate-status" data-gate-status>읽는 중</span></div>
+  </header>
+
+  <main class="gate-main">
+    <section class="gate-head">
+      <p class="kicker" data-kicker>관문</p>
+      <h1 data-title>관문을 여는 중…</h1>
+      <p class="desc" data-desc></p>
+      <p class="gate-meta" data-meta></p>
+      <div class="gate-banners" data-banners></div>
+    </section>
+    <section class="gate-body" data-body aria-live="polite"></section>
+    <section class="gate-raw" data-raw hidden>
+      <details><summary>이 revision 파일</summary><ul data-files></ul></details>
+      <details><summary>최근 관문 기록 JSON</summary><pre data-records></pre></details>
+    </section>
+  </main>
+
+  <aside class="gate-side glass" aria-label="결정">
+    <h2>결정</h2>
+    <p class="side-hint" data-side-hint>고른 뒤 아래 버튼을 누르면 관문 기록이 남습니다.</p>
+    <div class="side-actions" data-actions></div>
+    <details class="side-more">
+      <summary>검토자 · 소요 시간 · 사유 (선택)</summary>
+      <label>검토자 <input type="text" data-reviewer value="user"></label>
+      <label>소요 분 <input type="number" data-minutes min="0" step="any" value="0"></label>
+      <label>사유·메모 <textarea data-reasons rows="3"></textarea></label>
+    </details>
+    <button type="button" class="btn btn--ghost btn--wide" data-preview>답 JSON 보기</button>
+    <pre class="answer-json" data-answer-json hidden></pre>
+    <p class="side-status" role="status" data-status></p>
+  </aside>
+</div>
+<script src="shared/api.js"></script>
+<script src="shared/gate.js"></script>
+</body>
+</html>
