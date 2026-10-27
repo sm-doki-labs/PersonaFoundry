@@ -2,6 +2,7 @@
 
 from acf.contracts import (  # noqa: F401
     common,
+    dataset,
     frames,
     hero,
     persona,
@@ -10,6 +11,8 @@ from acf.contracts import (  # noqa: F401
     qa,
     reference,
     refs,
+    release,
     scene,
+    training,
     video,
 )

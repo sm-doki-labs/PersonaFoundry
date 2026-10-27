@@ -1,10 +1,10 @@
 # 에이전틱 캐릭터 공장 상세 설계 (LLD)
 
-- 문서 버전: v1.2
+- 문서 버전: v1.3
 - 작성일: 2026-10-14
 - 상태: 초안, 사용자 검토 전
-- 근거: [PRD v1.2](../product/prd.md), [시스템 명세 v1.2](spec.md). 이 문서는 명세를 코드로 옮기는 세부만 정하고 다른 결정을 담지 않는다. 절마다 근거가 되는 명세 절을 `(명세 §n)`으로 적는다.
-- 변경 이력: v0.1 최초 작성 / v0.2(2026-10-20) S1을 화제성 순위 → 외모 특징 프록시로 바꾸고 §2~§5·§8.1·§9~§13을 고쳤다(D-0017, D-0018) / v0.3(2026-10-20) 인물 인상 칸과 계약 v2(§5.2·§5.5·§8.1·§10, D-0020, D-0021) / v0.4(2026-10-21) G1 참조 사진·S2 구현(§2~§5·§5.7·§5.8·§8.1·§8.2·§9·§10·§12·§13, D-0022, D-0023) / v0.5(2026-10-21) S3 외모 연결, S4·G4 구현(§2~§5·§5.10·§8.3·§8.4·§12, D-0024~D-0026) / v0.6(2026-10-21) S5·G5와 xai_video·grok_web 어댑터(§2~§5·§5.11·§8.5·§9·§10·§12·§13, D-0028~D-0030) / v0.7(2026-10-21) 9:16 세로 첫 프레임과 `intro-inputs-v2`(§3·§4·§5.11·§8.5, D-0031), 실제 grok.com 화면에 맞춘 `grok_web`(§9, D-0032) / v0.8(2026-10-22) 씨앗 → 변형 기획, S3r 참고 자료, S4a·S4b·S4 배경 → 자세 → 완성 이미지, 갈래별 진행 오케스트레이터(§2~§6·§8.3·§8.3a·§8.4·§11·§12, D-0033~D-0035) / v0.9(2026-10-22) 이미지 자동 검사·수정 루프(§2·§3·§5.10b·§8.4a·§9·§11·§12, D-0036, D-0037) / v1.0(2026-10-22) S6 동작 영상 골격과 G5b(§2~§5·§5.11a·§6.1·§8.5a·§11·§12, D-0038, D-0039) / v1.1(2026-10-22) 앱 통화 영상 카탈로그, 무표정 첫 프레임, 계약 v2(§2~§4·§5.11a·§8.5·§11·§12, D-0040, D-0041) / v1.2(2026-10-27) 얼굴은 G1에서 한 장만 고르고 S2를 자동 기준 사진·동일인 검사로 바꿔 G2를 없앴다. 아직 코드에는 반영하지 않았다(§2~§4·§5.7·§5.8·§5.9·§5.17·§6.1·§8.1~§8.5·§11~§13, D-0042, D-0043)
+- 근거: [PRD v1.3](../product/prd.md), [시스템 명세 v1.3](spec.md). 이 문서는 명세를 코드로 옮기는 세부만 정하고 다른 결정을 담지 않는다. 절마다 근거가 되는 명세 절을 `(명세 §n)`으로 적는다.
+- 변경 이력: v0.1 최초 작성 / v0.2(2026-10-20) S1을 화제성 순위 → 외모 특징 프록시로 바꾸고 §2~§5·§8.1·§9~§13을 고쳤다(D-0017, D-0018) / v0.3(2026-10-20) 인물 인상 칸과 계약 v2(§5.2·§5.5·§8.1·§10, D-0020, D-0021) / v0.4(2026-10-21) G1 참조 사진·S2 구현(§2~§5·§5.7·§5.8·§8.1·§8.2·§9·§10·§12·§13, D-0022, D-0023) / v0.5(2026-10-21) S3 외모 연결, S4·G4 구현(§2~§5·§5.10·§8.3·§8.4·§12, D-0024~D-0026) / v0.6(2026-10-21) S5·G5와 xai_video·grok_web 어댑터(§2~§5·§5.11·§8.5·§9·§10·§12·§13, D-0028~D-0030) / v0.7(2026-10-21) 9:16 세로 첫 프레임과 `intro-inputs-v2`(§3·§4·§5.11·§8.5, D-0031), 실제 grok.com 화면에 맞춘 `grok_web`(§9, D-0032) / v0.8(2026-10-22) 씨앗 → 변형 기획, S3r 참고 자료, S4a·S4b·S4 배경 → 자세 → 완성 이미지, 갈래별 진행 오케스트레이터(§2~§6·§8.3·§8.3a·§8.4·§11·§12, D-0033~D-0035) / v0.9(2026-10-22) 이미지 자동 검사·수정 루프(§2·§3·§5.10b·§8.4a·§9·§11·§12, D-0036, D-0037) / v1.0(2026-10-22) S6 동작 영상 골격과 G5b(§2~§5·§5.11a·§6.1·§8.5a·§11·§12, D-0038, D-0039) / v1.1(2026-10-22) 앱 통화 영상 카탈로그, 무표정 첫 프레임, 계약 v2(§2~§4·§5.11a·§8.5·§11·§12, D-0040, D-0041) / v1.2(2026-10-27) 얼굴은 G1에서 한 장만 고르고 S2를 자동 기준 사진·동일인 검사로 바꿔 G2를 없앴다. 아직 코드에는 반영하지 않았다(§2~§4·§5.7·§5.8·§5.9·§5.17·§6.1·§8.1~§8.5·§11~§13, D-0042, D-0043) / v1.3(2026-10-27) 3일 PoC 계약: §4 명령(S1 수집·S9~S11·내보내기·웹앱), §5.14·§5.15·§5.17을 새 계약(`data-plan-v1` 등, `training-run-v2` 등, `character-package-v1`·`export-result-v1`)으로 바꾸고, §6.5 워크숍 API, §8.8~§8.11(S9 샘플·대량 두 단계와 G7a, S10 학습·평가 분리, 패키지, 우리 앱 내보내기), §9 어댑터(`grok_oauth`, 순위 수집기, `gemma_qlora`, `vertex_gemini`), §12 M8을 더했다(D-0044, D-0045)
 
 ## 1. 범위와 기준
 
@@ -37,7 +37,8 @@ agentic-character-factory/
       xai_video.py     VideoGen: xAI 공식 API(D-0028)
       grok_web.py      VideoGen: Playwright + 전용 Chrome 프로필(CDP), 기본 꺼짐(D-0029)
       fake_video.py    VideoGen 가짜
-      vertex_tuning.py Tuning(R1)
+      grok_oauth.py    VideoGen: xAI 영상 API를 OAuth 접근 토큰으로(D-0044 (3))
+      training/        TrainingProvider: gemma_qlora.py(임대 GPU), vertex_gemini.py, fake.py(D-0044)
       fake_image.py    ImageGen 가짜 어댑터(단색 PNG)
       codex_image.py   ImageGen: ChatGPT 구독 codex exec image_gen(D-0019)
       fake.py          모든 포트의 가짜 어댑터
@@ -62,9 +63,13 @@ agentic-character-factory/
       s6_actions/      app_clips.py(앱 표준 37편 사본), catalog.py, run.py, page.py, approve.py   (동작 영상·무표정 첫 프레임·G5b·동작별 부분 재생성, D-0038·D-0040. qa.py는 R1)
       s7_traits/       sheet.py, check.py
       s8_prompts/      build.py, align.py, probe.py
-      s9_data/         sns_rewrite.py, nikl.py, synth.py, split.py, qa.py
-      s10_train/       prereg.py, submit.py, collect.py, eval.py
-      s11_release/     manifest.py
+      s9_data/         plan.py, handoff.py, samples.py, build.py, checks.py, split.py, page.py, approve.py   (G7a·G7, §8.8)
+      s10_train/       plan.py, submit.py, collect.py   (학습, 관문 없음, §8.9)
+      s10_eval/        prereg.py, run.py, metrics.py, judge.py, page.py, approve.py   (G8, §8.9)
+      s11_release/     package.py, page.py, approve.py   (G9, §8.10)
+      export/          doki_app/api_svc.py, doki_app/chat_svc.py, verify.py   (§8.11)
+    collectors/        순위 수집기 포트·출처 어댑터·가짜(§9)
+    web/               워크숍 웹앱: app.py, jobs.py, events.py, static/(§6.5)
     checks/
       vision_judge.py  항목별 일관성 판정
       pair_judge.py    정순·역순 짝 판정과 합의
@@ -154,7 +159,13 @@ agentic-character-factory/
 | `acf persona traits [--references refs.json] [--reference-doc card.json ...]` | S7. 참조 ID 목록과 카드 본문을 에이전트 입력에 넣는다. |
 | `acf persona prompts --probes probes.txt` | S8. 프롬프트 쌍·말투 확인 표본·G6 페이지. 직전 실행이 표본 단계에서 끊겼으면 같은 rev에서 이어 간다. |
 | `acf persona probe --probes probes.txt` | 고정된 프롬프트 쌍은 두고 표본만 다시 돌린다. 결과는 `prompt-probe-r<k>.json`으로 누적되고 G6 페이지는 다시 만든다. |
-| `acf data build|qa` / `acf train prereg|submit|collect|eval` / `acf release build` | S9~S11(R1). |
+| `acf ref collect --source <source_id> [--categories female,male] [--execute]` | S1 실제 순위 수집(D-0044 (4)). 기본은 호출 계획(어떤 URL을 몇 번)만 낸다. 실행하면 `popularity-ranking-v2`를 쓰고 출처·수집 시각·이용 조건 확인 기록을 남긴다. 이용 조건이 자동 수집을 허용하지 않는 출처는 거절한다. |
+| `acf data plan|samples|build <character_id> [--execute]` | S9(§8.8). `plan`은 G6 승인 프롬프트 쌍으로 `data-plan-v1`을 고정한다. `samples`는 클러스터별 인계안(`data-handoff-v1`)과 샘플(`data-sample-v1`)을 만들고 G7a 대기로 둔다. `build`는 G7a 승인 뒤 나머지를 작성·검사·분할해 `dataset-rev-v2`를 만들고 G7 대기로 둔다. 기본은 호출 계획만, `--execute`로 작성 모델을 부른다. |
+| `acf train plan|submit|collect <character_id> --provider gemma_qlora|vertex_gemini` | S10 학습(§8.9). `plan`은 `training-run-v2`(`dryRun=true`: 요청 설정·전송 파일·비용 추정)을 쓴다. PoC는 여기까지다(D-0044 (9)). `submit`·`collect`는 `--execute`와 사용자 지시가 있어야 하고, 비용 추정이 상한을 넘으면 제출하지 않는다. |
+| `acf eval prereg|run|judge|report <character_id>` | S10 평가(§8.9). 사전 등록 → 조건별 응답 수집(`eval-run-v1`) → LLM 짝 판정 → 보고서(`eval-report-v2`) → G8 대기. |
+| `acf release build <character_id>` | S11(§8.10). 승인된 revision으로 `character-package-v1` 패키지를 만들고 G9 대기로 둔다. |
+| `acf export doki-app <character_id> [--verify]` | 우리 앱 변환(§8.11). G9 승인 패키지를 api-svc 시드 묶음과 chat-svc 콘텐츠 트리로 바꾸고 `export-result-v1`을 쓴다. `--verify`는 일회용 PostgreSQL 두 개에 적재해 확인한다. |
+| `python -m acf.web --root <공장 루트> [--port 8765]` | 워크숍 웹앱(§6.5). |
 | `acf ledger report <id>` | 원장으로 비용·시간 보고서를 만든다. |
 | `acf verify <id>` | 모든 revision 폴더의 manifest.sha256을 확인한다. |
 
@@ -238,21 +249,47 @@ v1(동작 카탈로그 8개, D-0039)은 실제 산출물 없이 v2로 바뀌었�
 
 쌍: `{schemaVersion, characterId, personaVersion, sections[name], long{text, sha256, chars}, short{text, sha256, chars}, systemRulesRef, shortAdopted: false}`. 표본: `{schemaVersion, personaVersion, probes[{sentence, longResponse, shortResponse, judge{pick, reasons}}]}`
 
-### 5.14 `dataset-rev-v1` / `data-qa-v1` (R1)
+### 5.14 S9 데이터셋 계약 (D-0044, D-0045)
 
-`{schemaVersion, characterId, personaVersion, datasetRev, mix{sns, nikl, synth}, examples[{exampleId, material, sourceRef, split, checks{turnCount, userTurnsVerbatim, lengthRatio, addedSentences, factLeak, koreanStyle}}], digest}`. QA: `{schemaVersion, datasetRev, sampled[exampleId], verdicts{<exampleId>: ADOPT|FIX|REJECT}, reviewer, minutes}`
+코드는 `src/acf/contracts/dataset.py`다. `dataset-rev-v1`·`data-qa-v1`을 대체한다(실제 산출물 없이 바뀜).
 
-### 5.15 `training-run-v1` / `eval-prereg-v1` / `eval-report-v1` (R1)
+| 계약 | 내용 |
+|---|---|
+| `data-plan-v1` | `{characterId, personaVersion, promptPairSha256, targetTrainConversations, clusters[{clusterId: base|situation|history|ownership|conflict, label, share, targetConversations, materials[SNS_REWRITE|SYNTH|NIKL], sampleSize}], validation{baseConversations, augmentedShare}, guideRef, writerModel, judgeModel}`. 기본값은 학습 가이드 §6의 소민 기준 배합(640대화, 56:8:22:7:7, 샘플 12, 검증 기반 60 + 보강 10%) |
+| `data-handoff-v1` | 클러스터별 인계안: `behaviorTable[{situation, attention, choice, voice}]`, `voiceExamples`, `forbidden`, `notes` |
+| `conversation-v1` | 학습 예시 한 개: `conversationId, clusterId, material, skeletonId, system, messages[{role: user|assistant, content}], checks{blocking{<검사 이름>: bool}, warnings}, provenance{writerModel, requestRef, sourceRef, editedBy}`. `system`은 짧은 system(성격 + 관계 + 채널 + 시작 장면), 프리필 없음 |
+| `data-sample-v1` | G7a에 올리는 클러스터별 샘플 묶음(`conversations[{ref, sha256}]`) |
+| `data-qa-v2` | G7a·G7 사람 판정: `gate, subjectSha256, verdicts{conversationId: ADOPT|FIX|REJECT}, notes, reviewer, minutes` |
+| `dataset-rev-v2` | G7에서 고정: `datasetRev(ds<k>), planSha256, sampleQaRefs, clusterCounts{clusterId: {conversations, replies, supervisedTokens}}, files[{split, path, sha256, conversations}], blockingFailures, warnings, digest` |
 
-학습: `{schemaVersion, datasetRev, provider, baseModel, requestedConfig, appliedConfig, jobId, status, checkpoints[], modelBinding}`. 사전 등록: `{schemaVersion, personaVersion, arms[{arm: LONG_BASE|SHORT_SFT, ref}], journeySetRef, criteria[{id, metric, comparator, threshold, primary}], frozenAt, sha256}`. 보고서: `{schemaVersion, preregSha256, pairs[], judgeConsensus, humanResults, criteriaResults[{id, value, pass}], shortAdoptDecision}`
+저장 위치: `runs/characters/<id>/s9-data/ds<k>/` 아래 `plan.json`, `handoffs/<cluster>.json`, `samples/<cluster>.json`, `conversations/<conversationId>.json`, `train.jsonl`, `validation-base.jsonl`, `validation-augmented.jsonl`, `eval.jsonl`, `index.jsonl`, `dataset.json`. JSONL 한 줄은 `{"messages": [{"role": "system", ...}, {"role": "user", ...}, {"role": "assistant", ...}]}`이다. Vertex 형식(`systemInstruction` + `contents[{role, parts}]`)은 제출 때 변환한다.
+
+### 5.15 S10 학습·평가 계약 (D-0044, D-0045)
+
+코드는 `src/acf/contracts/training.py`다. `training-run-v1`·`eval-prereg-v1`·`eval-report-v1`을 대체한다.
+
+| 계약 | 내용 |
+|---|---|
+| `training-run-v2` | `{characterId, datasetRev, datasetDigest, provider: gemma_qlora|vertex_gemini|fake, baseModel, baseModelRevision, requestedConfig, appliedConfig, dryRun, estimate{usd, gpuHours, billableTokens, basis}, budgetUsd, status: PLANNED|SUBMITTED|RUNNING|SUCCEEDED|FAILED|CANCELLED, jobId, transfers[{path, bytes, sha256, remoteSha256}], checkpoints[{checkpointId, epoch, step, ref}], modelBinding{provider, ref, checkpointId}}`. `dryRun=true`이면 `jobId`가 없다 |
+| `eval-prereg-v2` | `{characterId, personaVersion, arms[{armId: LONG_BASE|SHORT_GEMMA_SFT|SHORT_GEMINI_SFT, promptRef, model}], sets[{setId: OE|SE|APOLOGY|LONG200, ref, seeds, perTurnSeed, personas}], judge{model, family, orderSwap}, humanPairs, criteria[{id, metric, comparator, threshold, appliesTo}], frozenAt}`. 기본 기준(D-0045 (3)): `repeat_rate_101_200 <= 0.05`, `memory_recall_200 >= 0.9`, `apology_recovery >= 4/6`, `appliesTo = SFT_ANY` |
+| `eval-run-v1` | 한 조건·한 세트의 응답: `{preregSha256, armId, setId, model, items[{itemId, personaId, turns[{user, reply, seed}]}]}` |
+| `eval-report-v2` | `{preregSha256, runRefs, metrics[{armId, metric, value, detail}], criteriaResults[{id, armId, value, passed}], llmPairs[{pairId, armA, armB, forward, reverse, consensus}], humanPicks[{pairId, pick}], llmHumanAgreement, recommendation}` |
+
+저장 위치: `runs/characters/<id>/s10-train/tr<k>/<provider>/training-run.json`(어댑터·체크포인트는 Git 밖), `runs/characters/<id>/s10-eval/ev<k>/{prereg.json, runs/<arm>-<set>.json, pairs.json, report.json}`.
 
 ### 5.16 `gate-record-v1`
 
 `{schemaVersion, characterId|briefId, gate, shownArtifacts[{ref, sha256}], decision, selections[], reasons, requestedChanges[{field, note}], reviewer, minutes, decidedAt}`
 
-### 5.17 `release-manifest-v1` (D-0011)
+### 5.17 `character-package-v1` / `export-result-v1` (D-0011, D-0044)
 
-`{schemaVersion, characterId, releaseRev, appearanceRev, planRev, personaVersion, prompts{longSha256, shortSha256, shortAdopted}, modelBinding, chapters[{chapterId, frameRef}], videos[{videoId, kind, actionId, sha256}], datasetRev, evalReportRef, gates[G1, G3~G9 refs], builtAt}`. G2는 결번이다(D-0042). 옛 캐릭터의 G2 기록이 있으면 함께 담는다
+코드는 `src/acf/contracts/release.py`다. `release-manifest-v1`을 대체한다.
+
+패키지(형식 중립): `{characterId, packageRev(pk<k>), locale: ko, builtAt, profile{name, gender, age, job, tagline, description, hobby, likes, dislikes, mbti, tags[≤4], tmiItems[{text, revealStage}]}, appearance{appearanceRev, heroImage, spec}, chapters[{chapterNo, chapterId, title, relationshipStage, intro, goal, facts, frame, background}], videos[{videoId, kind: INTRO|ACTION, chapterNo, clipKey, title, description, useWhen, expression, durationS, file, provider, synthetic}], persona{personaVersion, traitSheet, longPrompt, shortPrompt}, sft{datasetRev, datasetDigest, trainingRuns, evalReport, adoptedBinding}, gates[{gate, rev, decision, recordRef}], files[{path, sha256, bytes}]}`. 경로는 모두 패키지 루트 기준 상대 경로이고 `files`에 있어야 한다. G2는 결번이다(D-0042). 옛 캐릭터의 G2 기록이 있으면 `gates`에 함께 담는다.
+
+패키지 폴더: `runs/characters/<id>/s11-release/pk<k>/` 아래 `package.json`, `appearance/`, `chapters/ch<n>/`, `videos/`, `persona/`, `sft/`, `gates/`.
+
+내보내기 기록: `{characterId, package{ref, sha256}, target: doki-app, targetVersions{api-svc: <alembic head>@<commit>, chat-svc: ...}, outputs[{system: api-svc|chat-svc, kind: seed-bundle|content-tree, path, sha256}], mapping[{source, target, note}], unmapped[], verification{status: NOT_RUN|PASSED|FAILED, disposableDb, steps[{name, ok, detail}]}}`.
 
 ### 5.18 원장
 
@@ -266,6 +303,8 @@ v1(동작 카탈로그 8개, D-0039)은 실제 산출물 없이 v2로 바뀌었�
 
 `graph.py`는 `Stage(id, deps: set[GateId], gate: GateId|None, parallel_group)` 목록을 가진다. S3의 `gate=G3`, S4·S5·S7의 `deps={G3}`, S6의 `deps={G4}`, S8은 `deps=set()`이지만 S7 완료가 필요하므로 `after={S7}`로 표현한다. S11의 `deps={G5, G8}`.
 
+S9~S11은 다음 단계로 둔다(D-0044, §8.8~§8.11): `s9s` 데이터 샘플(`deps={G6}`, `gate=G7a`), `s9` 데이터셋(`deps={G7a}`, `gate=G7`), `s10t` 학습(`deps={G7}`, 관문 없음, 같은 단계 안에서 학습 환경별 `training-run-v2`를 만든다), `s10` 평가(`deps={G7}`, `after={s10t}`, `gate=G8`), `s11` 패키지(`deps={G4, G5, G5b, G6, G8}`, `gate=G9`), `sx` 내보내기(`deps={G9}`, 관문 없음). 실제 학습은 PoC에서 dry run까지이므로, 실제 설정의 `s10t`는 `training-run-v2(dryRun=true)`를 쓰고 사람 실행 지시를 기다리는 상태로 멈춘다. 가짜 학습 공급자에서는 끝까지 간다.
+
 ### 6.2 상태 파일과 전이
 
 `state.json`: `{characterId|briefId, stages{<stage>: {status, currentRev, attempts, lastError, updatedAt}}, gates{<gate>: {status, rev, recordRef}}}`. 전이는 `state.py`의 함수 하나로만 하며 허용되지 않은 전이는 `StateTransitionError`다. 쓰기는 임시 파일 뒤 `os.replace`로 원자적으로 한다.
@@ -277,6 +316,23 @@ v1(동작 카탈로그 8개, D-0039)은 실제 산출물 없이 v2로 바뀌었�
 ### 6.4 검토 페이지
 
 `gates.py`는 Jinja 없이 문자열 템플릿으로 정적 HTML을 만든다. 이미지·영상은 상대 경로로 넣고, 후보 레이블은 `secrets.SystemRandom`으로 섞어 `key.sealed.json`에 대응표를 둔다. 페이지의 버튼은 결정을 `gate-record-v1` JSON 텍스트로 만들어 복사하게 한다. 네트워크 요청은 없다.
+
+### 6.5 워크숍 웹앱 API (D-0044 (6), PoC 계획서 §6)
+
+`src/acf/web/`(FastAPI)이다. 화면은 워크숍 시안(`c-glass.html` 작업실, `d-ops.html` 운영)을 `src/acf/web/static/`에 두고 API로 데이터를 읽는다. 로그인은 없고, 공장 루트·포트·저장 위치는 설정값이다(배포 대비).
+
+| 경로 | 동작 |
+|---|---|
+| `GET /api/health` | 서버·공장 루트 확인 |
+| `GET /api/projects` | `runs/characters/*`·`runs/briefs/*` 목록과 단계·관문 상태 요약 |
+| `GET /api/characters/{id}` | `state.json` 전체, 갈래별 진행 요약, 대기 관문 |
+| `GET /api/characters/{id}/gates/{gate}` | 그 관문 검토 항목(파일 목록, 미리보기 URL, 기존 기록) |
+| `GET /api/files/{id}/{path}` | 캐릭터 폴더 안 파일만. 경로 탈출은 거절한다 |
+| `POST /api/characters/{id}/gates/{gate}/decision` | 본문은 `acf gate import`의 답 JSON과 같다. 같은 코드 경로로 관문 기록을 남긴다 |
+| `POST /api/jobs`, `GET /api/jobs/{jobId}` | `{characterId, action: run, until}`로 오케스트레이터를 백그라운드에서 돌린다. 캐릭터당 동시에 하나 |
+| `GET /api/events` | SSE. `{type: job|state|gate, characterId, ...}` |
+
+새 관문의 답 형식: G7a `{"decision": "SELECT"|"REQUEST_CHANGES", "cluster": "<clusterId>", "verdicts": {"<conversationId>": "ADOPT"|"FIX"|"REJECT"}, "notes": {...}}`, G7 `{"decision": "APPROVE"|"REQUEST_CHANGES", "verdicts": {...}}`(무작위 표본 20개), G8 `{"decision": "SELECT", "adopted": "LONG_BASE"|"<model_binding ref>", "humanPicks": [{"pairId", "pick"}]}`, G9 `{"decision": "APPROVE"|"REJECT", "reasons": "..."}`.
 
 ## 7. 에이전트 러너 (명세 §4)
 
@@ -392,17 +448,49 @@ Profiler는 기획서, 기준 문서 발췌(5항목 설명, 카드 7요소 설�
 
 `resources/prompt-sections-v1.json`의 섹션 목록으로 긴·짧은 프롬프트를 조립한다. 긴 프롬프트의 시스템 규칙 섹션은 `systemRulesRef` 파일을 그대로 넣는다. `align`은 두 프롬프트의 섹션 헤더 집합이 같은지, 짧은 프롬프트가 `short_prompt_max_chars` 이내인지, 금지 표현이 없는지 확인한다. `probe`는 `voiceProbes`마다 두 프롬프트로 응답을 받고 판정 모델이 캐릭터 일치를 비교한다. 결과는 G6 페이지에 나란히 표시되며 자동 승인에 쓰지 않는다.
 
-### 8.8 S9 데이터 (R1, 명세 §10.3)
+### 8.8 S9 데이터셋 (명세 §10.3, D-0044, D-0045)
 
-`sns_rewrite`는 `gemini-sft-poc`의 후보 대화 파일 경로를 설정으로 받아 읽기 전용으로 연다. 각 대화에서 캐릭터가 될 화자를 분류 결과로 정하고, 캐릭터 턴만 다시 쓴다. 검사: 턴 수·역할 일치, 사용자 턴 원문 일치, 길이 비율 0.7~1.5(제안), 문장 수 증가 없음, 원본 화자 사실(이름·장소·고유명사 목록) 미포함, 한국어 구어 기준 문구 포함. `split`은 원본 대화 ID로 묶어 분할한다. `synth`는 특질 시트의 `situational`마다 장면을 만들고 전환 조건을 덮는다. `digest`는 예시 정렬 뒤 정규화 JSON의 sha256이다.
+학습 가이드 §7·§13의 절차를 따른다. 그래프에서는 두 단계다: `s9s`(인계안·샘플, 관문 G7a, 의존 G6)와 `s9`(대량 작성·검사·분할, 관문 G7, 의존 G7a).
 
-### 8.9 S10 학습·평가 (R1, 명세 §10.4)
+1. `plan`: G6 승인 `prompt-pair-v1`의 짧은 프롬프트와 특질 시트로 `data-plan-v1`을 고정한다. 클러스터 목표 수는 `round(target × share)`이고 합이 목표와 다르면 `base`에서 맞춘다.
+2. `samples`: 클러스터마다 인계안을 작성 모델로 만들고(특질 시트의 선택 기준 5항목·상황별 변화 → 행동 기준표), 같은 인계안으로 샘플 12개를 쓴다. 각 대화의 `skeletonId`는 장면 뼈대 단위로 붙인다. G7a 페이지는 클러스터별 인계안과 샘플 전문을 보여 주고 판정·고칠 점을 받는다. `REQUEST_CHANGES`면 고칠 점을 인계안에 붙여 그 클러스터만 다시 만든다.
+3. `build`: G7a에서 채택된 샘플은 그대로 넣고, 나머지는 같은 인계안 + 채택 샘플을 예시로 작성한다. 재료: `SNS_REWRITE`(`gemini-sft-poc` 후보 대화를 읽기 전용으로 열어 캐릭터 턴만 다시 쓴다, D-0007), `SYNTH`(합성 장면), `NIKL`(접근 경로가 정해질 때까지 비활성). 원본 SFT가 없는 캐릭터의 `base`는 `SNS_REWRITE`와 `SYNTH`로 채운다(가이드에서 검증되지 않은 적용, 계획서 §9).
+4. 기계 검사(차단): 형식(역할 교대·system 존재·빈 답 없음), 사용자 턴 원문 일치(SNS 재작성), 프리필 없음, 원본 화자 사실 미포함, 금지 표현, 같은 말끝·같은 사과 문장 반복(데이터셋 전체 n-gram, 가이드 §8), 최대 길이(학습 템플릿 토큰 수, 기본 4,096). 경고: 길이 비율, 감정 표지 분포. charforge의 표준 검사·렌더러를 이 프로젝트 코드로 옮겨 쓴다(다른 저장소 코드를 import하지 않는다).
+5. 분할: `skeletonId` 묶음째 나눈다. 검증은 `base`에서 `baseConversations`, 보강 클러스터마다 `augmentedShare`. 평가 세트는 학습·검증과 따로 만든다(§8.9).
+6. G7: 검사 보고서, 클러스터별 수·답변 수·토큰 수, 무작위 표본 20개를 보여 준다. 승인하면 `dataset-rev-v2`를 고정한다.
 
-`prereg`는 평가 여정 세트와 기준을 고정하고 해시를 낸다. `submit`은 Tuning 포트에 제출하고 `requestedConfig`와 공급자가 돌려준 `appliedConfig`를 모두 기록한다. `eval`은 두 조건의 응답을 모아 익명 짝을 만들고 `pair_judge`로 합의를 내며, 사람 판정은 G8 페이지에서 받는다. 사전 등록 해시가 다르면 분석을 거절한다.
+작성 호출은 실행기 예산(동시 호출 상한은 설정값, 기본 4)과 원장을 쓰고, 재시도는 같은 입력의 재전송이며 첫 성공 결과를 보존한다.
 
-### 8.10 S11 릴리즈 (R1)
+### 8.9 S10 학습·평가 (명세 §10.4, D-0044, D-0045)
 
-승인된 revision을 모아 `release-manifest-v1`을 만들고, 모든 참조 파일의 sha256을 다시 계산해 일치하지 않으면 실패한다.
+학습(`s10t`, 관문 없음, 의존 G7)과 평가(`s10`, 관문 G8, 선행 `s10t`)로 나눈다.
+
+학습 어댑터는 `TrainingProvider` 포트(`plan`, `submit`, `status`, `collect`)를 따른다.
+
+- `gemma_qlora`: 임대 GPU(Vast). 기본 설정은 학습 가이드 §11(unsloth/gemma-4-31B-it-unsloth-bnb-4bit, QLoRA r16/α32, dropout 0, LR 5e-5 linear, warmup 5%, 배치 1×4, 최대 4,096토큰, seed 3407, 1·2·3에폭 저장, assistant 답변만 손실). `plan`은 전송 파일 목록·바이트·sha256, 예상 GPU 시간(스텝 수 × 스텝당 초, 기본값은 소민 r3 실측 6초), 시간 단가로 비용을 낸다. `submit`은 이어 올리기 가능한 조각 전송 → 원격 해시 확인 → 학습 시작, `collect`는 완료 기록 확인 → 어댑터 회수·해시 확인 → 서버 삭제 순서다. 원격 상태는 계획 파일이 아니라 원격 로그와 완료 파일로 판단한다.
+- `vertex_gemini`: Vertex 튜닝. 기반 모델은 설정값이고 착수 때 지원 목록으로 정한다. `plan`은 과금 토큰 수(데이터셋 토큰 × 에폭)와 단가로 비용을 낸다. 체크포인트 ID·step을 공급자 값 그대로 기록하고 중간 epoch를 추정하지 않는다.
+- `fake`: 오프라인 전체 흐름용. 즉시 `SUCCEEDED`와 가짜 `model_binding`을 돌려준다.
+
+비용 추정이 `budgetUsd`를 넘으면 `submit`을 거절한다. PoC는 `plan`(dry run)까지만 실제 설정으로 확인한다(D-0044 (9)).
+
+평가: `prereg`가 조건(LONG_BASE, SHORT_GEMMA_SFT, SHORT_GEMINI_SFT)·세트(OE 고정 이력 질문, SE 서운함, APOLOGY 무례·사과 대본, LONG200 200턴 × 사용자 페르소나 4명)·판정·기준을 고정하고 해시를 낸다. `run`은 조건마다 응답을 모은다. 연속 대화는 모델 답을 다음 턴에 그대로 넣고 턴마다 다른 시드를 쓴다. 지표: `repeat_rate_101_200`(101~200턴 말풍선 가운데 앞서 나온 것과 같은 말풍선 비율), `memory_recall_200`(초반에 심은 정보를 200턴 시점에 묻는 확인 질문 정답률, 판정 모델 + 정답 키), `apology_recovery`(진지한 사과 대본에서 회복한 비율). `judge`는 같은 입력의 두 조건 응답을 정순·역순으로 판정해 합의만 센다. G8 페이지는 지표·기준 결과·LLM 짝 판정과 사람 블라인드 20쌍 화면을 보여 주고, 사람 판정으로 일치율을 낸다. 기준 미달이어도 보고서는 나오고 채택은 사람이 G8에서 정한다.
+
+### 8.10 S11 릴리즈 패키지 (D-0011, D-0044)
+
+의존: G4, G5, G5b, G6, G8. 승인된 revision의 파일을 패키지 폴더로 복사하고(`profile`은 G3 기획서, `chapters`는 S4b 챕터 사실과 G4 완성 이미지, `videos`는 G5·G5b 승인 영상, `persona`는 G6, `sft`는 G7·G8) `character-package-v1`을 쓴다. 쓰기 전에 모든 파일의 sha256을 다시 재고, 원본 기록의 해시와 다르면 실패한다. G9 페이지는 패키지 요약(프로필 카드 미리보기, 챕터 3개, 영상 수와 가짜 여부, 대화 경로 두 개, 관문 기록)을 보여 준다.
+
+### 8.11 우리 앱 내보내기 `doki-app` (D-0044 (1))
+
+G9 승인 패키지를 우리 앱 두 시스템의 공식 적재 입력으로 바꾼다. 두 저장소는 읽기만 하고, 적재는 그 저장소의 명령을 그 저장소 환경에서 부른다.
+
+| 대상 | 적재 입력 | 공식 적재 명령 | 담는 것 |
+|---|---|---|---|
+| api-svc | 시드 묶음 `dokilabs-seed/1`(`data/seed/content.json`과 같은 형식, 테이블별 행) | `uv run alembic upgrade head` → `uv run python -m scripts.seed load` | `character`(이름·성별·나이·소개·직업·취미 등), `character_profile_card`(ko 줄의 새 칸·`tags`·`tmi_items`), `character_stage`(챕터 = 단계, `stage_no` 1~3), 미디어(상대 키, CDN 절대 URL 없음), `character_clip`(`clip_key`·제목·설명·사용 조건·표정·`pick_role`·`action_category`), 소개 영상 |
+| chat-svc | 콘텐츠 트리 `data/`의 캐릭터 묶음(`personas/<slug>-r1.json`, `relationship_profiles/`, `quests/`, `chapter_definitions/`, `chapters/`, `pointers/content-pointers-v2.json` 갱신) | `uv run alembic upgrade head` → `uv run python -m scripts.db_ops.content_release publish --data-dir <트리>` → `verify` | persona는 `character-persona-v6`(여덟 섹션)으로 렌더한다. 긴 프롬프트·특질 시트 → v6 섹션 대응표가 변환기의 일부다 |
+
+변환기는 매핑 표(`mapping`)와 버린 칸(`unmapped`)을 `export-result-v1`에 남긴다. 대상의 alembic head가 변환기가 아는 값과 다르면 적재 전에 멈춘다(현재: chat-svc `0028_authoring_project_locale`, api-svc는 구현 때 기록).
+
+적재 확인(`--verify`): 관리자 접속 정보(환경변수 이름만 설정)로 일회용 PostgreSQL 데이터베이스를 두 개 만들고, 각 저장소의 head까지 올린 뒤 위 명령으로 넣고, 캐릭터 ID·단계 수·클립 수·persona revision을 조회해 확인하고 데이터베이스를 지운다. chat-svc 트리는 저장소의 `data/`를 임시 폴더로 복사한 위에 캐릭터 묶음을 더해 publish한다. dev/stage DB에는 연결하지 않는다.
 
 ## 9. 공급자 어댑터 (명세 §11)
 
@@ -413,7 +501,10 @@ Profiler는 기획서, 기준 문서 발췌(5항목 설명, 카드 7요소 설�
 | `codex_exec` | §7 참조. |
 | `xai_video` | `POST {base}/videos/generations`에 `{model, prompt, image: {url: data URI}, duration, resolution, generate_audio[, aspect_ratio]}`를 보내 `request_id`를 받는다. `GET {base}/videos/{id}`를 `poll_interval_s`마다 조회해 status가 done이면 `video.url`을 키 없이 바로 내려받고, failed·expired·error면 사유와 함께 실패, `timeout_s`를 넘으면 `VideoTimeoutError(job_id)`. 429·5xx는 지수 대기 3회. 키는 `api_key_env`(기본 `XAI_API_KEY`)로만 읽고 없으면 호출 전에 실패. 비용은 단가표(1.5: 480p $0.08·720p $0.14·1080p $0.25/초, 1.5-lite: $0.02·$0.03·$0.14/초, 2026-10-21) × 실제 초 + 입력 이미지 $0.01. |
 | `grok_web` | 기본 꺼짐(`accept_terms_risk = true` 필요, D-0029). `playwright`(`--extra web`)의 `connect_over_cdp(cdp_url)`로 사용자가 띄운 전용 프로필 Chrome에 붙어 새 탭을 앞으로 가져와 Imagine을 연다. 화면 흐름은 2026-10-21 로그인 화면에 맞췄다(D-0032): 입력 폼(`form:has(button[type=submit])`) 안에서 비디오 모드 버튼 → 해상도 라디오(`480p`·`720p`) → 길이 라디오(`6s`·`10s`·`15s`) → 소리 버튼(`aria-pressed`를 요청과 맞춤) → 파일 입력에 첫 프레임 업로드(이미지 제거 버튼이 보일 때까지 대기, 업로드 뒤 종횡비 버튼이 사라지고 영상은 이미지 비율을 따름) → 편집기(`[contenteditable]`)에 프롬프트(들어갔는지 확인) → 제출. 제출 뒤 주소가 `/imagine/post/<id>`로 바뀌면 그 id가 든 `<video>`의 주소(assets.grok.com의 `generated_video.mp4`)를 로그인 세션 요청으로 받는다(다운로드 버튼은 다운로드 이벤트가 오지 않아 쓰지 않는다). 옵션 클릭이나 제출 뒤 주소에 `#subscribe`가 붙으면(결제 창) 등급 제한·사용량 소진으로 바로 실패한다. 90초 안에 결과 페이지로 넘어가지 않으면 제출 안 됨으로 실패한다. 웹에 없는 길이·해상도는 S5가 첫 프레임을 만들기 전에 `check_settings`로 거절한다. 어느 단계든 실패하면 `~/.acf/grok-web-work/<job>/error-<단계>.png` 스크린샷을 남기고 `VideoGenerationError`. 탭만 닫고 사용자의 Chrome은 닫지 않는다. 재개 불가(`resumable = False`), 비용 0, 작업 ID는 `web-<hex>:<post id>`. 복구층(Stagehand `act()`)은 자리만 둔다. |
-| `vertex_tuning` (R1) | `gemini-sft-poc`의 공급자 구현을 참고하되 코드는 복사하지 않고 이 프로젝트에서 새로 쓴다. |
+| `grok_oauth` | `VideoModel`. 요청·상태 처리는 `xai_video`와 같고 인증만 OAuth 접근 토큰(Bearer)이다. 토큰은 `token_file`(기본 opencodex 인증 파일의 활성 xAI 계정)이나 `token_env`에서 읽고, 값을 출력·기록하지 않는다. 만료면 다시 로그인하라는 오류를 낸다(새로 고침 없음). 명시해야 켜진다. 실제 호출 확인 전이다(D-0044 (3)). |
+| 순위 수집기(`src/acf/collectors/`) | 출처별 어댑터 + 가짜. 이용 조건 확인 기록이 없는 출처는 거절하고, 호출 계획(dry run)을 먼저 낸다. 요청 간격·User-Agent·재시도는 설정값. 출처 조사는 `docs/research/2026-10-27-ranking-sources.md`. |
+| `gemma_qlora` | `TrainingProvider`: 임대 GPU QLoRA(§8.9). |
+| `vertex_gemini` | `TrainingProvider`: Vertex 튜닝(§8.9). `gemini-sft-poc`의 구현을 참고하되 코드는 복사하지 않는다. 옛 이름 `vertex_tuning`을 대체한다. |
 | `fake_image` | `ImageGen` 가짜. 프롬프트 해시로 색을 정한 64×64 단색 PNG를 돌려준다. |
 | `codex_image` | `ImageGen` 실제(D-0019). 임시 폴더에서 `codex exec --json -s read-only -c mcp_servers={} --disable apps --disable browser_use --disable computer_use -m <model>`에 "내장 이미지 도구로 정확히 한 장, 셸·파일 접근 금지" 지시와 프롬프트·피할 것·선호 크기를 넘긴다. 첫 이벤트 `thread.started`의 `thread_id`로 `$CODEX_HOME/generated_images/<thread_id>/*.png` 가운데 가장 최근 파일을 읽어 PNG 서명을 확인하고 돌려준다. 원본은 지우지 않는다. 종료 코드가 0이 아니거나 PNG가 없으면 `ImageGenerationError`. 원장에는 `kind=IMAGE`, 구독 사용 토큰(`turn.completed.usage`), 비용 0을 남긴다. 크기는 지시일 뿐이며 관측된 출력은 1254×1254다. 장당 약 30~40초가 걸린다. `reference_images`가 있으면 파일마다 `-i <절대경로>`를 붙이고, `-i`가 여러 값을 받으므로 프롬프트는 `--` 뒤에 둔다. 참조 파일이 없으면 호출 전에 `ImageGenerationError`. 참조 이미지로 같은 얼굴이 유지되는 것을 확인했다(2026-10-21). |
 | `fake` | 모든 포트. `(stage, ref)` 키로 준비된 응답을 돌려주고 받은 요청을 기록한다. 이미지는 단색 PNG, 영상은 ffmpeg로 만든 1초 더미 파일. |
@@ -475,6 +566,7 @@ Profiler는 기획서, 기준 문서 발췌(5항목 설명, 카드 7요소 설�
 | M5 | S5 소개 영상(D-0028~D-0032): 9:16 세로 첫 프레임, `xai_video`·`grok_web` 어댑터, 제출·재개·실측, G5 사람 선택, `acf video intro`·`web-setup` | 오프라인 통과. 2026-10-21 실제: 세로 첫 프레임 생성 확인, grok.com 화면 맞춤과 웹 영상 1편 생성·받기 확인, S5 전체 웹 실행은 무료 등급 한도(결제 창)로 막힘. 남은 것: 웹 한도 또는 유료 등급(Q-0018) 뒤 S5 전체 실행, 실제 API 1회(사용자가 보류) | R0 |
 | M6 | S6 동작 영상(D-0038, D-0040, D-0041): G4 승인 이미지 → 미소·무표정 첫 프레임 → 앱 통화 영상 표준 세트(`l2` 6편·`standard` 37편) → G5b 선택·제외·부분 재생성, `acf video actions`. 다음: 특별 행동 제안 에이전트, 영상 자동 검사 | 골격: 오프라인 통과(2026-10-22). 남은 것: 영상 공급자 사용량 확보(Q-0018) 뒤 `l2` 18편 실제 실행과 G5b 승인 | R0 골격·R1 |
 | M7 | SNS 재작성·NIKL·합성·분할, 학습 제출·수집, 사전 등록·블라인드 평가, 릴리즈 매니페스트, G7~G9 | 사전 등록 기준 판정 보고서와 `release_rev` 1개. | R1 |
+| M8 (PoC, D-0044·D-0045) | 3일 PoC: A 외모 흐름(M2b의 `picked`까지), B 순위 수집기, C S9 데이터셋, D S10 학습(dry run)·평가, E 패키지·우리 앱 변환기, F Grok OAuth, G 워크숍 웹앱, H 그래프에 `s9s`·`s9`·`s10t`·`s10`·`s11`·내보내기 연결과 `tests/test_offline_pipeline.py` | 여성·남성 합성 브리프 두 개가 가짜 공급자로 S1 → G9 → 패키지 → 일회용 DB 적재까지 네트워크 없이 통과하고, 워크숍 화면에서 관문만 눌러 같은 흐름을 끝까지 간다. 실제 호출은 순위 수집·이미지·LLM 1회씩 | PoC |
 
 구현 순서는 M0 → M4(선행) → M1 → M2 → M3 → M5 → M6 → M7이다(D-0013). M2b는 워크숍 화면 연결 전에 한다. 각 노드의 현재 성숙도(L0~L4)와 올리는 규칙은 [현재 상태](../status/current-state.md)와 [인계 규칙](../status/README.md#노드-성숙도-규칙)에 있다. 마일스톤의 "끝나는 조건"은 대부분 L1(오프라인)이고, L2 이상은 그 규칙을 따른다. M4의 실제 실행은 `acf plan import`로 들여온 기획서의 G3 기록이 있으면 된다.
 
