@@ -38,12 +38,12 @@ class _DevStaticFiles(StaticFiles):
         return response
 
 
-def create_app(root: Path, config_path: Path | None = None) -> FastAPI:
-    """공장 루트 하나에 붙는 워크숍 앱을 만든다."""
+def create_app(root: Path, config_path: Path | None = None, *, runner=None) -> FastAPI:
+    """공장 루트 하나에 붙는 워크숍 앱을 만든다. runner는 시험에서 작업 실행 함수를 바꿀 때 쓴다."""
     root = Path(root).expanduser().resolve()
     conf = load_settings(root, config_path)
     hub = EventHub()
-    jobs = JobManager(root, conf, hub)
+    jobs = JobManager(root, conf, hub, runner=runner)
     app = FastAPI(
         title="캐릭터 공장 워크숍",
         version="0.1.0",
@@ -90,7 +90,25 @@ def create_app(root: Path, config_path: Path | None = None) -> FastAPI:
         data["job"] = jobs.active_for(character_id)
         data["jobs"] = jobs.list(character_id=character_id, limit=10)
         data["lastJob"] = data["jobs"][0] if data["jobs"] else None
+        data["held"] = _held(character_id, data["lastJob"])
         return data
+
+    def _held(character_id: str, last_job: dict[str, Any] | None) -> list[dict[str, Any]]:
+        """마지막 작업이 실행 확인을 기다리게 둔 유료 단계(D-0049, LLD §6.7)."""
+        if not last_job or not last_job.get("held"):
+            return []
+        from character_factory_poc.pipeline.scheduler import paid_providers
+
+        ctx = Context(config=load_config(root, conf.config_path), execute=False)
+        state = reads.read_state(reads.character_dir(root, character_id))[0]
+        stages = state.get("stages") if isinstance(state.get("stages"), dict) else {}
+        out = []
+        for sid in last_job["held"]:
+            status = (stages.get(sid) or {}).get("status", "PENDING")
+            if status in {"APPROVED", "AWAITING_HUMAN", "SKIPPED"}:
+                continue
+            out.append({"stage": sid, "providers": paid_providers(ctx, sid)})
+        return out
 
     @app.get("/api/characters/{character_id}/gates/{gate}")
     def gate(character_id: str, gate: str) -> dict[str, Any]:
@@ -152,6 +170,8 @@ def create_app(root: Path, config_path: Path | None = None) -> FastAPI:
             character_id,
         )
         jobs.publish_state(character_id, force=True)
+        # D-0049(LLD §6.7): 결정 뒤 의존이 풀린 갈래를 이어서 돌린다.
+        resume = jobs.request_resume(character_id)
         return {
             "characterId": character_id,
             "gate": gate,
@@ -161,6 +181,7 @@ def create_app(root: Path, config_path: Path | None = None) -> FastAPI:
             "record": view["record"],
             "state": detail["state"],
             "character": detail["summary"],
+            "resumeJob": resume,
         }
 
     # ---- 작업 큐 ----
@@ -178,7 +199,10 @@ def create_app(root: Path, config_path: Path | None = None) -> FastAPI:
         until = body.get("until")
         if until is not None and not isinstance(until, str):
             raise WebError(400, "until은 문자열이어야 한다")
-        return jobs.submit(character_id.strip(), action, until)
+        confirm = body.get("confirm", [])
+        if not isinstance(confirm, list):
+            raise WebError(400, "confirm은 단계 ID 목록이어야 한다")
+        return jobs.submit(character_id.strip(), action, until, confirm=confirm)
 
     @app.get("/api/jobs")
     def list_jobs(

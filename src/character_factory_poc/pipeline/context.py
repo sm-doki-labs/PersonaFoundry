@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from character_factory_poc.common.budget import Budget
@@ -34,6 +35,8 @@ class Context:
     _image: ImageModel | None = None
     _video: VideoModel | None = None
     _vision: object | None = None
+    # D-0049(LLD §6.6): 물결 실행에서 여러 단계가 동시에 공급자를 처음 만들 수 있다.
+    _lazy: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
     @classmethod
     def load(cls, root: Path, execute: bool, max_calls: int | None = None) -> Context:
@@ -52,13 +55,15 @@ class Context:
         return Budget(self.config.budget, max_calls_override=self.max_calls)
 
     def text_model(self, character_id: str, budget: Budget) -> TextModel:
-        if self._text is None:
-            self._text = make_text_model(self.config.provider("text"))
+        with self._lazy:
+            if self._text is None:
+                self._text = make_text_model(self.config.provider("text"))
         return TrackedTextModel(self._text, self.ledger(character_id), budget)
 
     def judge_model(self, character_id: str, budget: Budget, allow_same_family=False) -> TextModel:
-        if self._judge is None:
-            self._judge = make_text_model(self.config.provider("judge"))
+        with self._lazy:
+            if self._judge is None:
+                self._judge = make_text_model(self.config.provider("judge"))
         t, j = self.config.provider("text"), self.config.provider("judge")
         if t.adapter != "fake" and j.adapter != "fake" and t.family() == j.family():
             msg = f"경고: 생성({t.model})과 판정({j.model}) 모델 계열이 같다(D-0010)"
@@ -73,16 +78,18 @@ class Context:
         self._judge = judge or text
 
     def image_model(self, character_id: str, budget: Budget) -> TrackedImageModel:
-        if self._image is None:
-            self._image = make_image_model(self.config.provider("image"))
+        with self._lazy:
+            if self._image is None:
+                self._image = make_image_model(self.config.provider("image"))
         return TrackedImageModel(self._image, self.ledger(character_id), budget)
 
     def use_image(self, image: ImageModel) -> None:
         self._image = image
 
     def video_model(self, character_id: str, budget: Budget) -> TrackedVideoModel:
-        if self._video is None:
-            self._video = make_video_model(self.config.provider("video"))
+        with self._lazy:
+            if self._video is None:
+                self._video = make_video_model(self.config.provider("video"))
         return TrackedVideoModel(self._video, self.ledger(character_id), budget)
 
     def use_video(self, video: VideoModel) -> None:
@@ -103,8 +110,9 @@ class Context:
         from character_factory_poc.providers.factory import make_vision_model
         from character_factory_poc.providers.tracked import TrackedVisionModel
 
-        if self._vision is None:
-            self._vision = make_vision_model(self.config.provider("vision"))
+        with self._lazy:
+            if self._vision is None:
+                self._vision = make_vision_model(self.config.provider("vision"))
         return TrackedVisionModel(self._vision, self.ledger(character_id), budget)
 
     def use_vision(self, vision) -> None:
@@ -117,17 +125,18 @@ class Context:
         """[agent] backend = "codex_exec"이면 추적 래퍼를 돌려주고, 아니면 None(API 백엔드)."""
         from character_factory_poc.providers.tracked import TrackedCodexAgent
 
-        if self._codex is None:
-            if self.config.agent.get("backend") != "codex_exec":
-                return None
-            from character_factory_poc.providers.codex_exec import CodexExecAgent
+        with self._lazy:
+            if self._codex is None:
+                if self.config.agent.get("backend") != "codex_exec":
+                    return None
+                from character_factory_poc.providers.codex_exec import CodexExecAgent
 
-            a = self.config.agent
-            self._codex = CodexExecAgent(
-                model=a.get("model") or self.config.provider("text").model,
-                reasoning_effort=a.get("reasoning_effort", "medium"),
-                sandbox=a.get("sandbox", "workspace-write"),
-                timeout_s=int(a.get("timeout_s", 1800)),
-                extra_config=list(a.get("extra_config", [])),
-            )
+                a = self.config.agent
+                self._codex = CodexExecAgent(
+                    model=a.get("model") or self.config.provider("text").model,
+                    reasoning_effort=a.get("reasoning_effort", "medium"),
+                    sandbox=a.get("sandbox", "workspace-write"),
+                    timeout_s=int(a.get("timeout_s", 1800)),
+                    extra_config=list(a.get("extra_config", [])),
+                )
         return TrackedCodexAgent(self._codex, self.ledger(character_id), budget, stage)

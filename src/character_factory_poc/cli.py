@@ -395,6 +395,11 @@ def cmd_run(args) -> int:
         ),
         verify_export=args.verify_export,
         submit_training=args.submit_training,
+        max_parallel=(
+            args.parallel
+            if args.parallel is not None
+            else int(ctx.config.orchestrator.get("max_parallel", 1))
+        ),
     )
     validate_until(opt.until)
     validate_auto_approve(opt.auto_approve)
@@ -747,6 +752,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s.add_argument("--allow-same-family", action="store_true")
     s.add_argument("--training-providers", default=None, help="s10t 학습 공급자 쉼표 목록")
+    s.add_argument(
+        "--parallel",
+        type=int,
+        default=None,
+        help="동시에 돌릴 단계 수(D-0049). 기본은 [orchestrator] max_parallel, 없으면 1",
+    )
     s.add_argument(
         "--submit-training",
         action="store_true",

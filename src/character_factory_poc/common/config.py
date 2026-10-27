@@ -43,6 +43,10 @@ class FactoryConfig:
     source_path: Path | None = None
     agent: dict[str, Any] = field(default_factory=dict)
     resources: dict[str, Any] = field(default_factory=dict)
+    # D-0049(LLD §3): 물결 실행·자동 재개, 관문 사전 검토, 수정 요청 재작업
+    orchestrator: dict[str, Any] = field(default_factory=dict)
+    review: dict[str, Any] = field(default_factory=dict)
+    rework: dict[str, Any] = field(default_factory=dict)
 
     def provider(self, name: str) -> ProviderConfig:
         return self.providers.get(name, ProviderConfig())
@@ -86,4 +90,7 @@ def load_config(root: Path, path: Path | None = None) -> FactoryConfig:
         source_path=cfg_path if cfg_path.exists() else None,
         agent=dict(data.get("agent", {})),
         resources=dict(data.get("resources", {})),
+        orchestrator=dict(data.get("orchestrator", {})),
+        review=dict(data.get("review", {})),
+        rework=dict(data.get("rework", {})),
     )

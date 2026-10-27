@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,12 @@ class RunOptions:
     training_providers: list[str] | None = None  # s10t 학습 공급자. 없으면 [stages.s10t]
     submit_training: bool = False  # 학습 제출·회수까지 한다(유료). 기본은 계획(dry run)만
     verify_export: bool = False  # sx에서 일회용 DB 적재 확인까지 한다(LLD §8.11)
+    # D-0049(LLD §6.6·§6.7)
+    max_parallel: int = 1  # 동시에 돌릴 단계 수. 1이면 순차 훑기
+    web: bool = False  # 워크숍이 시작한 실행. 유료 공급자 단계는 확인을 받는다
+    confirmed: set[str] = field(default_factory=set)  # 사람이 실행을 확인·허락한 단계
+    # 물결 실행의 작업 스레드를 감싸는 함수(워크숍이 작업 로그를 스레드별로 모을 때 쓴다)
+    wrap_worker: Callable[[Callable], Callable] | None = None
 
 
 @dataclass
@@ -54,10 +61,17 @@ class RunLog:
     stopped_at: str = ""
     waiting: list[str] = field(default_factory=list)  # 사람 검토를 기다리는 관문
     blocked: list[str] = field(default_factory=list)  # 의존·입력이 없어 시작하지 못한 단계
+    held: list[str] = field(default_factory=list)  # 유료 공급자 단계: 실행 확인 대기(D-0049)
+    waves: list[list[str]] = field(default_factory=list)  # 물결마다 동시에 시작한 단계
+    timings: dict[str, dict[str, str]] = field(default_factory=dict)  # 단계별 start·end(UTC)
 
     def add(self, s: str) -> None:
         self.steps.append(s)
         print(s)
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat(timespec="milliseconds")
 
 
 def _appearance_axis(ctx: Context, cid: str, opt: RunOptions) -> bool:
@@ -216,72 +230,106 @@ def _auto_approve(ctx: Context, cid: str, gate: str) -> None:
     )
 
 
-def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
-    validate_until(opt.until)
-    validate_auto_approve(opt.auto_approve)
-    log = RunLog()
-    runners = _stage_runners(ctx, cid, opt)
-    for sid, stage in STAGES.items():
-        if not stage.implemented or sid not in runners:
-            if ctx.state(cid).stage(sid).status == "PENDING":
-                if sid == "s1":
-                    log.add("s1: --ranking 없음 — 건너뜀(페르소나 우선 경로)")
-                elif sid in APPEARANCE_STAGES:
-                    log.add(f"{sid}: 외모 축(S1·S2) 없음 — 건너뜀")
-            continue
-        state = ctx.state(cid)
-        st = state.stage(sid)
-        gate_ok = stage.gate is None or state.gate(stage.gate).status == "APPROVED"
-        if st.status in {"APPROVED", "SKIPPED"} or (st.status == "AWAITING_HUMAN" and gate_ok):
-            log.add(f"{sid}: 이미 {st.status}({st.currentRev}) — 건너뜀")
-        elif st.status == "AWAITING_HUMAN" and stage.gate:
-            log.add(f"{sid}: {stage.gate} 대기 중({st.currentRev})")
+def _skip_note(ctx: Context, cid: str, sid: str, runners: dict) -> str | None:
+    """실행 함수가 없는 단계의 건너뜀 문장. 기록할 것이 없으면 None."""
+    stage = STAGES[sid]
+    if stage.implemented and sid in runners:
+        return None
+    if ctx.state(cid).stage(sid).status == "PENDING":
+        if sid == "s1":
+            return "s1: --ranking 없음 — 건너뜀(페르소나 우선 경로)"
+        if sid in APPEARANCE_STAGES:
+            return f"{sid}: 외모 축(S1·S2) 없음 — 건너뜀"
+    return ""
+
+
+def _step(
+    ctx: Context, cid: str, sid: str, opt: RunOptions, runners: dict, log: RunLog
+) -> str | None:
+    """단계 하나를 처리한다(D-0035 규칙 그대로). 반환: None(다음 단계로), "break", "return".
+
+    순차 훑기와 물결 실행(LLD §6.6)이 함께 쓴다.
+    """
+    stage = STAGES[sid]
+    state = ctx.state(cid)
+    st = state.stage(sid)
+    gate_ok = stage.gate is None or state.gate(stage.gate).status == "APPROVED"
+    ran = False
+    if st.status in {"APPROVED", "SKIPPED"} or (st.status == "AWAITING_HUMAN" and gate_ok):
+        log.add(f"{sid}: 이미 {st.status}({st.currentRev}) — 건너뜀")
+    elif st.status == "AWAITING_HUMAN" and stage.gate:
+        log.add(f"{sid}: {stage.gate} 대기 중({st.currentRev})")
+    else:
+        try:
+            state.require_deps(sid)
+        except GateNotApprovedError as e:
+            log.add(f"{sid}: 시작 불가 — {e}")
+            log.blocked.append(sid)
+            return "break" if opt.until == sid else None
+        # D-0049: 워크숍 실행은 유료 공급자 단계를 사람이 확인하기 전에는 돌리지 않는다.
+        from character_factory_poc.pipeline.scheduler import paid_stage
+
+        if opt.web and sid not in opt.confirmed and paid_stage(ctx, sid):
+            log.add(f"{sid}: 유료 공급자 — 실행 확인 대기")
+            log.held.append(sid)
+            return None
+        # D-0049: 수정 요청 뒤 다시 돌기 전에 재작업 브리프·반복 상한을 본다.
+        if st.status == "REJECTED":
+            from character_factory_poc.pipeline.rework import prepare_rework
+
+            if not prepare_rework(ctx, cid, sid, opt):
+                log.add(f"{sid}: {stage.gate} 반복 상한 — 사람 허락 대기")
+                log.blocked.append(sid)
+                return None
+        log.add(f"{sid}: 실행")
+        started = _now()
+        try:
+            out = runners[sid]()
+        except NeedsInputError as e:
+            log.add(f"{sid}: 사람 입력 대기 — {e}")
+            log.blocked.append(sid)
+            return None
+        except GateNotApprovedError as e:
+            log.add(f"{sid}: 시작 불가 — {e}")
+            log.blocked.append(sid)
+            return None
+        except CheckFailed as e:
+            # 검사 실패는 그 단계만 멈춘다. 다른 갈래는 계속 돈다(D-0035).
+            log.add(f"{sid}: 검사 실패 — {e}")
+            log.blocked.append(sid)
+            if opt.until == sid:
+                log.stopped_at = sid
+                return "return"
+            return None
+        finally:
+            log.timings[sid] = {"start": started, "end": _now()}
+        ran = True
+        if out is None:
+            log.add(f"{sid}: 건너뜀({ctx.state(cid).stage(sid).status})")
         else:
-            try:
-                state.require_deps(sid)
-            except GateNotApprovedError as e:
-                log.add(f"{sid}: 시작 불가 — {e}")
-                log.blocked.append(sid)
-                if opt.until == sid:
-                    break
-                continue
-            log.add(f"{sid}: 실행")
-            try:
-                out = runners[sid]()
-            except NeedsInputError as e:
-                log.add(f"{sid}: 사람 입력 대기 — {e}")
-                log.blocked.append(sid)
-                continue
-            except GateNotApprovedError as e:
-                log.add(f"{sid}: 시작 불가 — {e}")
-                log.blocked.append(sid)
-                continue
-            except CheckFailed as e:
-                # 검사 실패는 그 단계만 멈춘다. 다른 갈래는 계속 돈다(D-0035).
-                log.add(f"{sid}: 검사 실패 — {e}")
-                log.blocked.append(sid)
-                if opt.until == sid:
-                    log.stopped_at = sid
-                    return log
-                continue
-            if out is None:
-                log.add(f"{sid}: 건너뜀({ctx.state(cid).stage(sid).status})")
-            else:
-                log.add(f"{sid}: 완료 → {out}")
-        # 관문 처리: 자동 승인 플래그가 없으면 기다리는 관문으로 모으고 다른 갈래를 계속 진행한다
-        state = ctx.state(cid)
-        if stage.gate and state.gate(stage.gate).status == "AWAITING_HUMAN":
-            if stage.gate in opt.auto_approve:
-                _auto_approve(ctx, cid, stage.gate)
-                log.add(f"{stage.gate}: 자동 승인(--auto-approve)")
-            else:
-                log.add(f"{stage.gate}: 사람 검토 대기")
-                if stage.gate not in log.waiting:
-                    log.waiting.append(stage.gate)
-        if opt.until in (sid, stage.gate):
-            log.add(f"{opt.until}에 도달해 멈춘다")
-            log.stopped_at = opt.until
-            return log
+            log.add(f"{sid}: 완료 → {out}")
+    # 관문 처리: 자동 승인 플래그가 없으면 기다리는 관문으로 모으고 다른 갈래를 계속 진행한다
+    state = ctx.state(cid)
+    if stage.gate and state.gate(stage.gate).status == "AWAITING_HUMAN":
+        if stage.gate in opt.auto_approve:
+            _auto_approve(ctx, cid, stage.gate)
+            log.add(f"{stage.gate}: 자동 승인(--auto-approve)")
+        else:
+            if ran:
+                from character_factory_poc.pipeline.review import review_on_open
+
+                review_on_open(ctx, cid, stage.gate)
+            log.add(f"{stage.gate}: 사람 검토 대기")
+            if stage.gate not in log.waiting:
+                log.waiting.append(stage.gate)
+    if opt.until in (sid, stage.gate):
+        log.add(f"{opt.until}에 도달해 멈춘다")
+        log.stopped_at = opt.until
+        return "return"
+    return None
+
+
+def _finish(log: RunLog) -> RunLog:
     log.stopped_at = (log.waiting or log.blocked or ["end"])[0]
     if log.waiting or log.blocked:
         log.add(
@@ -291,3 +339,27 @@ def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
             + (", ".join(log.blocked) or "없음")
         )
     return log
+
+
+def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
+    validate_until(opt.until)
+    validate_auto_approve(opt.auto_approve)
+    if opt.max_parallel > 1:
+        # D-0049(LLD §6.6): 의존이 풀린 단계를 동시에 돌린다.
+        from character_factory_poc.pipeline.scheduler import run_waves
+
+        return run_waves(ctx, cid, opt)
+    log = RunLog()
+    runners = _stage_runners(ctx, cid, opt)
+    for sid in STAGES:
+        note = _skip_note(ctx, cid, sid, runners)
+        if note is not None:
+            if note:
+                log.add(note)
+            continue
+        action = _step(ctx, cid, sid, opt, runners, log)
+        if action == "break":
+            break
+        if action == "return":
+            return log
+    return _finish(log)

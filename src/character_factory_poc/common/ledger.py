@@ -23,6 +23,11 @@ def _append(path: Path, row: dict[str, Any]) -> None:
         fcntl.flock(f, fcntl.LOCK_UN)
 
 
+def append_jsonl(path: Path, row: dict[str, Any]) -> None:
+    """원장과 같은 방식(파일 잠금 덧붙이기)으로 JSON 한 줄을 남긴다."""
+    _append(Path(path), row)
+
+
 class Ledger:
     def __init__(self, folder: Path):
         self.folder = Path(folder)

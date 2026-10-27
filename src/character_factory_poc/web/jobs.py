@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import itertools
 import json
 import os
 import re
@@ -88,6 +89,11 @@ class Job:
     stopped_at: str | None = None
     waiting: list[str] = field(default_factory=list)
     blocked: list[str] = field(default_factory=list)
+    # D-0049(LLD §6.7): 무엇이 시작했나(manual|gate), 사람이 실행을 확인한 단계, 확인을 기다린 단계
+    trigger: str = "manual"
+    confirm: list[str] = field(default_factory=list)
+    held: list[str] = field(default_factory=list)
+    seq: int = 0  # 같은 초에 만든 작업의 순서(기록에는 남기지 않는다)
 
     def as_dict(self, *, include_log: bool = True) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -103,11 +109,15 @@ class Job:
             "stoppedAt": self.stopped_at,
             "waiting": list(self.waiting),
             "blocked": list(self.blocked),
+            "trigger": self.trigger,
+            "confirm": list(self.confirm),
+            "held": list(self.held),
             "logLines": len(self.log),
             "result": {
                 "stoppedAt": self.stopped_at,
                 "waiting": list(self.waiting),
                 "blocked": list(self.blocked),
+                "held": list(self.held),
             },
         }
         if include_log:
@@ -140,6 +150,9 @@ class Job:
             stopped_at=text("stoppedAt") or None,
             waiting=texts("waiting"),
             blocked=texts("blocked"),
+            trigger=text("trigger", "manual"),
+            confirm=texts("confirm"),
+            held=texts("held"),
         )
 
 
@@ -163,6 +176,8 @@ class JobManager:
         self._lock = threading.Lock()
         self._jobs: dict[str, Job] = {}
         self._active: dict[str, str] = {}
+        self._rerun: dict[str, bool] = {}
+        self._seq = itertools.count(1)
         self._signatures: dict[str, str] = {}
         self._router: _StdoutRouter | None = None
         self._load_history()
@@ -182,7 +197,7 @@ class JobManager:
             jobs = list(self._jobs.values())
         if character_id:
             jobs = [j for j in jobs if j.character_id == character_id]
-        jobs.sort(key=lambda j: (j.created_at, j.job_id), reverse=True)
+        jobs.sort(key=lambda j: (j.created_at, j.seq, j.job_id), reverse=True)
         return [j.as_dict(include_log=False) for j in jobs[: max(1, min(limit, MAX_HISTORY))]]
 
     def active_for(self, character_id: str) -> dict[str, Any] | None:
@@ -198,7 +213,15 @@ class JobManager:
 
     # ---- 시작 ----
 
-    def submit(self, character_id: str, action: str = "run", until: str | None = None) -> dict:
+    def submit(
+        self,
+        character_id: str,
+        action: str = "run",
+        until: str | None = None,
+        *,
+        confirm: list[str] | None = None,
+        trigger: str = "manual",
+    ) -> dict:
         reads.character_dir(self.root, character_id)
         action = (action or "").strip()
         if action not in ACTIONS:
@@ -209,6 +232,10 @@ class JobManager:
                 400,
                 f"until은 단계(s1~s11)나 관문(G1~G9) 중 하나다: {gate_or_stage!r}",
             )
+        confirmed = list(confirm or [])
+        bad = [s for s in confirmed if not isinstance(s, str) or s not in STAGES]
+        if bad:
+            raise WebError(400, f"confirm은 단계 ID 목록이다: {bad!r}")
         with self._lock:
             running = self._active.get(character_id)
             if running:
@@ -218,6 +245,9 @@ class JobManager:
                 character_id=character_id,
                 action=action,
                 until=gate_or_stage,
+                trigger=trigger,
+                confirm=confirmed,
+                seq=next(self._seq),
             )
             self._jobs[job.job_id] = job
             self._active[character_id] = job.job_id
@@ -232,7 +262,39 @@ class JobManager:
         thread.start()
         return job.as_dict(include_log=False)
 
+    def request_resume(self, character_id: str) -> dict | None:
+        """관문 결정 뒤 이어서 돌린다(D-0049, LLD §6.7). 이미 돌고 있으면 끝난 뒤 한 번 더."""
+        settings = self._orchestrator()
+        if not settings.get("auto_resume", False):
+            return None
+        with self._lock:
+            if self._active.get(character_id):
+                self._rerun[character_id] = True
+                return None
+        until = str(settings.get("resume_until", "sx"))
+        try:
+            return self.submit(character_id, until=until, trigger="gate")
+        except WebError as exc:
+            if exc.status != 409:
+                raise
+            with self._lock:
+                self._rerun[character_id] = True
+            return None
+
+    def _orchestrator(self) -> dict[str, Any]:
+        try:
+            return dict(load_config(self.root, self.settings.config_path).orchestrator)
+        except (OSError, ValueError):
+            return {}
+
     def _run(self, job: Job) -> None:
+        self._run_locked(job)
+        with self._lock:
+            again = self._rerun.pop(job.character_id, False)
+        if again:
+            self.request_resume(job.character_id)
+
+    def _run_locked(self, job: Job) -> None:
         with self.locks.hold(job.character_id):
             job.status = "running"
             job.started_at = now_iso()
@@ -247,6 +309,7 @@ class JobManager:
                 job.steps = list(log.steps)
                 job.waiting = list(log.waiting)
                 job.blocked = list(log.blocked)
+                job.held = list(getattr(log, "held", []))
                 job.status = "succeeded"
             except Exception as exc:  # 작업 실패를 기록하고 서버는 계속 돈다
                 job.status = "failed"
@@ -263,12 +326,36 @@ class JobManager:
                 self._publish_job(job)
                 self.publish_state(job.character_id, force=True)
 
+    def run_options(self, job: Job, stream: _JobStream, **over: Any) -> RunOptions:
+        """워크숍 실행의 RunOptions(D-0049): 물결 실행, 유료 단계 확인, 작업 스레드 로그 연결."""
+        orch = self._orchestrator()
+        router = self._stdout_router()
+
+        def wrap(fn: Callable) -> Callable:
+            def inner(*args: Any, **kwargs: Any) -> Any:
+                router.register(stream)
+                try:
+                    return fn(*args, **kwargs)
+                finally:
+                    router.unregister()
+
+            return inner
+
+        values: dict[str, Any] = {
+            "until": job.until,
+            "max_parallel": int(orch.get("max_parallel", 1)),
+            "web": True,
+            "confirmed": set(job.confirm),
+            "wrap_worker": wrap,
+        }
+        values.update(over)
+        return RunOptions(**values)
+
     def _run_default(self, job: Job, stream: _JobStream) -> RunLog:
         """cli run과 같은 경로: 설정을 읽어 Context를 만들고 run_until을 돌린다."""
         config = load_config(self.root, self.settings.config_path)
         ctx = Context(config=config, execute=True)
-        options = RunOptions(until=job.until)
-        return run_until(ctx, job.character_id, options)
+        return run_until(ctx, job.character_id, self.run_options(job, stream))
 
     def _stdout_router(self) -> _StdoutRouter:
         """여러 캐릭터가 동시에 돌아도 각 작업의 print가 자기 로그로만 가게 한 번만 감싼다."""
