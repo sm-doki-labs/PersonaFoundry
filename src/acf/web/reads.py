@@ -11,10 +11,10 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
 
 from acf.pipeline.graph import GATES, STAGES
 from acf.web.errors import WebError
+from acf.web.gate_items import build_gate_items, file_url
 
 CHARACTERS_DIR = "runs/characters"
 BRIEFS_DIR = "runs/briefs"
@@ -27,7 +27,7 @@ _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 _VIDEO_SUFFIXES = {".mp4", ".webm", ".mov"}
 _TEXT_SUFFIXES = {".md", ".txt", ".log"}
 
-# 단계 폴더 이름 (각 단계 run.py가 쓰는 값). s9~s11은 아직 구현 전이라 예상 이름을 둔다.
+# 단계 폴더 이름 (각 단계 run.py가 쓰는 값). S9~S11은 LLD §5.14·§5.15·§5.17의 저장 위치다.
 STAGE_DIRS = {
     "s1": "s1-reference",
     "s2": "s2-hero",
@@ -40,9 +40,12 @@ STAGE_DIRS = {
     "s6": "s6-actions",
     "s7": "s7-traits",
     "s8": "s8-prompts",
-    "s9": "s9-dataset",
-    "s10": "s10-training",
+    "s9s": "s9-data",
+    "s9": "s9-data",
+    "s10t": "s10-train",
+    "s10": "s10-eval",
     "s11": "s11-release",
+    "sx": "sx-export",
 }
 
 GATE_TITLES = {
@@ -55,10 +58,89 @@ GATE_TITLES = {
     "G5": "소개 영상 고르기",
     "G5b": "동작 영상 고르기",
     "G6": "프롬프트 승인",
-    "G7": "학습 데이터 승인",
-    "G8": "평가 보고서 승인",
-    "G9": "릴리즈 패키지 승인",
+    "G7a": "데이터 샘플 검토",
+    "G7": "데이터셋 승인",
+    "G8": "평가·블라인드 20쌍",
+    "G9": "패키지 승인",
 }
+
+# 관문 화면의 종류·단계·허용 결정. connected=False는 단계 코드가 아직 없어 501로 답하는 관문이다.
+GATE_META: dict[str, dict[str, Any]] = {
+    "G1": {
+        "kind": "faces",
+        "stage": "s1",
+        "connected": True,
+        "decisions": ("SELECT", "APPROVE", "REQUEST_CHANGES", "REJECT"),
+    },
+    "G3": {
+        "kind": "planVariants",
+        "stage": "s3",
+        "connected": True,
+        "decisions": ("SELECT", "APPROVE", "REQUEST_CHANGES", "REJECT"),
+    },
+    "G4a": {
+        "kind": "backgrounds",
+        "stage": "s4a",
+        "connected": True,
+        "decisions": ("SELECT", "APPROVE", "REQUEST_CHANGES", "REJECT"),
+    },
+    "G4b": {
+        "kind": "poses",
+        "stage": "s4b",
+        "connected": True,
+        "decisions": ("SELECT", "APPROVE", "REQUEST_CHANGES", "REJECT"),
+    },
+    "G4": {
+        "kind": "frames",
+        "stage": "s4",
+        "connected": True,
+        "decisions": ("APPROVE", "SELECT", "REQUEST_CHANGES", "REJECT"),
+    },
+    "G5": {
+        "kind": "intro",
+        "stage": "s5",
+        "connected": True,
+        "decisions": ("SELECT", "REQUEST_CHANGES", "REJECT"),
+    },
+    "G5b": {
+        "kind": "actions",
+        "stage": "s6",
+        "connected": True,
+        "decisions": ("SELECT", "APPROVE", "REQUEST_CHANGES", "REJECT"),
+    },
+    "G6": {
+        "kind": "prompts",
+        "stage": "s8",
+        "connected": True,
+        "decisions": ("APPROVE", "REQUEST_CHANGES", "REJECT"),
+    },
+    "G7a": {
+        "kind": "samples",
+        "stage": "s9s",
+        "connected": False,
+        "decisions": ("SELECT", "REQUEST_CHANGES", "REJECT"),
+    },
+    "G7": {
+        "kind": "dataset",
+        "stage": "s9",
+        "connected": False,
+        "decisions": ("APPROVE", "REQUEST_CHANGES", "REJECT"),
+    },
+    "G8": {
+        "kind": "eval",
+        "stage": "s10",
+        "connected": False,
+        "decisions": ("SELECT", "REQUEST_CHANGES", "REJECT"),
+    },
+    "G9": {
+        "kind": "package",
+        "stage": "s11",
+        "connected": False,
+        "decisions": ("APPROVE", "REJECT"),
+    },
+}
+# 화면에 보이는 관문 순서. 그래프에 아직 없는 관문도 이 순서 안에서 보여 준다.
+GATE_ORDER = tuple(GATE_META)
 
 # 화면의 갈래(팀) 묶음. d-ops 시안의 병렬 작업 표시와 같은 나눔이다.
 LANES = [
@@ -67,10 +149,22 @@ LANES = [
     {"id": "scene", "label": "장면", "stages": ("s4a", "s4b", "s4")},
     {"id": "video", "label": "영상", "stages": ("s5", "s6")},
     {"id": "persona", "label": "페르소나", "stages": ("s7", "s8")},
-    {"id": "data", "label": "학습 데이터", "stages": ("s9",)},
-    {"id": "training", "label": "학습·평가", "stages": ("s10",)},
-    {"id": "release", "label": "출시", "stages": ("s11",)},
+    {"id": "data", "label": "데이터", "stages": ("s9s", "s9")},
+    {"id": "training", "label": "학습", "stages": ("s10t", "s10")},
+    {"id": "release", "label": "패키지", "stages": ("s11", "sx")},
 ]
+
+
+def known_gates() -> list[str]:
+    """화면이 아는 관문 순서. 그래프에 아직 없는 관문도 화면에는 보여 준다."""
+    return [gate for gate in GATE_ORDER if gate in GATES or gate in GATE_META]
+
+
+def gate_meta(gate: str) -> dict[str, Any]:
+    meta = GATE_META.get(gate)
+    if meta is None:
+        raise WebError(404, f"관문이 없다: {gate}({', '.join(known_gates())} 중 하나다)")
+    return {"gate": gate, "title": GATE_TITLES.get(gate, gate), **meta}
 
 
 def now_iso() -> str:
@@ -233,6 +327,7 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
         "stateError": error,
         "stages": stages,
         "gates": gates,
+        "lanes": _lanes(stages),
         "pendingGates": pending,
         "progress": _progress(stages),
         "awaitingHuman": bool(pending),
@@ -268,6 +363,7 @@ def _lanes(stages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "implemented": any(s["implemented"] for s in items),
                 "done": len(done),
                 "total": len(items),
+                "percent": round(len(done) / len(items) * 100) if items else 0,
                 "stages": [
                     {
                         "id": s["id"],
@@ -302,7 +398,7 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
         "persona": summary["persona"],
         "stages": summary["stages"],
         "gates": summary["gates"],
-        "lanes": _lanes(summary["stages"]),
+        "lanes": summary["lanes"],
         "pendingGates": summary["pendingGates"],
         "progress": summary["progress"],
         "updatedAt": summary["updatedAt"],
@@ -322,10 +418,6 @@ def _kind(path: Path) -> str:
     if suffix in _TEXT_SUFFIXES:
         return "text"
     return "file"
-
-
-def file_url(character_id: str, rel: str) -> str:
-    return f"/api/files/{quote(character_id)}/{quote(rel, safe='/')}"
 
 
 def _iter_files(folder: Path | None, limit: int) -> list[Path]:
@@ -371,41 +463,71 @@ def gate_records(char_dir: Path, gate: str) -> list[dict[str, Any]]:
 
 
 def gate_view(root: Path, character_id: str, gate: str) -> dict[str, Any]:
-    """관문 검토 페이지가 보여 주는 항목: 파일·미리보기 URL·기존 관문 기록."""
-    if gate not in GATES:
-        raise WebError(404, f"관문이 없다: {gate}({', '.join(GATES)} 중 하나다)")
+    """관문 상세 화면의 자료: 고를 항목·파일·미리보기 URL·기존 관문 기록.
+
+    단계 코드가 없는 관문(G7a·G7·G8·G9)은 계약 모양의 합성 예시를 돌려주고 synthetic=true로
+    표시한다. 결정은 이 경로가 아니라 POST .../decision이 기존 approve 경로로 보낸다.
+    """
+    meta = gate_meta(gate)
     char_dir = character_dir(root, character_id)
     state, error = read_state(char_dir)
-    gate_row = next(g for g in _gate_rows(state) if g["id"] == gate)
-    stage_id = next((sid for sid, s in STAGES.items() if s.gate == gate), None)
+    raw_gates = state.get("gates") if isinstance(state.get("gates"), dict) else {}
+    raw_gate = raw_gates.get(gate) if isinstance(raw_gates.get(gate), dict) else {}
+    gate_row = next((g for g in _gate_rows(state) if g["id"] == gate), None)
+    if gate_row is None:
+        gate_row = {
+            "id": gate,
+            "title": meta["title"],
+            "status": raw_gate.get("status", "PENDING"),
+            "rev": raw_gate.get("rev"),
+            "recordRef": raw_gate.get("recordRef"),
+        }
+    stage_id = meta["stage"]
+    stage_dir = STAGE_DIRS.get(stage_id, stage_id)
     stage_row = next((s for s in _stage_rows(state) if s["id"] == stage_id), None)
     rev = gate_row["rev"]
     rev_dir: Path | None = None
-    if stage_id and rev:
-        candidate = char_dir / STAGE_DIRS.get(stage_id, stage_id) / rev
+    if rev:
+        candidate = char_dir / stage_dir / rev
         if candidate.is_dir():
             rev_dir = candidate
     files = [_file_entry(char_dir, p) for p in _iter_files(rev_dir, MAX_FILES)]
     records = gate_records(char_dir, gate)
-    current = None
-    if gate_row["recordRef"]:
-        current = read_json_file(char_dir / gate_row["recordRef"])
+    record_ref = gate_row["recordRef"] or raw_gate.get("recordRef")
+    current = read_json_file(char_dir / str(record_ref)) if record_ref else None
     previews = [f for f in files if f["kind"] in {"html", "image", "video"}]
+    items = build_gate_items(
+        gate=gate,
+        kind=meta["kind"],
+        connected=meta["connected"],
+        char_dir=char_dir,
+        character_id=character_id,
+        stage_dir=stage_dir,
+        rev=rev,
+    )
+    missing = list(items.get("problems", []))
+    if meta["connected"] and rev_dir is None:
+        missing.append(
+            f"{stage_dir}/{rev or '<rev>'}/ 폴더가 없다. 단계를 먼저 돌리거나 state.json의 "
+            "revision을 확인한다"
+        )
     return {
         "characterId": character_id,
         "gate": gate,
-        "title": GATE_TITLES.get(gate, gate),
+        "title": meta["title"],
+        "kind": meta["kind"],
+        "connected": meta["connected"],
+        "decisions": list(meta["decisions"]),
+        "synthetic": items.get("source") == "fixture",
+        "items": items,
+        "missing": missing,
         "status": gate_row["status"],
         "rev": rev,
-        "recordRef": gate_row["recordRef"],
+        "recordRef": record_ref,
         "record": current,
         "records": records,
         "stage": stage_row,
-        "stageDir": (
-            f"{CHARACTERS_DIR}/{character_id}/{STAGE_DIRS.get(stage_id, stage_id)}/{rev}"
-            if rev_dir and stage_id
-            else None
-        ),
+        "stageDir": (f"{CHARACTERS_DIR}/{character_id}/{stage_dir}/{rev}" if rev_dir else None),
         "files": files,
         "previews": previews,
         "stateError": error,

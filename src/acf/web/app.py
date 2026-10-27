@@ -19,7 +19,6 @@ from acf.common.config import load_config
 from acf.common.errors import FactoryError
 from acf.pipeline.approve import approve_gate
 from acf.pipeline.context import Context
-from acf.pipeline.graph import GATES
 from acf.web import reads
 from acf.web.errors import WebError
 from acf.web.events import EventHub, format_sse
@@ -28,6 +27,15 @@ from acf.web.settings import load_settings
 
 GATE_DECISIONS = {"APPROVE", "REJECT", "REQUEST_CHANGES", "SELECT"}
 _TEXT_TYPES = {"text/html", "text/css", "text/plain", "text/markdown", "application/json"}
+
+
+class _DevStaticFiles(StaticFiles):
+    """화면 파일을 고칠 때 브라우저가 옛 JS·CSS를 계속 쓰지 않게 no-store로 보낸다."""
+
+    async def get_response(self, path: str, scope: Any):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
 
 def create_app(root: Path, config_path: Path | None = None) -> FastAPI:
@@ -108,8 +116,8 @@ def create_app(root: Path, config_path: Path | None = None) -> FastAPI:
         gate: str,
         body: Annotated[dict[str, Any], Body()],
     ) -> dict[str, Any]:
-        if gate not in GATES:
-            raise WebError(404, f"관문이 없다: {gate}({', '.join(GATES)} 중 하나다)")
+        if gate not in reads.known_gates():
+            raise WebError(404, f"관문이 없다: {gate}({', '.join(reads.known_gates())} 중 하나다)")
         answer = _clean_answer(body)
         char_dir = reads.character_dir(root, character_id)
         state, _ = reads.read_state(char_dir)
@@ -253,7 +261,7 @@ def create_app(root: Path, config_path: Path | None = None) -> FastAPI:
 
     static_dir = conf.static_path
     if static_dir.is_dir():
-        app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+        app.mount("/", _DevStaticFiles(directory=str(static_dir), html=True), name="static")
     else:
 
         @app.get("/")
