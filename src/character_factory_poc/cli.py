@@ -394,6 +394,7 @@ def cmd_run(args) -> int:
             else None
         ),
         verify_export=args.verify_export,
+        submit_training=args.submit_training,
     )
     validate_until(opt.until)
     validate_auto_approve(opt.auto_approve)
@@ -746,6 +747,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s.add_argument("--allow-same-family", action="store_true")
     s.add_argument("--training-providers", default=None, help="s10t 학습 공급자 쉼표 목록")
+    s.add_argument(
+        "--submit-training",
+        action="store_true",
+        help="s10t에서 학습을 제출·회수한다(유료). 없으면 학습 계획(dry run)만 쓴다",
+    )
     s.add_argument(
         "--verify-export", action="store_true", help="sx에서 일회용 DB 적재 확인까지 한다"
     )

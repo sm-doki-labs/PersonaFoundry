@@ -173,8 +173,12 @@ def collect_sft(ctx: Context, cid: str) -> tuple[Sft, list[SourceFile], list[str
         runs.append(SourceFile("training-run", run_path, rel, sha256_file(run_path)))
     sources.extend(runs)
     sft = sft.model_copy(update={"trainingRuns": [item.rel for item in runs]})
+    adopted = _adopted_binding(ctx, cid)
+    if adopted:
+        # 학습 없이 긴 프롬프트로 간 경우(K-0038)에도 G8 채택이 남는다. evalReport는 비어 있다.
+        sft = sft.model_copy(update={"adoptedBinding": adopted})
 
-    report_path = _latest(char_dir / "s10-eval", "ev", "report.json")
+    report_path = _latest_eval_report(ctx, cid)
     if report_path is not None:
         try:
             validate("eval-report-v2", read_json(report_path))
@@ -189,10 +193,19 @@ def collect_sft(ctx: Context, cid: str) -> tuple[Sft, list[SourceFile], list[str
             sft = sft.model_copy(
                 update={
                     "evalReport": "sft/eval-report.json",
-                    "adoptedBinding": _adopted_binding(ctx, cid),
+                    "adoptedBinding": adopted,
                 }
             )
     return sft, sources, problems
+
+
+def _latest_eval_report(ctx: Context, cid: str) -> Path | None:
+    """G8이 승인한 revision의 평가 보고서. 학습 없이 진행했으면 None이다."""
+    gate = ctx.state(cid).gate("G8")
+    if gate.status == "APPROVED" and gate.rev:
+        path = ctx.character_dir(cid) / "s10-eval" / gate.rev / "report.json"
+        return path if path.is_file() else None
+    return _latest(ctx.character_dir(cid) / "s10-eval", "ev", "report.json")
 
 
 def _latest(parent: Path, prefix: str, name: str) -> Path | None:

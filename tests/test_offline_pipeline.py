@@ -127,6 +127,7 @@ def decide(client: TestClient, cid: str, gate: str, seen: dict) -> None:
     """화면 항목을 읽고 사람이 고를 답을 만들어 보낸다."""
     v = view(client, cid, gate)
     items = v["items"]
+    seen.setdefault("kinds", {})[gate] = v["kind"]
     seen[gate] = items.get("source")
     if gate in {"G1", "G3", "G4a", "G4b", "G4", "G5", "G5b", "G6"}:
         post(client, cid, gate, answer_for(gate, items))
@@ -156,6 +157,15 @@ def decide(client: TestClient, cid: str, gate: str, seen: dict) -> None:
         assert items["samples"]
         post(client, cid, gate, {"decision": "APPROVE", "verdicts": {}, "reviewer": "tester"})
         return
+    if gate == "G8" and v["kind"] == "promptOnly":
+        # 학습 결과 없이 연 G8(K-0038): 화면은 블라인드 비교 대신 '긴 프롬프트로 진행'을 묻는다.
+        assert "pairs" not in items and items["adoptOptions"] == ["LONG_BASE"]
+        choice = seen.get("g8_choice", "SELECT")
+        answer = {"decision": choice, "reviewer": "tester", "minutes": 1}
+        if choice == "SELECT":
+            answer["adopted"] = "LONG_BASE"
+        post(client, cid, gate, answer)
+        return
     if gate == "G8":
         pairs = items["pairs"]
         assert len(pairs) == 20
@@ -177,9 +187,8 @@ def decide(client: TestClient, cid: str, gate: str, seen: dict) -> None:
     raise AssertionError(f"모르는 관문: {gate}")
 
 
-@pytest.mark.parametrize("gender", sorted(CHARACTERS))
-def test_full_pipeline_from_ranking_to_app_db(tmp_path: Path, gender: str) -> None:
-    root = tmp_path / gender
+def drive(root: Path, gender: str, *, submit_training: bool, seen: dict) -> tuple:
+    """sx가 끝나거나 더 진행할 관문이 없을 때까지 돌리고 대기 관문을 웹 API로 결정한다."""
     ctx, cid = setup(root, gender)
     opt = RunOptions(
         until="sx",
@@ -187,20 +196,31 @@ def test_full_pipeline_from_ranking_to_app_db(tmp_path: Path, gender: str) -> No
         seed=SEED,
         voice_probes=list(PROBES),
         verify_export=VERIFY_DB,
+        submit_training=submit_training,
     )
-    seen: dict[str, str | None] = {}
     rounds = 0
+    log = None
     with TestClient(create_app(root)) as client:
         for _ in range(MAX_ROUNDS):
             rounds += 1
             log = run_until(ctx, cid, opt)
-            if ctx.state(cid).stage("sx").status == "APPROVED":
+            if ctx.state(cid).stage("sx").status == "APPROVED" or not log.waiting:
                 break
-            assert log.waiting, ("진행이 멈췄다", log.blocked, log.steps[-8:])
             for gate in log.waiting:
                 decide(client, cid, gate, seen)
         else:
             pytest.fail(f"{MAX_ROUNDS}번 돌아도 끝나지 않았다")
+    return ctx, cid, rounds, log
+
+
+@pytest.mark.parametrize("gender", sorted(CHARACTERS))
+def test_full_pipeline_from_ranking_to_app_db(tmp_path: Path, gender: str) -> None:
+    """SFT 경로: 학습(가짜)을 제출·회수하고 평가·블라인드 판정을 거쳐 패키지·적재까지."""
+    seen: dict = {}
+    ctx, cid, rounds, log = drive(tmp_path / gender, gender, submit_training=True, seen=seen)
+    assert ctx.state(cid).stage("sx").status == "APPROVED", log.steps[-8:]
+    assert seen["kinds"]["G8"] == "eval"
+    seen.pop("kinds")
 
     state = ctx.state(cid)
     # 모든 현행 관문이 사람(웹 API) 결정으로 승인됐다. G2는 결번이다.
@@ -238,3 +258,39 @@ def test_full_pipeline_from_ranking_to_app_db(tmp_path: Path, gender: str) -> No
     else:
         assert verification["status"] == "NOT_RUN"
     print(f"{gender}: {rounds}회 실행으로 sx까지, 적재 확인 {verification['status']}")
+
+
+def test_prompt_only_path_packages_without_training(tmp_path: Path) -> None:
+    """K-0038: 학습은 계획(dry run)만, G8에서 긴 프롬프트를 골라 패키지·적재까지 간다."""
+    seen: dict = {}
+    ctx, cid, rounds, log = drive(tmp_path / "f", "female", submit_training=False, seen=seen)
+    state = ctx.state(cid)
+    assert state.stage("sx").status == "APPROVED", log.steps[-8:]
+    assert seen["kinds"]["G8"] == "promptOnly"
+    assert state.stage("s10t").status == "AWAITING_HUMAN"  # 계획만 있고 제출하지 않았다
+    char_dir = ctx.character_dir(cid)
+    plan_run = next((char_dir / "s10-train").glob("tr*/*/training-run.json"))
+    assert json.loads(plan_run.read_text())["dryRun"] is True
+    package_rev = state.stage("s11").currentRev
+    package = json.loads((char_dir / "s11-release" / package_rev / "package.json").read_text())
+    sft = package["sft"]
+    assert sft["adoptedBinding"] == "LONG_BASE"
+    assert sft["evalReport"] is None
+    assert sft["datasetRev"] and sft["trainingRuns"]
+    assert package["persona"]["longPrompt"]
+    export_rev = state.stage("sx").currentRev
+    result = json.loads((char_dir / "sx-export" / export_rev / "export-result.json").read_text())
+    assert result["verification"]["status"] == ("PASSED" if VERIFY_DB else "NOT_RUN")
+
+
+def test_prompt_only_wait_choice_keeps_s10_waiting(tmp_path: Path) -> None:
+    """G8에서 '학습을 기다린다'를 고르면 평가가 멈추고, 다시 돌려도 같은 질문을 또 열지 않는다."""
+    seen: dict = {"g8_choice": "REJECT"}
+    ctx, cid, rounds, log = drive(tmp_path / "f", "female", submit_training=False, seen=seen)
+    state = ctx.state(cid)
+    assert state.gate("G8").status == "REJECTED"
+    assert state.stage("s10").status == "REJECTED"
+    assert state.stage("s11").status == "PENDING"
+    assert "s10" in log.blocked and any("학습 결과" in s for s in log.steps)
+    evals = sorted(p.name for p in (ctx.character_dir(cid) / "s10-eval").iterdir())
+    assert evals == ["ev1"]

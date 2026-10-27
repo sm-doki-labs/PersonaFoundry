@@ -44,6 +44,7 @@ class RunOptions:
     )
     seed: dict[str, Any] | None = None  # 기획 씨앗(D-0033). 저장된 씨앗이 없을 때만 쓴다.
     training_providers: list[str] | None = None  # s10t 학습 공급자. 없으면 [stages.s10t]
+    submit_training: bool = False  # 학습 제출·회수까지 한다(유료). 기본은 계획(dry run)만
     verify_export: bool = False  # sx에서 일회용 DB 적재 확인까지 한다(LLD §8.11)
 
 
@@ -133,21 +134,36 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
         return run_s3_draft(ctx, cid, opt.brief_text)
 
     def s10t():
+        from character_factory_poc.stages.s10_train.plan import plan_s10t
         from character_factory_poc.stages.s10_train.run import run_s10t
 
-        return run_s10t(ctx, cid, opt.training_providers)
+        # 학습 제출은 유료라 --submit-training을 따로 줄 때만 한다(D-0048).
+        if opt.submit_training:
+            return run_s10t(ctx, cid, opt.training_providers)
+        return plan_s10t(ctx, cid, opt.training_providers)
 
     def s10():
-        from character_factory_poc.stages.s10_eval import prereg, report
+        from character_factory_poc.stages.s10_eval import prereg, prompt_only, report
         from character_factory_poc.stages.s10_eval import run as eval_run
 
-        if not _training_ready(ctx, cid):
-            raise NeedsInputError(
-                "학습 결과(model_binding)가 없다. 학습은 계획(dry run)까지만 돌았다. "
-                "cfp train submit/collect --execute 뒤 다시 돌린다"
-            )
         st = ctx.state(cid).stage("s10")
-        if st.status not in {"RUNNING", "CHECK_FAILED"} or not st.currentRev:
+        last = ctx.character_dir(cid) / "s10-eval" / (st.currentRev or "-")
+        if not _training_ready(ctx, cid):
+            waiting = st.status == "REJECTED" and prompt_only.is_prompt_only(last)
+            mode = str(ctx.config.stage("s10").get("untrained", "ask"))
+            if mode == "wait" or waiting:
+                raise NeedsInputError(
+                    "학습 결과(model_binding)가 없다. 학습은 계획(dry run)까지만 돌았다. "
+                    "cfp train submit/collect --execute 뒤 다시 돌린다"
+                )
+            # K-0038: 학습 없이 긴 프롬프트로 갈지 사람이 G8에서 정한다.
+            return prompt_only.open_prompt_only(ctx, cid)
+        # 학습 대기를 골랐다가(REJECTED) 학습 결과가 생기면 새 ev revision으로 평가한다.
+        if (
+            st.status not in {"RUNNING", "CHECK_FAILED"}
+            or not st.currentRev
+            or prompt_only.is_prompt_only(last)
+        ):
             prereg.build_prereg(ctx, cid)
         eval_run.run_eval(ctx, cid)
         return report.judge_and_report(ctx, cid)

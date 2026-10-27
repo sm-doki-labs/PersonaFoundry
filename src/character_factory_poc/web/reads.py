@@ -514,8 +514,8 @@ def gate_view(root: Path, character_id: str, gate: str) -> dict[str, Any]:
     return {
         "characterId": character_id,
         "gate": gate,
-        "title": meta["title"],
-        "kind": meta["kind"],
+        "title": items.get("title") or meta["title"],
+        "kind": items.get("viewKind") or meta["kind"],
         "connected": meta["connected"],
         "decisions": list(meta["decisions"]),
         "synthetic": items.get("source") == "fixture",

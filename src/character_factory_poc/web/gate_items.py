@@ -672,6 +672,18 @@ def data_dataset(char_dir: Path, character_id: str, stage_dir: str, rev: str) ->
 def eval_report(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[str, Any]:
     """G8: 지표·기준과 사람 블라인드 쌍. 조건 이름은 쌍에 넣지 않는다."""
     rev_dir = Path(char_dir) / stage_dir / rev
+    prompt_only = read_json(rev_dir / "prompt-only.json")
+    if prompt_only is not None:
+        # K-0038: 학습 결과 없이 연 G8. 블라인드 비교 대신 '긴 프롬프트로 진행' 결정을 받는다.
+        return {
+            "kind": "eval",
+            "viewKind": "promptOnly",
+            "title": "학습 없이 진행",
+            "source": "artifacts",
+            "decision": prompt_only,
+            "adoptOptions": prompt_only.get("adoptOptions", ["LONG_BASE"]),
+            "page": asset(char_dir, character_id, stage_dir, rev, "gate-G8.html"),
+        }
     report = read_json(rev_dir / "report-final.json") or read_json(rev_dir / "report.json")
     pairs_doc = read_json(rev_dir / "pairs.json")
     prereg = read_json(rev_dir / "prereg.json")

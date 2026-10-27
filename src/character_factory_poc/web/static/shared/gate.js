@@ -237,6 +237,15 @@
       render: renderEval,
       build: buildEval
     },
+    promptOnly: {
+      hint: '학습 결과가 아직 없다. 긴 프롬프트로 패키지까지 갈지, 학습을 기다릴지 정한다.',
+      actions: [
+        ['SELECT', '긴 프롬프트로 진행', 'primary'],
+        ['REJECT', '학습을 기다린다', 'ghost']
+      ],
+      render: renderPromptOnly,
+      build: buildPromptOnly
+    },
     package: {
       hint: '패키지 요약을 확인하고 승인한다. 승인 뒤 우리 앱 변환·적재는 별도 단계다.',
       actions: [
@@ -957,11 +966,20 @@
 
   function renderSamples(items) {
     var clusters = list(items.clusters);
+    // 판정을 마친 클러스터는 표시하고, 아직 안 한 첫 클러스터를 기본으로 고른다.
+    var firstOpen = clusters.findIndex(function (cluster) {
+      return !cluster.reviewed;
+    });
+    if (firstOpen < 0) firstOpen = 0;
+    var reviewed = clusters.filter(function (cluster) {
+      return cluster.reviewed;
+    }).length;
     var options = clusters
       .map(function (cluster, index) {
         return (
-          '<option value="' + esc(cluster.clusterId) + '"' + (index === 0 ? ' selected' : '') +
-          '>' + esc(cluster.clusterId) + '</option>'
+          '<option value="' + esc(cluster.clusterId) + '"' +
+          (index === firstOpen ? ' selected' : '') + '>' + esc(cluster.clusterId) +
+          (cluster.reviewed ? ' · 판정 완료' : '') + '</option>'
         );
       })
       .join('');
@@ -974,7 +992,8 @@
         ['검증', validationText((items.plan || {}).validation)]
       ]) +
       '</section>' +
-      '<section class="gate-section"><h2>클러스터 샘플</h2>' +
+      '<section class="gate-section"><h2>클러스터 샘플 <span class="blind-count">' +
+      reviewed + ' / ' + clusters.length + ' 판정</span></h2>' +
       '<label class="field"><span>클러스터</span><select data-cluster-pick>' + options +
       '</select></label><div data-cluster-body></div></section>' +
       '<section class="gate-section"><h2>인계안 수정 요청 (선택)</h2>' +
@@ -1136,9 +1155,16 @@
         return '<option value="' + esc(option) + '">' + esc(option) + '</option>';
       })
       .join('');
+    // 지표에는 조건 이름과 값이 있어 판정을 흔들 수 있다. 블라인드를 다 고른 뒤에 연다.
+    var blindOpen =
+      !list(items.pairs).length || (state.view && state.view.status !== 'AWAITING_HUMAN');
     return (
-      '<section class="gate-section"><h2>지표</h2>' +
-      '<p class="section-sub">조건 이름은 블라인드가 끝난 뒤 채택 기준에서만 쓴다.</p>' +
+      '<section class="gate-section" data-blind-wait' + (blindOpen ? ' hidden' : '') + '>' +
+      '<h2>지표</h2><p class="section-sub">조건 이름과 지표 값은 블라인드 ' +
+      list(items.pairs).length + '쌍을 모두 고르면 열려요.</p></section>' +
+      '<section class="gate-section" data-after-blind' + (blindOpen ? '' : ' hidden') + '>' +
+      '<h2>지표</h2>' +
+      '<p class="section-sub">블라인드 판정을 마친 뒤 보는 조건별 지표다.</p>' +
       '<table class="metric-table"><thead><tr><th>조건</th><th>지표</th><th>값</th></tr>' +
       '</thead><tbody>' + metrics + '</tbody></table>' +
       '<details class="gate-more"><summary>기준 결과</summary>' +
@@ -1173,6 +1199,37 @@
   }
 
   // ---------------------------------------------------------------- G9
+  // ---------------------------------------------------------------- G8(학습 없이 진행, K-0038)
+  function renderPromptOnly(items) {
+    var doc = items.decision || {};
+    var runs = list(doc.trainingRuns)
+      .map(function (run) {
+        var usd = run.estimateUsd == null ? '-' : '$' + Number(run.estimateUsd).toFixed(2);
+        return '<tr><td>' + esc(run.provider) + '</td><td>' + esc(run.status) + '</td><td>' +
+          (run.dryRun ? '계획만(dry run)' : '실행') + '</td><td class="num">' + esc(usd) +
+          '</td></tr>';
+      })
+      .join('');
+    return (
+      '<section class="gate-section"><h2>학습 결과가 없어요</h2>' +
+      '<p class="section-sub">' + esc(doc.reason || '') + '</p>' +
+      '<table class="metric-table"><thead><tr><th>학습 환경</th><th>상태</th><th>실행</th>' +
+      '<th>추정 비용</th></tr></thead><tbody>' +
+      (runs || '<tr><td colspan="4">학습 계획 없음</td></tr>') + '</tbody></table></section>' +
+      '<section class="gate-section"><h2>이렇게 진행돼요</h2>' +
+      '<p class="section-sub"><b>긴 프롬프트로 진행</b>을 누르면 SFT 평가 없이 패키지를 만들고, ' +
+      '패키지에는 긴 프롬프트·짧은 프롬프트·데이터셋(' + esc(doc.datasetRev || '없음') +
+      ')과 학습 계획이 들어가요. <b>학습을 기다린다</b>를 누르면 학습 결과가 생길 때까지 ' +
+      '평가 단계가 멈춰요.</p></section>'
+    );
+  }
+
+  function buildPromptOnly(decision) {
+    var answer = { decision: decision };
+    if (decision === 'SELECT') answer.adopted = list(state.items.adoptOptions)[0] || 'LONG_BASE';
+    return Object.assign(answer, details());
+  }
+
   function renderPackage(items) {
     var pkg = items.package || {};
     var profile = pkg.profile || {};
@@ -1230,7 +1287,8 @@
         ['persona', (pkg.persona || {}).personaVersion],
         ['데이터셋', sft.datasetRev],
         ['학습 기록', joinList(sft.trainingRuns, ' / ')],
-        ['평가 보고서', sft.evalReport],
+        ['평가 보고서', sft.evalReport ||
+          (sft.adoptedBinding === 'LONG_BASE' ? '없음 · 학습 없이 긴 프롬프트로 진행' : '없음')],
         ['채택 모델', sft.adoptedBinding]
       ]) + '</section>' +
       '<section class="gate-section"><h2>관문 기록</h2>' +
@@ -1255,7 +1313,9 @@
 
   // ---------------------------------------------------------------- 렌더
   function connectionLabel(view) {
-    return view && view.connected === false ? '아직 연결 전' : '결정 가능';
+    if (view && view.connected === false) return '아직 연결 전';
+    if (view && (view.status === 'APPROVED' || view.status === 'REJECTED')) return '결정 완료';
+    return view && view.status === 'AWAITING_HUMAN' ? '결정 가능' : '단계 대기';
   }
 
   function banner(kind, title, body) {
@@ -1426,8 +1486,11 @@
       .then(function (data) {
         var gateState = ((data || {}).state || {}).gates || {};
         var recorded = (gateState[state.gate] || {}).status || '';
-        setStatus('기록했다: ' + (data.recordRef || '') + ' · 상태 ' + recorded, 'ok');
-        return load();
+        var message = '기록했다: ' + (data.recordRef || '') + ' · 상태 ' + recorded;
+        // 다시 그리면 상태 줄이 지워지므로 새로 읽은 뒤에 기록 결과를 보여 준다.
+        return load().then(function () {
+          setStatus(message, 'ok');
+        });
       })
       .catch(function (error) {
         if (error.status === 501) {
@@ -1443,10 +1506,13 @@
         } else {
           setStatus(error.message, 'bad');
         }
-        state.busy = false;
         qa('[data-decide]').forEach(function (node) {
           node.disabled = false;
         });
+      })
+      .then(function () {
+        // 성공·실패 모두 다음 결정을 보낼 수 있게 푼다(G7a는 클러스터마다 따로 보낸다).
+        state.busy = false;
       });
   }
 
@@ -1537,6 +1603,12 @@
       var done = Object.keys(state.pairs).length;
       var counter = q('[data-blind-count]');
       if (counter) counter.textContent = done + ' / ' + total;
+      if (total && done >= total) {
+        var after = q('[data-after-blind]');
+        var wait = q('[data-blind-wait]');
+        if (after) after.hidden = false;
+        if (wait) wait.hidden = true;
+      }
     }
   });
 

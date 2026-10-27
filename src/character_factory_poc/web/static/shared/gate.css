@@ -148,3 +148,9 @@ body.gate-page{overflow:auto;min-height:100dvh}
 @media (max-width:720px){.gate-wrap{padding:10px;grid-template-rows:auto minmax(0,1fr)}
   .gate-head h1{font-size:26px}.pair .pair-answers,.doc-block,.probe .probe-a{
   grid-template-columns:1fr}.field-list .field{grid-template-columns:1fr;gap:4px}}
+
+/* 좁은 폭: 경로는 말줄임, 상태 표시는 줄이지 않는다(브라우저 확인 2026-10-28) */
+.gate-wrap .appbar .crumbs{min-width:0;flex:1 1 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.gate-wrap .appbar .top-right{flex:0 0 auto}
+.gate-status{white-space:nowrap}
+@media (max-width:720px){.gate-wrap .appbar .brand small{display:none}}

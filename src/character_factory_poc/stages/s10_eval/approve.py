@@ -96,6 +96,14 @@ def approve_g8(ctx: Context, cid: str, answer: dict[str, Any]) -> Path:
     gate = state.gate("G8")
     if gate.status != "AWAITING_HUMAN" or not gate.rev:
         raise FactoryError(f"{cid}: G8이 대기 상태가 아니다({gate.status})")
+    from character_factory_poc.stages.s10_eval.prompt_only import (
+        approve_prompt_only,
+        is_prompt_only,
+    )
+
+    if is_prompt_only(char_dir / "s10-eval" / gate.rev):
+        # K-0038: 학습 결과 없이 연 G8. 평가 보고서 대신 '긴 프롬프트로 진행' 결정을 받는다.
+        return approve_prompt_only(ctx, cid, char_dir / "s10-eval" / gate.rev, answer)
     if answer.get("decision") != "SELECT":
         raise FactoryError("G8 결정은 SELECT다(채택 조건을 고른다)")
     rev_dir = char_dir / "s10-eval" / gate.rev
