@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from character_factory_poc.pipeline.graph import STAGES
 from character_factory_poc.pipeline.orchestrator import RunLog
 from character_factory_poc.web import create_app
 from character_factory_poc.web.errors import WebError
@@ -111,12 +112,12 @@ def test_health_and_projects_read_real_runs(tmp_path):
         char = data["characters"][0]
         assert char["name"] == "윤하린"
         assert char["persona"]["job"] == "책방 직원"
-        assert char["progress"]["total"] == 11
+        assert char["progress"]["total"] == sum(1 for s in STAGES.values() if s.implemented)
         assert {g["id"] for g in char["pendingGates"]} == {"G1", "G3"}
         stages = {s["id"]: s for s in char["stages"]}
         assert stages["s1"]["status"] == "AWAITING_HUMAN"
         assert stages["s1"]["gateStatus"] == "AWAITING_HUMAN"
-        assert stages["s9"]["implemented"] is False
+        assert stages["s9"]["implemented"] is True
         assert data["totals"]["pendingGates"] == 2
 
         brief = data["briefs"][0]
@@ -135,7 +136,7 @@ def test_character_detail_keeps_state_and_lanes(tmp_path):
         lanes = {lane["id"]: lane for lane in detail["lanes"]}
         assert lanes["appearance"]["status"] == "gate"
         assert lanes["appearance"]["pendingGates"] == ["G1"]
-        assert lanes["data"]["implemented"] is False
+        assert lanes["data"]["implemented"] is True
         assert [g["id"] for g in detail["pendingGates"]] == ["G1", "G3"]
         assert client.get("/api/characters/not-there").status_code == 404
 
@@ -231,8 +232,9 @@ def test_gate_decision_uses_cli_path_and_records(tmp_path):
         assert bad.status_code == 400
         unknown = client.post("/api/characters/" + CID + "/gates/G99/decision", json=answer)
         assert unknown.status_code == 404
-        unimplemented = client.post("/api/characters/" + CID + "/gates/G7/decision", json=answer)
-        assert unimplemented.status_code == 501
+        # G7은 연결됐다(H 갈래). 대기 중이 아니면 관문 경로가 409로 거절한다
+        not_waiting = client.post("/api/characters/" + CID + "/gates/G7/decision", json=answer)
+        assert not_waiting.status_code == 409
 
 
 def test_job_queue_runs_orchestrator_with_fake_providers(tmp_path):

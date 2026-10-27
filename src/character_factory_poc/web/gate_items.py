@@ -592,6 +592,146 @@ def prompts(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict
     }
 
 
+# ---------------------------------------------------------------- G7a·G7·G8·G9 (H 갈래)
+# 합성 예시(gate_fixtures)와 같은 모양으로 실제 산출물을 읽는다. 화면 코드는 그대로 쓴다.
+
+_VERDICTS = ["ADOPT", "FIX", "REJECT"]
+
+
+def _conv_view(conv: dict[str, Any]) -> dict[str, Any]:
+    return {k: conv.get(k) for k in ("conversationId", "clusterId", "system", "messages")}
+
+
+def data_samples(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[str, Any]:
+    """G7a: 클러스터별 인계안과 샘플 전문, 이미 판정한 클러스터 표시."""
+    from character_factory_poc.stages.s9_data.samples import load_samples
+
+    rev_dir = Path(char_dir) / stage_dir / rev
+    plan = read_json(rev_dir / "plan.json")
+    if plan is None:
+        return _empty("samples", ["plan.json이 없다. cfp data samples를 먼저 돌린다"])
+    clusters = []
+    for c in plan.get("clusters", []):
+        cid = c["clusterId"]
+        try:
+            convs = [_conv_view(x.model_dump(mode="json")) for x in load_samples(rev_dir, cid)]
+        except Exception as exc:  # noqa: BLE001  화면 읽기는 깨진 파일이 있어도 나머지를 보여 준다
+            convs = []
+            plan.setdefault("problems", []).append(f"{cid} 샘플을 읽지 못했다: {exc}")
+        clusters.append(
+            {
+                "clusterId": cid,
+                "handoff": read_json(rev_dir / "handoffs" / f"{cid}.json"),
+                "samples": convs,
+                "reviewed": (Path(char_dir) / "gates" / f"G7a-{rev}-{cid}.json").is_file(),
+            }
+        )
+    return {
+        "kind": "samples",
+        "source": "artifacts",
+        "plan": plan,
+        "clusters": clusters,
+        "verdicts": _VERDICTS,
+        "page": asset(char_dir, character_id, stage_dir, rev, "gate-G7a.html"),
+    }
+
+
+def data_dataset(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[str, Any]:
+    """G7: 분할·검사 요약과 표본 20개(대화 ID 순 앞 20개)."""
+    rev_dir = Path(char_dir) / stage_dir / rev
+    dataset = read_json(rev_dir / "dataset.json")
+    if dataset is None:
+        return _empty("dataset", ["dataset.json이 없다. cfp data build를 먼저 돌린다"])
+    rows = []
+    index = rev_dir / "index.jsonl"
+    if index.is_file():
+        for line in index.read_text("utf-8").splitlines():
+            if line.strip():
+                rows.append(json.loads(line))
+    samples = []
+    for row in sorted(rows, key=lambda r: str(r.get("conversationId")))[:20]:
+        conv = read_json(rev_dir / str(row.get("path", "")))
+        if conv is not None:
+            samples.append(_conv_view(conv))
+    report = read_json(rev_dir / "check-report.json") or {}
+    notes = [
+        f"차단 실패 {dataset.get('blockingFailures', 0)}건, 경고 {dataset.get('warnings', 0)}건"
+    ]
+    notes += [str(n) for n in report.get("warnings", [])][:5] if isinstance(report, dict) else []
+    return {
+        "kind": "dataset",
+        "source": "artifacts",
+        "dataset": dataset,
+        "samples": samples,
+        "notes": notes,
+        "verdicts": _VERDICTS,
+        "page": asset(char_dir, character_id, stage_dir, rev, "gate-G7.html"),
+    }
+
+
+def eval_report(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[str, Any]:
+    """G8: 지표·기준과 사람 블라인드 쌍. 조건 이름은 쌍에 넣지 않는다."""
+    rev_dir = Path(char_dir) / stage_dir / rev
+    report = read_json(rev_dir / "report-final.json") or read_json(rev_dir / "report.json")
+    pairs_doc = read_json(rev_dir / "pairs.json")
+    prereg = read_json(rev_dir / "prereg.json")
+    if report is None or pairs_doc is None or prereg is None:
+        return _empty("eval", ["평가 보고서·짝 판정·사전 등록 가운데 없는 파일이 있다"])
+    by_id = {p.get("pairId"): p for p in pairs_doc.get("pairs", [])}
+    pairs = []
+    for pid in pairs_doc.get("humanPairIds", []):
+        p = by_id.get(pid)
+        if p is None:
+            continue
+        prompt = (f"{p['history']}\n\n" if p.get("history") else "") + str(p.get("user", ""))
+        pairs.append({"pairId": pid, "prompt": prompt, "a": p.get("replyA"), "b": p.get("replyB")})
+    options = ["LONG_BASE"] + [
+        a["model"]
+        for a in prereg.get("arms", [])
+        if a.get("armId") != "LONG_BASE" and not str(a.get("model", "")).startswith("UNBOUND:")
+    ]
+    criteria = [
+        {
+            "id": c["id"],
+            "metric": c["metric"],
+            "rule": f"{c['comparator']} {c['threshold']}",
+        }
+        for c in prereg.get("criteria", [])
+    ]
+    return {
+        "kind": "eval",
+        "source": "artifacts",
+        "report": report,
+        "criteria": criteria,
+        "pairs": pairs,
+        "adoptOptions": options,
+        "page": asset(char_dir, character_id, stage_dir, rev, "gate-G8.html"),
+    }
+
+
+def release_package(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[str, Any]:
+    """G9: 패키지 요약. 적재 확인은 G9 승인 뒤 cfp export doki-app --verify가 한다."""
+    rev_dir = Path(char_dir) / stage_dir / rev
+    package = read_json(rev_dir / "package.json")
+    if package is None:
+        return _empty("package", ["package.json이 없다. cfp release build를 먼저 돌린다"])
+    files = package.get("files", [])
+    missing = [f["path"] for f in files if not (rev_dir / f["path"]).is_file()]
+    return {
+        "kind": "package",
+        "source": "artifacts",
+        "package": package,
+        "counts": {
+            "files": len(files),
+            "chapters": len(package.get("chapters", [])),
+            "videos": len(package.get("videos", [])),
+            "missing": missing,
+        },
+        "verification": {"status": "NOT_RUN", "disposableDb": True, "steps": []},
+        "page": asset(char_dir, character_id, stage_dir, rev, "gate-G9.html"),
+    }
+
+
 BUILDERS = {
     "faces": faces,
     "planVariants": plan_variants,
@@ -601,6 +741,10 @@ BUILDERS = {
     "intro": intro,
     "actions": actions,
     "prompts": prompts,
+    "samples": data_samples,
+    "dataset": data_dataset,
+    "eval": eval_report,
+    "package": release_package,
 }
 
 

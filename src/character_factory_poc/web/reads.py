@@ -117,25 +117,25 @@ GATE_META: dict[str, dict[str, Any]] = {
     "G7a": {
         "kind": "samples",
         "stage": "s9s",
-        "connected": False,
+        "connected": True,
         "decisions": ("SELECT", "REQUEST_CHANGES", "REJECT"),
     },
     "G7": {
         "kind": "dataset",
         "stage": "s9",
-        "connected": False,
+        "connected": True,
         "decisions": ("APPROVE", "REQUEST_CHANGES", "REJECT"),
     },
     "G8": {
         "kind": "eval",
         "stage": "s10",
-        "connected": False,
+        "connected": True,
         "decisions": ("SELECT", "REQUEST_CHANGES", "REJECT"),
     },
     "G9": {
         "kind": "package",
         "stage": "s11",
-        "connected": False,
+        "connected": True,
         "decisions": ("APPROVE", "REJECT"),
     },
 }

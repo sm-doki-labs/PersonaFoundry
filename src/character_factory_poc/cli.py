@@ -388,6 +388,12 @@ def cmd_run(args) -> int:
         allow_same_family=args.allow_same_family,
         ranking=json.loads(Path(args.ranking).read_text("utf-8")) if args.ranking else None,
         seed=json.loads(Path(args.seed).read_text("utf-8")) if args.seed else None,
+        training_providers=(
+            [x.strip() for x in args.training_providers.split(",")]
+            if args.training_providers
+            else None
+        ),
+        verify_export=args.verify_export,
     )
     validate_until(opt.until)
     validate_auto_approve(opt.auto_approve)
@@ -427,6 +433,115 @@ def cmd_verify(args) -> int:
         return 1
     print("모든 manifest가 일치한다")
     return 0
+
+
+# ---------------------------------------------------------------- S9~S11·내보내기 (LLD §4, D-0044)
+
+
+def _ctx(args) -> Context:
+    return Context.load(
+        _root(args),
+        execute=getattr(args, "execute", False),
+        max_calls=getattr(args, "max_calls", None),
+    )
+
+
+def cmd_data(args) -> int:
+    """S9: plan(계획 고정) · samples(인계안·샘플 → G7a) · build(대량·검사·분할 → G7)."""
+    from character_factory_poc.stages import s9_data
+    from character_factory_poc.stages.s9_data import build, plan, samples
+
+    ctx = _ctx(args)
+    cid = args.character_id
+    stage = {"plan": "plan", "samples": "s9s", "build": "s9"}[args.sub]
+    if args.sub == "plan":
+        out = plan.run_plan(ctx, cid)
+        print(f"데이터 계획: {out}")
+        return 0
+    if not args.execute:
+        print(format_plan(s9_data.plan_calls(ctx, cid, stage)))
+        return 0
+    if args.sub == "samples":
+        out = samples.run_samples(ctx, cid)
+        print(f"샘플·인계안: {out} (G7a 대기, gate-G7a.html)")
+    else:
+        out = build.run_build(ctx, cid)
+        print(f"데이터셋: {out} (G7 대기, gate-G7.html)")
+    return 0
+
+
+def cmd_train(args) -> int:
+    """S10 학습: plan은 비용 추정만(dry run), submit·collect는 --execute가 있어야 부른다."""
+    from character_factory_poc.stages.s10_train.collect import collect_s10t
+    from character_factory_poc.stages.s10_train.plan import plan_s10t
+    from character_factory_poc.stages.s10_train.submit import submit_s10t
+
+    ctx = _ctx(args)
+    providers = [p.strip() for p in args.providers.split(",")] if args.providers else None
+    fn = {"plan": plan_s10t, "submit": submit_s10t, "collect": collect_s10t}[args.sub]
+    if args.sub != "plan" and not args.execute:
+        print(
+            f"dry run: train {args.sub}는 유료 학습을 부른다. --execute와 사용자 지시가 있어야 한다"
+        )
+        return 0
+    out = fn(ctx, args.character_id, providers)
+    print(f"학습 {args.sub}: {out}")
+    return 0
+
+
+def cmd_eval(args) -> int:
+    """S10 평가: prereg → run → judge → report(G8 대기)."""
+    from character_factory_poc.stages.s10_eval import judge, prereg, report
+    from character_factory_poc.stages.s10_eval import run as eval_run
+
+    ctx = _ctx(args)
+    cid = args.character_id
+    if args.sub == "prereg":
+        built = prereg.build_prereg(ctx, cid)
+        print(f"사전 등록: {built.rev_dir} (sha256 {built.sha256[:12]}…)")
+        return 0
+    if not args.execute:
+        pre, _, rev_dir = prereg.load_prereg(ctx, cid)
+        if args.sub == "run":
+            print(format_plan(eval_run.plan_calls(pre, ctx.character_dir(cid))))
+        else:
+            print(f"dry run: eval {args.sub}는 판정 모델을 부른다. --execute가 있어야 한다")
+        return 0
+    if args.sub == "run":
+        out = eval_run.run_eval(ctx, cid)
+    elif args.sub == "judge":
+        out = judge.run_judge(ctx, cid)
+    else:
+        out = report.judge_and_report(ctx, cid)
+    print(f"평가 {args.sub}: {out}")
+    return 0
+
+
+def cmd_release_build(args) -> int:
+    from character_factory_poc.stages.s11_release.package import build_package
+
+    out = build_package(_ctx(args), args.character_id)
+    print(f"릴리즈 패키지: {out} (G9 대기, gate-G9.html)")
+    return 0
+
+
+def cmd_export_doki_app(args) -> int:
+    from character_factory_poc.stages.export.export import export_doki_app
+
+    result, rev_dir = export_doki_app(_ctx(args), args.character_id, verify=args.verify)
+    print(f"내보내기: {rev_dir} · 적재 확인 {result.verification.status}")
+    for step in result.verification.steps:
+        print(f"  {'ok ' if step.ok else 'NG '} {step.name} {step.detail}")
+    return 0 if result.verification.status != "FAILED" else 1
+
+
+def cmd_web(args) -> int:
+    from character_factory_poc.web.__main__ import main as web_main
+
+    argv = ["--root", str(_root(args))]
+    if args.port:
+        argv += ["--port", str(args.port)]
+    return web_main(argv)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -630,9 +745,73 @@ def build_parser() -> argparse.ArgumentParser:
         "--seed", default=None, help="기획 씨앗 JSON(D-0033). 저장된 씨앗이 없을 때만 쓴다"
     )
     s.add_argument("--allow-same-family", action="store_true")
+    s.add_argument("--training-providers", default=None, help="s10t 학습 공급자 쉼표 목록")
+    s.add_argument(
+        "--verify-export", action="store_true", help="sx에서 일회용 DB 적재 확인까지 한다"
+    )
     s.add_argument("--execute", action="store_true")
     s.add_argument("--max-calls", type=int, default=None)
     s.set_defaults(fn=cmd_run)
+
+    data = sub.add_parser("data", help="S9 학습 데이터셋(D-0044)").add_subparsers(
+        dest="sub", required=True
+    )
+    for name, help_text in (
+        ("plan", "G6 승인 프롬프트로 data-plan-v1을 고정한다"),
+        ("samples", "클러스터별 인계안·샘플 → G7a 대기(--execute)"),
+        ("build", "G7a 승인 뒤 대량 작성·검사·분할 → G7 대기(--execute)"),
+    ):
+        s = data.add_parser(name, help=help_text)
+        s.add_argument("character_id")
+        s.add_argument("--execute", action="store_true")
+        s.add_argument("--max-calls", type=int, default=None)
+        s.set_defaults(fn=cmd_data)
+
+    train = sub.add_parser("train", help="S10 학습(Gemma QLoRA·Vertex Gemini)").add_subparsers(
+        dest="sub", required=True
+    )
+    for name, help_text in (
+        ("plan", "학습 계획과 비용 추정(dry run, 호출 없음)"),
+        ("submit", "학습 제출(--execute, 유료)"),
+        ("collect", "학습 결과 회수(--execute)"),
+    ):
+        s = train.add_parser(name, help=help_text)
+        s.add_argument("character_id")
+        s.add_argument("--providers", default=None, help="쉼표 목록. 없으면 [stages.s10t]")
+        s.add_argument("--execute", action="store_true")
+        s.set_defaults(fn=cmd_train)
+
+    ev = sub.add_parser("eval", help="S10 평가와 G8").add_subparsers(dest="sub", required=True)
+    for name, help_text in (
+        ("prereg", "평가 세트·조건·기준을 고정한다(학습 결과가 있어야 한다)"),
+        ("run", "조건별 응답 수집(--execute)"),
+        ("judge", "정순·역순 짝 판정(--execute)"),
+        ("report", "지표·보고서 → G8 대기(--execute)"),
+    ):
+        s = ev.add_parser(name, help=help_text)
+        s.add_argument("character_id")
+        s.add_argument("--execute", action="store_true")
+        s.add_argument("--max-calls", type=int, default=None)
+        s.set_defaults(fn=cmd_eval)
+
+    release = sub.add_parser("release").add_subparsers(dest="sub", required=True)
+    s = release.add_parser("build", help="S11 릴리즈 패키지 → G9 대기")
+    s.add_argument("character_id")
+    s.set_defaults(fn=cmd_release_build)
+
+    export = sub.add_parser("export").add_subparsers(dest="sub", required=True)
+    s = export.add_parser("doki-app", help="G9 승인 패키지 → api-svc 시드·chat-svc 트리")
+    s.add_argument("character_id")
+    s.add_argument(
+        "--verify",
+        action="store_true",
+        help="일회용 PostgreSQL에 실제 적재해 확인(CFP_PG_ADMIN_URL)",
+    )
+    s.set_defaults(fn=cmd_export_doki_app)
+
+    s = sub.add_parser("web", help="워크숍 웹앱(LLD §6.5)")
+    s.add_argument("--port", type=int, default=None)
+    s.set_defaults(fn=cmd_web)
 
     ledger = sub.add_parser("ledger").add_subparsers(dest="sub", required=True)
     s = ledger.add_parser("report")

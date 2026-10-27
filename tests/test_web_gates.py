@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from character_factory_poc.web import create_app, reads
+from character_factory_poc.web import create_app, gate_fixtures, reads
 from tests.support.web_gates import answer_for, build
 
 GATE_CASES = [
@@ -26,7 +26,7 @@ GATE_CASES = [
     ("G6", "prompts", "G6"),
 ]
 
-UNCONNECTED = [
+LATE_GATES = [
     ("G7a", "samples"),
     ("G7", "dataset"),
     ("G8", "eval"),
@@ -329,28 +329,25 @@ def test_g6_approve_issues_persona_version(tmp_path):
     assert _state(tmp_path, cid)["stages"]["s8"]["status"] == "APPROVED"
 
 
-@pytest.mark.parametrize("gate,kind", UNCONNECTED)
-def test_unconnected_gates_show_fixture_and_answer_501(tmp_path, gate, kind):
+@pytest.mark.parametrize("gate,kind", LATE_GATES)
+def test_late_gates_are_connected_and_wait_for_their_stage(tmp_path, gate, kind):
+    """G7a~G9는 H 갈래에서 연결됐다. 단계가 돌기 전에는 revision이 없다고 알리고 결정을 거절한다."""
     _ctx, cid = build(tmp_path, "G1")
     with _client(tmp_path) as client:
         view = _view(client, cid, gate)
-        assert view["connected"] is False
-        assert view["synthetic"] is True
+        assert view["connected"] is True
         assert view["kind"] == kind
-        assert view["items"]["source"] == "fixture"
-        assert view["items"]["note"]
+        assert view["items"]["source"] == "artifacts"
+        assert view["items"]["problems"]
         res = client.post(
             f"/api/characters/{cid}/gates/{gate}/decision",
             json={"decision": view["decisions"][0], "reviewer": "tester"},
         )
-        assert res.status_code == 501, res.text
-        assert "아직 구현되지 않았다" in res.json()["detail"]
+        assert res.status_code in (400, 409), res.text
 
 
-def test_g7a_fixture_has_clusters_and_samples(tmp_path):
-    _ctx, cid = build(tmp_path, "G1")
-    with _client(tmp_path) as client:
-        items = _view(client, cid, "G7a")["items"]
+def test_g7a_fixture_has_clusters_and_samples():
+    items = gate_fixtures.fixture_for("G7a", "cf-x")
     assert [c["clusterId"] for c in items["clusters"]] == [
         "base",
         "situation",
@@ -366,19 +363,15 @@ def test_g7a_fixture_has_clusters_and_samples(tmp_path):
     assert items["plan"]["targetTrainConversations"] == 640
 
 
-def test_g7_fixture_has_twenty_samples(tmp_path):
-    _ctx, cid = build(tmp_path, "G1")
-    with _client(tmp_path) as client:
-        items = _view(client, cid, "G7")["items"]
+def test_g7_fixture_has_twenty_samples():
+    items = gate_fixtures.fixture_for("G7", "cf-x")
     assert len(items["samples"]) == 20
     assert items["dataset"]["schemaVersion"] == "dataset-rev-v2"
     assert items["dataset"]["blockingFailures"] == 0
 
 
-def test_g8_blind_pairs_hide_condition_names(tmp_path):
-    _ctx, cid = build(tmp_path, "G1")
-    with _client(tmp_path) as client:
-        items = _view(client, cid, "G8")["items"]
+def test_g8_fixture_blind_pairs_hide_condition_names():
+    items = gate_fixtures.fixture_for("G8", "cf-x")
     pairs = items["pairs"]
     assert len(pairs) == 20
     for pair in pairs:
@@ -386,19 +379,14 @@ def test_g8_blind_pairs_hide_condition_names(tmp_path):
     text = json.dumps(pairs, ensure_ascii=False)
     for arm in ("LONG_BASE", "SHORT_GEMMA_SFT", "SHORT_GEMINI_SFT"):
         assert arm not in text
-    assert items["adoptOptions"] == ["LONG_BASE", "SHORT_GEMMA_SFT", "SHORT_GEMINI_SFT"]
     assert items["report"]["metrics"]
 
 
-def test_g9_fixture_summarises_package(tmp_path):
-    _ctx, cid = build(tmp_path, "G1")
-    with _client(tmp_path) as client:
-        items = _view(client, cid, "G9")["items"]
+def test_g9_fixture_summarises_package():
+    items = gate_fixtures.fixture_for("G9", "cf-x")
     package = items["package"]
     assert package["schemaVersion"] == "character-package-v1"
-    assert package["packageRev"] == "pk1"
     assert len(package["chapters"]) == 3
-    assert package["gates"]
     assert items["verification"]["disposableDb"] is True
 
 
@@ -436,7 +424,7 @@ def test_projects_expose_lanes_and_job_queue(tmp_path):
     assert lanes["appearance"]["done"] == 2
     assert lanes["appearance"]["percent"] == 100
     assert lanes["plan"]["pendingGates"] == ["G3"]
-    assert lanes["data"]["implemented"] is False
+    assert lanes["data"]["implemented"] is True
     assert "jobs" in data
     assert data["totals"]["runningJobs"] == 0
 

@@ -24,7 +24,12 @@ from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.graph import GATES, RETIRED_GATES, STAGES
 
 # 외모 축(S1·S2)을 탄 캐릭터만 도는 단계
-APPEARANCE_STAGES = ("s2", "s4a", "s4b", "s4", "s5", "s6")
+APPEARANCE_STAGES = ("s2", "s4a", "s4b", "s4", "s5", "s6", "s11", "sx")
+# 사람 판정 자체가 관문의 내용이라 자동 승인하지 않는다(G7a 클러스터별 판정, G8 블라인드 20쌍)
+HUMAN_ONLY_GATES = {
+    "G7a": "클러스터마다 샘플을 판정해야 한다",
+    "G8": "블라인드 20쌍을 사람이 골라야 한다",
+}
 
 
 @dataclass
@@ -38,6 +43,8 @@ class RunOptions:
         None  # popularity-ranking-v2 객체. 없으면 s1을 건너뛴다(D-0013 페르소나 우선 경로).
     )
     seed: dict[str, Any] | None = None  # 기획 씨앗(D-0033). 저장된 씨앗이 없을 때만 쓴다.
+    training_providers: list[str] | None = None  # s10t 학습 공급자. 없으면 [stages.s10t]
+    verify_export: bool = False  # sx에서 일회용 DB 적재 확인까지 한다(LLD §8.11)
 
 
 @dataclass
@@ -71,8 +78,30 @@ def validate_auto_approve(names: set[str]) -> None:
     for g in sorted(names):
         if g in RETIRED_GATES:
             raise FactoryError(RETIRED_GATES[g] + ". --auto-approve로 받지 않는다")
+        if g in HUMAN_ONLY_GATES:
+            raise FactoryError(f"--auto-approve {g}: {HUMAN_ONLY_GATES[g]}")
         if g not in GATES:
             raise FactoryError(f"--auto-approve {g}: 없는 관문이다({', '.join(GATES)})")
+
+
+def _training_ready(ctx: Context, cid: str) -> bool:
+    """최신 학습 revision에 성공한 model_binding이 하나라도 있는지 본다.
+
+    s10t는 dry run(계획)만으로도 AWAITING_HUMAN이 되어 그래프상 s10의 after를 채운다.
+    학습 결과 없이 평가를 시작하지 않도록 평가 진입점에서 따로 확인한다.
+    """
+    import json
+
+    from character_factory_poc.stages.s10_train.io import latest_rev
+
+    rev_dir = latest_rev(ctx, cid)
+    if rev_dir is None:
+        return False
+    for path in sorted(rev_dir.glob("*/training-run.json")):
+        run = json.loads(path.read_text("utf-8"))
+        if run.get("status") == "SUCCEEDED" and run.get("modelBinding"):
+            return True
+    return False
 
 
 def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callable[[], Path | None]]:
@@ -103,11 +132,45 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
             raise NeedsInputError("S3를 돌리려면 --brief가 필요하다(또는 cfp plan import)")
         return run_s3_draft(ctx, cid, opt.brief_text)
 
+    def s10t():
+        from character_factory_poc.stages.s10_train.run import run_s10t
+
+        return run_s10t(ctx, cid, opt.training_providers)
+
+    def s10():
+        from character_factory_poc.stages.s10_eval import prereg, report
+        from character_factory_poc.stages.s10_eval import run as eval_run
+
+        if not _training_ready(ctx, cid):
+            raise NeedsInputError(
+                "학습 결과(model_binding)가 없다. 학습은 계획(dry run)까지만 돌았다. "
+                "cfp train submit/collect --execute 뒤 다시 돌린다"
+            )
+        st = ctx.state(cid).stage("s10")
+        if st.status not in {"RUNNING", "CHECK_FAILED"} or not st.currentRev:
+            prereg.build_prereg(ctx, cid)
+        eval_run.run_eval(ctx, cid)
+        return report.judge_and_report(ctx, cid)
+
+    def sx():
+        from character_factory_poc.stages.export.export import export_doki_app
+
+        _, rev_dir = export_doki_app(ctx, cid, verify=opt.verify_export)
+        return rev_dir
+
+    from character_factory_poc.stages.s9_data.build import run_build
+    from character_factory_poc.stages.s9_data.samples import run_samples
+    from character_factory_poc.stages.s11_release.package import build_package
+
     runners: dict[str, Callable[[], Path | None]] = {
         "s3": s3,
         "s3r": lambda: run_s3r(ctx, cid),
         "s7": lambda: run_s7(ctx, cid),
         "s8": lambda: run_s8(ctx, cid, opt.voice_probes, opt.allow_same_family),
+        "s9s": lambda: run_samples(ctx, cid),
+        "s9": lambda: run_build(ctx, cid),
+        "s10t": s10t,
+        "s10": s10,
     }
     if opt.ranking is not None:
         runners["s1"] = lambda: run_s1(ctx, cid, opt.ranking)
@@ -118,6 +181,9 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
         runners["s4b"] = lambda: run_s4b(ctx, cid)
         runners["s4"] = lambda: run_s4(ctx, cid)
         runners["s6"] = lambda: run_s6(ctx, cid)
+        # 패키지는 외모·장면·영상 산출물이 있어야 만든다(LLD §8.10)
+        runners["s11"] = lambda: build_package(ctx, cid)
+        runners["sx"] = sx
     return runners
 
 

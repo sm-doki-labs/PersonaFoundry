@@ -1,4 +1,4 @@
-"""관문 승인 일반화 (G1, G3, G4a, G4b, G4, G5, G5b, G6). G2는 결번이다(D-0042)."""
+"""관문 승인 일반화 (G1, G3, G4a, G4b, G4, G5, G5b, G6, G7a, G7, G8, G9). G2는 결번이다(D-0042)."""
 
 from __future__ import annotations
 
@@ -45,6 +45,22 @@ def approve_gate(ctx: Context, cid: str, gate: str, answer: dict) -> Path:
         from character_factory_poc.stages.s8_prompts.approve import approve_g6
 
         return approve_g6(ctx, cid, answer)
+    if gate == "G7a":
+        from character_factory_poc.stages.s9_data.approve import approve_g7a
+
+        return approve_g7a(ctx, cid, answer)
+    if gate == "G7":
+        from character_factory_poc.stages.s9_data.approve import approve_g7
+
+        return approve_g7(ctx, cid, answer)
+    if gate == "G8":
+        from character_factory_poc.stages.s10_eval.approve import approve_g8
+
+        return approve_g8(ctx, cid, answer)
+    if gate == "G9":
+        from character_factory_poc.stages.s11_release.approve import approve_g9
+
+        return approve_g9(ctx, cid, answer)
     if gate == "G3":
         char_dir = ctx.character_dir(cid)
         state = ctx.state(cid)
