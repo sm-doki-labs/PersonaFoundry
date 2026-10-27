@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "popularity-ranking-v2",
+  "scope": {
+    "characterGender": "female",
+    "ageRange": "20s",
+    "artStyle": "photoreal",
+    "appearanceOrigin": "korean",
+    "moodHints": [
+      "청순",
+      "시크"
+    ]
+  },
+  "lists": [
+    {
+      "listId": "actress-2026-10",
+      "source": "<발표 기관·지수 이름>",
+      "category": "여자 배우",
+      "period": "2026-10",
+      "retrievedAt": "2026-10-20",
+      "url": "<발표 기사 URL>",
+      "entries": [
+        {
+          "rank": 1,
+          "name": "예시 인물 A1",
+          "score": null
+        },
+        {
+          "rank": 2,
+          "name": "예시 인물 A2",
+          "score": null
+        },
+        {
+          "rank": 3,
+          "name": "예시 인물 A3",
+          "score": null
+        },
+        {
+          "rank": 4,
+          "name": "예시 인물 A4",
+          "score": null
+        },
+        {
+          "rank": 5,
+          "name": "예시 인물 A5",
+          "score": null
+        },
+        {
+          "rank": 6,
+          "name": "예시 인물 A6",
+          "score": null
+        }
+      ]
+    },
+    {
+      "listId": "girlgroup-2026-10",
+      "source": "<발표 기관·지수 이름>",
+      "category": "걸그룹 멤버",
+      "period": "2026-10",
+      "retrievedAt": "2026-10-20",
+      "url": "<발표 기사 URL>",
+      "entries": [
+        {
+          "rank": 1,
+          "name": "예시 인물 B1",
+          "score": null
+        },
+        {
+          "rank": 2,
+          "name": "예시 인물 B2",
+          "score": null
+        },
+        {
+          "rank": 3,
+          "name": "예시 인물 B3",
+          "score": null
+        },
+        {
+          "rank": 4,
+          "name": "예시 인물 B4",
+          "score": null
+        },
+        {
+          "rank": 5,
+          "name": "예시 인물 B5",
+          "score": null
+        },
+        {
+          "rank": 6,
+          "name": "예시 인물 B6",
+          "score": null
+        }
+      ]
+    }
+  ],
+  "notes": "양식 예시. 이름은 가상이다. 실제 실행 때는 발표 내용을 그대로 옮기고 score는 발표에 지수가 있으면 적는다. scope.appearanceOrigin은 korean | east-asian | unspecified 중 하나다(D-0020)."
+}

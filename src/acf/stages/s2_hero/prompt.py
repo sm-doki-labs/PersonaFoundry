@@ -1,0 +1,47 @@
+"""S2 대표 이미지 프롬프트 (LLD §8.2).
+
+외모군 공통 특징·비교 범위만 쓰고 이름은 넣지 않는다(FR-35).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from acf.contracts.reference import AppearanceCluster, RankingScope
+from acf.stages.s1_reference.preview import appearance_parts, subject_phrase
+
+NEGATIVE = "text, watermark, logo, blur, plastic skin"
+IDENTITY = (
+    "Use the attached reference image(s) as the identity reference: keep the same face shape, "
+    "eyes, nose, lips, skin tone, hair color and hairstyle so it clearly reads as the same "
+    "fictional person."
+)
+PHOTO = (
+    "Upper body, three-quarter angle, plain studio backdrop, directional window light from the "
+    "left with gentle shadows. Natural skin texture with visible pores, no airbrushing, "
+    "individual hair strands clearly resolved, sharp focus on the eyes, shot on a full-frame "
+    "camera with an 85mm lens at f/2."
+)
+
+
+def build_hero_prompt(
+    cluster: AppearanceCluster,
+    scope: RankingScope,
+    vocab: dict[str, Any],
+    n: int,
+    total: int,
+    has_references: bool,
+) -> str:
+    parts = [
+        f"Hero character portrait photograph of a fictional {subject_phrase(scope)} "
+        f"in their {scope.ageRange}, {scope.artStyle} style, for an editorial magazine spread."
+    ]
+    if has_references:
+        parts.append(IDENTITY)
+    # 사람이 고른 참조 사진이 외형의 기준이다. 외형 태그를 같이 주면 모델이 글을 따라
+    # 머리색·머리 모양을 바꿨다(2026-10-21 실제 호출). 참조가 있으면 스타일링·분위기만 준다(D-0023).
+    parts += appearance_parts(cluster, vocab, include_looks=not has_references)
+    parts.append(PHOTO)
+    parts.append("An original person, not based on any real individual.")
+    parts.append(f"Variation {n} of {total}.")
+    return " ".join(parts)

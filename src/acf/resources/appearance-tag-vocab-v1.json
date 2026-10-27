@@ -1,0 +1,278 @@
+{
+  "schemaVersion": "appearance-tag-vocab-v1",
+  "note": "S1 외모 특징 어휘(D-0017, Q-0004). ko는 검토 페이지 표기, en은 이미지 프롬프트 구절이다. 단일값 필드는 어휘 값 또는 unknown, 복수값 필드는 어휘 값 0~maxMulti개다.",
+  "maxMulti": 3,
+  "single": {
+    "faceShape": {
+      "label": "얼굴형",
+      "values": {
+        "oval": {
+          "ko": "계란형",
+          "en": "oval face"
+        },
+        "round": {
+          "ko": "둥근형",
+          "en": "round face"
+        },
+        "heart": {
+          "ko": "하트형",
+          "en": "heart-shaped face"
+        },
+        "long": {
+          "ko": "긴 얼굴형",
+          "en": "long face"
+        },
+        "square": {
+          "ko": "각진 턱선",
+          "en": "defined square jawline"
+        },
+        "small-v": {
+          "ko": "작은 V라인",
+          "en": "small face with a slim V-line jaw"
+        }
+      }
+    },
+    "eyeShape": {
+      "label": "눈매",
+      "values": {
+        "large-double": {
+          "ko": "큰 쌍꺼풀 눈",
+          "en": "large double-lidded eyes"
+        },
+        "round": {
+          "ko": "동그란 눈",
+          "en": "round eyes"
+        },
+        "almond": {
+          "ko": "아몬드형 눈",
+          "en": "almond-shaped eyes"
+        },
+        "monolid": {
+          "ko": "무쌍 눈",
+          "en": "monolid eyes"
+        },
+        "upturned": {
+          "ko": "올라간 눈꼬리",
+          "en": "upturned cat-like eyes"
+        },
+        "downturned": {
+          "ko": "처진 눈꼬리",
+          "en": "gently downturned eyes"
+        }
+      }
+    },
+    "hairLength": {
+      "label": "머리 길이",
+      "values": {
+        "pixie": {
+          "ko": "숏컷",
+          "en": "pixie cut"
+        },
+        "short": {
+          "ko": "짧은 머리",
+          "en": "short hair"
+        },
+        "bob": {
+          "ko": "단발",
+          "en": "bob-length hair"
+        },
+        "medium": {
+          "ko": "중단발",
+          "en": "shoulder-length hair"
+        },
+        "long": {
+          "ko": "긴 머리",
+          "en": "long hair"
+        }
+      }
+    },
+    "hairColor": {
+      "label": "머리색",
+      "values": {
+        "black": {
+          "ko": "흑발",
+          "en": "black hair"
+        },
+        "dark-brown": {
+          "ko": "진갈색",
+          "en": "dark brown hair"
+        },
+        "light-brown": {
+          "ko": "밝은 갈색",
+          "en": "light brown hair"
+        },
+        "blonde": {
+          "ko": "금발",
+          "en": "blonde hair"
+        },
+        "ash": {
+          "ko": "애쉬 계열",
+          "en": "ash-toned hair"
+        },
+        "vivid": {
+          "ko": "원색 염색",
+          "en": "vividly dyed hair"
+        }
+      }
+    },
+    "hairStyle": {
+      "label": "머리 스타일",
+      "values": {
+        "straight": {
+          "ko": "생머리",
+          "en": "straight hair"
+        },
+        "wavy": {
+          "ko": "웨이브",
+          "en": "soft wavy hair"
+        },
+        "curly": {
+          "ko": "곱슬",
+          "en": "curly hair"
+        },
+        "layered": {
+          "ko": "레이어드",
+          "en": "layered cut"
+        },
+        "tied": {
+          "ko": "묶은 머리",
+          "en": "tied-back hair"
+        },
+        "updo": {
+          "ko": "올림머리",
+          "en": "updo hairstyle"
+        }
+      }
+    },
+    "bangs": {
+      "label": "앞머리",
+      "values": {
+        "none": {
+          "ko": "앞머리 없음",
+          "en": "no bangs"
+        },
+        "full": {
+          "ko": "풀뱅",
+          "en": "full blunt bangs"
+        },
+        "see-through": {
+          "ko": "시스루뱅",
+          "en": "wispy see-through bangs"
+        },
+        "side": {
+          "ko": "옆 앞머리",
+          "en": "side-swept bangs"
+        },
+        "curtain": {
+          "ko": "커튼뱅",
+          "en": "curtain bangs"
+        }
+      }
+    },
+    "skinTone": {
+      "label": "피부 톤",
+      "values": {
+        "fair": {
+          "ko": "밝은 피부",
+          "en": "fair skin"
+        },
+        "light": {
+          "ko": "밝은 중간 톤",
+          "en": "light skin"
+        },
+        "medium": {
+          "ko": "중간 톤",
+          "en": "medium skin tone"
+        },
+        "tan": {
+          "ko": "구릿빛",
+          "en": "tanned skin"
+        }
+      }
+    }
+  },
+  "multi": {
+    "styling": {
+      "label": "스타일링",
+      "values": {
+        "casual": {
+          "ko": "캐주얼",
+          "en": "casual"
+        },
+        "street": {
+          "ko": "스트릿",
+          "en": "streetwear"
+        },
+        "feminine": {
+          "ko": "페미닌",
+          "en": "feminine"
+        },
+        "minimal": {
+          "ko": "미니멀",
+          "en": "minimal"
+        },
+        "sporty": {
+          "ko": "스포티",
+          "en": "sporty"
+        },
+        "classic": {
+          "ko": "클래식",
+          "en": "classic"
+        },
+        "y2k": {
+          "ko": "Y2K",
+          "en": "Y2K-inspired"
+        },
+        "office": {
+          "ko": "오피스",
+          "en": "smart office wear"
+        },
+        "edgy": {
+          "ko": "엣지",
+          "en": "edgy"
+        }
+      }
+    },
+    "mood": {
+      "label": "분위기",
+      "values": {
+        "innocent": {
+          "ko": "청순",
+          "en": "innocent and pure"
+        },
+        "chic": {
+          "ko": "시크",
+          "en": "chic and cool"
+        },
+        "cute": {
+          "ko": "귀여움",
+          "en": "cute"
+        },
+        "elegant": {
+          "ko": "우아",
+          "en": "elegant"
+        },
+        "glamorous": {
+          "ko": "화려함",
+          "en": "glamorous"
+        },
+        "healthy": {
+          "ko": "건강미",
+          "en": "healthy and energetic"
+        },
+        "mysterious": {
+          "ko": "신비",
+          "en": "mysterious"
+        },
+        "warm": {
+          "ko": "다정",
+          "en": "warm and friendly"
+        },
+        "boyish": {
+          "ko": "보이시",
+          "en": "boyish"
+        }
+      }
+    }
+  }
+}

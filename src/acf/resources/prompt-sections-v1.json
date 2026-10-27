@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "prompt-sections-v1",
+  "note": "긴·짧은 프롬프트가 공유하는 섹션 목록이다. 이름 집합이 같아야 한다(FR-21). 구성은 gemini-sft-poc prod_frame(split-frame-r5-v40)의 persona 섹션 v6를 참고했으며, 운영 프롬프트의 실제 섹션 목록은 Q-0006에서 사용자가 확정한다.",
+  "sections": [
+    "ACTOR_IDENTITY",
+    "SYSTEM_RULES",
+    "PERSONA / FACTS",
+    "PERSONA / DISPOSITION",
+    "PERSONA / CHOICES",
+    "PERSONA / SWITCHES",
+    "PERSONA / VOICE",
+    "PERSONA / KNOWS_AND_LIMITS",
+    "CHAPTERS",
+    "OUTPUT"
+  ],
+  "shortOnlyBudget": {
+    "ACTOR_IDENTITY": 200,
+    "SYSTEM_RULES": 400,
+    "PERSONA / FACTS": 150,
+    "PERSONA / DISPOSITION": 250,
+    "PERSONA / CHOICES": 250,
+    "PERSONA / SWITCHES": 200,
+    "PERSONA / VOICE": 200,
+    "PERSONA / KNOWS_AND_LIMITS": 120,
+    "CHAPTERS": 180,
+    "OUTPUT": 120
+  }
+}
+

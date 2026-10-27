@@ -1,0 +1,30 @@
+{
+  "_note": "acf plan import <slug> --from plan.json 으로 들여온다. _note 필드는 지운다. age는 18 이상. evidence를 비우면 공장이 {kind: USER}로 채운다. 성격 칸(coreTraits, contrastTrait)의 근거로 외모(APPEARANCE)는 쓸 수 없다(D-0005).",
+  "name": "캐릭터 이름",
+  "age": 24,
+  "job": "직업",
+  "coreTraits": [
+    "핵심 성격 1 (행동으로 쓴다: '먼저 제안한다')",
+    "핵심 성격 2"
+  ],
+  "contrastTrait": "대비 특징 1",
+  "chapters": [
+    {
+      "chapterId": "ch1",
+      "scene": "챕터 1 배경 한 줄",
+      "relationStage": "지인"
+    },
+    {
+      "chapterId": "ch2",
+      "scene": "챕터 2 배경 한 줄",
+      "relationStage": "호감"
+    },
+    {
+      "chapterId": "ch3",
+      "scene": "챕터 3 배경 한 줄",
+      "relationStage": "강한 호감"
+    }
+  ],
+  "notes": "기획 의도나 참고 사항 (선택)"
+}
+
