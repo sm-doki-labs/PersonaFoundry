@@ -14,8 +14,13 @@
     kind: '',
     pairs: {},
     busy: false,
-    source: null
+    source: null,
+    review: null,
+    reviewIndex: {}
   };
+
+  // 사전 검토가 붙는 관문(D-0049). G7a·G8은 사람 판정·블라인드 비교라 화면을 바꾸지 않는다.
+  var REVIEW_GATES = ['G1', 'G3', 'G4a', 'G4b', 'G4', 'G5', 'G5b', 'G6', 'G7', 'G9'];
 
   var STATUS_KO = {
     PENDING: '대기',
@@ -125,6 +130,33 @@
   function checkedValue(name) {
     var node = q('input[name="' + name + '"]:checked');
     return node ? node.value : '';
+  }
+  function reviewItem(candidateId) {
+    return state.reviewIndex[candidateId] || null;
+  }
+  function reviewLine(candidateId) {
+    var item = reviewItem(candidateId);
+    if (!item) return '';
+    var out = '';
+    if (item.verdict === 'RECOMMEND') {
+      out += '<span class="badge-chip is-good">' +
+        (item.rank === 1 ? '검토 1순위' : '검토 추천') + '</span>';
+    } else if (item.verdict === 'CONCERN') {
+      out += '<span class="badge-chip is-bad">걸리는 점</span>';
+    }
+    var reasons = list(item.reasons).slice(0, 2).join(' · ');
+    var defects = list(item.defects)
+      .map(function (defect) {
+        return (defect.field ? defect.field + ': ' : '') + defect.note;
+      })
+      .slice(0, 2)
+      .join(' · ');
+    var text = [reasons, defects].filter(Boolean).join(' · ');
+    if (text) out += '<span class="review-note">' + esc(text) + '</span>';
+    return out ? '<span class="review-line">' + out + '</span>' : '';
+  }
+  function reviewEnabled() {
+    return REVIEW_GATES.indexOf(state.gate) >= 0;
   }
 
   // ---------------------------------------------------------------- 화면 정의
@@ -273,7 +305,7 @@
             '<span class="card-title">' +
             esc(face.previewId) +
             (face.recommended ? ' <span class="badge-chip is-good">추천</span>' : '') +
-            '</span>' +
+            '</span>' + reviewLine(face.previewId) +
             '<span class="card-sub">' + esc(face.prompt || '') + '</span>' +
             '<span class="pick-line"><input type="radio" name="face" value="' +
             esc(face.previewId) + '" data-cluster="' + esc(cluster.clusterId) +
@@ -391,7 +423,8 @@
         return (
           '<label class="gate-card">' +
           '<span class="card-title">' + esc(plan.variantId) + ' · ' + esc(plan.name || '') +
-          '</span><span class="card-sub">' + esc(plan.tagline || '') + '</span>' +
+          '</span>' + reviewLine(plan.variantId) +
+          '<span class="card-sub">' + esc(plan.tagline || '') + '</span>' +
           planSummary(plan) +
           '<details class="gate-more" data-keep><summary>선택 기준·프로필 카드</summary>' +
           planDetails(plan) + '</details>' +
@@ -485,7 +518,7 @@
       '<label class="gate-card">' +
       image(candidate.plate, 'wide') +
       '<span class="card-title">' + esc(candidate.candidateId) + ' · ' +
-      esc(candidate.place) + '</span>' +
+      esc(candidate.place) + '</span>' + reviewLine(candidate.candidateId) +
       '<span class="card-sub">' + esc(candidate.why || '') + '</span>' +
       qaBadge(candidate.qa) +
       facts([
@@ -574,7 +607,7 @@
   function poseCard(chapter, pose) {
     return (
       '<label class="gate-card"><span class="card-title">' + esc(pose.title || pose.poseId) +
-      '</span>' +
+      '</span>' + reviewLine(pose.poseId) +
       facts([
         ['몸', pose.body],
         ['손', pose.hands],
@@ -684,6 +717,7 @@
         var ch = frame.chapterId;
         return (
           '<section class="gate-section"><h2>' + esc(ch) + ' · ' + esc(frame.frameId) + '</h2>' +
+          reviewLine(frame.frameId) +
           '<div class="gate-grid">' + image(frame.file, 'wide') +
           '<div>' + qaBadge(frame.qa) + qaNote(frame.qa) +
           '<details class="gate-more"><summary>생성 지시 확인</summary><pre class="answer-json">' +
@@ -731,6 +765,7 @@
         return (
           '<label class="gate-card">' + video(candidate.file) +
           '<span class="card-title">' + esc(candidate.candidateId) + '</span>' +
+          reviewLine(candidate.candidateId) +
           '<span class="card-sub">' + esc(candidate.provider) + ' · ' +
           esc(candidate.model) + ' · ' + esc(measured) + '</span>' +
           '<span class="pick-line"><input type="radio" name="introPick" value="' +
@@ -774,6 +809,7 @@
           '<span class="card-title">' + esc(candidate.candidateId) +
           (candidate.reusedFrom ? ' <span class="badge-chip">재사용 ' +
             esc(candidate.reusedFrom) + '</span>' : '') + '</span>' +
+          reviewLine(action.actionId + ':' + candidate.candidateId) +
           '<span class="pick-line"><input type="radio" name="' + esc(action.actionId) +
           '" value="' + esc(candidate.candidateId) + '"> 이 영상</span></label>'
         );
@@ -881,9 +917,10 @@
       (items.shortAdopted ? ' · 짧은 프롬프트 채택됨' : '') + '</p>' +
       '<div class="doc-block">' +
       '<div class="doc"><h3>긴 프롬프트 <span class="badge-chip">' + esc(long.chars || 0) +
-      '자</span></h3><pre>' + esc(long.text || '') + '</pre></div>' +
+      '자</span>' + reviewLine('long') + '</h3><pre>' + esc(long.text || '') + '</pre></div>' +
       '<div class="doc"><h3>짧은 프롬프트 <span class="badge-chip">' + esc(short.chars || 0) +
-      '자</span></h3><pre>' + esc(short.text || '') + '</pre></div></div></section>' +
+      '자</span>' + reviewLine('short') + '</h3><pre>' + esc(short.text || '') +
+      '</pre></div></div></section>' +
       '<section class="gate-section"><h2>표본 응답</h2>' +
       '<p class="section-sub">판정은 참고용이다. 승인은 사람이 한다.</p>' +
       (probes || '<p class="empty">표본 응답이 아직 없다.</p>') + '</section>' +
@@ -945,7 +982,8 @@
     var id = conversation.conversationId;
     return (
       '<div class="pair"><div class="pair-head"><span>' + esc(id) + '</span>' +
-      '<span>' + esc(conversation.clusterId || '') + '</span></div>' +
+      '<span>' + esc(conversation.clusterId || '') + '</span>' +
+      reviewLine(id) + '</div>' +
       (conversation.system ? '<p class="card-sub">system: ' + esc(conversation.system) +
         '</p>' : '') +
       '<div class="pair-answers">' + messages + '</div>' +
@@ -1360,6 +1398,38 @@
         banner('warn', '아직 차례가 아님', '앞 단계가 끝나야 이 관문이 열린다. 먼저 작업을 돌린다.')
       );
     }
+    var rework = view.rework || {};
+    if (rework.capReached) {
+      out.push(
+        banner(
+          'bad',
+          '수정 상한 도달',
+          '같은 관문의 수정 요청이 상한에 닿았다. 다시 만들려면 사람이 실행을 한 번 더 허락해야 한다.'
+        )
+      );
+    }
+    if (reviewEnabled() && view.status !== 'PENDING') {
+      if (view.review) {
+        var reviewer = view.review.reviewer || {};
+        var who = [reviewer.provider, reviewer.model].filter(Boolean).join(' · ');
+        var summary = view.review.summary || '후보별 근거를 카드에 붙였다.';
+        var concern = list(view.review.items).some(function (item) {
+          return item.verdict === 'CONCERN';
+        });
+        var missing = summary.indexOf('빠진 파일') >= 0 && summary.indexOf('빠진 파일 없음') < 0;
+        out.push(
+          banner(
+            concern || missing ? 'warn' : 'ok',
+            '사전 검토 · 추천은 승인이 아니다',
+            summary + (who ? ' (' + who + ')' : '')
+          )
+        );
+      } else {
+        out.push(
+          banner('muted', '검토 없음', '이 관문의 사전 검토 기록이 없다. 추천 없이 사람이 직접 고른다.')
+        );
+      }
+    }
     return out.join('');
   }
 
@@ -1400,6 +1470,11 @@
     var view = state.view;
     var items = state.items;
     var meta = KINDS[state.kind];
+    state.review = view.review || null;
+    state.reviewIndex = {};
+    list(state.review && state.review.items).forEach(function (item) {
+      if (item && item.candidateId) state.reviewIndex[item.candidateId] = item;
+    });
     var summary = (state.character && state.character.summary) || {};
     var name = summary.name || state.characterId;
     var back = 'c-glass.html?character=' + encodeURIComponent(state.characterId) +
@@ -1426,6 +1501,10 @@
       '<span>revision <code>' + esc(view.rev || '-') + '</code></span>' +
       '<span>상태 ' + esc(STATUS_KO[view.status] || view.status || '-') + '</span>' +
       (view.recordRef ? '<span>기록 <code>' + esc(view.recordRef) + '</code></span>' : '') +
+      (view.rework && view.rework.round
+        ? '<span class="gate-chip">수정 ' + esc(view.rework.round) + '/' +
+          esc(view.rework.maxRounds == null ? '?' : view.rework.maxRounds) + '</span>'
+        : '') +
       '<span>' + esc(connectionLabel(view)) + '</span>';
     q('[data-banners]').innerHTML = renderBanners(view, items);
     q('[data-body]').innerHTML = meta

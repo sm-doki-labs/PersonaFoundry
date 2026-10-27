@@ -113,6 +113,21 @@ def cmd_gate_import(args) -> int:
     return 0
 
 
+def cmd_review(args) -> int:
+    from character_factory_poc.pipeline.review import plan_review_calls, review_gate
+
+    ctx = Context.load(_root(args), execute=args.execute)
+    if not args.execute:
+        print(format_plan(plan_review_calls(ctx, args.character_id, args.gate)))
+        return 0
+    out = review_gate(ctx, args.character_id, args.gate)
+    if out is None:
+        print(f"{args.gate} 검토 기록 없음")
+        return 0
+    print(f"{args.gate} 사전 검토: {out}")
+    return 0
+
+
 def cmd_ref_run(args) -> int:
     from character_factory_poc.stages.s1_reference import run as s1
     from character_factory_poc.stages.s3_plan.draft import new_character
@@ -635,6 +650,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("gate")
     s.add_argument("--answer", required=True)
     s.set_defaults(fn=cmd_gate_import)
+
+    s = sub.add_parser("review", help="열린 관문의 사전 검토(LLD §6.8). 기본은 호출 계획만 낸다")
+    s.add_argument("character_id")
+    s.add_argument("gate")
+    s.add_argument("--execute", action="store_true")
+    s.set_defaults(fn=cmd_review)
 
     s = sub.add_parser("check", help="작업 공간의 output.json을 단계 검사로 확인한다(에이전트용)")
     s.add_argument("stage")

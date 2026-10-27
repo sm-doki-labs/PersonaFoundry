@@ -13,6 +13,7 @@ from character_factory_poc.contracts import (  # noqa: F401
     refs,
     release,
     report,
+    review,
     rework,
     scene,
     training,
