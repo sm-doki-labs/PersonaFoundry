@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 
@@ -16,12 +17,41 @@ from fastapi.testclient import TestClient
 
 from character_factory_poc.common.config import load_config
 from character_factory_poc.pipeline.graph import GATES
+from character_factory_poc.pipeline.hil_report import build_hil_report
 from character_factory_poc.pipeline.orchestrator import RunLog, run_until
 from character_factory_poc.web import create_app
 from tests import test_offline_pipeline as flow
 
-ORCH = '\n[orchestrator]\nmax_parallel = 3\nauto_resume = true\nresume_until = "sx"\n'
+ORCH = (
+    '\n[orchestrator]\nmax_parallel = 3\nauto_resume = true\nresume_until = "sx"\n'
+    '[review]\nenabled = true\nvision = false\ngates = ["G3", "G6", "G7", "G9"]\n'
+    "[rework]\nmax_rounds = 3\nnormalize = false\n"
+)
 NOTES = {"G4a": "ch2 배경을 비 오는 골목으로", "G4": "ch2 표정을 조금 더 밝게"}
+
+
+def review_answer(req) -> dict:
+    """가짜 검토자: 입력 후보를 받은 순서대로 순위를 매기고, 승인 관문에는 걸리는 점 없음."""
+    match = re.search(r"<input>(.*?)</input>", req.messages[-1].content, re.S)
+    payload = json.loads(match.group(1)) if match else {}
+    ids = [c["candidateId"] for c in payload.get("candidates", [])]
+    if req.stage != "G3":
+        return {
+            "items": [{"candidateId": i, "verdict": "OK", "reasons": []} for i in ids],
+            "summary": "걸리는 점 없음",
+        }
+    return {
+        "items": [
+            {
+                "candidateId": i,
+                "rank": n + 1,
+                "verdict": "RECOMMEND" if n == 0 else "OK",
+                "reasons": ["가짜 검토 근거"],
+            }
+            for n, i in enumerate(ids)
+        ],
+        "summary": "첫 안을 권한다",
+    }
 
 
 def _idle(client: TestClient, cid: str, timeout: float = 60.0) -> dict:
@@ -69,6 +99,7 @@ def test_workshop_decisions_only_reach_export(tmp_path: Path, gender: str) -> No
     with open(root / "factory.toml", "a", encoding="utf-8") as f:
         f.write(ORCH)
     ctx.config = load_config(root)
+    ctx._judge.add("REVIEW", review_answer)  # noqa: SLF001  가짜 검토 답
     extra = {
         "ranking": flow.ranking_for(gender),
         "seed": flow.SEED,
@@ -116,3 +147,21 @@ def test_workshop_decisions_only_reach_export(tmp_path: Path, gender: str) -> No
         (char_dir / "sx-export" / state.stage("sx").currentRev / "export-result.json").read_text()
     )
     assert result["verification"]["status"] == ("PASSED" if flow.VERIFY_DB else "NOT_RUN")
+
+    # 사전 검토(FR-45): G3에는 추천이 붙고 관문 기록이 그 검토를 가리킨다. G7a·G8에는 없다.
+    g3 = json.loads((char_dir / state.gate("G3").recordRef).read_text("utf-8"))
+    assert g3["reviewRef"] and g3["followedReview"] is not None
+    for gate in ("G7a", "G8"):
+        rec = json.loads((char_dir / state.gate(gate).recordRef).read_text("utf-8"))
+        assert not rec.get("reviewRef"), gate
+    # 재작업(FR-46): 메모 원문이 브리프에 남는다.
+    for gate, note in NOTES.items():
+        briefs = sorted((char_dir / "rework").glob(f"{gate}-*.json"))
+        assert briefs, gate
+        targets = json.loads(briefs[0].read_text("utf-8"))["targets"]
+        assert targets == [{"field": "ch2", "note": note}]
+    # 사람 시간 보고서(FR-47)
+    report = build_hil_report(char_dir)
+    by_gate = {g.gate: g for g in report.gates}
+    assert set(by_gate) == set(GATES)
+    assert by_gate["G4a"].requestChangesCount == 1 and by_gate["G4"].requestChangesCount == 1

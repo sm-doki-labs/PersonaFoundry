@@ -473,8 +473,13 @@ def _stage_dir(gate: str) -> str:
 
 
 def review_path(char_dir: Path, gate: str, rev: str) -> Path:
-    """관문 단계 폴더의 <rev>/review-<gate>.json (LLD §5.19)."""
-    return Path(char_dir) / _stage_dir(gate) / rev / f"review-{gate}.json"
+    """<캐릭터 폴더>/reviews/<gate>-<rev>.json (LLD §5.19).
+
+    단계 revision 폴더 안에 두면 매니페스트·패키지 파일 목록에 없는 파일이 생겨 해시 검사가
+    깨진다(통합 시험에서 G9 패키지 검사로 확인). 관문 기록(gates/)처럼 캐릭터 폴더에 둔다.
+    """
+    _stage_dir(gate)  # 모르는 관문이면 FactoryError
+    return Path(char_dir) / "reviews" / f"{gate}-{rev}.json"
 
 
 def load_review(char_dir: Path, gate: str, rev: str) -> GateReview | None:

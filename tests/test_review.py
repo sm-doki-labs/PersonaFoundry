@@ -143,7 +143,8 @@ def test_review_ranks_are_recorded_and_exposed_without_state_change(tmp_path) ->
     rev = ctx.state(cid).gate("G3").rev
 
     out = review_on_open(ctx, cid, "G3")
-    assert out is not None and out.name == "review-G3.json"
+    assert out is not None and out.name == f"G3-{out.stem.split('-', 1)[1]}.json"
+    assert out.parent.name == "reviews"
     assert _state_bytes(tmp_path, cid) == before
     review = load_review(ctx.character_dir(cid), "G3", rev)
     assert review is not None
@@ -206,7 +207,7 @@ def test_followed_review_true_and_false(tmp_path, decision, expected) -> None:
         {"decision": "SELECT", "selections": [decision], "reviewer": "tester"},
     )
     record = _record(tmp_path, cid, "G3", rev)
-    assert record["reviewRef"] == f"s3-plan/{rev}/review-G3.json"
+    assert record["reviewRef"] == f"reviews/G3-{rev}.json"
     assert record["followedReview"] is expected
 
 
@@ -220,7 +221,7 @@ def test_old_review_is_hidden_after_new_revision(tmp_path) -> None:
     char_dir = ctx.character_dir(cid)
     new_rev = "pr2"
     shutil.copytree(char_dir / "s3-plan" / rev, char_dir / "s3-plan" / new_rev)
-    (char_dir / "s3-plan" / new_rev / "review-G3.json").unlink()
+    assert not (char_dir / "reviews" / f"G3-{new_rev}.json").exists()  # 검토는 rev 폴더 밖에 있다
     state_path = char_dir / "state.json"
     state = json.loads(state_path.read_text("utf-8"))
     state["gates"]["G3"]["rev"] = new_rev
