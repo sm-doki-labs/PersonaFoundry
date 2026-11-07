@@ -65,3 +65,29 @@ class VideoTimeoutError(VideoGenerationError):
     def __init__(self, job_id: str, message: str):
         self.job_id = job_id
         super().__init__(message)
+
+
+class ProviderRequestError(FactoryError, RuntimeError):
+    """공급자가 요청을 거절했다(429·5xx를 뺀 비정상 응답, 명세 §24.3). 재시도하지 않는다.
+
+    provider_message는 공급자 오류 문구의 앞 500자다. 키 값 가림은 호출한 어댑터가 먼저 한다.
+    RuntimeError도 상속하므로 기존 공급자 실패를 RuntimeError로 잡던 곳은 그대로 동작한다.
+    """
+
+    def __init__(self, status: int, provider_message: str):
+        self.status = status
+        self.provider_message = (provider_message or "")[:500]
+        super().__init__(f"공급자 요청 오류 {status}: {self.provider_message}")
+
+
+class ProviderTransportError(FactoryError, RuntimeError):
+    """응답을 끝까지 받지 못했다: 연결 끊김·시간 초과·429·5xx·깨진 스트림(D-0084).
+
+    공급자가 이미 생성·청구했을 수 있으므로 예산 예약을 풀지 않는다. kind는
+    disconnect·timeout·rate_limit·server_error·malformed_stream 가운데 하나다.
+    """
+
+    def __init__(self, kind: str, detail: str, status: int | None = None):
+        self.kind = kind
+        self.status = status
+        super().__init__(f"공급자 호출 실패({kind}): {(detail or '')[:300]}")

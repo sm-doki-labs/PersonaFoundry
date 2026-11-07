@@ -17,7 +17,13 @@ def make_text_model(cfg: ProviderConfig) -> TextModel:
         if not cfg.base_url or not cfg.model:
             raise ValueError("openai_compat 어댑터에는 base_url과 model이 필요하다")
         return OpenAICompatTextModel(
-            base_url=cfg.base_url, model=cfg.model, api_key_env=cfg.api_key_env
+            base_url=cfg.base_url,
+            model=cfg.model,
+            api_key_env=cfg.api_key_env,
+            timeout=float(cfg.extra.get("timeout_s", 180)),
+            max_retries=int(cfg.extra.get("max_retries", 3)),
+            reasoning_effort=cfg.extra.get("reasoning_effort"),
+            stream=bool(cfg.extra.get("stream", False)),
         )
     raise ValueError(f"알 수 없는 텍스트 어댑터: {cfg.adapter}")
 

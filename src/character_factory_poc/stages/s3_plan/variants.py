@@ -35,7 +35,7 @@ from character_factory_poc.stages.s1_reference.ranking import all_names, load_ra
 from character_factory_poc.stages.s2_hero.approve import load_appearance_spec
 from character_factory_poc.stages.s3_plan.check_v2 import check_variants, name_guard
 from character_factory_poc.stages.s3_plan.check_v2 import codex_checks as codex_checks
-from character_factory_poc.stages.s3_plan.draft import appearance_input
+from character_factory_poc.stages.s3_plan.common import appearance_input
 from character_factory_poc.stages.s3_plan.page import render_g3_page
 from character_factory_poc.stages.s3_plan.seed import load_latest_seed
 
@@ -51,13 +51,24 @@ def _config(ctx: Context) -> dict[str, int]:
 
 def plan_calls(ctx: Context) -> list[CallPlan]:
     """형식 재시도 2회와 검사 재시도까지 합친 호출 상한이다."""
+    if ctx.config.stage("s7").get("formation_profile") == "ko-text-choice-voice-long-v2":
+        return [CallPlan("s3-choices", "요구·후보·의미 검토(형식 재시도 포함)", 9)]
+    if ctx.text_deck_enabled:
+        return [
+            CallPlan(
+                "s3",
+                "Sol 제약·Gemini 초안·Gemini 말투(형식 재시도·검사 재시도 1회 포함, D-0086)",
+                12 + min(1, _config(ctx)["max_check_retries"]),
+                est_cost_usd=None,
+            )
+        ]
     count = 3 + _config(ctx)["max_check_retries"]
     return [CallPlan("s3-variants", "Planner 상세 기획 변형(형식·검사 재시도 포함)", count)]
 
 
 def _preflight(ctx: Context, cid: str) -> tuple[PlanSeed, dict, list[dict]]:
-    # D-0042: 외모 명세는 G2가 아니라 s2 승인이 기준이다.
-    spec, _ = load_appearance_spec(ctx, cid)
+    # D-0042: 외모 명세는 G2가 아니라 s2 승인이 기준이다. D-0080: 페르소나 우선 캐릭터는
+    # 외모 없이(appearance=None) 같은 변형 경로를 쓴다.
     seed = load_latest_seed(ctx, cid)
     if seed is None:
         raise NeedsInputError(
@@ -68,12 +79,25 @@ def _preflight(ctx: Context, cid: str) -> tuple[PlanSeed, dict, list[dict]]:
             f"{cid}: G3 검토 대기 중이다. 기존 안에 REQUEST_CHANGES 또는 REJECT를 기록한 뒤 "
             "새 revision을 만든다"
         )
-    path = ctx.character_dir(cid) / "s1-reference" / spec.sourceReferenceRev / "ranking.json"
-    names = all_names(load_ranking(read_json(path))) if path.exists() else []
-    return seed, appearance_input(ctx, cid), name_guard(names)
+    state = ctx.state(cid)
+    appearance_axis = state.stage("s1").status != "PENDING" or state.gate("G1").status != "PENDING"
+    if appearance_axis and state.stage("s2").status != "APPROVED":
+        # 외모 축을 시작한 캐릭터는 지금처럼 s2 승인 뒤에만 기획한다.
+        load_appearance_spec(ctx, cid)
+    appearance = appearance_input(ctx, cid)
+    names: list[str] = []
+    if appearance is not None:
+        spec, _ = load_appearance_spec(ctx, cid)
+        path = ctx.character_dir(cid) / "s1-reference" / spec.sourceReferenceRev / "ranking.json"
+        names = all_names(load_ranking(read_json(path))) if path.exists() else []
+    return seed, appearance, name_guard(names)
 
 
-def _inputs(seed: PlanSeed, appearance: dict, guard: list[dict], rev: str) -> dict[str, Any]:
+def _appearance_rev(appearance: dict | None) -> str | None:
+    return appearance["appearanceRev"] if appearance else None
+
+
+def _inputs(seed: PlanSeed, appearance: dict | None, guard: list[dict], rev: str) -> dict[str, Any]:
     return {
         "seed": dump(seed),
         "appearance": appearance,
@@ -84,36 +108,42 @@ def _inputs(seed: PlanSeed, appearance: dict, guard: list[dict], rev: str) -> di
             "characterId": seed.characterId,
             "planRev": rev,
             "seedRev": seed.seedRev,
-            "appearanceRev": appearance["appearanceRev"],
+            "appearanceRev": _appearance_rev(appearance),
         },
     }
 
 
-def _example(seed: PlanSeed, appearance: dict, rev: str) -> dict:
+def _example(seed: PlanSeed, appearance: dict | None, rev: str) -> dict:
     return {
         "schemaVersion": "character-plan-v2",
         "characterId": seed.characterId,
         "planRev": rev,
         "seedRev": seed.seedRev,
         "variantId": "v1",
-        "appearanceRev": appearance["appearanceRev"],
+        "appearanceRev": _appearance_rev(appearance),
         "name": "<허구 이름>",
         "age": seed.age or 25,
         "gender": seed.gender or "other",
         "job": seed.job or "<현실의 직업>",
         "tagline": "<이 캐릭터를 소개하는 한 줄>",
         "background": seed.background or "<짧고 구체적인 현대 한국 배경>",
-        "coreTraits": ["상대가 망설이면 먼저 선택지를 좁혀 제안한다"],
-        "contrastTrait": "거절을 들으면 이유를 캐묻지 않고 멈춘다",
+        # D-0089: 예시 성격 문장·상황을 두면 모든 캐릭터가 그 틀을 따른다(K-0076).
+        # 자리표시자만 둔다.
+        "coreTraits": ["<기본 선택과 그 이득·비용이 보이는 행동 문장>"],
+        "contrastTrait": "<해석이 뒤집히는 조건과 그때의 선택>",
         "choices": [
-            {"situation": s, "firstMove": "<이 변형이 먼저 선택하는 구체적 행동>"}
-            for s in ("상대가 약속에 늦을 때", "칭찬을 들었을 때", "관계 확답을 재촉받을 때")
+            {"situation": s, "firstMove": "<이 변형이 먼저 고르는 관찰 가능한 행동>"}
+            for s in (
+                "<이 씨앗의 생활에서 생기는 근거 없는 시비 상황>",
+                "<이 씨앗의 생활에서 생기는 압력 상황>",
+                "<이 씨앗의 생활에서 생기는 다른 압력 상황>",
+            )
         ],
         "lifeAndTastes": ["<일상의 습관>", "<좋아하는 취미>", "<생활의 작은 취향>"],
-        "wantsAndFears": ["<원하는 관심과 피하고 싶은 관계>"],
+        "wantsAndFears": ["<핵심 긴장을 담은 인물의 문장>"],
         "misreadings": ["<행동이 오해받는 지점>"],
-        "voiceSummary": "<구별되는 어미·호흡·반응 순서>",
-        "voiceExamples": ["<실제 대사 1>", "<실제 대사 2>"],
+        "voiceSummary": "<상대높임 등급과 대표 종결 형태 표기, 범주별 말투 경향>",
+        "voiceExamples": ["<사람 검토용 초안 1>", "<사람 검토용 초안 2>"],
         "boundaries": ["<하지 않는 행동과 한계>"],
         "profileCard": dump(ProfileCard()),
         "chapterArc": [
@@ -137,7 +167,7 @@ def _example(seed: PlanSeed, appearance: dict, rev: str) -> dict:
 def _fix_plan(
     plan: CharacterPlanV2,
     seed: PlanSeed,
-    appearance: dict,
+    appearance: dict | None,
     rev: str,
     variant: str,
     own: bool = False,
@@ -148,7 +178,8 @@ def _fix_plan(
         planRev=rev,
         seedRev=seed.seedRev,
         variantId=variant,
-        appearanceRev=appearance["appearanceRev"],
+        appearanceRev=_appearance_rev(appearance),
+        selectedTraits=[dump(t) for t in seed.selectedTraits],
     )
     arcs = {arc["chapterId"]: arc["arc"] for arc in raw["chapterArc"]}
     raw["chapterArc"] = [
@@ -200,7 +231,20 @@ def _publish(
     return rev_dir
 
 
+def run_s3_from_brief(ctx: Context, cid: str, brief_text: str) -> Path:
+    """D-0080: 브리프 원문을 씨앗으로 고정한 뒤(이미 있으면 그대로) 변형 경로로 기획한다."""
+    from character_factory_poc.stages.s3_plan.seed import seed_fields_from_brief, write_seed
+
+    if load_latest_seed(ctx, cid) is None:
+        write_seed(ctx, cid, seed_fields_from_brief(brief_text))
+    return run_s3_variants(ctx, cid)
+
+
 def run_s3_variants(ctx: Context, cid: str) -> Path:
+    if ctx.config.stage("s7").get("formation_profile") == "ko-text-choice-voice-long-v2":
+        from character_factory_poc.stages.s3_plan.choice_flow import run_choice_variants
+
+        return run_choice_variants(ctx, cid)
     seed, appearance, guard = _preflight(ctx, cid)
     cfg = _config(ctx)
     budget = ctx.budget()
@@ -211,18 +255,37 @@ def run_s3_variants(ctx: Context, cid: str) -> Path:
     try:
         inputs = _inputs(seed, appearance, guard, rev)
         inputs["variant-count"] = cfg["variants"]
+        if ctx.text_deck_enabled:
+            from character_factory_poc.stages.s3_plan.diversity import (
+                avoid_list,
+                draw_anchors,
+                recent_anchor_values,
+            )
+
+            # D-0100: 다양성은 바깥에서 넣는다(후보별 구체 단서 + 이미 쓴 이름·취미·음식).
+            chars_dir = ctx.character_dir(cid).parent
+            inputs["diversity-anchors"] = draw_anchors(
+                cid, rev, cfg["variants"], exclude=recent_anchor_values(chars_dir, cid)
+            )
+            inputs["avoid-list"] = avoid_list(chars_dir, cid)
+        if ctx.text_deck_enabled:
+            from character_factory_poc.stages.s3_plan.model_deck import brief
+
+            inputs["fixed-requirements"] = brief(ctx, cid, rev_dir, seed, budget)
         example = _example(seed, appearance, rev)
         result = run_agent(
             AgentSpec(
                 role="plan_variants",
                 output_contract="plan-variants-output-v1",
                 stage="s3-variants",
-                max_check_retries=cfg["max_check_retries"],
+                max_check_retries=min(1, cfg["max_check_retries"])
+                if ctx.text_deck_enabled
+                else cfg["max_check_retries"],
             ),
             rev_dir / "workspace",
             inputs,
             [check_variants(seed, cfg["variants"], guard)],
-            ctx.text_model(cid, budget),
+            ctx.role_model(cid, budget, "plan_variants"),
             ref=f"{cid}/{rev}",
             contract_example={
                 "variants": [example | {"variantId": f"v{i + 1}"} for i in range(cfg["variants"])],
@@ -232,6 +295,19 @@ def run_s3_variants(ctx: Context, cid: str) -> Path:
         )
         if not result.ok:
             raise CheckFailed("s3", result.problems)
+        if ctx.text_deck_enabled:
+            from character_factory_poc.stages.s3_plan.model_deck import finish
+
+            final = finish(
+                ctx,
+                cid,
+                rev_dir,
+                seed,
+                result.output,
+                budget,
+                [check_variants(seed, cfg["variants"], guard)],
+            )
+            result.output = final
         plans = [
             _fix_plan(p, seed, appearance, rev, f"v{i}")
             for i, p in enumerate(result.output.variants, 1)

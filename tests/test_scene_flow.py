@@ -31,7 +31,6 @@ from character_factory_poc.stages.s4b_poses.run import codex_checks as scene_che
 from character_factory_poc.stages.s4b_poses.run import plan_calls as pose_calls
 from character_factory_poc.stages.s4b_poses.run import run_s4b
 from tests.support.flow import approve_plan_v2, make_ctx, through_s2
-from tests.test_agentic import BRIEF
 
 CH = ("ch1", "ch2", "ch3")
 
@@ -289,14 +288,13 @@ def test_identity_crop(flow, monkeypatch, mode):
 
 
 def test_v1_plan_is_rejected(tmp_path):
-    from character_factory_poc.stages.s3_plan.draft import run_s3_draft
-    from tests.test_frames import agent
+    from tests.support.legacy import approve_v1_plan
+    from tests.test_frames import agent, frames_plan
 
     ctx, _ = make_ctx(tmp_path)
     ctx._text.add("AGENT", agent)
     cid = through_s2(ctx)
-    run_s3_draft(ctx, cid, BRIEF)
-    approve_gate(ctx, cid, "G3", {"decision": "APPROVE", "reviewer": "u"})
+    approve_v1_plan(ctx, cid, frames_plan(cid))
     with pytest.raises(CheckFailed, match="character-plan-v2"):
         run_s4a(ctx, cid)
 
@@ -379,7 +377,7 @@ def test_dry_run_and_budget_before_writes(flow):
 
 
 def test_dependencies(tmp_path):
-    from character_factory_poc.stages.s3_plan.draft import new_character
+    from character_factory_poc.stages.s3_plan.common import new_character
 
     ctx, _ = make_ctx(tmp_path)
     cid = new_character(ctx, "deps")

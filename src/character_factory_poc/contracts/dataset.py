@@ -2,6 +2,9 @@
 
 학습 가이드(한소민 QLoRA 데이터셋·프롬프트 구축 가이드)의 절차를 계약으로 옮긴다:
 클러스터별 인계안 → 12개 샘플 → G7a 사람 검토 → 대량 작성 → 기계 검사 → G7.
+
+`[stages.s9] policy = "qlora-authored-v1"`이면 창작 인물 정책(D-0078)의 6클러스터와 정책 출처를
+`policy` 필드에 남긴다. 정책이 없으면 `policy`는 None이고 기존 5클러스터 계획과 같다.
 """
 
 from __future__ import annotations
@@ -13,10 +16,72 @@ from pydantic import Field
 from character_factory_poc.common.schema import register
 from character_factory_poc.contracts.common import ArtifactRef, Strict
 
-ClusterId = Literal["base", "situation", "history", "ownership", "conflict"]
+ClusterId = Literal["base", "situation", "history", "ownership", "conflict", "long"]
 Material = Literal["SNS_REWRITE", "SYNTH", "NIKL"]
 Split = Literal["train", "validation_base", "validation_augmented", "eval"]
 Verdict = Literal["ADOPT", "FIX", "REJECT"]
+TargetVerdict = Literal["PASS", "OUT_OF_RANGE", "UNKNOWN"]
+
+
+class TurnRule(Strict):
+    """한 대화의 턴 조건. 턴은 대화당 assistant 메시지 수다(정책 turnMix.unit)."""
+
+    minAssistantTurns: int = Field(ge=1)
+    maxAssistantTurns: int = Field(ge=1)
+    minTopicShifts: int = Field(default=0, ge=0, description="작성자가 표시한 화제 전환 최소 수")
+    minLateTriggers: int = Field(default=0, ge=0, description="후반 계기 상황 최소 수")
+    lateTriggerFrom: float = Field(
+        default=0.5, ge=0, le=1, description="계기 상황이 시작할 수 있는 메시지 위치(비율)"
+    )
+    sources: dict[str, str] = Field(default_factory=dict, description="필드 → 정책 출처")
+    description: str = ""
+
+
+class ClusterPolicy(Strict):
+    """정책에서 온 클러스터 속성. source가 "proposal"이면 운영 시작값이다."""
+
+    shareSource: str
+    shareNote: str = ""
+    protected: bool
+    minShare: float | None = None
+    minShareSource: str = ""
+    maxShare: float | None = None
+    maxShareSource: str = ""
+    description: str = ""
+    policyMaterials: list[str] = Field(default_factory=list, description="정책 원문 재료 표기")
+    materialNotes: list[str] = Field(default_factory=list)
+    turnRule: TurnRule | None = None
+
+
+class TurnTarget(Strict):
+    """학습 분할의 턴 분포 목표 한 줄. band는 구간, 나머지는 비구간 지표다."""
+
+    key: str = Field(description="예: 1-4, maxTurns, supervisedTokenShareTurnsGe10")
+    kind: Literal["band", "max_turns", "supervised_token_share_ge"]
+    low: int | None = Field(default=None, description="band·share 지표의 턴 하한")
+    high: int | None = Field(default=None, description="band의 턴 상한")
+    min: float | None = None
+    minSource: str = ""
+    max: float | None = None
+    maxSource: str = ""
+
+
+class PlanPolicy(Strict):
+    """data-plan에 고정하는 정책 기록(D-0078)."""
+
+    name: str
+    schemaVersion: str
+    status: str = Field(description="정책 파일의 status. draft_proposal이면 확정값이 아니다")
+    policySha256: str = Field(description="정책 JSON 정규화 sha256")
+    targetSource: str
+    turnUnit: str
+    turnTargets: list[TurnTarget] = Field(default_factory=list)
+    protectedMinRatio: float = Field(ge=0, le=1)
+    protectedMinRatioSource: str
+    proposalValues: list[str] = Field(
+        default_factory=list, description="source가 proposal인 값의 경로. 운영 시작값이다"
+    )
+    notes: list[str] = Field(default_factory=list)
 
 
 class ClusterPlan(Strict):
@@ -26,6 +91,7 @@ class ClusterPlan(Strict):
     targetConversations: int = Field(ge=0)
     materials: list[Material]
     sampleSize: int = Field(default=12, ge=1, description="G7a에 올리는 샘플 수")
+    policy: ClusterPolicy | None = None
 
 
 class ValidationPlan(Strict):
@@ -47,6 +113,7 @@ class DataPlan(Strict):
     guideRef: str = Field(description="학습 가이드 경로와 확인 날짜")
     writerModel: str
     judgeModel: str = ""
+    policy: PlanPolicy | None = Field(default=None, description="정책 없이 만든 계획이면 None")
 
 
 class BehaviorRow(Strict):

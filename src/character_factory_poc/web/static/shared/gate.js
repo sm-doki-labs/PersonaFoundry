@@ -5,6 +5,7 @@
   var api = window.CF_API;
   if (!api) return;
   var params = new URLSearchParams(location.search);
+  if (params.get('embedded') === '1') document.body.classList.add('gate-embedded');
   var state = {
     characterId: params.get('character') || '',
     gate: params.get('gate') || '',
@@ -387,6 +388,12 @@
   }
 
   function planDetails(plan) {
+    var evidence = list((state.items.choiceEvidence || {})[plan.variantId]).map(function (rule) {
+      return '<li><b>' + esc(rule.situation) + '</b>' + facts([
+        ['먼저 지키는 것', rule.priority], ['감수하는 것', rule.acceptedCost],
+        ['생각을 바꾸는 조건', rule.switchWhen]
+      ]) + '</li>';
+    }).join('');
     var moves = list(plan.choices)
       .map(function (choice) {
         return (
@@ -406,6 +413,7 @@
     ];
     return (
       (moves ? '<ul>' + moves + '</ul>' : '') +
+      (evidence ? '<h3>선택 근거</h3><ul>' + evidence + '</ul>' : '') +
       facts(cardRows) +
       facts([
         ['생활·취향', joinList(plan.lifeAndTastes, ' / ')],
@@ -446,7 +454,12 @@
         : '<p class="section-sub">직접 쓴 안을 쓰려면 S3 own으로 새 revision을 만든 뒤 다시 ' +
           '연다. 그 revision의 u1 후보가 여기에 나타난다.</p>') +
       '<div class="field-list" data-plan-fields><p class="empty">후보를 고르면 칸이 열린다.</p>' +
-      '</div></section>'
+      '</div>' + (items.requireExplicitSelection ?
+        '<p class="section-sub">수정한 내용은 새 버전에서 다시 검토합니다. 원래 요구를 바꾸는 경우에만 아래에서 해당 요구를 고르세요.</p>' +
+        list(items.seedRequirements).map(function (r) {
+          return '<label class="pick-line"><input type="checkbox" data-replace-requirement="' +
+            esc(r.id) + '"> ' + esc(r.quote) + '</label>';
+        }).join('') : '') + '</section>'
     );
   }
 
@@ -508,6 +521,14 @@
       if (decision === 'SELECT' && !pick) throw Error('기획 후보 하나를 골라 주세요.');
       answer.selections = pick ? [pick.value] : [];
       answer.edits = collectEdits();
+      if (state.items.requireExplicitSelection) {
+        if (decision !== 'SELECT') throw Error('후보 하나를 직접 골라 주세요.');
+        answer.supersedesRequirements = qa('[data-replace-requirement]:checked').map(function (node) {
+          return node.getAttribute('data-replace-requirement');
+        });
+        if (answer.supersedesRequirements.length && !Object.keys(answer.edits).length)
+          throw Error('기존 요구를 바꾸려면 수정 내용도 함께 적어 주세요.');
+      }
     }
     return Object.assign(answer, details());
   }
@@ -1453,6 +1474,9 @@
     var host = q('[data-actions]');
     var locked = view.status === 'APPROVED' || view.status === 'REJECTED';
     host.innerHTML = meta.actions
+      .filter(function (action) {
+        return !(state.kind === 'planVariants' && state.items.requireExplicitSelection && action[0] === 'APPROVE');
+      })
       .map(function (action) {
         var decision = action[0];
         var label = action[1];
@@ -1552,7 +1576,9 @@
   function currentAnswer(decision) {
     var meta = KINDS[state.kind];
     if (!meta) throw Error('화면 종류를 모른다: ' + state.kind);
-    return meta.build(decision);
+    var answer = meta.build(decision);
+    if (state.view && state.view.rev) answer.expectedRev = state.view.rev;
+    return answer;
   }
 
   function showAnswer(answer) {

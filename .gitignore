@@ -14,3 +14,8 @@ runs/
 work/
 .DS_Store
 
+# studio/: 시연 녹화·캡처와 작업자 실행 로그는 크고 재생성 가능하므로 올리지 않는다.
+studio/recordings/
+studio/previews/
+studio/plans/*-work/
+

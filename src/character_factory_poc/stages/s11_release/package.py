@@ -23,20 +23,29 @@ from character_factory_poc.common.store import (
     write_once_json,
     write_once_text,
 )
+from character_factory_poc.contracts.common import ArtifactRef
 from character_factory_poc.contracts.dataset import DatasetRev
 from character_factory_poc.contracts.frames import ApprovedFrames
 from character_factory_poc.contracts.hero import AppearanceSpec
-from character_factory_poc.contracts.persona import PromptPair, TraitSheet
+from character_factory_poc.contracts.persona import (
+    PromptPair,
+    PromptPairV2,
+    TraitSheet,
+    load_prompt_pair,
+)
 from character_factory_poc.contracts.planning import CharacterPlanV2
 from character_factory_poc.contracts.release import (
+    AdapterFile,
     Appearance,
     Chapter,
     CharacterPackage,
+    CheckpointSelectionRef,
     GateRef,
     PackageFile,
     Persona,
     Profile,
     Sft,
+    SftServing,
     TmiItem,
     Video,
 )
@@ -54,6 +63,11 @@ from character_factory_poc.stages.s8_prompts.build import load_latest_trait_shee
 
 # G9로 넘기기 전에 반드시 승인돼 있어야 하는 관문. S9·S10(G7·G8)은 없어도 된다(D-0044).
 REQUIRED_GATES = ("G4", "G5", "G5b", "G6")
+
+#: 채택 어댑터 서빙 기록의 패키지 경로와 어댑터 파일(D-0077).
+SERVING_REL = "sft/serving.json"
+ADAPTER_FILES = ("adapter_model.safetensors", "adapter_config.json")
+DEFAULT_CHAT_TEMPLATE = "gemma-4-thinking"
 
 
 @dataclass(frozen=True)
@@ -112,10 +126,17 @@ def load_persona(
     pair_path = prompt_dir / "persona-version.json"
     if not pair_path.exists():
         pair_path = prompt_dir / "prompt-pair.json"
-    pair: PromptPair = validate("prompt-pair-v1", read_json(pair_path))  # type: ignore[assignment]
-    sheet, sheet_path = load_latest_trait_sheet(ctx, cid)
+    pair = load_prompt_pair(pair_path)
+    if isinstance(pair, PromptPairV2) or (prompt_dir / "persona-bundle.json").exists():
+        from character_factory_poc.stages.s8_prompts.formation import verify_approved_pair
+
+        pair, sheet, sheet_path = verify_approved_pair(ctx, cid, prompt_dir)
+    else:
+        sheet, sheet_path = load_latest_trait_sheet(ctx, cid)
 
     for name, prompt in (("long", pair.long), ("short", pair.short)):
+        if prompt is None:
+            continue
         if text_sha256(prompt.text) != prompt.sha256:
             problems.append(f"persona.{name}Prompt: 텍스트 sha256이 기록과 다르다")
     rules_path = Path(pair.systemRulesRef)
@@ -133,8 +154,18 @@ def load_persona(
         personaVersion=pair.personaVersion or gate.rev,
         traitSheet="persona/trait-sheet.json",
         longPrompt="persona/long-prompt.txt",
-        shortPrompt="persona/short-prompt.txt",
+        shortPrompt="persona/short-prompt.txt" if pair.short is not None else None,
     )
+    if isinstance(pair, PromptPairV2):
+        for source_name, path in [
+            ("persona-bundle", prompt_dir / "persona-bundle.json"),
+            ("blueprint", sheet_path.parent / "blueprint.json"),
+            ("formation-dialogues", sheet_path.parent / "formation-dialogues.json"),
+            ("quality-profile", sheet_path.parent / "profile.json"),
+        ]:
+            sources.append(
+                SourceFile(source_name, path, f"persona/{source_name}.json", sha256_file(path))
+            )
     return persona, sources, pair, sheet, problems
 
 
@@ -229,6 +260,157 @@ def _adopted_binding(ctx: Context, cid: str) -> str | None:
         return None
     selections = read_json(path).get("selections") or []
     return selections[0] if selections else None
+
+
+def _adoption_arm(ctx: Context, cid: str) -> str | None:
+    """G8 adoption.json의 armId. 학습 없이 진행했거나 기록이 없으면 None이다."""
+    gate = ctx.state(cid).gate("G8")
+    if gate.status != "APPROVED" or not gate.rev:
+        return None
+    path = ctx.character_dir(cid) / "s10-eval" / gate.rev / "adoption.json"
+    if not path.is_file():
+        return None
+    arm = read_json(path).get("armId")
+    return arm if isinstance(arm, str) else None
+
+
+def _recorded_hashes(artifact_dir: Path) -> dict[str, dict]:
+    """원격 회수 기록(complete.json·screen-complete.json)의 파일별 sha256·bytes."""
+    recorded: dict[str, dict] = {}
+    for name in ("complete.json", "screen-complete.json"):
+        path = artifact_dir / "remote" / name
+        if not path.is_file():
+            continue
+        try:
+            files = read_json(path).get("files") or []
+        except (ValueError, AttributeError):
+            continue
+        for item in files:
+            if isinstance(item, dict) and isinstance(item.get("path"), str):
+                recorded[item["path"]] = item
+    return recorded
+
+
+def collect_serving(
+    ctx: Context, cid: str, adopted: str | None
+) -> tuple[SftServing | None, list[str]]:
+    """G8이 실제 gemma_qlora 어댑터를 채택했으면 sft-serving-v1을 만든다(D-0077).
+
+    LONG_BASE·가짜 공급자 채택이나 아직 성공하지 않은 학습이면 None이다. 어댑터 가중치는
+    복사하지 않고, 원격 회수 기록의 해시와 지금 잰 해시가 같을 때만 참조한다.
+    """
+    if not adopted or adopted == "LONG_BASE" or adopted.startswith("fake://"):
+        return None, []
+    arm = _adoption_arm(ctx, cid)
+    if arm is not None and arm != "SHORT_GEMMA_SFT":
+        return None, []
+    char_dir = ctx.character_dir(cid)
+    problems: list[str] = []
+    match: tuple[Path, TrainingRun] | None = None
+    for run_path in sorted((char_dir / "s10-train").glob("tr*/**/training-run.json")):
+        try:
+            run: TrainingRun = validate("training-run-v2", read_json(run_path))  # type: ignore[assignment]
+        except Exception:  # noqa: BLE001 - 형식 오류는 collect_sft가 보고한다
+            continue
+        if run.provider == "gemma_qlora" and run.modelBinding and run.modelBinding.ref == adopted:
+            match = (run_path, run)
+            break
+    if match is None:
+        if arm == "SHORT_GEMMA_SFT":
+            problems.append("sft.serving: G8이 채택한 binding의 gemma_qlora 학습 기록이 없다")
+        return None, problems
+    run_path, run = match
+    binding = run.modelBinding
+    assert binding is not None
+    if run.status != "SUCCEEDED" or binding.provider != "gemma_qlora":
+        if arm == "SHORT_GEMMA_SFT" and binding.provider == "gemma_qlora":
+            problems.append(f"sft.serving: 채택한 gemma_qlora 학습이 성공하지 않았다({run.status})")
+        return None, problems
+
+    artifact_dir = (run_path.parent / "artifacts").resolve()
+    adapter_dir = Path(binding.ref)
+    if not adapter_dir.is_absolute():
+        adapter_dir = artifact_dir / adapter_dir
+    adapter_dir = adapter_dir.resolve()
+    recorded = _recorded_hashes(artifact_dir)
+    files: list[AdapterFile] = []
+    for name in ADAPTER_FILES:
+        path = adapter_dir / name
+        if not path.is_file():
+            problems.append(f"sft.serving: 어댑터 파일이 없다({path})")
+            continue
+        actual, size = sha256_file(path), path.stat().st_size
+        rel = path.relative_to(artifact_dir).as_posix() if path.is_relative_to(artifact_dir) else ""
+        expected = recorded.get(rel)
+        if expected is None:
+            problems.append(f"sft.serving: {name}의 회수 기록 해시가 없다(remote/complete.json)")
+        elif expected.get("sha256") != actual:
+            problems.append(
+                f"sft.serving: {name} sha256 불일치"
+                f"(기록 {str(expected.get('sha256'))[:12]}… / 실제 {actual[:12]}…)"
+            )
+        elif isinstance(expected.get("bytes"), int) and expected["bytes"] != size:
+            problems.append(f"sft.serving: {name} 바이트 수 불일치")
+        files.append(AdapterFile(path=name, sha256=actual, bytes=size))
+
+    selection: CheckpointSelectionRef | None = None
+    selection_path = run_path.parent / "checkpoint-selection.json"
+    if selection_path.is_file():
+        try:
+            raw = read_json(selection_path)
+        except ValueError as exc:
+            problems.append(f"sft.serving: checkpoint-selection.json을 읽을 수 없다({exc})")
+        else:
+            decision = raw.get("decision") if isinstance(raw, dict) else None
+            chosen = raw.get("chosen") if isinstance(raw, dict) else None
+            chosen_id = chosen.get("checkpointId") if isinstance(chosen, dict) else None
+            binding_id = run.modelBinding.checkpointId if run.modelBinding else None
+            if isinstance(decision, str) and (
+                decision == "KEEP_INCUMBENT" or decision.startswith("BLOCKED")
+            ):
+                problems.append(
+                    f"sft.serving: 체크포인트 선택 결정이 {decision}라 어댑터를 채택할 수 없다"
+                )
+            if chosen_id and binding_id and chosen_id != binding_id:
+                problems.append(
+                    f"sft.serving: 선택 기록의 체크포인트 {chosen_id}와 "
+                    f"채택 binding {binding_id}가 다르다"
+                )
+            selection = CheckpointSelectionRef(
+                path=selection_path.relative_to(char_dir).as_posix(),
+                sha256=sha256_file(selection_path),
+                decision=decision if isinstance(decision, str) else None,
+            )
+    if problems:
+        return None, problems
+
+    applied, requested = run.appliedConfig, run.requestedConfig
+    serving = SftServing(
+        characterId=cid,
+        adoptedBinding=adopted,
+        provider="gemma_qlora",
+        trainingRun=ArtifactRef(
+            ref=f"sft/training-{run.provider}.json", sha256=sha256_file(run_path)
+        ),
+        baseModel=run.baseModel,
+        baseModelRevision=str(
+            run.baseModelRevision
+            or applied.get("revision")
+            or requested.get("baseModelRevision")
+            or ""
+        ),
+        chatTemplate=str(
+            applied.get("chatTemplate") or requested.get("chatTemplate") or DEFAULT_CHAT_TEMPLATE
+        ),
+        checkpointId=binding.checkpointId,
+        adapterRef=str(adapter_dir),
+        adapterFiles=files,
+        runtimeVersions=dict(
+            applied.get("runtimeVersions") or requested.get("expectedVersions") or {}
+        ),
+        checkpointSelection=selection,
+    )
+    return validate("sft-serving-v1", dump(serving)), []  # type: ignore[return-value]
 
 
 def collect_gates(char_dir: Path) -> tuple[list[GateRef], list[SourceFile]]:
@@ -353,11 +535,15 @@ def build_package(ctx: Context, cid: str) -> Path:
     actions, actions_dir = load_approved_actions(ctx, cid)
     persona, persona_sources, pair, _sheet, persona_problems = load_persona(ctx, cid)
     sft, sft_sources, sft_problems = collect_sft(ctx, cid)
+    serving, serving_problems = collect_serving(ctx, cid, sft.adoptedBinding)
+    if serving is not None:
+        sft = sft.model_copy(update={"serving": SERVING_REL})
     gate_refs, gate_sources = collect_gates(char_dir)
 
     problems = [
         *persona_problems,
         *sft_problems,
+        *serving_problems,
         *_consistency(cid, plan, appearance, scene, frames, actions, frames_dir),
     ]
     sources: list[SourceFile] = [
@@ -470,12 +656,24 @@ def build_package(ctx: Context, cid: str) -> Path:
         spec = dump(appearance)
         spec["referenceImage"] = {**spec["referenceImage"], "path": "appearance/hero.png"}
         write_once_json(rev_dir / "appearance/appearance.json", spec)
+        from character_factory_poc.stages.s8_prompts.chapter_start import (
+            load_latest_chapter_start,
+        )
+
+        chapter_start = load_latest_chapter_start(char_dir)
         for chapter_id in CHAPTERS:
-            write_once_json(
-                rev_dir / f"chapters/{chapter_id}/facts.json", _facts(by_scene[chapter_id])
-            )
+            facts = _facts(by_scene[chapter_id])
+            if chapter_start:
+                # D-0089: 공장이 만든 챕터 시작 설정을 사실 파일에 함께 담아 내보내기가 쓰게 한다.
+                facts["chapterStart"] = next(
+                    c for c in chapter_start["chapters"] if c["chapterId"] == chapter_id
+                )
+            write_once_json(rev_dir / f"chapters/{chapter_id}/facts.json", facts)
         write_once_text(rev_dir / persona.longPrompt, pair.long.text)
-        write_once_text(rev_dir / persona.shortPrompt, pair.short.text)
+        if persona.shortPrompt is not None and pair.short is not None:
+            write_once_text(rev_dir / persona.shortPrompt, pair.short.text)
+        if serving is not None:
+            write_once_json(rev_dir / SERVING_REL, dump(serving))
         package = validate(
             "character-package-v1",
             dump(
@@ -574,6 +772,7 @@ __all__ = [
     "SourceFile",
     "build_package",
     "collect_gates",
+    "collect_serving",
     "collect_sft",
     "load_package",
     "load_persona",

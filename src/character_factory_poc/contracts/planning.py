@@ -14,6 +14,7 @@ from pydantic import Field, field_validator, model_validator
 
 from character_factory_poc.common.schema import register
 from character_factory_poc.contracts.common import Strict
+from character_factory_poc.contracts.creator_traits import CreatorTrait
 
 Gender = Literal["female", "male", "other"]
 EvidenceKindV2 = Literal["SEED", "USER", "AGENT", "PRESET", "REFERENCE", "APPEARANCE"]
@@ -77,12 +78,19 @@ class PlanSeed(Strict):
     gender: Gender | None = None
     background: str = ""
     notes: str = ""
+    selectedTraits: list[CreatorTrait] = Field(default_factory=list, max_length=5)
 
 
 class EvidenceV2(Strict):
     kind: EvidenceKindV2
     ref: str = ""
     quote: str = ""
+
+    @field_validator("ref", "quote", mode="before")
+    @classmethod
+    def _null_is_empty(cls, v):
+        # 모델이 빈 근거를 null로 내는 일이 잦다(2026-11-04 시험 3건 중 2건). 기본값과 같다.
+        return "" if v is None else v
 
 
 class Choice(Strict):
@@ -165,6 +173,7 @@ class CharacterPlanV2(Strict):
     evidence: dict[str, list[EvidenceV2]] = Field(default_factory=dict)
     appearanceRev: str | None = None
     notes: str = ""
+    selectedTraits: list[CreatorTrait] = Field(default_factory=list, max_length=5)
 
     @field_validator("chapterArc")
     @classmethod

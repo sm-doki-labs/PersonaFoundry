@@ -13,7 +13,8 @@ def _e(value) -> str:
     return html.escape(str(value), quote=True)
 
 
-def render_g3_page(*, variants: PlanVariants) -> str:
+def render_g3_page(*, variants: PlanVariants, choice_evidence=None) -> str:
+    explicit = getattr(variants, "schemaVersion", "") == "plan-variants-v2"
     cards = []
     for plan in variants.candidates:
         fields = []
@@ -24,6 +25,17 @@ def render_g3_page(*, variants: PlanVariants) -> str:
                 else value
             )
             fields.append(f"<dt>{_e(field)}</dt><dd><pre>{_e(text)}</pre></dd>")
+        if choice_evidence:
+            for rule in choice_evidence[plan.variantId].rules:
+                explanation = (
+                    f"먼저 지키는 것: {rule.priority}\n"
+                    f"감수하는 것: {rule.acceptedCost}\n"
+                    f"생각을 바꾸는 조건: {rule.switchWhen}"
+                )
+                fields.append(
+                    f"<dt>{_e(rule.situation)} · 선택 근거</dt>"
+                    f"<dd><pre>{_e(explanation)}</pre></dd>"
+                )
         cards.append(
             '<article class="card">'
             f'<h2><label><input type="radio" name="pick" value="{_e(plan.variantId)}"> '
@@ -65,10 +77,16 @@ def render_g3_page(*, variants: PlanVariants) -> str:
             "".join(cards),
             "</div></fieldset><h2>선택과 수정</h2>",
             '<label for="decision">결정</label><select id="decision">'
-            "<option>SELECT</option><option>APPROVE</option>"
-            "<option>REQUEST_CHANGES</option><option>REJECT</option></select>",
-            '<p class="hint">APPROVE는 첫 후보를 고릅니다. '
-            "수정 내용은 선택한 후보에 적용합니다.</p>",
+            "<option>SELECT</option>"
+            + ("" if explicit else "<option>APPROVE</option>")
+            + "<option>REQUEST_CHANGES</option><option>REJECT</option></select>",
+            (
+                '<p class="hint">후보 하나를 직접 고릅니다. '
+                "수정한 내용은 새 버전에서 다시 검토합니다.</p>"
+                if explicit
+                else '<p class="hint">APPROVE는 첫 후보를 고릅니다. '
+                "수정 내용은 선택한 후보에 적용합니다.</p>"
+            ),
             '<label for="edits">수정할 칸 · edits JSON 객체</label>',
             '<textarea id="edits" spellcheck="false" aria-describedby="edit-help">{}</textarea>',
             '<p id="edit-help" class="hint">예: {&quot;tagline&quot;: &quot;새 소개 문장&quot;}. '

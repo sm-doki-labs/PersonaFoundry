@@ -27,7 +27,7 @@ from character_factory_poc.pipeline.rework import (
     rework_rounds,
     rework_status,
 )
-from character_factory_poc.stages.s3_plan.draft import new_character
+from character_factory_poc.stages.s3_plan.common import new_character
 from character_factory_poc.stages.s5_intro.run import run_s5
 from character_factory_poc.web import reads
 from tests.support.flow import approve_plan_v2, make_ctx, through_s2

@@ -8,8 +8,9 @@ G7a에서 먼저 읽고 고칠 수 있는 문서다. 캐릭터를 소개하는 �
 
 - `trait-sheet`: 캐릭터의 선택 기준 5항목(attention·interpretationPriority·primaryResponse·
   expressionIntensity·switchConditions), 판단 우선순위, 대화 습관, 상황별 반응, 경험.
-- `cluster`: 지금 쓸 클러스터(base·situation·history·ownership·conflict), 이 클러스터의 목표
-  대화 수와 허용 재료.
+- `cluster`: 지금 쓸 클러스터(base·situation·history·ownership·conflict, 창작 인물 정책이면
+  long까지), 이 클러스터의 목표 대화 수와 허용 재료. 정책 계획이면 `description`(정책 설명)과
+  `turnRule`(긴 대화의 턴·화제 전환·후반 계기 조건)이 함께 온다.
 - `prompt-short`: 이 캐릭터의 짧은 system. 말투의 기준이다.
 - `memo`: 직전 G7a 검토에서 받은 고칠 점. 비어 있을 수 있다.
 
@@ -34,5 +35,7 @@ G7a에서 먼저 읽고 고칠 수 있는 문서다. 캐릭터를 소개하는 �
 - `forbidden`에는 가이드 §9.1의 오류(사용자 정보 날조, 주인 혼동, 잘못 없는 동반 사과,
   관계 위협, 상대 대사 대필) 가운데 이 클러스터에서 실제로 나기 쉬운 것만 적는다.
 - 클러스터 주제를 벗어난 행은 넣지 않는다. `history`는 회상·변경·미제공 사실, `ownership`은
-  주인 구분·자기 일정, `conflict`는 서운함·사과·회복·덜 풀림·선 긋기를 다룬다.
+  주인 구분·자기 일정, `conflict`는 서운함·사과·회복·덜 풀림·선 긋기를 다룬다. `long`은 긴
+  흐름 안의 화제 전환과 후반 계기 상황(약속 변경, 성의 없는 사과, 서운한 말)에서 고르는 행동을
+  행으로 쓴다.
 - `memo`가 있으면 그 지적을 기준표에 반영하고, `notes`에 어떻게 반영했는지 한 줄로 남긴다.

@@ -20,7 +20,7 @@ from character_factory_poc.common.schema import validate
 from character_factory_poc.common.store import verify_manifest
 from character_factory_poc.providers.embed import HashEmbedder, cosine, make_embedder
 from character_factory_poc.providers.fake_codex import FakeCodexAgent
-from character_factory_poc.stages.s3_plan.importer import import_plan, load_approved_plan
+from character_factory_poc.stages.s3_plan.importer import load_approved_plan
 from character_factory_poc.stages.s3r_refs.index import build_index, load_index, write_index
 from character_factory_poc.stages.s3r_refs.select import (
     build_queries,
@@ -31,6 +31,7 @@ from character_factory_poc.stages.s3r_refs.select import (
     run_s3r,
 )
 from tests.support.flow import approve_plan_v2, make_ctx, through_s2
+from tests.support.legacy import import_plan
 from tests.support.synthetic import PLAN
 from tests.test_agentic import CATALOG
 

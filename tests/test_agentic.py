@@ -105,14 +105,22 @@ def ctx(tmp_path: Path) -> Context:
 
 def _writer(ws: Path, prompt: str, attempt: int):
     """단계별 가짜 에이전트: 작업 공간 inputs를 읽어 output.json을 만든다."""
+    from tests.support.flow import variants_from_workspace
+
+    variants = variants_from_workspace(ws)
+    if variants is not None:  # s3: D-0080 브리프 → 씨앗 → 변형
+        return variants
     ids = ws / "inputs" / "ids.json"
     if ids.exists():  # s3
         d = json.loads(ids.read_text("utf-8"))
         return _plan_from_preset(d["characterId"], d["planRev"])
-    if (ws / "inputs" / "character-plan.json").exists():  # s7
+    if (ws / "inputs" / "character-plan.json").exists() and not (
+        ws / "inputs" / "trait-sheet.json"
+    ).exists():  # s7: S8도 이제 승인 기획을 받는다
         plan = json.loads((ws / "inputs" / "character-plan.json").read_text("utf-8"))
-        # 프리셋 카드가 자동으로 들어왔는지 확인
-        assert (ws / "inputs" / "reference-doc-P29.json").exists()
+        # 구형 기획서(프리셋 기반)일 때만 프리셋 카드가 자동으로 들어온다.
+        if plan.get("schemaVersion") == "character-plan-v1":
+            assert (ws / "inputs" / "reference-doc-P29.json").exists()
         return trait_sheet(plan["characterId"], plan["planRev"])
     if (ws / "inputs" / "sections.json").exists():  # s8
         return prompter_output()
@@ -128,7 +136,7 @@ def test_run_until_g6_with_codex_backend(ctx, tmp_path):
     judge.add("JUDGE", {"pick": "B", "reasons": "x"})
     ctx.use_models(text, judge)
 
-    from character_factory_poc.stages.s3_plan.draft import new_character
+    from character_factory_poc.stages.s3_plan.common import new_character
 
     cid = new_character(ctx, "codexrun")
     opt = RunOptions(until="G6", auto_approve={"G3"}, brief_text=BRIEF, voice_probes=["안녕"])
@@ -144,43 +152,13 @@ def test_run_until_g6_with_codex_backend(ctx, tmp_path):
     assert len(codex.calls) == 3
     ws3 = ctx.character_dir(cid) / "s3-plan" / "pr1" / "workspace"
     assert (ws3 / "AGENTS.md").exists() and (ws3 / "check.sh").exists()
-    assert "planner" in (ws3 / "AGENTS.md").read_text("utf-8")
+    assert "plan_variants" in (ws3 / "AGENTS.md").read_text("utf-8")  # D-0080 브리프 → 변형
     # 원장에 codex 호출이 AGENT로 기록됐다
     kinds = [c["kind"] for c in ctx.ledger(cid).calls()]
     assert kinds.count("AGENT") == 3
     # 두 번째 실행은 전부 건너뛰고 G6에서 멈춘다
     log2 = run_until(ctx, cid, opt)
     assert log2.stopped_at == "G6" and len(codex.calls) == 3
-
-
-def test_codex_backend_retries_with_feedback(ctx, tmp_path):
-    from character_factory_poc.stages.s3_plan.draft import new_character, run_s3_draft
-
-    def writer(ws: Path, prompt: str, attempt: int):
-        d = json.loads((ws / "inputs" / "ids.json").read_text("utf-8"))
-        p = _plan_from_preset(d["characterId"], d["planRev"])
-        if attempt == 1:
-            p["coreTraits"] = ["밝음, 솔직함"]
-        return p
-
-    codex = FakeCodexAgent(writer=writer)
-    ctx.use_codex(codex)
-    cid = new_character(ctx, "retry")
-    run_s3_draft(ctx, cid, BRIEF)
-    assert len(codex.calls) == 2
-    assert "행동으로 서술" in codex.calls[1][1]
-
-
-def test_check_cli(ctx, tmp_path):
-    ws = tmp_path / "ws"
-    (ws / "inputs").mkdir(parents=True)
-    (ws / "inputs" / "brief.md").write_text(BRIEF, encoding="utf-8")
-    assert check_main(["s3", str(ws)]) == 1  # output.json 없음
-    (ws / "output.json").write_text(
-        json.dumps(_plan_from_preset("cf-20260101-x", "pr1"), ensure_ascii=False), encoding="utf-8"
-    )
-    assert check_main(["s3", str(ws)]) == 0
-    assert main(["--root", str(tmp_path), "check", "s3", str(ws)]) == 0
 
 
 def test_taint_detection(tmp_path):
@@ -202,15 +180,45 @@ def test_taint_detection(tmp_path):
     ]
 
 
-def test_plan_draft_rejects_appearance_and_requires_notes(ctx):
-    from character_factory_poc.common.schema import validate
-    from character_factory_poc.stages.s3_plan.check import check_plan_draft
+def test_codex_backend_retries_with_feedback(ctx, tmp_path):
+    """D-0080: 변형 경로에서도 검사 실패 사유를 붙여 codex를 다시 부른다."""
+    from character_factory_poc.stages.s3_plan.common import new_character
+    from character_factory_poc.stages.s3_plan.seed import write_seed
+    from character_factory_poc.stages.s3_plan.variants import run_s3_variants
+    from tests.support.flow import variants_from_workspace
 
-    p = _plan_from_preset("cf-20260101-x", "pr1")
-    p["notes"] = ""
-    plan = validate("character-plan-v1", p)
-    problems = check_plan_draft(BRIEF)(plan)
-    assert any("notes" in x for x in problems)
-    p["evidence"]["chapters"] = [{"kind": "BRIEF", "ref": "brief.md", "quote": "없는 문장"}]
-    plan = validate("character-plan-v1", p)
-    assert any("브리프 원문에 없다" in x for x in check_plan_draft(BRIEF)(plan))
+    def writer(ws: Path, prompt: str, attempt: int):
+        out = variants_from_workspace(ws)
+        if attempt == 1:
+            out["variants"][0]["coreTraits"] = ["밝음, 솔직함"]
+        return out
+
+    codex = FakeCodexAgent(writer=writer)
+    ctx.use_codex(codex)
+    cid = new_character(ctx, "retry")
+    write_seed(ctx, cid, {"personality": "조용하지만 단단함"})
+    run_s3_variants(ctx, cid)
+    assert len(codex.calls) == 2
+    assert "행동을 서술" in codex.calls[1][1]
+
+
+def test_check_cli(ctx, tmp_path):
+    from tests.support.flow import variants_for_seed
+
+    ws = tmp_path / "ws"
+    (ws / "inputs").mkdir(parents=True)
+    seed = {
+        "schemaVersion": "plan-seed-v1",
+        "characterId": "cf-20260101-x",
+        "seedRev": "sd1",
+        "personality": "조용하지만 단단함",
+    }
+    ids = {"characterId": "cf-20260101-x", "planRev": "pr1", "seedRev": "sd1"}
+    for name, value in (("seed", seed), ("ids", ids), ("variant-count", 3), ("name-guard", [])):
+        (ws / "inputs" / f"{name}.json").write_text(json.dumps(value, ensure_ascii=False), "utf-8")
+    assert check_main(["s3-variants", str(ws)]) == 1  # output.json 없음
+    (ws / "output.json").write_text(
+        json.dumps(variants_for_seed(seed, ids), ensure_ascii=False), encoding="utf-8"
+    )
+    assert check_main(["s3-variants", str(ws)]) == 0
+    assert main(["--root", str(tmp_path), "check", "s3-variants", str(ws)]) == 0

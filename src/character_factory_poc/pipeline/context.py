@@ -24,6 +24,13 @@ from character_factory_poc.providers.tracked import (
 )
 
 
+def _utc_now():
+    """형성 예산 단가를 고르는 시각. 테스트가 시계를 고정할 때 바꾼다."""
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC)
+
+
 @dataclass
 class Context:
     config: FactoryConfig
@@ -35,6 +42,7 @@ class Context:
     _image: ImageModel | None = None
     _video: VideoModel | None = None
     _vision: object | None = None
+    _run_budget: object | None = None
     # D-0049(LLD §6.6): 물결 실행에서 여러 단계가 동시에 공급자를 처음 만들 수 있다.
     _lazy: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
 
@@ -52,13 +60,143 @@ class Context:
         return StateFile(self.character_dir(character_id) / "state.json", character_id)
 
     def budget(self) -> Budget:
+        if self._run_budget is not None:
+            return self._run_budget
         return Budget(self.config.budget, max_calls_override=self.max_calls)
+
+    def formation_budget(self):
+        """New recipe shares one persistent envelope across S3 and S7 commands."""
+        if self._run_budget is not None:
+            return self._run_budget
+        from character_factory_poc.common.budget import RunBudget
+
+        cfg = self.config.stage("s7")
+        synthetic = not self.text_deck_enabled and all(
+            self.config.provider(k).adapter == "fake" for k in ("text", "judge")
+        )
+        scope = str(cfg.get("budget_run_id", "choice-voice"))
+        if not scope or any(
+            c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+            for c in scope
+        ):
+            raise ValueError("budget_run_id must contain letters, numbers, hyphens or underscores")
+        path = self.config.runs_dir / "budgets" / f"{scope}.json"
+        input_rate = cfg.get("input_rate_upper_per_million", 0 if synthetic else None)
+        output_rate = cfg.get("output_rate_upper_per_million", 0 if synthetic else None)
+        if not synthetic and self.text_deck_enabled and (input_rate is None or output_rate is None):
+            table_in, table_out = self._deck_rate_upper(path)
+            input_rate = table_in if input_rate is None else input_rate
+            output_rate = table_out if output_rate is None else output_rate
+        self._run_budget = RunBudget(
+            path,
+            max_calls=min(
+                self.max_calls or self.config.budget.max_calls_per_command,
+                self.config.budget.max_calls_per_command,
+            ),
+            max_tokens=int(cfg.get("max_run_tokens", 2_000_000)),
+            max_cost_usd=self.config.budget.max_cost_usd_per_command,
+            input_rate_per_million=input_rate,
+            output_rate_per_million=output_rate,
+            synthetic=synthetic,
+        )
+        return self._run_budget
+
+    def _deck_rate_upper(self, path: Path) -> tuple[float | None, float | None]:
+        """현재 덱 task 모델들의 가장 높은 입력·출력 단가(명세 §24.6).
+
+        미확인 단가가 있으면 호출 전에 거절한다. 봉투가 이미 있으면 처음 만든 단가를 쓰되,
+        지금 프로필·경로의 단가가 그보다 높으면 봉투가 상한을 지킬 수 없으므로 거절한다.
+        """
+        import json
+
+        from character_factory_poc.common import pricing
+        from character_factory_poc.common.text_deck import deck
+
+        models = sorted({self.config.text_binding(s["id"])["model"] for s in deck()["stages"]})
+        now = _utc_now()
+        overrides = self.price_overrides()
+        rates = pricing.max_rates(models, now, overrides)
+        if rates is None:
+            missing = pricing.missing_prices(models, now, overrides)
+            raise ValueError(
+                "형성 예산의 단가 상한을 정할 수 없다. 단가 미확인 모델: "
+                + ", ".join(missing or models)
+            )
+        if not path.exists():
+            return rates
+        try:
+            limits = json.loads(path.read_text("utf-8"))["limits"]
+            envelope = (limits["inputRate"], limits["outputRate"])
+        except (ValueError, KeyError, TypeError, OSError):
+            return rates  # 손상된 봉투는 RunBudget이 거절한다.
+        if rates[0] > envelope[0] or rates[1] > envelope[1]:
+            raise ValueError(
+                f"현재 덱 단가 상한(입력 {rates[0]}, 출력 {rates[1]} USD/1M)이 기존 예산 봉투"
+                f"(입력 {envelope[0]}, 출력 {envelope[1]})보다 높다. "
+                "[stages.s7] budget_run_id를 새로 정해 새 봉투로 실행한다"
+            )
+        return envelope
+
+    def price_overrides(self) -> dict:
+        return dict(getattr(self.config, "pricing", None) or {})
+
+    def _billing(self, cfg, inner, route: str | None = None) -> dict | None:
+        """공급자 설정의 과금 구분(명세 §24.2). 주입한 가짜 모델은 래퍼가 none으로 표시한다."""
+        if getattr(inner, "name", "") == "fake":
+            return None
+        from character_factory_poc.common import api_routes
+
+        return api_routes.billing_for(cfg, route=route)
+
+    @property
+    def text_deck_enabled(self) -> bool:
+        return bool(self.config.text_pipeline.get("enabled", False))
+
+    def task_model(self, character_id: str, budget: Budget, task: str) -> TextModel:
+        if not self.text_deck_enabled:
+            from character_factory_poc.common.text_deck import JUDGE_TASKS
+
+            if task in JUDGE_TASKS:
+                return self.judge_model(character_id, budget)
+            return self.text_model(character_id, budget)
+        if not self.execute:
+            raise ValueError("텍스트 제작 모델 호출에는 --execute가 필요하다")
+        cfg = self.config.task_provider(task)
+        binding = self.config.text_binding(task)
+        if cfg.api_key_env and not cfg.api_key():
+            from character_factory_poc.common.api_routes import family_of
+
+            # 설정 칸에 키 값을 잘못 넣었을 수 있으므로 환경변수 이름은 알리지 않는다.
+            family = binding.get("family") or family_of(cfg.model) or "미상"
+            raise ValueError(f"{task} task({family} 계열)의 인증 키가 설정되지 않았다")
+        inner = make_text_model(cfg)
+        return TrackedTextModel(
+            inner,
+            self.ledger(character_id),
+            budget,
+            binding=binding,
+            billing=self._billing(cfg, inner, route=binding["route"]),
+            price_overrides=self.price_overrides(),
+            # D-0084: 덱 경로는 어댑터 재시도를 끄므로 전송 실패만 예산 안에서 다시 보낸다.
+            transport_retries=int(self.config.text_pipeline.get("transport_retries", 1)),
+        )
+
+    def role_model(self, character_id: str, budget: Budget, role: str) -> TextModel:
+        from character_factory_poc.common.text_deck import task_for_role
+
+        return self.task_model(character_id, budget, task_for_role(role))
 
     def text_model(self, character_id: str, budget: Budget) -> TextModel:
         with self._lazy:
             if self._text is None:
                 self._text = make_text_model(self.config.provider("text"))
-        return TrackedTextModel(self._text, self.ledger(character_id), budget)
+        return TrackedTextModel(
+            self._text,
+            self.ledger(character_id),
+            budget,
+            billing=self._billing(self.config.provider("text"), self._text),
+            price_overrides=self.price_overrides(),
+        )
 
     def judge_model(self, character_id: str, budget: Budget, allow_same_family=False) -> TextModel:
         with self._lazy:
@@ -70,7 +208,13 @@ class Context:
             print(msg, file=sys.stderr)
             if not allow_same_family:
                 raise ValueError(msg + ". --allow-same-family로 명시해야 한다")
-        return TrackedTextModel(self._judge, self.ledger(character_id), budget)
+        return TrackedTextModel(
+            self._judge,
+            self.ledger(character_id),
+            budget,
+            billing=self._billing(j, self._judge),
+            price_overrides=self.price_overrides(),
+        )
 
     # 테스트에서 가짜 모델을 주입할 때 쓴다.
     def use_models(self, text: TextModel, judge: TextModel | None = None) -> None:
@@ -113,7 +257,13 @@ class Context:
         with self._lazy:
             if self._vision is None:
                 self._vision = make_vision_model(self.config.provider("vision"))
-        return TrackedVisionModel(self._vision, self.ledger(character_id), budget)
+        return TrackedVisionModel(
+            self._vision,
+            self.ledger(character_id),
+            budget,
+            billing=self._billing(self.config.provider("vision"), self._vision),
+            price_overrides=self.price_overrides(),
+        )
 
     def use_vision(self, vision) -> None:
         self._vision = vision
@@ -123,7 +273,11 @@ class Context:
 
     def agent_backend(self, character_id: str, budget: Budget, stage: str):
         """[agent] backend = "codex_exec"이면 추적 래퍼를 돌려주고, 아니면 None(API 백엔드)."""
+        from character_factory_poc.common.text_deck import TEXT_STAGES
         from character_factory_poc.providers.tracked import TrackedCodexAgent
+
+        if self.text_deck_enabled and stage in TEXT_STAGES:
+            return None
 
         with self._lazy:
             if self._codex is None:

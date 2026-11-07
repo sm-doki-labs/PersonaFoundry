@@ -180,9 +180,10 @@ def arm_metrics(
 
 
 def _relevant_arms(criterion: Criterion, prereg: EvalPrereg) -> list[ArmId]:
+    registered = [arm.armId for arm in prereg.arms]
     if criterion.appliesTo == "SFT_ANY":
-        return list(SFT_ARMS)
-    return [arm.armId for arm in prereg.arms]
+        return [arm for arm in SFT_ARMS if arm in registered]
+    return registered
 
 
 def evaluate_criteria(prereg: EvalPrereg, metrics: list[MetricValue]) -> list[CriterionResult]:

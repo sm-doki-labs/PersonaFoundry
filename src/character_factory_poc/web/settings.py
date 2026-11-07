@@ -31,11 +31,16 @@ class WebSettings:
     sse_heartbeat_s: float = DEFAULT_HEARTBEAT_S
     default_until: str = DEFAULT_UNTIL
     config_path: Path | None = None
+    studio_dir: Path | None = None
 
     @property
     def static_path(self) -> Path:
         """화면 파일 폴더. 상대 경로면 공장 루트 기준으로 푼다."""
         return _absolute(self.root, self.static_dir)
+
+    @property
+    def studio_path(self) -> Path | None:
+        return _absolute(self.root, self.studio_dir) if self.studio_dir else None
 
     @property
     def jobs_path(self) -> Path:
@@ -49,6 +54,7 @@ class WebSettings:
             "host": self.host,
             "port": self.port,
             "staticDir": str(self.static_path),
+            "studioDir": str(self.studio_path) if self.studio_path else None,
             "jobsDir": str(self.jobs_path),
             "sseHeartbeatS": self.sse_heartbeat_s,
             "defaultUntil": self.default_until,
@@ -98,6 +104,7 @@ def load_settings(root: Path, config_path: Path | None = None) -> WebSettings:
         host=str(table.get("host") or DEFAULT_HOST),
         port=_port(table.get("port") or DEFAULT_PORT),
         static_dir=_absolute(root, static_raw),
+        studio_dir=_absolute(root, table["studio_dir"]) if table.get("studio_dir") else None,
         jobs_dir=_absolute(root, jobs_raw),
         sse_heartbeat_s=heartbeat,
         default_until=str(table.get("default_until") or DEFAULT_UNTIL),

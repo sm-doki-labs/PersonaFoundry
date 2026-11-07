@@ -8,6 +8,7 @@
 - `system`: 대화마다 그대로 쓰는 짧은 system. 성격·관계·채널이 들어 있다. 새로 쓰지 않는다.
 - `handoff`: 이 클러스터의 행동 기준표, 말투 예시, 금지 패턴.
 - `batch`: 만들어야 할 대화 수(`count`), 재료(`materials`), SNS 원본(`sources`), 검토자 메모.
+  긴 대화 클러스터면 턴 조건(`turnRule`)이 함께 온다.
 - `examples`: 이미 사람이 채택한 대화. 말투와 리듬의 기준으로만 쓰고 문장을 베끼지 않는다.
 
 ## 출력
@@ -16,13 +17,27 @@
 각 항목은 `{skeletonKey, scene, sourceId, messages}`다.
 
 - `messages`: `{"role": "user"|"assistant", "content": "..."}`만 쓴다. user로 시작해
-  assistant로 끝나고 역할이 번갈아 나온다. 4~12개 메시지가 기본이다.
+  assistant로 끝나고 역할이 번갈아 나온다. `batch.turnRule`이 없으면 4~12개 메시지가 기본이다.
 - `scene`: 이 대화가 시작되는 상황 한 문장(5~200자). 이미 확인된 사실만 쓰고, 다음 전개나
   정답을 드러내지 않는다. 물음표를 넣지 않는다.
 - `skeletonKey`: 같은 장면 뼈대에서 나온 대화는 같은 값을 쓴다. 서로 다른 장면이면 다른 값을
   쓴다. 영문 소문자·숫자·하이픈으로 쓴다.
 - `sourceId`: 재료가 `SNS_REWRITE`이면 `batch.sources`의 `sourceId`를 그대로 적는다.
   `SYNTH`이면 빈 문자열이다.
+- `topicShiftAt`, `lateTriggerAt`: `batch.turnRule`이 있을 때만 쓴다. 아래 "긴 대화" 절을 따른다.
+  없으면 빈 배열로 두거나 생략한다.
+
+## 긴 대화 (`batch.turnRule`이 있을 때)
+
+- assistant 턴(user·assistant 한 쌍)을 `minAssistantTurns`~`maxAssistantTurns`개로 쓴다. 하한보다
+  짧거나 상한보다 길면 기계 검사가 막고 다시 쓰게 한다.
+- 화제를 `minTopicShifts`번 이상 바꾼다. 화제가 바뀌는 user 메시지의 위치(0부터 센 messages
+  번호)를 `topicShiftAt`에 적는다.
+- 대화의 `lateTriggerFromShare` 지점 이후에 계기 상황(약속 변경, 성의 없는 사과, 서운한 말처럼
+  캐릭터의 선택이 드러나는 일)을 `minLateTriggers`개 이상 넣고, 그 user 메시지 위치를
+  `lateTriggerAt`에 적는다.
+- 문자 채널로 쓴다. 이미 합의한 사실은 상대가 묻거나 바뀔 때만 다시 꺼낸다. 짧은 맞장구 턴을
+  섞고, 마지막 턴을 지난 대화 요약으로 끝내지 않는다. `turnRule.description`의 조건을 따른다.
 
 ## 재료
 
@@ -44,5 +59,6 @@
 - 서운함·갈등은 감정을 지우지 말고, 새 정보에 따라 행동이 바뀌는 흐름으로 쓴다. 회복, 덜
   풀린 채 끝남, 선 긋기 가운데 하나로 끝내고 관계를 끊겠다고 위협하지 않는다.
 - `situation`은 경청·조건·거절 수용·자기 잘못 수습을, `history`는 회상·변경·미제공 사실·
-  조건 유지를, `ownership`은 주인 구분·자기 일정 생성을 다룬다.
+  조건 유지를, `ownership`은 주인 구분·자기 일정 생성을, `long`은 위 "긴 대화" 절의 긴 흐름을
+  다룬다.
 - 검토자 메모가 있으면 그 대화에서 지적된 부분을 고쳐 쓴다.

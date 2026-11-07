@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default=None, help="factory.toml 경로(다른 위치일 때)")
     parser.add_argument("--host", default=None, help="기본은 [web] host")
     parser.add_argument("--port", type=int, default=None, help="기본은 [web] port")
+    parser.add_argument("--jobs-dir", default=None, help="이번 서버의 작업 큐 경로만 별도로 지정")
     parser.add_argument("--log-level", default="info")
     return parser
 
@@ -34,7 +35,8 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"설정 오류: {exc}", file=sys.stderr)
         return 2
-    app = create_app(root, config_path)
+    app = create_app(root, config_path, jobs_dir=Path(args.jobs_dir) if args.jobs_dir else None)
+    conf = app.state.settings
     host = args.host or conf.host
     port = args.port or conf.port
     print(f"워크숍: http://{host}:{port}  (공장 루트 {conf.root}, 작업 기록 {conf.jobs_path})")

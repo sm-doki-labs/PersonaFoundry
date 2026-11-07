@@ -1,8 +1,13 @@
 """산출물 계약 (명세 §5, LLD §5). import하면 레지스트리에 등록된다."""
 
 from character_factory_poc.contracts import (  # noqa: F401
+    actor_persona,
+    chapter_start,
+    choice_design,
     common,
     dataset,
+    dialogue_beats,
+    formation,
     frames,
     hero,
     persona,
@@ -12,10 +17,14 @@ from character_factory_poc.contracts import (  # noqa: F401
     reference,
     refs,
     release,
+    rendered_dialogues,
     report,
     review,
     rework,
     scene,
     training,
+    trait_ledger,
     video,
+    voice,
+    voice_bundle,
 )

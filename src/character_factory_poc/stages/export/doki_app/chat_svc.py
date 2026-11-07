@@ -352,6 +352,17 @@ def _first_sentence(text: str) -> str:
 def _chapter_asset(
     revision: str, chapter_key: str, chapter: Chapter, facts: dict[str, Any]
 ) -> dict[str, Any]:
+    start = facts.get("chapterStart")
+    if start:
+        # D-0089: 공장이 인물별로 만든 챕터 시작 설정을 그대로 쓴다.
+        return {
+            "chapterAssetId": revision,
+            "chapterId": chapter_key,
+            "sceneFacts": _clean(start["sceneFacts"]),
+            "sceneBoundaries": _clean(start["sceneBoundaries"]),
+            "relationshipCanon": _clean(facts.get("relationshipCanon") or []),
+            "activityCandidates": [],
+        }
     scene_facts = _clean([facts.get("meetingContext"), *(facts.get("sceneFacts") or [])])[:5]
     canon = _clean(facts.get("relationshipCanon") or []) or _clean(
         [facts.get("meetingContext") or chapter.intro]
@@ -457,6 +468,29 @@ def _profile(
     card = sheet.get("card") or {}
     habits = card.get("dialogueHabits") or {}
     experiences = card.get("experiences") or []
+    start = (facts.get("chapterStart") or {}).get("relationship")
+    if start:
+        # D-0089: 틀 문장 대신 인물별로 저작한 관계 설정(MD-5.5~5.7). 말높임도 고정하지 않는다.
+        return {
+            "schemaVersion": "chapter-relationship-profile-v3",
+            "profileId": f"{slug}-{chapter.chapterId}",
+            "revision": revision,
+            "personaId": slug,
+            "chapterId": chapter_key,
+            "appliesToStage": slot["entry"],
+            "entryPosture": _clean(start["entryPosture"]),
+            "addresseeStance": start["addresseeStance"],
+            "speechLevel": start["speechLevel"],
+            "initiativePolicy": start["initiativePolicy"],
+            "enabledLoopRefs": [],
+            "loopModifiers": [],
+            "expressionDelta": _clean(start["expressionDelta"]),
+            "sceneWant": start["sceneWant"],
+            "presenceReason": start["presenceReason"],
+            "speakingWay": str(habits.get("directness") or choice.get("expressionIntensity") or ""),
+            "moodRange": dict(start["moodRange"]),
+            "trustedStory": start.get("trustedStory"),
+        }
     meeting = str(facts.get("meetingContext") or chapter.intro or chapter.title)
     scene_facts = _clean(facts.get("sceneFacts") or [])
     speaking = str(habits.get("directness") or choice.get("expressionIntensity") or "짧게 말한다")

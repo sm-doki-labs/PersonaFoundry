@@ -16,12 +16,13 @@ import sys
 import threading
 import uuid
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from character_factory_poc.common.config import load_config
+from character_factory_poc.contracts.common import State
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.graph import GATES, STAGES
 from character_factory_poc.pipeline.orchestrator import RunLog, RunOptions, run_until
@@ -32,6 +33,7 @@ from character_factory_poc.web.settings import WebSettings
 
 MAX_LOG_LINES = 2000
 MAX_HISTORY = 200
+MAX_CREATOR_BRIEF_CHARS = 20_000
 ACTIONS = {"run"}
 _JOB_ID_RE = re.compile(r"^job-[A-Za-z0-9-]{1,64}$")
 
@@ -222,7 +224,22 @@ class JobManager:
         confirm: list[str] | None = None,
         trigger: str = "manual",
     ) -> dict:
-        reads.character_dir(self.root, character_id)
+        char_dir = reads.character_dir(self.root, character_id)
+        state_path = char_dir / "state.json"
+        if state_path.is_symlink() or (
+            state_path.exists() and not state_path.resolve().is_relative_to(char_dir.resolve())
+        ):
+            raise WebError(409, "진행 상태 파일이 캐릭터 폴더 밖을 가리켜 실행할 수 없다")
+        if state_path.exists():
+            raw_state, state_error = reads.read_state(char_dir)
+            if state_error:
+                raise WebError(409, f"진행 상태가 손상되어 실행할 수 없다: {state_error}")
+            try:
+                parsed_state = State.model_validate(raw_state)
+            except ValueError as exc:
+                raise WebError(409, "진행 상태가 state-v1 형식에 맞지 않아 실행할 수 없다") from exc
+            if parsed_state.subjectId != character_id:
+                raise WebError(409, "진행 상태의 캐릭터 ID가 달라 실행할 수 없다")
         action = (action or "").strip()
         if action not in ACTIONS:
             raise WebError(400, f"action은 {', '.join(sorted(ACTIONS))}만 받는다: {action!r}")
@@ -353,9 +370,46 @@ class JobManager:
 
     def _run_default(self, job: Job, stream: _JobStream) -> RunLog:
         """cli run과 같은 경로: 설정을 읽어 Context를 만들고 run_until을 돌린다."""
+        brief = self._creator_brief(job.character_id)
         config = load_config(self.root, self.settings.config_path)
         ctx = Context(config=config, execute=True)
-        return run_until(ctx, job.character_id, self.run_options(job, stream))
+        options = self.run_options(job, stream)
+        if brief is not None:
+            options = replace(options, brief_text=brief)
+        return run_until(ctx, job.character_id, options)
+
+    def _creator_brief(self, character_id: str) -> str | None:
+        """생성 요청이 고정한 브리프를 읽는다. 없는 파일은 기존 CLI 입력 동작을 지킨다."""
+        char_dir = reads.character_dir(self.root, character_id)
+        folder = char_dir / "creator-input"
+        path = folder / "brief-r1.md"
+        if not folder.exists() and not folder.is_symlink():
+            return None
+        if folder.is_symlink():
+            raise ValueError("creator-input가 심볼릭 링크라 브리프를 읽을 수 없다")
+        if not path.exists() and not path.is_symlink():
+            return None
+        if path.is_symlink():
+            raise ValueError("brief-r1.md가 심볼릭 링크라 브리프를 읽을 수 없다")
+        resolved = path.resolve()
+        if not resolved.is_relative_to(char_dir.resolve()):
+            raise ValueError("brief-r1.md가 캐릭터 폴더 밖을 가리킨다")
+        try:
+            size = path.stat().st_size
+        except OSError as exc:
+            raise ValueError("brief-r1.md를 읽지 못했다") from exc
+        if size > MAX_CREATOR_BRIEF_CHARS * 4:
+            raise ValueError(f"브리프는 {MAX_CREATOR_BRIEF_CHARS}자 이하여야 한다")
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                brief = handle.read(MAX_CREATOR_BRIEF_CHARS + 1)
+        except (OSError, UnicodeDecodeError) as exc:
+            raise ValueError("brief-r1.md를 UTF-8로 읽지 못했다") from exc
+        if len(brief) > MAX_CREATOR_BRIEF_CHARS:
+            raise ValueError(f"브리프는 {MAX_CREATOR_BRIEF_CHARS}자 이하여야 한다")
+        if not brief.strip():
+            raise ValueError("브리프가 비어 있다")
+        return brief
 
     def _stdout_router(self) -> _StdoutRouter:
         """여러 캐릭터가 동시에 돌아도 각 작업의 print가 자기 로그로만 가게 한 번만 감싼다."""

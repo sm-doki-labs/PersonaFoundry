@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
+from dataclasses import replace
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -38,10 +39,35 @@ class _DevStaticFiles(StaticFiles):
         return response
 
 
-def create_app(root: Path, config_path: Path | None = None, *, runner=None) -> FastAPI:
+class _StudioStaticFiles(_DevStaticFiles):
+    """Serve the visual surface without publishing plans, logs, or local work."""
+
+    async def get_response(self, path: str, scope: Any):
+        name = path.strip("/")
+        allowed_html = {
+            "",
+            ".",
+            "index.html",
+            "d-ops.html",
+            "c-glass.html",
+            "a-studio.html",
+            "b-editorial.html",
+        }
+        if name not in allowed_html and not name.startswith(
+            ("shared/", "assets/", "previews/", "recordings/")
+        ):
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        return await super().get_response(path, scope)
+
+
+def create_app(
+    root: Path, config_path: Path | None = None, *, runner=None, jobs_dir: Path | None = None
+) -> FastAPI:
     """공장 루트 하나에 붙는 워크숍 앱을 만든다. runner는 시험에서 작업 실행 함수를 바꿀 때 쓴다."""
     root = Path(root).expanduser().resolve()
     conf = load_settings(root, config_path)
+    if jobs_dir is not None:
+        conf = replace(conf, jobs_dir=Path(jobs_dir))
     hub = EventHub()
     jobs = JobManager(root, conf, hub, runner=runner)
     app = FastAPI(
@@ -54,6 +80,15 @@ def create_app(root: Path, config_path: Path | None = None, *, runner=None) -> F
     app.state.settings = conf
     app.state.hub = hub
     app.state.jobs = jobs
+    from character_factory_poc.web.trait_authoring import install_authoring_routes
+
+    install_authoring_routes(app, root, conf, jobs)
+    from character_factory_poc.web.text_pipeline import install_text_pipeline_routes
+
+    install_text_pipeline_routes(app, root, conf, jobs)
+    from character_factory_poc.web.runtime import install_runtime_routes
+
+    install_runtime_routes(app, root, conf, jobs)
 
     @app.exception_handler(WebError)
     async def _web_error(_request: Request, exc: WebError) -> JSONResponse:  # pragma: no cover
@@ -137,16 +172,23 @@ def create_app(root: Path, config_path: Path | None = None, *, runner=None) -> F
         if gate not in reads.known_gates():
             raise WebError(404, f"관문이 없다: {gate}({', '.join(reads.known_gates())} 중 하나다)")
         answer = _clean_answer(body)
+        expected_rev = answer.pop("expectedRev", None)
+        if expected_rev is not None and not isinstance(expected_rev, str):
+            raise WebError(400, "expectedRev는 문자열이어야 한다")
         char_dir = reads.character_dir(root, character_id)
-        state, _ = reads.read_state(char_dir)
-        raw_gates = state.get("gates") if isinstance(state.get("gates"), dict) else {}
-        gate_state = raw_gates.get(gate) if isinstance(raw_gates.get(gate), dict) else {}
-        if gate_state.get("status") in {"APPROVED", "REJECTED"}:
-            raise WebError(
-                409,
-                f"{gate}는 이미 결정이 기록됐다. 새 revision으로 다시 돌린 뒤 결정한다",
-            )
         with jobs.locks.hold(character_id):
+            state, state_error = reads.read_state(char_dir)
+            if state_error:
+                raise WebError(409, "진행 상태를 읽지 못해 결정을 기록할 수 없다")
+            raw_gates = state.get("gates") if isinstance(state.get("gates"), dict) else {}
+            gate_state = raw_gates.get(gate) if isinstance(raw_gates.get(gate), dict) else {}
+            if expected_rev is not None and gate_state.get("rev") != expected_rev:
+                raise WebError(409, "검토한 revision이 바뀌었다. 최신 후보를 다시 확인한다")
+            if gate_state.get("status") in {"APPROVED", "REJECTED"}:
+                raise WebError(
+                    409,
+                    f"{gate}는 이미 결정이 기록됐다. 새 revision으로 다시 돌린 뒤 결정한다",
+                )
             ctx = Context(config=load_config(root, conf.config_path), execute=True)
             try:
                 output = approve_gate(ctx, character_id, gate, answer)
@@ -272,7 +314,13 @@ def create_app(root: Path, config_path: Path | None = None, *, runner=None) -> F
             "name": "캐릭터 공장 워크숍",
             "endpoints": [
                 "GET /api/health",
+                "GET /api/text-pipeline",
+                "POST /api/text-pipeline/selection",
+                "GET /api/text-pipeline/characters",
+                "GET /api/text-pipeline/characters/{id}",
                 "GET /api/projects",
+                "GET /api/runtime/graph",
+                "POST /api/runtime/characters",
                 "GET /api/characters/{id}",
                 "GET /api/characters/{id}/gates/{gate}",
                 "POST /api/characters/{id}/gates/{gate}/decision",
@@ -280,8 +328,20 @@ def create_app(root: Path, config_path: Path | None = None, *, runner=None) -> F
                 "POST /api/jobs",
                 "GET /api/jobs/{jobId}",
                 "GET /api/events",
+                "GET /api/traits/catalog",
+                "POST /api/traits/recommend",
+                "GET /api/characters/{id}/seed",
+                "POST /api/characters/{id}/seed",
             ],
         }
+
+    studio_dir = conf.studio_path
+    if studio_dir is not None:
+        if not studio_dir.is_dir():
+            raise ValueError("[web] studio_dir 폴더를 찾을 수 없다")
+        app.mount(
+            "/studio", _StudioStaticFiles(directory=str(studio_dir), html=True), name="studio"
+        )
 
     static_dir = conf.static_path
     if static_dir.is_dir():

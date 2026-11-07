@@ -10,10 +10,11 @@ from typing import Any
 from pydantic import Field
 
 from character_factory_poc.common.budget import CallPlan
-from character_factory_poc.common.canonical import sha256_text
+from character_factory_poc.common.canonical import sha256_file, sha256_text
 from character_factory_poc.common.schema import dump, register, validate
 from character_factory_poc.common.store import (
     next_rev,
+    read_json,
     write_manifest,
     write_once_json,
     write_once_text,
@@ -27,9 +28,14 @@ from character_factory_poc.pipeline.gates import render_gate_page
 from character_factory_poc.pipeline.rework import load_rework
 from character_factory_poc.providers.base import ChatRequest, Message, extract_json_object
 from character_factory_poc.stages.s3_plan.importer import load_approved_plan
+from character_factory_poc.stages.s8_prompts.source import (
+    canonical_sections,
+    project_plan,
+    with_creator_traits,
+)
 
 FILLED_BY_FACTORY = ("SYSTEM_RULES", "OUTPUT")
-OUTPUT_RULE = "캐릭터의 발화 텍스트만 출력한다. JSON, 따옴표, 라벨, 설명, 행동·장면 지문을 붙이지 않는다. 한 턴은 대개 짧은 1~2문장으로 끝내고 3문장을 넘기지 않는다."
+OUTPUT_RULE = "캐릭터가 실제로 할 말만 출력한다. JSON·라벨·해설·행동 지문은 쓰지 않는다. 보통 짧은 1~3문장으로 답하고 필요하면 말풍선처럼 줄을 나눈다. 답변 틀을 채우려고 이유·대안·질문을 덧붙이지 않는다."
 
 
 @register("prompter-output-v1")
@@ -82,7 +88,16 @@ def make_section_checks(sections: list[str], short_budget: dict[str, int]):
     return _check
 
 
-def assemble(sections: list[str], body: dict[str, str], name: str, system_rules: str) -> str:
+def assemble(
+    sections: list[str],
+    body: dict[str, str],
+    name: str,
+    system_rules: str,
+    canonical: dict[str, str] | None = None,
+    *,
+    creator_plan=None,
+) -> str:
+    body = body | (canonical or {})
     parts = []
     for s in sections:
         if s == "SYSTEM_RULES":
@@ -93,6 +108,8 @@ def assemble(sections: list[str], body: dict[str, str], name: str, system_rules:
             text = f"캐릭터 이름: {name}\n" + body[s].strip()
         else:
             text = body[s].strip()
+        if s == "PERSONA / DISPOSITION" and creator_plan is not None:
+            text = with_creator_traits(text, creator_plan)
         parts.append(f"[{s}]\n{text}")
     return "\n\n".join(parts) + "\n"
 
@@ -142,7 +159,13 @@ def _resumable_rev(char_dir: Path, state) -> str | None:
 def run_s8(
     ctx: Context, cid: str, voice_probes: list[str], allow_same_family: bool = False
 ) -> Path:
-    plan, _ = load_approved_plan(ctx, cid)
+    if ctx.config.stage("s7").get("formation_profile"):
+        from character_factory_poc.stages.s8_prompts.formation import run_formation_s8
+
+        return run_formation_s8(ctx, cid, voice_probes)
+    if ctx.text_deck_enabled:
+        return run_deck_s8(ctx, cid, voice_probes)
+    plan, plan_path = load_approved_plan(ctx, cid)
     sheet, sheet_path = load_latest_trait_sheet(ctx, cid)
     char_dir = ctx.character_dir(cid)
     state = ctx.state(cid)
@@ -150,7 +173,7 @@ def run_s8(
     brief = load_rework(ctx, cid, "G6")
     s8cfg = ctx.config.stage("s8")
     retries = int(s8cfg.get("max_check_retries", 3))
-    short_max = int(s8cfg.get("short_prompt_max_chars", 1500))
+    short_max = int(s8cfg.get("short_prompt_max_chars", 2400))
     sec = load_sections()
     sections: list[str] = sec["sections"]
     short_budget: dict[str, int] = sec.get("shortOnlyBudget", {})
@@ -164,6 +187,27 @@ def run_s8(
         probe_doc = run_probes(ctx, cid, budget, pair, sheet, voice_probes, allow_same_family)
         _finish_s8(cid, state, rev_dir, resume_rev, plan, sheet, pair, probe_doc)
         return rev_dir
+    rules_text, rules_ref = load_system_rules(ctx)
+    source = project_plan(plan, sha256_file(plan_path))
+    canonical = canonical_sections(source, sheet)
+    empty_body = {s: "" for s in sections}
+    base_chars = len(
+        assemble(sections, empty_body, plan.name, rules_text, canonical, creator_plan=plan)
+    )
+    if base_chars > short_max:
+        raise ValueError(f"정본 {base_chars}자가 짧은 프롬프트 상한 {short_max}자를 넘는다")
+    generated = [s for s in sections if s not in canonical and s not in FILLED_BY_FACTORY]
+    available = short_max - base_chars
+    total_budget = sum(short_budget.get(s, 0) for s in generated)
+    minimum = 24
+    if available < minimum * len(generated):
+        raise ValueError("정본 보존 뒤 생성 본문 예산이 부족하다. short 상한을 늘려야 한다")
+    short_budget = dict(short_budget)
+    if total_budget > available:
+        for s in generated:
+            short_budget[s] = minimum + int(
+                short_budget.get(s, 0) * (available - minimum * len(generated)) / total_budget
+            )
     budget.check_plan(plan_calls(retries, len(voice_probes)))
     rev = next_rev(char_dir / "s8-prompts", "pv")
     rev_dir = char_dir / "s8-prompts" / rev
@@ -175,6 +219,7 @@ def run_s8(
     )
     inputs: dict[str, Any] = {
         "trait-sheet": dump(sheet),
+        "character-plan": source,
         "sections": sections,
         "shortBudget": short_budget,
         "character-name.txt": plan.name,
@@ -205,8 +250,8 @@ def run_s8(
         )
     out: PrompterOutput = result.output
     rules_text, rules_ref = load_system_rules(ctx)
-    long_text = assemble(sections, out.long, plan.name, rules_text)
-    short_text = assemble(sections, out.short, plan.name, rules_text)
+    long_text = assemble(sections, out.long, plan.name, rules_text, canonical, creator_plan=plan)
+    short_text = assemble(sections, out.short, plan.name, rules_text, canonical, creator_plan=plan)
     problems = align_check(long_text, short_text, sections, short_max)
     if problems:
         state.transition("s8", "CHECK_FAILED", rev=rev, error="; ".join(problems))
@@ -223,6 +268,7 @@ def run_s8(
         systemRulesSha256=sha256_text(rules_text),
         shortAdopted=False,
     )
+    write_once_json(rev_dir / "source-plan.json", source)
     write_once_json(rev_dir / "prompt-pair.json", dump(pair))
     write_once_text(rev_dir / "long.md", long_text)
     write_once_text(rev_dir / "short.md", short_text)
@@ -380,3 +426,98 @@ def run_probes(
         probes=probes,
         judgeModel=judge.model,
     )
+
+
+def run_deck_s8(ctx: Context, cid: str, voice_probes: list[str]) -> Path:
+    """Preserve approved prose; the compatibility short slot is an uncompressed copy."""
+    from character_factory_poc.stages.s8_prompts.actor_persona import (
+        compose_approved_sheet,
+        load_actor_rules,
+    )
+
+    if not ctx.execute:
+        raise ValueError("--execute is required")
+    if voice_probes:
+        raise ValueError(
+            "모델 덱 제작은 대화 시험을 자동 수행하지 않는다. 개발 평가는 별도로 실행한다"
+        )
+    state = ctx.state(cid)
+    state.require_deps("s8")
+    plan, plan_path = load_approved_plan(ctx, cid)
+    sheet, sheet_path = load_latest_trait_sheet(ctx, cid)
+    rules, rules_ref = load_actor_rules(ctx)
+    ledger_path = sheet_path.parent / "trait-ledger.json"
+    if ledger_path.exists():
+        from character_factory_poc.stages.s8_prompts.actor_persona import compose_from_ledger
+
+        ledger = validate("trait-ledger-v1", json.loads(ledger_path.read_text("utf-8")))
+        text, sections = compose_from_ledger(plan, ledger, rules_text=rules)
+        compiler = "actor-trait-ledger-v1"
+    else:
+        text, sections = compose_approved_sheet(plan, sheet, rules_text=rules)
+        compiler = "actor-approved-sheet-v1"
+    from character_factory_poc.common.errors import NeedsInputError
+
+    gate = state.gate("G6")
+    previous = ctx.character_dir(cid) / "s8-prompts" / str(gate.rev)
+    record = read_json(ctx.character_dir(cid) / gate.recordRef) if gate.recordRef else {}
+    rework = load_rework(ctx, cid, "G6")
+    if rework is not None or record.get("decision") == "REQUEST_CHANGES":
+        old_pair = previous / "prompt-pair.json"
+        if old_pair.exists() and read_json(old_pair)["long"]["sha256"] == sha256_text(text):
+            raise NeedsInputError(
+                "G6 수정 요청이 남아 있다. S3/S7 원천이나 시스템 규칙을 먼저 수정한 뒤 조립한다"
+            )
+    source_binding_path = sheet_path.parent / "text-deck-binding.json"
+    source_generation = (
+        read_json(source_binding_path)
+        if source_binding_path.exists()
+        else dict(status="legacy_or_unknown", responseModel=None, binding=None)
+    )
+    if source_generation.get("traitSheetSha256", sha256_file(sheet_path)) != sha256_file(
+        sheet_path
+    ):
+        raise ValueError("trait source generation binding hash mismatch")
+    limit = int(ctx.config.stage("s8").get("long_prompt_max_chars", 8000))
+    if len(text) > limit:
+        raise ValueError(f"정본 {len(text)}자가 S8 상한 {limit}자를 넘는다. 내용을 자르지 않는다")
+    folder = ctx.character_dir(cid) / "s8-prompts"
+    rev = next_rev(folder, "pv")
+    folder = folder / rev
+    state.transition("s8", "RUNNING", rev=rev)
+    content = dict(text=text, sha256=sha256_text(text), chars=len(text))
+    pair = PromptPair(
+        characterId=cid,
+        traitSheetSha256=sha256_file(sheet_path),
+        sections=list(sections),
+        long=content,
+        short=content,
+        systemRulesRef=rules_ref,
+        systemRulesSha256=sha256_text(rules),
+        shortAdopted=False,
+    )
+    write_once_json(folder / "source-plan.json", project_plan(plan, sha256_file(plan_path)))
+    write_once_json(
+        folder / "text-deck-binding.json",
+        dict(
+            selectedConfiguration=ctx.config.text_binding("voice"),
+            sourceGeneration=source_generation,
+            completionCheck="NOT_RUN",
+            compiler=compiler,
+            planSha256=sha256_file(plan_path),
+            traitSheetSha256=sha256_file(sheet_path),
+            shortPolicy="uncompressed-identical-copy; not a qualified short prompt",
+        ),
+    )
+    write_once_json(folder / "prompt-pair.json", dump(pair))
+    write_once_text(folder / "long.md", text)
+    write_once_text(folder / "short.md", text)
+    probe = PromptProbe(
+        characterId=cid,
+        promptPairSha256=sha256_file(folder / "prompt-pair.json"),
+        probes=[],
+        judgeModel="",
+        note="제작 중 대화 시험 미실행; short는 압축하지 않은 동일 본문",
+    )
+    _finish_s8(cid, state, folder, rev, plan, sheet, pair, probe)
+    return folder

@@ -1,7 +1,8 @@
-"""G8 정적 검토 페이지 (LLD §6.4·§8.9).
+"""G8 정적 검토 페이지 (LLD §6.4·§8.9, D-0078).
 
 지표·기준·LLM 짝 판정과 사람 블라인드 20쌍을 한 장에 보여 주고, 답 JSON을 복사하게 한다.
-사람 표본에는 어느 조건인지 쓰지 않는다.
+사람 표본에는 어느 조건인지 쓰지 않는다. 보고서에 정책 점수표가 있으면 결정 초안·축별 커버리지·
+개선 과제를 함께 보여 준다. 결정은 초안이며 사람 결정을 대신하지 않는다.
 """
 
 from __future__ import annotations
@@ -31,6 +32,155 @@ def _metric_detail(report: EvalReport, arm: str, metric: str) -> str:
     return ""
 
 
+_COVERAGE_LABEL = {"MEASURED": "측정됨", "PARTIAL": "부분", "NOT_MEASURED": "미측정"}
+_STATE_LABEL = {"measured": "측정", "relative": "상대 비교만", "not_measured": "미측정"}
+
+
+def _threshold(node: dict[str, Any] | None) -> str:
+    if not node:
+        return "—"
+    text = f"{node.get('value')}"
+    if node.get("note"):
+        text = f"{node['note']} {text}"
+    if node.get("startingValue"):
+        text += " (운영 시작값·proposal)"
+    elif node.get("source"):
+        text += f" ({node['source'].rsplit('/', 1)[-1]})"
+    return text
+
+
+def _fraction(m: dict[str, Any]) -> str:
+    if m.get("denominator"):
+        return f"{m.get('numerator')}/{m.get('denominator')}"
+    return "—" if m.get("rate") is None else str(m.get("rate"))
+
+
+def _policy_sections(report: EvalReport, tasks: dict[str, Any] | None) -> list[str]:
+    """정책 점수표 절. 이전 보고서(decision 없음)는 빈 목록이다."""
+    if report.decision is None:
+        return []
+    parts = [
+        '<h2>결정 초안</h2><p class="hint">정책 규칙으로 계산한 초안이다. G8의 사람 결정을 '
+        "대신하지 않는다. 판정이 llm_only라 RELEASE_ACCEPTED·MODEL_ACCEPTED는 자동으로 내지 "
+        "않는다.</p>",
+        f'<p><span class="badge">{_e(report.decision)}</span></p><ul>',
+    ]
+    parts.extend(f"<li>{_e(r)}</li>" for r in report.decisionReasons)
+    parts.append("</ul>")
+    sel = report.checkpointSelection
+    if sel:
+        chosen = sel.get("chosen") or {}
+        parts.append(
+            "<h3>학습 단계 체크포인트 선택</h3><table><tr><th>기록</th><th>결정</th>"
+            "<th>선택</th><th>binding 일치</th><th>뜻</th></tr>"
+            f"<tr><td>{_e(sel.get('ref'))}</td><td>{_e(sel.get('decision') or '—')}</td>"
+            f"<td>{_e(chosen.get('checkpointId') or sel.get('bestCheckpoint') or '—')}</td>"
+            f"<td>{_e({True: '같다', False: '다르다'}.get(sel.get('matchesBinding'), '—'))}</td>"
+            f"<td>{_e(sel.get('meaning'))}</td></tr></table>"
+        )
+
+    parts.append(
+        '<h2>축별 커버리지</h2><p class="hint">정책 evaluation.suites별로 지금 세트'
+        "(OE·SE·APOLOGY·LONG200)가 무엇을 쟀는지 보인다. 미측정 문항군은 결과가 없다는 뜻이며 "
+        "통과로 읽지 않는다.</p><table><tr><th>문항군</th><th>커버리지</th><th>구성 요소</th>"
+        "<th>지표 (분자/분모)</th><th>짝 판정</th></tr>"
+    )
+    for suite in report.suiteCoverage:
+        comps = "<br>".join(
+            f"{_e(c['name'])}: {_e(_STATE_LABEL.get(c['state'], c['state']))}"
+            for c in suite.get("components", [])
+        )
+        plan = ", ".join(
+            f"{_e(key)} {_e(_threshold(node))}" for key, node in suite.get("plan", {}).items()
+        )
+        if plan:
+            comps += f'<br><span class="hint">정책 계획: {plan}</span>'
+        measures = "<br>".join(
+            f"{_e(m['armId'])} {_e(m['component'])} {_e(_fraction(m))} "
+            f"({_e(m.get('comparator') or '')} {_e(_threshold(m.get('threshold')))}) "
+            f"{'통과' if m.get('passed') else ('미달' if m.get('passed') is False else '')}"
+            for m in suite.get("measures", [])
+        )
+        pairs = "<br>".join(
+            f"{_e(p['armA'])} {p['winsA']} : {p['winsB']} {_e(p['armB'])} "
+            f"(비김 {p['ties']}, SPLIT {p['split']} / {p['total']})"
+            for p in suite.get("pairs", [])
+        )
+        cov = suite.get("coverage", "")
+        cls = "fail" if cov == "NOT_MEASURED" else ""
+        note = f'<br><span class="hint">{_e(suite["note"])}</span>' if suite.get("note") else ""
+        parts.append(
+            f'<tr><td>{_e(suite["suiteId"])}<br><span class="hint">'
+            f"{_e(suite.get('purpose', ''))}</span></td>"
+            f'<td class="{cls}">{_e(_COVERAGE_LABEL.get(cov, cov))}</td>'
+            f"<td>{comps}</td><td>{measures or '—'}{note}</td><td>{pairs or '—'}</td></tr>"
+        )
+    parts.append("</table>")
+
+    if report.criticalErrorChecks:
+        parts.append(
+            "<h3>중대 오류</h3><table><tr><th>오류</th><th>커버리지</th><th>방법</th>"
+            "<th>조건별 (분자/분모)</th></tr>"
+        )
+        for check in report.criticalErrorChecks:
+            rows = "<br>".join(
+                f"{_e(m['armId'])} {_e(_fraction(m))} "
+                f"(기준 {_e(m.get('comparator') or '')} {_e(_threshold(m.get('threshold')))}) · "
+                f"{_e(m.get('detail', ''))}"
+                for m in check.get("measures", [])
+            )
+            cov = check.get("coverage", "")
+            parts.append(
+                f"<tr><td>{_e(check['errorId'])}</td><td>{_e(_COVERAGE_LABEL.get(cov, cov))}</td>"
+                f"<td>{_e(check.get('by', ''))}</td><td>{rows or '—'}</td></tr>"
+            )
+        parts.append("</table>")
+
+    if tasks is not None:
+        ref = report.improvementTasksRef.ref if report.improvementTasksRef else ""
+        parts.append(
+            f'<h2>개선 과제</h2><p class="hint">{_e(ref)} · 한 바퀴에 개입 하나만 바꾼다. '
+            "매핑 근사는 정책 유형과 지표가 정확히 같지 않다는 뜻이다.</p>"
+        )
+        if tasks.get("tasks"):
+            parts.append(
+                "<table><tr><th>과제</th><th>실패 유형</th><th>근거</th><th>첫 개입</th>"
+                "<th>매핑</th></tr>"
+            )
+            for task in tasks["tasks"]:
+                mapping = task.get("mapping", {})
+                evidence = "<br>".join(
+                    f"{_e(ev['armId'])} {_e(ev['metric'])} {_e(_fraction(ev))} "
+                    f"{_e(ev.get('detail', ''))}"
+                    for ev in task.get("evidence", [])
+                )
+                first = task.get("firstIntervention", {})
+                parts.append(
+                    f'<tr><td>{_e(task["taskId"])}<br><span class="hint">'
+                    f"{_e(task['trigger'])}</span></td>"
+                    f"<td>{_e(task.get('failureType') or '정책 유형 없음')}</td>"
+                    f"<td>{evidence}</td>"
+                    f"<td>{_e(first.get('kind', ''))}: {_e(first.get('text', ''))}</td>"
+                    f"<td>{_e(mapping.get('confidence', ''))}: "
+                    f"{_e(mapping.get('rationale', ''))}</td></tr>"
+                )
+            parts.append("</table>")
+        else:
+            parts.append("<p>정책 기준으로 잡힌 실패 신호가 없다.</p>")
+        parts.append("<h3>다음 재평가 전에 고정할 것</h3><ul>")
+        parts.extend(
+            f"<li><b>{_e(h['item'])}</b> {_e(h['value'])}</li>"
+            for h in tasks.get("holdBeforeNextEval", [])
+        )
+        parts.append("</ul>")
+        demoted = ", ".join(d["setId"] for d in tasks.get("setDemotions", []))
+        parts.append(
+            f"<p><b>평가 세트 강등</b> {_e(demoted)}: 다음 확증에서는 개발 세트로 쓴다. "
+            "이 세트의 실패를 겨냥해 데이터를 고치면 회귀 세트가 된다.</p>"
+        )
+    return parts
+
+
 def render_g8_page(
     *,
     subject_id: str,
@@ -40,6 +190,7 @@ def render_g8_page(
     pairs: dict[str, Any],
     final: bool = False,
     adopted: str | None = None,
+    improvement_tasks: dict[str, Any] | None = None,
 ) -> str:
     overall = criteria_overall(prereg, report.criteriaResults)
     picks = {p.pairId: p.pick for p in report.humanPicks}
@@ -73,6 +224,7 @@ def render_g8_page(
         f"prereg {_e(report.preregSha256[:12])}… · 판정 {_e(prereg.judge.model)}"
         f"({_e(prereg.judge.family)})</p>",
     ]
+    parts.extend(_policy_sections(report, improvement_tasks))
 
     parts.append(
         "<h2>기준</h2><table><tr><th>기준</th><th>지표</th><th>비교</th>"

@@ -16,7 +16,7 @@ from character_factory_poc.pipeline.context import Context
 from character_factory_poc.providers.fake import FakeTextModel
 from character_factory_poc.stages.s1_reference.run import run_s1
 from character_factory_poc.stages.s2_hero.run import run_s2
-from character_factory_poc.stages.s3_plan.draft import new_character
+from character_factory_poc.stages.s3_plan.common import new_character
 from character_factory_poc.stages.s3_plan.own import run_s3_own
 from character_factory_poc.stages.s3_plan.seed import write_seed
 from character_factory_poc.stages.s3_plan.variants import run_s3_variants

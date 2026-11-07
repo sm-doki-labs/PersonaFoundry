@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Literal
+import json
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Annotated, Any, Literal
 
-from pydantic import Field
+from pydantic import ConfigDict, Field, StringConstraints, field_validator, model_validator
 
+from character_factory_poc.common.canonical import sha256_text
 from character_factory_poc.common.schema import register
 from character_factory_poc.contracts.common import Strict
 
@@ -125,3 +129,86 @@ class PromptProbe(Strict):
     probes: list[Probe]
     judgeModel: str
     note: str = "판정은 참고용이다. G6 승인에 자동으로 쓰지 않는다."
+
+
+# New contracts deliberately do not change validation of historical v1 artifacts.
+_Text = Annotated[str, StringConstraints(strip_whitespace=False, min_length=1, pattern=r"\S")]
+_Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+
+
+class PromptTextV2(PromptText):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    text: _Text
+    sha256: _Sha256
+    chars: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def verify_text(self) -> PromptTextV2:
+        if self.chars != len(self.text) or self.sha256 != sha256_text(self.text):
+            raise ValueError("prompt text chars/sha256 do not match actual text")
+        return self
+
+
+@register("prompt-pair-v2")
+class PromptPairV2(Strict):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+
+    schemaVersion: Literal["prompt-pair-v2"] = "prompt-pair-v2"
+    characterId: _Text
+    personaVersion: _Text | None = None
+    traitSheetSha256: _Sha256
+    sections: list[_Text] = Field(min_length=1)
+    long: PromptTextV2
+    longStatus: Literal["READY"] = "READY"
+    short: PromptTextV2 | None = None
+    shortStatus: Literal["UNAVAILABLE", "UNQUALIFIED", "READY"]
+    systemRulesRef: _Text
+    systemRulesSha256: _Sha256
+    shortAdopted: Literal[False] = False
+
+    @field_validator("shortAdopted", mode="before")
+    @classmethod
+    def require_false(cls, value: Any) -> bool:
+        if value is not False:
+            raise ValueError("shortAdopted must be false")
+        return value
+
+    @model_validator(mode="after")
+    def verify_short_state(self) -> PromptPairV2:
+        if (self.shortStatus == "UNAVAILABLE") != (self.short is None):
+            raise ValueError("short data must agree with shortStatus")
+        if len(set(self.sections)) != len(self.sections):
+            raise ValueError("sections must be unique")
+        return self
+
+
+def load_prompt_pair(data_or_path: Mapping[str, Any] | str | Path) -> PromptPair | PromptPairV2:
+    """Read only explicit v1/v2 artifacts; never invent a missing short or version."""
+    data = (
+        json.loads(Path(data_or_path).read_text(encoding="utf-8"))
+        if isinstance(data_or_path, str | Path)
+        else dict(data_or_path)
+    )
+    if not isinstance(data, dict):
+        raise ValueError("prompt pair must be a JSON object")
+    match data.get("schemaVersion"):
+        case "prompt-pair-v1":
+            return PromptPair.model_validate(data)
+        case "prompt-pair-v2":
+            return PromptPairV2.model_validate(data)
+        case _:
+            raise ValueError("unsupported or missing prompt-pair schemaVersion")
+
+
+def require_long(pair: PromptPair | PromptPairV2) -> PromptText:
+    """Both versions carry a required long prompt."""
+    return pair.long
+
+
+def require_short(pair: PromptPair | PromptPairV2) -> PromptText:
+    """Legacy short stays readable; v2 consumers must explicitly support its state."""
+    if isinstance(pair, PromptPairV2) and (pair.shortStatus != "READY" or pair.short is None):
+        raise ValueError(f"short prompt unsupported: {pair.shortStatus}")
+    assert pair.short is not None
+    return pair.short

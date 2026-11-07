@@ -94,7 +94,9 @@ def _prompt_pair(ctx: Context, cid: str) -> tuple[dict[str, Any], str, Path, Pat
         raise FactoryError(f"{cid}: G6 프롬프트 쌍이 없다(S8 상태 {st.status})")
     rev_dir = ctx.character_dir(cid) / "s8-prompts" / st.currentRev
     pair = json.loads((rev_dir / "prompt-pair.json").read_text("utf-8"))
-    validate("prompt-pair-v1", pair)
+    from character_factory_poc.contracts.persona import load_prompt_pair, require_short
+
+    require_short(load_prompt_pair(pair))
     long_path, short_path = rev_dir / "long.md", rev_dir / "short.md"
     if not long_path.exists() or not short_path.exists():
         raise FactoryError(f"{cid}: S8 프롬프트 파일(long.md·short.md)이 없다")
@@ -111,7 +113,13 @@ def discover_bindings(ctx: Context, cid: str) -> dict[str, dict[str, str]]:
     found: dict[str, dict[str, str]] = {}
     if not root.exists():
         return found
-    for path in sorted(root.glob("tr*/*/training-run.json")):
+
+    def rev_number(path: Path) -> int:
+        digits = path.parent.parent.name[2:]
+        return int(digits) if digits.isdigit() else -1
+
+    # tr9보다 tr10이 뒤에 오도록 숫자로 정렬한다. 뒤의(최신) 성공 binding이 앞의 것을 덮는다.
+    for path in sorted(root.glob("tr*/*/training-run.json"), key=lambda p: (rev_number(p), str(p))):
         try:
             run = json.loads(path.read_text("utf-8"))
             validate("training-run-v2", run)
@@ -168,8 +176,12 @@ def _arms(
             model=text_model,
         )
     ]
+    configured = configured_training_providers(ctx)
     for arm in SFT_ARMS:
         info = bindings.get(arm)
+        if info is None and SFT_PROVIDERS[arm] not in configured:
+            # 학습 결과도 없고 학습 공급자로 고르지도 않은 조건은 등록하지 않는다(평가가 실패한다).
+            continue
         ref = info["ref"] if info else f"UNBOUND:{SFT_PROVIDERS[arm]}"
         arms.append(
             Arm(
@@ -181,7 +193,29 @@ def _arms(
                 model=ref,
             )
         )
+    if len(arms) < 2:
+        raise FactoryError(
+            "평가할 SFT 조건이 없다. LONG_BASE와 비교할 학습 결과(model_binding)나 "
+            "[stages.s10t] providers의 gemma_qlora·vertex_gemini가 하나는 있어야 한다"
+        )
     return arms
+
+
+def configured_training_providers(ctx: Context) -> set[str]:
+    """[stages.s10t] providers가 가리키는 학습 공급자. fake는 두 SFT 환경을 모두 대신한다.
+
+    설정이 없으면 학습 단계 기본값(두 공급자 모두)과 같다.
+    """
+    from character_factory_poc.stages.s10_train.io import resolve_providers
+
+    try:
+        adapters = {item.adapter for item in resolve_providers(ctx, None)}
+    except FactoryError:
+        raw = ctx.config.stage("s10t").get("providers")
+        adapters = {v for v in raw if isinstance(v, str)} if isinstance(raw, list) else set()
+    if "fake" in adapters:
+        adapters |= set(SFT_PROVIDERS.values())
+    return adapters
 
 
 def build_prereg(

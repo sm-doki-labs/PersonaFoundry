@@ -34,6 +34,10 @@ class ChatResponse:
     elapsed_ms: int
     model: str
     provider: str
+    finish_reason: str | None = None
+    raw: dict | None = None
+    # usage-v1(명세 §24.3). 모르는 값은 None이다.
+    usage: dict | None = None
 
 
 class TextModel(Protocol):
@@ -63,6 +67,8 @@ class VisionResult:
     elapsed_ms: int
     model: str
     provider: str
+    # usage-v1(명세 §24.3). 모르는 값은 None이다.
+    usage: dict | None = None
 
 
 class VisionModel(Protocol):

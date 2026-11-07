@@ -1,10 +1,11 @@
 # 에이전틱 캐릭터 공장 상세 설계 (LLD)
 
-- 문서 버전: v1.5
+- 문서 버전: v1.15
 - 작성일: 2026-10-14
+- 수정일: 2026-11-04
 - 상태: 초안, 사용자 검토 전
-- 근거: [PRD v1.3](../product/prd.md), [시스템 명세 v1.3](spec.md). 이 문서는 명세를 코드로 옮기는 세부만 정하고 다른 결정을 담지 않는다. 절마다 근거가 되는 명세 절을 `(명세 §n)`으로 적는다.
-- 변경 이력: v0.1 최초 작성 / v0.2(2026-10-20) S1을 화제성 순위 → 외모 특징 프록시로 바꾸고 §2~§5·§8.1·§9~§13을 고쳤다(D-0017, D-0018) / v0.3(2026-10-20) 인물 인상 칸과 계약 v2(§5.2·§5.5·§8.1·§10, D-0020, D-0021) / v0.4(2026-10-21) G1 참조 사진·S2 구현(§2~§5·§5.7·§5.8·§8.1·§8.2·§9·§10·§12·§13, D-0022, D-0023) / v0.5(2026-10-21) S3 외모 연결, S4·G4 구현(§2~§5·§5.10·§8.3·§8.4·§12, D-0024~D-0026) / v0.6(2026-10-21) S5·G5와 xai_video·grok_web 어댑터(§2~§5·§5.11·§8.5·§9·§10·§12·§13, D-0028~D-0030) / v0.7(2026-10-21) 9:16 세로 첫 프레임과 `intro-inputs-v2`(§3·§4·§5.11·§8.5, D-0031), 실제 grok.com 화면에 맞춘 `grok_web`(§9, D-0032) / v0.8(2026-10-22) 씨앗 → 변형 기획, S3r 참고 자료, S4a·S4b·S4 배경 → 자세 → 완성 이미지, 갈래별 진행 오케스트레이터(§2~§6·§8.3·§8.3a·§8.4·§11·§12, D-0033~D-0035) / v0.9(2026-10-22) 이미지 자동 검사·수정 루프(§2·§3·§5.10b·§8.4a·§9·§11·§12, D-0036, D-0037) / v1.0(2026-10-22) S6 동작 영상 골격과 G5b(§2~§5·§5.11a·§6.1·§8.5a·§11·§12, D-0038, D-0039) / v1.1(2026-10-22) 앱 통화 영상 카탈로그, 무표정 첫 프레임, 계약 v2(§2~§4·§5.11a·§8.5·§11·§12, D-0040, D-0041) / v1.2(2026-10-27) 얼굴은 G1에서 한 장만 고르고 S2를 자동 기준 사진·동일인 검사로 바꿔 G2를 없앴다. 아직 코드에는 반영하지 않았다(§2~§4·§5.7·§5.8·§5.9·§5.17·§6.1·§8.1~§8.5·§11~§13, D-0042, D-0043) / v1.3(2026-10-27) 3일 PoC 계약: §4 명령(S1 수집·S9~S11·내보내기·웹앱), §5.14·§5.15·§5.17을 새 계약(`data-plan-v1` 등, `training-run-v2` 등, `character-package-v1`·`export-result-v1`)으로 바꾸고, §6.5 워크숍 API, §8.8~§8.11(S9 샘플·대량 두 단계와 G7a, S10 학습·평가 분리, 패키지, 우리 앱 내보내기), §9 어댑터(`grok_oauth`, 순위 수집기, `gemma_qlora`, `vertex_gemini`), §12 M8을 더했다(D-0044, D-0045) / v1.4(2026-10-28) 학습 없이 긴 프롬프트로 패키지까지 가는 G8 결정(§8.9), 학습 제출 분리(`--submit-training`), G8 답 형식(§6.5)(D-0048) / v1.5(2026-10-28) 에이전틱 실행: §3 설정, §4 명령, §5.16 관문 기록 선택 칸, §5.19~§5.21 새 계약, §6.6~§6.10 물결 실행·자동 재개·사전 검토·재작업·대기열, §11 시험, §12 M9(D-0049)
+- 근거: [PRD v1.14](../product/prd.md), [시스템 명세 v1.14](spec.md). 이 문서는 명세를 코드로 옮기는 세부만 정하고 다른 결정을 담지 않는다. 절마다 근거가 되는 명세 절을 `(명세 §n)`으로 적는다.
+- 변경 이력: v0.1 최초 작성 / v0.2(2026-10-20) S1을 화제성 순위 → 외모 특징 프록시로 바꾸고 §2~§5·§8.1·§9~§13을 고쳤다(D-0017, D-0018) / v0.3(2026-10-20) 인물 인상 칸과 계약 v2(§5.2·§5.5·§8.1·§10, D-0020, D-0021) / v0.4(2026-10-21) G1 참조 사진·S2 구현(§2~§5·§5.7·§5.8·§8.1·§8.2·§9·§10·§12·§13, D-0022, D-0023) / v0.5(2026-10-21) S3 외모 연결, S4·G4 구현(§2~§5·§5.10·§8.3·§8.4·§12, D-0024~D-0026) / v0.6(2026-10-21) S5·G5와 xai_video·grok_web 어댑터(§2~§5·§5.11·§8.5·§9·§10·§12·§13, D-0028~D-0030) / v0.7(2026-10-21) 9:16 세로 첫 프레임과 `intro-inputs-v2`(§3·§4·§5.11·§8.5, D-0031), 실제 grok.com 화면에 맞춘 `grok_web`(§9, D-0032) / v0.8(2026-10-22) 씨앗 → 변형 기획, S3r 참고 자료, S4a·S4b·S4 배경 → 자세 → 완성 이미지, 갈래별 진행 오케스트레이터(§2~§6·§8.3·§8.3a·§8.4·§11·§12, D-0033~D-0035) / v0.9(2026-10-22) 이미지 자동 검사·수정 루프(§2·§3·§5.10b·§8.4a·§9·§11·§12, D-0036, D-0037) / v1.0(2026-10-22) S6 동작 영상 골격과 G5b(§2~§5·§5.11a·§6.1·§8.5a·§11·§12, D-0038, D-0039) / v1.1(2026-10-22) 앱 통화 영상 카탈로그, 무표정 첫 프레임, 계약 v2(§2~§4·§5.11a·§8.5·§11·§12, D-0040, D-0041) / v1.2(2026-10-27) 얼굴은 G1에서 한 장만 고르고 S2를 자동 기준 사진·동일인 검사로 바꿔 G2를 없앴다. 아직 코드에는 반영하지 않았다(§2~§4·§5.7·§5.8·§5.9·§5.17·§6.1·§8.1~§8.5·§11~§13, D-0042, D-0043) / v1.3(2026-10-27) 3일 PoC 계약: §4 명령(S1 수집·S9~S11·내보내기·웹앱), §5.14·§5.15·§5.17을 새 계약(`data-plan-v1` 등, `training-run-v2` 등, `character-package-v1`·`export-result-v1`)으로 바꾸고, §6.5 워크숍 API, §8.8~§8.11(S9 샘플·대량 두 단계와 G7a, S10 학습·평가 분리, 패키지, 우리 앱 내보내기), §9 어댑터(`grok_oauth`, 순위 수집기, `gemma_qlora`, `vertex_gemini`), §12 M8을 더했다(D-0044, D-0045) / v1.4(2026-10-28) 학습 없이 긴 프롬프트로 패키지까지 가는 G8 결정(§8.9), 학습 제출 분리(`--submit-training`), G8 답 형식(§6.5)(D-0048) / v1.5(2026-10-28) 에이전틱 실행: §3 설정, §4 명령, §5.16 관문 기록 선택 칸, §5.19~§5.21 새 계약, §6.6~§6.10 물결 실행·자동 재개·사전 검토·재작업·대기열, §11 시험, §12 M9(D-0049) / v1.6(2026-10-29) 한소민 근거로 정본 직접 보존·조건부 적용·사실 소유자 구분을 보완했다(D-0053·D-0054)
 
 ## 1. 범위와 기준
 
@@ -132,7 +133,7 @@ character-factory-poc/
 |---|---|
 | `cfp brief new <slug> --from brief.md` | 브리프 Markdown을 `brief-v1`로 변환·검증·고정한다. 미정 항목은 `assumptions`에 기록한다. |
 | `cfp run <character_id> [--new-slug <slug>] --until <stage|gate> [--brief brief.md] [--seed seed.json] [--probes probes.txt] [--auto-approve G3] [--execute]` | 그래프를 따라 관문까지 연속 실행한다. 외모 축 캐릭터는 s1 → s2 → s3(씨앗·변형) → s5 → s3r → s4a → s4b → s4 → s7 → s8 순서이고, 한 갈래가 관문·씨앗을 기다리면 다른 갈래를 계속 돈다(D-0035). 이미 끝난 단계는 건너뛰고, 관문 대기나 CHECK_FAILED에서 멈춘다. `--auto-approve`는 실험 전용이며 기록에 남는다(D-0015). |
-| `cfp plan draft <slug> --brief brief.md [--execute]` | Planner 에이전트가 브리프와 프리셋 카탈로그(`[resources] stanford_presets_json`)로 기획서를 쓰고 G3 대기로 둔다. |
+| `cfp plan draft <slug> --brief brief.md [--execute]` | 브리프 원문을 씨앗 notes로 고정하고(성격·나이·성별·직업은 표시된 줄에서 추출) 변형 경로로 기획 3안을 만들어 G3 대기로 둔다(D-0080). `cfp run --brief`와 같은 함수(`variants.run_s3_from_brief`)를 쓴다. |
 | `cfp check <stage> <workspace>` | 작업 공간의 output.json을 계약·단계 검사로 확인한다. 에이전트가 `./check.sh`로 호출한다. |
 | `cfp status <id>` | 단계·관문 상태, 최신 revision, 대기 중인 관문을 표로 낸다. |
 | `cfp gate export <id> G<n>` | 검토 페이지 HTML을 만든다. |
@@ -159,7 +160,7 @@ character-factory-poc/
 | `cfp video web-setup [--port 9222] [--profile ~/.cfp/grok-chrome]` | `grok_web` 준비 안내: 전용 프로필 Chrome 실행 명령, 한 번 로그인, 설정 항목, `uv sync --extra web`. |
 | `cfp video actions <character_id> [--execute]` | S6. G4 승인이 필요하다. 기본은 무표정 첫 프레임 이미지 수와 동작 영상 편수(3챕터 × 동작 수 × 후보 수, 수정 요청 뒤에는 다시 만들 동작만)·모델·해상도·길이별 예상 비용만 보여 준다. 실행하면 G4 승인 이미지를 미소 첫 프레임으로 복사하고, 무표정 출발 영상이 있으면 챕터마다 무표정 첫 프레임을 만든 뒤 동작마다 제출·수집해 G5b 대기로 둔다. 직전 실행이 원격 대기·실패로 멈췄으면 같은 rev에서 이어 간다. |
 | `cfp gate import <id> G5b --answer answer.json` | G5b 결정. `{"decision": "SELECT", "picks": {"ch1-idle_good": "v1", ...}, "excluded": ["ch2-shy_good"]}` 또는 `{"decision": "REQUEST_CHANGES", "requestedChanges": [{"field": "ch1-glad_good", "note": "..."}]}`. `APPROVE`(자동 승인)는 모든 동작의 v1을 고른다. SELECT면 `approved-actions.json`을 쓴다. |
-| `cfp plan import <slug> --from plan.json [--brief brief.json]` | 사용자가 직접 쓴 기획서를 `character-plan-v1`로 검증·고정하고 `character_id`·`plan_rev`를 발급한다. G3를 `reviewer=user, decision=APPROVE, note=manual-plan`으로 기록한다(D-0013). 성격 칸 evidence는 `BRIEF` 또는 `USER`만 허용한다. |
+| `cfp plan import <slug> --from plan.json [--brief id] [--execute]` | character-plan-v2 기획서는 씨앗을 만들고 검증·고정한 뒤 G3를 `reviewer=user, decision=APPROVE, manual-plan`으로 기록한다(D-0013). 구형 character-plan-v1은 형식만 확인하고, `--execute`가 있으면 원문을 user-text로 보존해 기획 정리(`plan_normalizer`)로 v2 후보 `u1`을 만든 뒤 G3를 기다린다(D-0080). |
 | `cfp persona traits [--references refs.json] [--reference-doc card.json ...]` | S7. 참조 ID 목록과 카드 본문을 에이전트 입력에 넣는다. |
 | `cfp persona prompts --probes probes.txt` | S8. 프롬프트 쌍·말투 확인 표본·G6 페이지. 직전 실행이 표본 단계에서 끊겼으면 같은 rev에서 이어 간다. |
 | `cfp persona probe --probes probes.txt` | 고정된 프롬프트 쌍은 두고 표본만 다시 돌린다. 결과는 `prompt-probe-r<k>.json`으로 누적되고 G6 페이지는 다시 만든다. |
@@ -480,13 +481,13 @@ def run_agent(spec, workspace, inputs, checks, provider) -> AgentResult
 
 ### 8.3 S3 기획
 
-**import.** 사용자가 쓴 JSON(또는 템플릿 Markdown)을 `character-plan-v1`로 검증한다. evidence가 없는 칸은 `{kind: USER}`로 채운다. 브리프 없이 들여올 수 있으며 그 경우 `briefId`는 null이다.
+**import.** v2 JSON을 `character-plan-v2`로 검증한다. evidence가 없는 편집 칸은 `{kind: USER}`로 채우고, 기획서의 성격·직업·나이·성별·배경으로 씨앗을 먼저 고정해 `seedRev`를 단다. 구형 v1 JSON은 `own.run_s3_own`으로 넘겨 신형 후보를 만든다(D-0080).
 
-**draft.** 외모 명세가 고정돼 있으면(`s2` 승인) Planner 입력에 `appearance.json`(`appearanceRev`, 한국어 외모 설명, 비교 범위, 사용 제한 문구)을 넣는다. 이미지·순위 목록 이름은 넣지 않는다. Planner는 `appearanceRev`를 그대로 쓰고 챕터마다 `lighting`·`composition`을 채운다(D-0024). Planner는 브리프 각 문장에 번호를 붙인 사본을 받고, 칸마다 근거 번호를 적는다. `check`는 (a) 필수 칸, (b) 각 evidence의 `quote`가 원문 부분문자열인지, (c) 성격 칸의 evidence에 `APPEARANCE`가 없는지(D-0005)를 확인한다.
+**브리프(D-0080).** 구형 Planner 초안은 지웠다. `seed.seed_fields_from_brief`가 브리프를 씨앗으로 옮기고 `variants.run_s3_from_brief`가 변형 경로를 부른다. 승인본 읽기(`load_approved_plan`)와 S3r·S4·S7의 v1 읽기는 과거 기록을 위해 남긴다. 시험의 과거 v1 기록은 `tests/support/legacy.py`가 깐다.
 
 **씨앗(D-0033).** `stages/s3_plan/seed.py`의 `write_seed`가 `plan-seed-v1`을 `s3-plan/seeds/sd<k>.json`으로 고정한다. 성별이 비면 외모 명세 비교 범위의 성별(female·male)로 채운다. `load_latest_seed`가 가장 최근 씨앗을 읽는다.
 
-**변형(D-0033, D-0034).** `variants.run_s3_variants(ctx, cid)`, rev `pr<k>`, 관문 G3. 외모 명세(`s2` 승인, 없으면 `GateNotApprovedError`)와 씨앗(없으면 `NeedsInputError`)이 필요하다. Planner(`plan_variants`, 단계 표지 `s3-variants`)가 씨앗·외모 요약(D-0024의 사용 제한 문구 포함)·챕터 자리·프로필 카드 칸으로 `variants`(확정 3)안을 낸다. 코드가 ID·rev·씨앗 rev·변형 ID와 `chapterArc`의 자리·제목·관계 단계를 고정하므로 에이전트는 `arc` 문장만 쓴다. 검사(`check_v2.py`): 개수, 씨앗 직업 포함·나이·성별 일치, 모든 안이 같은 상황 집합을 쓰고 상황마다 첫 행동이 서로 다름, 성격 칸이 형용사만이 아님, 이름 유출. 결과는 `variants.json`(`plan-variants-v1`)과 `gate-G3.html`(안별 카드, 라디오, 고칠 칸 JSON).
+**변형(D-0033, D-0034).** `variants.run_s3_variants(ctx, cid)`, rev `pr<k>`, 관문 G3. 씨앗(없으면 `NeedsInputError`)이 필요하다. 외모 축을 시작한 캐릭터는 `s2` 승인이 필요하고(없으면 `GateNotApprovedError`), S1을 시작하지 않은 페르소나 우선 캐릭터는 외모 없이 돈다(D-0080). Planner(`plan_variants`, 단계 표지 `s3-variants`)가 씨앗·외모 요약(D-0024의 사용 제한 문구 포함)·챕터 자리·프로필 카드 칸으로 `variants`(확정 3)안을 낸다. 코드가 ID·rev·씨앗 rev·변형 ID와 `chapterArc`의 자리·제목·관계 단계를 고정하므로 에이전트는 `arc` 문장만 쓴다. 검사(`check_v2.py`): 개수, 씨앗 직업 포함·나이·성별 일치, 모든 안이 같은 상황 집합을 쓰고 상황마다 첫 행동이 서로 다름, 성격 칸이 형용사만이 아님, 이름 유출. 결과는 `variants.json`(`plan-variants-v1`)과 `gate-G3.html`(안별 카드, 라디오, 고칠 칸 JSON).
 
 **직접 쓴 안.** `own.run_s3_own(ctx, cid, user_text)`가 Normalizer(`plan_normalizer`, `s3-own`)로 사용자 글을 `u1` 하나로 정리한다. 글의 내용을 지키고 빠진 칸만 채우며, 칸의 근거를 `USER`·`AGENT`로 구분한다. 같은 씨앗 검사와 이름 유출 검사를 거쳐 새 rev에 `variants.json`(mode own)과 `user-text.md`를 쓴다.
 
@@ -526,6 +527,8 @@ Profiler는 기획서, 기준 문서 발췌(5항목 설명, 카드 7요소 설�
 
 ### 8.7 S8 프롬프트
 
+2026-10-29 보완(명세 §10.2): `stages/s8_prompts/source.py`가 승인 v1/v2 기획을 개인 식별용 레퍼런스·외모 축 없이 투영한다. `source-plan.json`에 입력 파일 SHA-256과 허용 필드를 고정한다. S8 모델 입력에 이 투영을 추가하고, 조립 시 ACTOR_IDENTITY·PERSONA / FACTS·PERSONA / VOICE·CHAPTERS는 정본으로 대체한다. v1에 없는 필드는 만들지 않고 말투는 기존 특질 시트로 보완한다. 모델 생성 전 정본+시스템+출력 규칙만으로도 short 상한을 넘으면 거절한다. 동결 쌍의 재개를 새 정본 사전 검사보다 먼저 판단한다. 생성할 네 섹션마다 최소24자 예산을 확보하지 못하면 호출 전에 거절한다. v1 말투는 dialogueHabits 다섯 항목을 모두 보존한다. 생성 뒤 전체 상한과 long/short 정렬 검사도 유지한다. 다른 선택·전환 섹션은 모델이 간결하게 작성하며 각 규칙을 적용하지 않을 조건과 자유 대화의 여지를 명시한다. 신규 tr/pv로만 실행한다.
+
 `resources/prompt-sections-v1.json`의 섹션 목록으로 긴·짧은 프롬프트를 조립한다. 긴 프롬프트의 시스템 규칙 섹션은 `systemRulesRef` 파일을 그대로 넣는다. `align`은 두 프롬프트의 섹션 헤더 집합이 같은지, 짧은 프롬프트가 `short_prompt_max_chars` 이내인지, 금지 표현이 없는지 확인한다. `probe`는 `voiceProbes`마다 두 프롬프트로 응답을 받고 판정 모델이 캐릭터 일치를 비교한다. 결과는 G6 페이지에 나란히 표시되며 자동 승인에 쓰지 않는다.
 
 ### 8.8 S9 데이터셋 (명세 §10.3, D-0044, D-0045)
@@ -547,7 +550,7 @@ Profiler는 기획서, 기준 문서 발췌(5항목 설명, 카드 7요소 설�
 
 학습 어댑터는 `TrainingProvider` 포트(`plan`, `submit`, `status`, `collect`)를 따른다.
 
-- `gemma_qlora`: 임대 GPU(Vast). 기본 설정은 학습 가이드 §11(unsloth/gemma-4-31B-it-unsloth-bnb-4bit, QLoRA r16/α32, dropout 0, LR 5e-5 linear, warmup 5%, 배치 1×4, 최대 4,096토큰, seed 3407, 1·2·3에폭 저장, assistant 답변만 손실). `plan`은 전송 파일 목록·바이트·sha256, 예상 GPU 시간(스텝 수 × 스텝당 초, 기본값은 소민 r3 실측 6초), 시간 단가로 비용을 낸다. `submit`은 이어 올리기 가능한 조각 전송 → 원격 해시 확인 → 학습 시작, `collect`는 완료 기록 확인 → 어댑터 회수·해시 확인 → 서버 삭제 순서다. 원격 상태는 계획 파일이 아니라 원격 로그와 완료 파일로 판단한다.
+- `gemma_qlora`: 임대 GPU(Vast). 기본 설정과 실행 순서는 D-0077에 따라 §21을 따른다(머스크 N3b 프로토콜, 0.5 epoch 체크포인트, 생성 결과로 체크포인트 선택, 실행마다 GPU 임대·삭제). 2026-10-27의 학습 가이드 §11 설정(Gemma 2/3 응답 표시, linear, 3 epoch)은 폐기했다.
 - `vertex_gemini`: Vertex 튜닝. 기반 모델은 설정값이고 착수 때 지원 목록으로 정한다. `plan`은 과금 토큰 수(데이터셋 토큰 × 에폭)와 단가로 비용을 낸다. 체크포인트 ID·step을 공급자 값 그대로 기록하고 중간 epoch를 추정하지 않는다.
 - `fake`: 오프라인 전체 흐름용. 즉시 `SUCCEEDED`와 가짜 `model_binding`을 돌려준다.
 
@@ -672,3 +675,187 @@ G9 승인 패키지를 우리 앱 두 시스템의 공식 적재 입력으로 �
 | 얼굴 임베딩 라이브러리를 쓸지(선택) | 설치 가능성과 라이선스 | M3 |
 | S2 `identity-v1` 판정이 G1 얼굴과 같은 사람인지를 사람 판단과 얼마나 맞게 보는지 | 실제 기준 사진 몇 장(같은 사람·다른 사람 섞어)을 판정하고 사람 판단과 비교 | M2b |
 
+
+## 14. 기본 품질 공정 구현(2026-10-29, 명세 §16)
+
+형성 설정은 `[stages.s7] formation_profile = "ko-text-prompt-long-v1"`로 명시하며 이전 설정은 legacy로 읽는다. S7 하위 단계는 새 revision 아래 design/workspace·dialogues/workspace에 원문과 입력을 각각 보존하고, 단계 완료 파일이 있으면 다시 호출하지 않는다. 내용 검사는 재생성 대신 CHECK_FAILED로 남긴다. S8 컴파일은 섹션 순서·본문 필드·예시 선택 ID를 고정하며 long8,000자를 넘으면 조용히 자르지 않는다.
+
+`contracts/formation.py`에 형성·프로필 계약을, `contracts/persona.py`에 prompt-pair-v2와 버전 로더를 둔다. S7의 trait-sheet.json은 v1 호환 투영으로 유지한다. bundle은 정확한 plan/trait/blueprint/dialogues/프로필/시스템 규칙/컴파일 버전을 해시로 묶는다. G6는 bundle이 참조한 S7 revision을 승인하며 현재 최신 revision으로 대신하지 않는다.
+
+컴파일 매핑은 정본 IDENTITY·LIFE·VOICE_EXAMPLES·CHAPTERS 직접 투영, blueprint의 decisionRules→행동, voiceProfile→목소리, ordinaryModes→일상 흐름, factPolicy→사실 경계, 고정4슬롯→CHARACTER_EXAMPLES다. 예시는 실제 messages에 넣지 않는다. 메시지 계약은 고정 system+실제 누적 이력+현재 user→첫 assistant 하나다. 이력 요약·재추출을 하지 않는다.
+
+품질 CLI는 `cfp persona qualify plan <cohort>`(기본 dry run), `cfp persona qualify run <cohort> --execute`, `cfp persona qualify report <run> [--human-reviews <file>]`로 분리한다. cohort는 사전 등록 슬롯·프로필·시나리오·분기·출처 해시를 포함한 불변 manifest다. 실제 대화 원문은 runs/에만 저장한다. 외부 대화 모델·tokenizer 바인딩이 없으면 실행을 미확인 상태로 막으며 추정 토큰을 실측으로 기록하지 않는다.
+
+판정은 모든 예정 응답·실패를 원장에서 재구성한다. 독립 사람 검토의 scene/turn 결함·행동·말투, 이중 평가32장면과 불일치 조정·인용 유효성을 확인한다. 기준과 분모를 만족하지 않으면 합격하지 않는다. 자세한 실행 예산과 개발/보류 규약은 [계획](../product/2026-10-29-persona-quality-floor-plan.md)을 따른다. 실제 구현 인터페이스와 검증 결과는 이 절에 갱신한다.
+
+§14 구현 인터페이스: `build_formation`과 `build_formation_dialogues`는 S7의 동결 revision을 사용한다. `compile_persona(..., source_hashes, trait_revision, persona_version, rules_text, rules_ref)`는 순수 컴파일이며 `verify_bundle`이 승인·소비 전에 파일 해시를 검증한다. 품질 실행은 `run_qualification(ctx, cohort, run_dir, dialogue_model, token_counter, formation_runner)`이며 정확한 counter가 없으면 실제 대화 전에 거절한다. baselineSource/baselineSourceSha256으로 동결 legacy 코드를 별도 프로세스에서 읽고 short 필수 소비를 우회하지 않는다. S11의 Persona.shortPrompt는 long 전용일 때 null이며 빈 성공 파일로 위장하지 않는다.
+
+실제 개발 관찰에서 Gemini의 max_tokens는 추론 토큰도 포함해 500 설정의24응답 중8개가 잘렸다. 소비 프로필의 total maxOutputTokens 상한을2,400으로 올릴 수 있게 하며, 본문 길이와 추론 예산을 같은 값으로 간주하지 않는다. 변경한 설정은 별도 관찰 조건으로 기록하고 정식 실행 전에 토큰/비용 상한을 다시 계산한다.
+
+## 15. 선택·말투 분리 구현(명세 §17)
+
+구현 순서와 계약은 [개선 계획 §6](../product/2026-10-29-persona-choice-voice-plan.md)을 따른다. 기존 `CharacterPlanV2` 투영을 유지하고 `seed-requirements-v1`, `choice-design-v1`, 생성/저장/선택 v2와 안정 choiceRuleId를 연결한다. v1 SourceRef/DecisionRule은 바꾸지 않는다.
+
+말투 자료의 실제 파일 해시·승인 원문·styleView 계보를 검증해 VoiceBinding을 고정한다. S7 revision 하위에 design/beats/render/preservation을 저장하며 원문·형식 재시도·의미 실패를 남긴다. v2의 말투 섹션에는 S3 생성 초안이 승인 팩 기준을 덮어쓰지 못한다.
+
+필수 커버리지는 일상·감정/관계 변화·핵심 선택·조건 변경과 승인 choiceRuleIds다. 충족하는 4예시 조합을 ID 순으로 고르고 불가능하면 COVERAGE_GAP이다. 선택/보존 FAIL·UNRESOLVED는 승인·소비 불가다.
+
+공유 RunBudget은 호출 전 입력/총 출력 토큰·비용을 예약하고 영속 원장에서 복원한다. 개발용 두 장면 프로토콜은 기존 정식 7장면 계약과 버전을 나누고 QUALIFIED를 내지 않는다. 모든 회귀는 합성 자료와 가짜 모델을 사용한다.
+
+v1.8 변경: §15에 선택·말투 분리의 계약·실행·검증 근거를 추가했다.
+
+구현 기록: `persona_quality/producers.py`는 `development-producer-v1`의 실제 파일 해시·선택 ID를 검사하고 A의 bundle 및 B/C/D의 고정 v1 컴파일을 재현한다. `DevelopmentCohortV2.comparison="selection"`에서는 같은 원천 자산의 CURRENT/COVERED만 허용하고 v2 조립 함수에서 선정 방식만 바꾼다. `s3_diagnostics.py`는 template의 씨앗·행동 예시 자리표시자와 실제 입력·첫 시도·출력/실패를 대조하고 블라인드 후보·사람 분류 집계를 내보낸다.
+
+VoicePack의 주입·검증 예시는 원본 대화 ID와 실제 파일/필드/인용을 모두 요구한다. 분리 감사의 파일·해시·필드·대화 ID도 그 원본과 같아야 한다. 부정형 말투 목표에는 유효한 requiredTags/forbiddenTags를 요구한다. G6 대기 중에는 현재 설정의 말투 정책과 승인 자료로 바인딩을 재계산한다. RunBudget은 별도 lock 파일과 원자적 교체로 저장하며 손상된 기존 원장을 새 예산으로 초기화하지 않는다. 정식 v2 재개 계획은 완료 요청을 다시 예산에 더하지 않으며 결과 미확인 형성 시도는 재추출하지 않는다.
+
+지원하지 않는 경로는 실제 nested Codex, 공유 예산 밖 구형 subprocess 형성, 의미 상태 분기다. 중립 후속 질문과 API 경로를 사용하며 지원 범위 밖 입력은 선제 거절한다. wheel에는 prompts·resources의 JSON/Markdown·정적 웹 자산을 모두 포함한다.
+
+## 16. 추가 특질 추천 구현(명세 §18)
+
+### 16.1 자산과 저장
+
+- `contracts/creator_traits.py::CreatorTrait`는 선택한 저작 행동과 출처를 담는다. `contracts/planning.py`의 seed/plan selectedTraits는 기본 빈 목록, 최대5개다(D-0067 구현 제안값).
+- `resources/creator-traits-v1.json`은 기존 06-presets.json의 144개 expression_focus.behavior를 literal로 투영한다. 원 카탈로그 SHA256·presetId·field path가 있으며 개인 점수/과거/원 대화는 복사하지 않는다. 패키지에 포함되어 외부 원본 경로 없이 동작한다.
+- `stages/s3_plan/trait_recommendations.py`는 load_catalog, catalog_view, recommend_traits, resolve_traits, verify_selected_traits를 제공한다. 추천은 어휘 검색이며 의미 적합성 PASS가 아니다. 한 번 최대5개를 보여주고 선택/제외 ID를 뺀다. 직접 검색과 관련 단서가 적은 경우의 탐색을 지원한다.
+- `seed.write_seed(..., trait_ids=None, expected_seed_rev=...)`는 단계 전이와 같은 state 잠금 안에서 최신 상태를 확인하고 실행/검토/승인 중이면 CLI와 웹 모두 거절한다. 원문 성격과 신원을 보존하고 선택 snapshot을 검증한 뒤 `.seed.lock` 배타 잠금 안에서 단조 revision과 예상 revision을 확인한다. CLI와 웹이 같은 저장 경로를 사용한다.
+
+### 16.2 진입점
+
+`cfp plan suggest --personality ... [--trait ID] [--search ...]`는 호출 없이 JSON 후보를 반환한다. `cfp plan seed ... --trait ID`를 반복해 고른 항목을 저장한다. 웹 `/trait-authoring.html?character=<id>`는 기존 캐릭터 선택·기본 설정·추천/검색·선택 목록·저장을 제공한다. 기존 워크숍 스타일을 재사용한다.
+
+| API | 계약 |
+|---|---|
+| GET /api/traits/catalog | 카탈로그 hash, 수량, 행동 snapshot 목록 |
+| POST /api/traits/recommend | personality, selectedIds, dismissedIds, search, limit → items, method=lexical-v1, matchStatus |
+| GET /api/characters/{id}/seed | seed 또는 null, editable, reason |
+| POST /api/characters/{id}/seed | fields, selectedIds, expectedSeedRev, catalogSha256 → 새 seed, nextUrl |
+
+특질을 선택하지 않았으면 카탈로그 조회 실패/로딩과 무관하게 저장할 수 있고 hash=null을 보낸다. 서버도 빈 선택에 카탈로그 읽기를 요구하지 않는다. 클라이언트는 행동/출처 본문을 저장 요청으로 제출하지 않는다. 서버는 ID를 해석하고 변조·중복·알 수 없는 ID를 거절한다. state가 손상되거나 S3가 RUNNING/AWAITING_HUMAN/APPROVED거나 작업 중이면 409다. seed/catalog stale은 409, 입력 오류는 400/422다. 캐릭터별 임시 입력과 선택을 보존하고 늦게 도착한 응답이 다른 캐릭터나 최신 검색을 덮지 않게 한다.
+
+### 16.3 하류 전달과 검증
+
+`variants._fix_plan`이 선택 목록을 각 후보에 결합한다. `choice_flow`는 selectedTraits 고정 요구를 추가하고 `check_choice_design`은 목록·요구 누락과 연결된 행동 규칙이 없는 경우를 거절한다. creator 요구의 검토 인용은 실제 행동 설계에서만 허용하고 공장이 복사한 selectedTraits metadata만으로 구현을 인정하지 않는다. `formation.canonical_plan`과 `source.project_plan`이 선택을 전달한다. v1/v2 컴파일러와 구형 long/short assemble은 `with_creator_traits`로 실제 선택 행동을 disposition에 보존한다. 의미 검토는 선택의 구현을 읽어야 하며 metadata 복사를 실현으로 오해하지 않도록 역할 지침에 명시한다.
+
+회귀 검사는 `test_trait_recommendations.py`, `test_trait_authoring.py`, `test_creator_trait_flow.py`에 있다. 합성 기획/대화와 fake 공급자로 전파를 확인하며 실제 대화 품질 검증과 구분한다. 다른 저장소 변경은 없다.
+
+
+## 17. 서비스 기반 actor compiler 구현(명세 §19)
+
+- contracts/actor_persona.py에 RuntimePersona 여덟 섹션과 단일 RuntimeContext(relationship/scene/speechLevel)를 둔다. stages/s8_prompts/actor_persona.py는 project_actor_persona/compose_actor_runtime/verify_actor_runtime를 제공한다. coreTraits와 선택 behavior는 disposition, wanted/fear는 해당 칸, attention/interpretationPriority는 해석, choice priority는 선택 경향, 개인별 표현 강도/리듬/직설성/감정 변화는 voice에 연결한다. 출처는 bundle asset으로만 기록한다.
+- actor-profile-v1은 내부 원천에서 결정적으로 투영한 문장 목록이며 새 모델 호출을 요구하지 않는다. exact 중복만 제거하며 의미/심리 타당성 점수라고 주장하지 않는다. 현행 여덟 섹션을 유지하되 개별 문장이 인물 주어의 저작 문장이어야 한다.
+- S8 새 조립은 actor-tendencies-compiler-v3와 examplesUsage=review-only를 기록한다. 기존 compose_choice_voice_text/coverage-policy-v1은 바꾸지 않는다. 내부 검토용 selectedDialogueIds4개는 runtime 예시 주입을 뜻하지 않는다. 새 bundle은 실제 본문과 actor profile을 원천으로 재현해 비교한다.
+- runtime rules는 새 resource로 두고 현재 관계·장면은 단일 객체만 받는다. 전체 챕터/예시/규칙표/제작 메타정보는 본문 검증에서 거절한다. 8000자 초과를 조용히 자르지 않는다.
+- tests/test_prompt_identity_preservation.py 및 기존 choice_voice_flow/creator_trait/development 회귀, 전체 scripts/check.sh, 독립 검토와 실제 Gemini 대조를 수행한다. 과거 실험과 다른 저장소는 수정하지 않는다.
+
+v1.10 변경은 사용자가 정정한 runtime 요구를 따른다. 처음 제안한 runtime 예시 선정 강화는 구현 범위에서 제외한다.
+
+## 18. 텍스트 제작 덱 연결(명세 §20)
+
+`resources/text-model-deck-v2.json`은 사용자 원본의 snapshot이다. `common/text_deck.py`는 task→profile override→route model ID 순으로 해석한다. `FactoryConfig.text_pipeline/task_provider/text_binding`, `Context.task_model/role_model`이 기존 공급자 포트와 추적 원장을 사용한다. 같은 텍스트 단계는 Codex subprocess를 우회하고 `max_retries=0`으로 HTTP 재시도를 예산 밖에 숨기지 않는다.
+
+`cfp models show/select --profile ... --route ...`는 네트워크 없이 해석·전환한다. 선택은 `work/text-pipeline-selection.json`에 원자적으로 저장한다. 설정은 `factory.toml`의 `[text_pipeline.routes.opencodex]`/`[text_pipeline.routes.test]`와 `models` 매핑이다. 주소에 인증정보/query를 넣지 못하며 인증 값은 환경변수로만 읽는다.
+
+표준 S3의 `model_deck.py`는 원문 요구 추출, 인용을 가진 설정 충돌 검토, 대상 필드만 한 번 수정, voice 두 필드만 확정하는 과정을 더한다. typed step fingerprint와 S7 recipe에는 덱 배정을 포함한다. 표준 S8은 `compose_approved_sheet`로 승인 원문을 서비스 섹션에 투영하고, 기존 v1 short 칸은 동일한 무압축 본문으로 보존한다. 새 압축/품질 합격을 주장하지 않는다. 선택의 예외는 산문으로 보존하고 기존 system_rules_path도 존중한다. G6 수정 후 동일 본문 재조립은 NeedsInputError로 멈추며 원천 수정 후 재개한다. S7 원천 생성 배정과 S8 현재 선택은 구분하고 최종 점검 상태는 NOT_RUN으로 남긴다.
+
+S9의 `deck.py`는 revision snapshot, 배치 입력/출력·검사/수정·실패 기록, 배치별 호출 계획 상한을 관리한다. `ledger.calls.jsonl`의 textBinding과 각 요청 기록으로 실제 출처를 추적한다. 의미 오류 재추첨·자동 경로 대체는 없다. 상세 사용법은 [실행 안내](../guides/text-model-deck.md)를 따른다.
+
+v1.11 변경(2026-10-30): 텍스트 모델 덱·프로필과 별도 테스트 호출 경로를 연결했다(D-0072).
+
+D-0080 구현(2026-11-04): `pipeline/orchestrator.py`의 s3 실행 함수는 씨앗이 없으면 `--seed` 또는 `seed.seed_fields_from_brief(brief)`로 씨앗을 먼저 고정한 뒤(다른 단계가 돌기 전), 외모 축이면 s2 승인을 확인하고 `run_s3_variants`를 부른다. `variants._preflight`는 S1·G1이 PENDING인 캐릭터에서 외모 명세를 요구하지 않고 appearance=None, 이름 검사 목록을 빈 목록으로 둔다. `prompts/plan_variants.md`는 appearance=null과 seed.notes의 브리프 원문(피해야 할 것·말투 확인 문장)을 요구로 다룬다. `s8_prompts/actor_persona.compose_approved_sheet`는 lifeAndTastes·wantsAndFears·voiceSummary·boundaries가 비면 ValueError이며, 이름 뒤 주제 조사는 받침에 따라 은/는을 고른다. 테스트는 `tests/test_brief_seed.py`, `tests/test_plan_variants.py`의 페르소나 우선 시험, `tests/support/flow.py`의 `variants_for_seed`·`v2_plan`이다.
+
+D-0082 구현(2026-11-04): `common/call_context.py`의 `CALL_OBSERVATION_RULE`을 `actor_persona`의 두 조립 경로 boundaries 끝에 넣고, `appearance_reading_problems`를 `check_plan_v2`(coreTraits·contrastTrait·choices·misreadings·voiceSummary·voiceExamples)와 `check_trait_sheet`(choice·stance·dialogueHabits·judgmentPriorities·situational)에서 부른다. 저작 지시문 6개 끝에 영상통화 맥락 절을 붙였다. `s7_traits/check._mentions`는 원문 포함 또는 2자 이상 어절의 70% 포함이면 기획 핵심 성격을 언급한 것으로 본다.
+
+D-0083(2026-11-04): `pipeline/agent.AGENT_MAX_OUTPUT_TOKENS`(32,000, 추론·생각 토큰 포함)를 `run_agent`, S9 덱, S7 formation 호출이 함께 쓴다.
+
+D-0084(2026-11-04): `errors.ProviderTransportError`(kind: disconnect·timeout·rate_limit·server_error·malformed_stream). `openai_compat`은 `stream=True`이고 공식 호스트일 때 `_send_stream`으로 SSE를 `collect_stream`에 모아 비스트리밍 응답 모양으로 바꾸고, Gemini는 `extra_body.google.thinking_config`(thinking_level=추론 강도, include_thoughts)를 보낸 뒤 `strip_thoughts`로 생각 블록을 걷어낸다. `TrackedTextModel(transport_retries=N)`은 `ProviderTransportError`일 때만 `<ref>~transport<k>`로 새 예약을 잡아 다시 부른다. `Context.task_model`이 `[text_pipeline] transport_retries`(기본 1)를 넘기고, `text_deck.resolve`는 api 경로 provider extra에만 `stream`을 둔다. `model_deck._review`의 인용 확인은 원래 문자열 값(`_strings`)에서 찾는다.
+
+D-0085(2026-11-05): `actor_persona.compose_approved_sheet`의 CHOICES는 `_choice_lines`가 만든다. 첫 줄은 "특별한 단서가 없을 때 → {primaryResponse}.", 다음은 switchConditions 원문, 판단 우선순위는 "{dilemma} → {choice}. 다만 {switch}."이며 `_bare`가 끝 마침표를 떼어 '..'을 막는다. `load_actor_rules`의 기본값은 `resources/actor-system-rules-v2.md`(ref `builtin:actor-system-rules-v2`)다. `s7_traits.check.check_speech_level(voiceSummary)`는 voiceSummary에서 해요체·반말을 읽어 dialogueHabits 다섯 칸과 choice.expressionIntensity에 다른 말높임의 어미·예시가 있으면 문제를 돌려준다. `sheet.run_s7`과 `checks.registry`의 s7 검사에 들어 있다.
+
+D-0086(2026-11-05): 덱 S3의 `model_deck.finish(ctx, cid, folder, seed, draft, budget, checks)`는 `deck_plan_voice` 하나만 부른다(`AgentSpec(..., max_check_retries=1)`, 검사: 변형 검사 + axisNote 보존 + voice 두 칸 밖 변경 금지 + `mixed_speech_levels`). 설정 검토·수정·재검토(`deck-review`·`deck-repair`·`deck-recheck`)는 없다. 첫 단락의 "인용을 가진 설정 충돌 검토, 대상 필드만 한 번 수정"은 이 결정으로 대체한다.
+
+## 19. 글래스 시안 연결 구현(명세 §21)
+
+WebSettings.studio_dir/studio_path로 시안 경로를 설정한다. create_app은 web.text_pipeline.install_text_pipeline_routes를 설치하고 루트 정적 파일보다 먼저 /studio를 mount한다. _StudioStaticFiles는 기존 HTML/shared/assets/previews/recordings만 제공하며 plans·작업자 로그와 임의 파일을 노출하지 않는다.
+
+GET /api/text-pipeline, POST /api/text-pipeline/selection, GET /api/text-pipeline/characters, GET /api/text-pipeline/characters/{id}를 제공한다. 선택 실패는 현재 값을 보존하고 활성 작업은409다. 캐릭터 경로와 revision·symlink를 검사하고 원장 읽기는 바이트/행/개수 상한을 둔다. 최근50개 텍스트 호출과 알려진 문서의 제한된 본문을 반환하며 textTruncated를 표시한다. 실제 sourceGeneration과 selectedConfiguration은 구분한다.
+
+별도 시안의 shared/text-pipeline.js/.css는 mount가 반환한 컨트롤러의 open/close로 동작한다. 프로필/경로·역할 모델·실제 기록을 렌더링하며 로딩/오류/오프라인/빈 상태·포커스 트랩과 복귀를 처리한다. 기본 테스트 덱 스냅샷을 시연 작업대에 적용하고 프롬프트 조립은 호출0회로 표시한다. 실제 실행/관문 처리는 기존 /c-glass.html?character=...로 이동한다.
+
+v1.12 변경(2026-10-30): 기존 글래스 시안과 텍스트 공정 API를 연결했다(D-0074).
+
+워크숍 CLI의 --jobs-dir은 create_app의 jobs_dir override로만 적용한다. 모델 설정 파일을 복제하지 않고 실제 factory.toml의 후속 변경을 읽는다. 별도 검토 서버가 기존 작업 큐를 복구/수정하지 않게 하는 선택적 실행 옵션이다.
+
+## 20. 실제 공장 화면 연결 구현(명세 §22)
+
+web.runtime.install_runtime_routes를 create_app에 설치한다. GET /api/runtime/graph는 pipeline.graph.STAGES의 deps/needs/after/gate를 정렬한 배열로 반환한다. POST /api/runtime/characters {slug,brief}는 검증 뒤 새 캐릭터와 creator-input/brief-r1.md를 만들며 모델을 호출하지 않는다. JobManager 기본 러너는 저장된 브리프를 RunOptions.brief_text로 전달한다. 빈 값·큰 본문·중복 ID·경로 탈출과 손상 상태는 거절한다.
+
+시안 d-ops.html은 shared/runtime.js/.css를 불러오고 기본 FactoryRuntime.mount를 사용한다. shared/ops.js는 ?mode=demo에만 초기화한다. 실제 렌더러는 기존 DOM 슬롯·글래스 토큰에 실제 목록·진행·그래프·관문·산출물을 보여 주며 시연 localStorage를 읽지 않는다. EventSource /api/events의 hello/state/gate/job를 snapshot 재조회 신호로 사용하고 재접속/주기 복구를 지원한다. 요청 경합은 선택 캐릭터별 최신 응답만 반영한다.
+
+시작/재개는 POST /api/jobs를 사용하고, held 단계만 별도 confirm으로 요청한다. 실제 관문은 drawer 안 /gate.html?character=...&gate=... iframe에서 고르고 승인/수정한다. SSE로 부모 화면도 재조회한다. 실제 텍스트 자료와 호출은 기존 /api/text-pipeline/characters/{id}에서 읽는다. 취소·일시정지 API가 없으므로 실제 모드에서 그 버튼과 시연 제어를 숨긴다. 워크숍 factory.toml은 [orchestrator] auto_resume=true/max_parallel=3/resume_until=sx로 연결한다. 실행 API를 부르기 전에는 생성이 없다.
+
+v1.13 변경(2026-10-30): 기본 실제 모드·브리프 보존·실행/관문/이벤트 연결을 추가한다.
+
+관문 iframe의 currentAnswer는 검토한 view.rev를 expectedRev로 함께 보낸다. 결정 API는 캐릭터 잠금 안에서 현재 상태를 다시 읽고 revision 불일치·이미 결정된 관문을409로 거절한다. 기존 CLI/API 호출은 expectedRev를 생략할 수 있다.
+
+최종 보완: runtime 그래프는 기존 reads.LANES도 반환해17단계를8갈래 작업대로 배치한다. 생성은 숨긴 staging과 파일 잠금·rename으로 완성 후 게시하며, 작업 큐는 state-v1과 subjectId를 함께 검증한다. 오래된 job-only 주소는 개별 작업 API로 캐릭터를 복원하고 모든 작업 ID는 jobId를 정규화한다. 관문 iframe은 embedded=1에서 내부 탐색을 숨기고 Escape/포커스 복귀를 부모와 연결한다.
+
+## 21. QLoRA 실제 연결 구현(명세 §23, D-0077·D-0078)
+
+**학습 공급자.** `providers/training/gemma_qlora.py`의 `GemmaSettings` 기본값은 머스크 N3b 프로토콜이다(revision 8e256fc6d63003fc0ca8c91b976e6dcc38433385, gemma-4-thinking, r16/α32, LR 5e-5 constant_with_warmup, warmup 5%, adamw_8bit, weight decay 0.001, 배치 1×4, 4,096토큰, 2 epoch, 체크포인트 0.5/1/1.5/2, 고정 버전 unsloth 2026.10.3·torch 2.10.0+cu128·transformers 5.5.0·trl 0.23.1·peft 0.18.1·datasets 4.3.0·bitsandbytes 0.50.2). 비용 추정은 스텝당 8.7초(N3b 236스텝 2,060초 실측), 준비 900초, 선별 생성당 12초+420초, 시간당 $0.90이다. `ssh_host`가 없으면 임대 모드다. 제출은 데이터 조각 전송·해시 확인 → 원격 스크립트 세 개 확인 → `screen/requests.jsonl` → `job.sh`(학습 → 성공 시 선별 → `job-exit.json`)를 `nohup timeout`으로 실행한다. 상태는 `complete.json`과 `screen-complete.json`·`job-exit.json`으로만 판정한다. 회수는 체크포인트·선별 파일 해시를 확인한 뒤 원격 폴더를 지우고 GPU를 삭제한다. `abort`는 로그를 남기고 GPU를 지운다.
+
+**원격 스크립트.** `remote/train_qlora.py`는 FastModel·get_chat_template·언어 층 LoRA·`train_on_responses_only("<|turn>user\n", "<|turn>model\n")`·SFTConfig(max_length, packing 없음, bf16)를 쓰고, 지도 토큰 0인 대화·최대 길이 초과·collator 라벨 변경·버전 불일치를 학습 전에 거절한다. step 목표로 0.5 epoch마다 어댑터를 저장하고 검증 loss를 기록한다. `remote/screen_qlora.py`는 기반 모델을 한 번 올리고 base·체크포인트 어댑터를 차례로 붙여 첫 출력만 남긴다. `remote/serve_qlora.py`는 127.0.0.1의 `/v1/generate`·`/health` 서버다.
+
+**GPU 임대.** `providers/training/vast.py`의 `VastLease`는 vastai CLI(--raw)로 잔액 확인 → 조건 제안 중 최저가 → 고유 라벨 생성 → 애매하면 라벨로 찾기(재생성 금지) → running·22/tcp에서 로컬 공개 키 attach(한 번) → SSH 확인 → 삭제·목록 부재 확인 순서를 `lease.json`에 기록한다. 템플릿 해시는 머스크 학습과 같은 c412724d111f171ee3c8554066ba564d다.
+
+**선별과 선택.** `providers/training/screening.py`가 검증 분할에서 단발 24·6턴 장면 2개를 뽑는다. `stages/s10_train/select.py`의 `select_checkpoint`가 결함 지표(빈 답·잘림·4-gram 루프·직전 답 반복·조기 중단·길이 중앙값)로 적격 구간을 정하고, `prompts/checkpoint_pair_judge.md`로 정순·역순 짝 판정해 `checkpoint-selection-v1`을 쓴다. `stages/s10_train/collect.py`가 선택을 binding에 반영한다. `stages/s10_train/drive.py`의 `drive_s10t`가 상태 확인 → 회수·선택을 끝날 때까지 몰고, 예외·중단이면 모든 미완료 실행을 abort한다. `run_s10t`는 제출된 revision이 있으면 새 계획 없이 이어 간다. 명령은 `cfp train drive|cleanup`이다.
+
+**평가.** `providers/training/inference.py`의 `GpuInferenceSession`이 어댑터 업로드·서버 기동·ready 대기·SSH 포트 전달·정리를, `GemmaAdapterChat`이 평가 대화 포트를 맡는다(기본 최대 32,768토큰, 미검증). `[stages.s10] gpu_seconds_per_turn`·`gpu_budget_usd`로 비용을 확인한다. 사전 등록은 미설정 공급자의 SFT 조건을 빼고, judge·metrics·report는 등록된 조건만 다룬다.
+
+**패키지.** `stages/s11_release/package.py`의 `collect_serving`이 `sft/serving.json`(`sft-serving-v1`)을 쓴다. 어댑터 해시는 회수 때의 원격 완료 기록과 대조하고, 선택 기록의 체크포인트와 채택 binding이 다르면 막는다.
+
+**창작 인물 정책.** `common/qlora_policy.py`가 `resources/qlora-authored-policy-v1.json`(정본은 `docs/guides/qlora-authored/policy-v1.json`)을 읽는다. S9 적용과 S10 보고서 연동은 같은 정책을 쓴다(세부는 이 절 끝의 S9·S10 보완을 따른다).
+
+**독립 검토 반영(2026-11-02).** 원격 세 스크립트는 버전 검사 직후 Unsloth를 다른 학습 패키지보다 먼저 불러온다. 학습 전에는 모든 행의 로컬 토큰화 일치, BOS 한 번, 길이, 지도 토큰, 모든 샘플의 collator 라벨 보존을 확인한다(`data-check.json`, `collator-label-parity-confirmed.json`). 행에 `supervisedAssistantIndexes`가 있으면 그 assistant 턴만 지도한다(원본 masking.select_labels). 없으면 모든 assistant 턴을 지도하며, 이 점이 N3b(선택 턴 지도)와 다르다. 마감에 닿으면 `checkpoints/budget-partial`을 남긴다. 선별은 자동 재시작을 거절하고 어댑터 텐서 일치와 wire 해시를 기록한다. 종료 이유는 EOS로 판정한다.
+
+GPU 비용 안전: 임대 전에 분리 프로세스 `cfp train guard`(`stages/s10_train/guard.py`)를 띄우고 준비 기록이 없으면 빌리지 않는다. guard는 `guard.json`에 한 번 정한 마감(학습 벽시계 상한 + 준비 대기 상한 + 회수 여유 2시간)과 잔액 하한을 넘으면 인스턴스를 지운다. drive는 제출을 abort 구간 안에서 하고 SIGTERM·SIGHUP을 중단으로 바꾼다. 재실행은 지워지지 않은 lease가 있으면 같은 revision을 이어 간다. 회수는 크기 비례 시간 제한과 재시도를 쓰고, 끝내 실패하면 GPU를 남긴 채 `collectError`를 기록해 멈춘다(다음은 `cfp train collect`→`cleanup`). `cleanup`은 모든 tr과 `s10-eval/*/inference`의 lease를 훑고 ID 없는 기록은 라벨로 지운다.
+
+선택과 binding: 회수 직후 run을 binding 없이 `selection.decision = PENDING`으로 먼저 쓰고, 선택이 DEVELOPMENT_RECOMMENDED·INCONCLUSIVE일 때만 고른 체크포인트를 binding으로 남긴다. KEEP_INCUMBENT·BLOCKED_*는 binding이 없어 평가 진입점이 학습 없이 진행할지 묻는다. 선택이 실패하면 다시 돌릴 때 원격 재접속 없이 선택만 다시 한다. 패키지는 선택 결정이 KEEP_INCUMBENT·BLOCKED_*이거나 선택 체크포인트가 binding과 다르면 serving을 막는다. 사전 등록은 학습 revision을 숫자 순으로 읽는다.
+
+v1.14 변경(2026-11-02): §21을 더하고 §8.9의 Gemma 기본값을 D-0077로 바꿨다.
+
+## 22. 공식 API 직접 연결 구현(명세 §24, D-0079)
+
+### 22.1 파일 소유
+
+갈래 작업자는 같은 작업 폴더에서 동시에 일하므로 아래 표에 적힌 파일만 고친다. 표에 없는 파일이 깨지면 고치지 않고 통합(E)에 알린다. 편집은 apply_patch로 해당 부분만 바꾸고 파일 전체를 다시 쓰지 않는다. commit·push·실제 네트워크 호출은 하지 않는다.
+
+| 갈래 | 고치는 파일 | 새 테스트 |
+|---|---|---|
+| A 호출 경로 | 새 `common/api_routes.py`, `common/text_deck.py`, `web/text_pipeline.py` | `tests/test_api_route.py` |
+| B 요청 형식 | `providers/openai_compat.py`, `providers/base.py`, `common/errors.py` | `tests/test_openai_dialect.py` |
+| C 단가표 | 새 `common/pricing.py`, 새 `resources/price-table-v1.json`, `common/config.py` | `tests/test_pricing.py` |
+| D 기록·예산·보고 | `providers/tracked.py`, `common/ledger.py`, `common/budget.py`, `pipeline/context.py`, `cli.py`, 새 `common/cost_report.py` | `tests/test_cost_recording.py`, `tests/test_cost_report.py` |
+| E 통합 | `factory.example.toml`, `.env.example`, `docs/`, 갈래 사이에서 생긴 기존 테스트 수정 | 없음 |
+
+경로는 `src/character_factory_poc/` 아래 기준이다. 기존 테스트가 자기 갈래의 변경 때문에 깨지면 그 갈래가 고친다.
+
+### 22.2 갈래 사이 계약
+
+**A → D.** `api_routes.FAMILY_DEFAULTS`는 `{"openai": {"base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY"}, "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "api_key_env": "GEMINI_API_KEY"}}`다. `family_of(model: str) -> str | None`는 `gpt-` → `"openai"`, `gemini-`·`google-antigravity/gemini-` → `"gemini"`, 그 밖은 `None`이다. `official_model_id(model: str) -> str`는 `google-antigravity/` 접두사를 뺀다. `billing_for(cfg: ProviderConfig, route: str | None = None) -> dict`는 `{"route": str, "family": str | None, "class": "api_billed" | "relay_equivalent" | "unverified" | "none"}`를 돌려준다. `class`는 어댑터가 `fake`면 `none`, 주소 호스트가 `api.openai.com`이나 `generativelanguage.googleapis.com`이면 `api_billed`, `127.0.0.1`·`localhost`면 `relay_equivalent`, 그 밖은 `unverified`다. `route` 인자가 없으면 `direct`(덱 밖 공급자) 또는 `fake`를 넣는다.
+
+`text_deck.resolve`는 `route == "api"`를 받아 모델 계열의 기본값에 `[text_pipeline.routes.api.families.<family>]`의 `base_url`·`api_key_env`·`timeout_s`를 덮고, 모델 ID는 `[text_pipeline.routes.api.models]` 매핑 → `official_model_id` 순으로 정한다. 계열을 정할 수 없으면 `ValueError`다. opencodex·test 경로의 반환값은 바꾸지 않는다. 형성 fingerprint가 해석 결과를 쓰기 때문이다. `api` 경로의 반환값에는 `family`를 더한다. 키 값 확인은 하지 않는다(호출 전 확인은 기존 `Context.task_model`이 한다).
+
+**B → D.** `ChatResponse`와 `VisionResult`에 맨 끝 필드 `usage: dict | None = None`을 더한다. 값은 `usage-v1`(`inputTokens`, `cachedInputTokens`, `cacheWriteTokens`, `outputTokens`, `reasoningTokens`, `finishReason`, `usageSource`)이며 모르는 값은 `None`이다. 기존 `input_tokens`·`output_tokens`도 같은 값으로 채운다(`output_tokens`는 보정한 청구 출력). `errors.ProviderRequestError(FactoryError, RuntimeError)`는 `status: int`, `provider_message: str`(앞 500자, 키 값 가림)를 가진다. 형식 선택은 `openai_compat.request_dialect(base_url) -> "openai" | "gemini" | "generic"`, 사용량 정리는 `openai_compat.normalize_usage(data: dict) -> dict`다.
+
+**C → D.** `pricing.PriceEntry`(frozen dataclass)는 `model`, `family`, `effective_from: date`, `effective_to: date | None`, `input_per_million: float | None`, `cached_input_per_million: float | None`, `cache_write_per_million: float | None`, `output_per_million: float | None`, `source: str`, `checked_at: str`, `basis: "table" | "config_override"`를 가진다. 함수는 `canonical_model(model) -> str`(`google-antigravity/`·`openai/` 접두사 제거), `lookup(model, at: datetime, overrides: dict | None = None) -> PriceEntry | None`, `estimate(usage: dict | None, entry: PriceEntry | None) -> dict`(`{"usd": float | None, "upperBound": bool, "reason": str | None}`), `price_ref(entry) -> dict | None`(`table`, `model`, `effectiveFrom`, `effectiveTo`, `source`, `basis`), `max_rates(models, at, overrides=None) -> tuple[float, float] | None`다. `FactoryConfig.pricing`은 `[pricing.models."<id>"]`의 `input_per_million`·`cached_input_per_million`·`output_per_million`을 담는 dict이며 기본값은 빈 dict다. 덮어쓰기는 기간과 무관하게 우선한다.
+
+**D.** `Ledger.record_call`에 키워드 인자 `cached_input_tokens`, `cache_write_tokens`, `reasoning_tokens`, `finish_reason`, `usage_source`, `price`, `billing`, `error_status`를 더하고, 값이 `None`이 아닐 때만 행에 쓴다. `TrackedTextModel`·`TrackedVisionModel`은 `billing`과 가격 덮어쓰기를 받아 성공 호출의 비용을 계산한다. `billing.class`가 `none`이면 단가를 찾지 않고 `estCostUsd`를 `None`으로 둔다. `usage`가 없으면 `input_tokens`·`output_tokens`로 `usage-v1`을 만든다. 가격 조회 모델은 요청 모델(`inner.model`)이다. 실패 호출은 `ProviderRequestError`의 상태 코드를 `error_status`로 남긴다. `RunBudget.settle`은 보정한 출력 토큰을 쓴다. `Context.formation_budget`은 설정 단가가 없고 합성 예산이 아니면 현재 덱 해석 모델들의 `max_rates`를 쓰고, 미확인이면 지금처럼 `ValueError`로 거절하되 미확인 모델 이름을 알린다. `cost_report.build(rows, *, recompute=False, overrides=None, at=None) -> dict`는 `cost-report-v1`을 만든다. `cfp ledger report <id>`는 기존 출력에 `cost`를 더하고, `cfp ledger cost <id 또는 calls.jsonl 경로> [--recompute] [--out 파일]`은 보고서를 출력·저장한다. 재계산은 원래 원장을 고치지 않는다. `cfp models select --route`의 선택지에 `api`를 더한다.
+
+### 22.3 통합 순서와 검사
+
+1. A·B·C·D가 동시에 시작한다. D는 A·B·C의 계약을 `tests/` 안의 가짜 구현이나 monkeypatch로 대신하고, 실제 모듈이 생기면 그것을 import한다.
+2. 각 갈래는 자기 테스트와 `uv run ruff check`·`uv run ruff format --check`를 통과시키고, 바꾼 파일 목록과 계약에서 벗어난 점을 보고한다.
+3. E는 C → B → A → D 순서로 결과를 검토하고, 전체 테스트를 돌린 뒤 설정 예시·안내 문서·상태 문서를 갱신한다. 독립 검토를 한 번 받는다.
+4. 실제 호출 확인은 사용자가 키를 넣고 실행을 지시한 뒤 `--execute`로 한다.
+
+v1.15 변경(2026-11-04): 공식 API 직접 연결의 파일 소유·갈래 계약·통합 순서를 추가했다(D-0079).

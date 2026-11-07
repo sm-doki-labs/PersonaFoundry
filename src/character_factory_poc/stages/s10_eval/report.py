@@ -1,7 +1,9 @@
-"""S10 평가 보고서 `eval-report-v2`와 G8 페이지 (LLD §5.15·§8.9).
+"""S10 평가 보고서 `eval-report-v2`와 G8 페이지 (LLD §5.15·§8.9, D-0078).
 
 지표·기준 결과·LLM 짝 판정·사람 블라인드 표본을 모아 보고서를 쓴다. 기준 미달이어도 보고서는
-나오고 채택은 G8에서 사람이 정한다.
+나오고 채택은 G8에서 사람이 정한다. 정책(qlora-authored-v1) 축별 커버리지, 결정값 초안, 개선 과제
+장부(improvement-tasks.json)를 함께 쓴다(scorecard.py). 응답 누락·사전 등록 해시 불일치면
+보고서 대신 integrity-blocked.json에 BLOCKED_INTEGRITY를 남기고 멈춘다.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from character_factory_poc.contracts.training import (
     MetricValue,
 )
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.stages.s10_eval import scorecard as sc
 from character_factory_poc.stages.s10_eval.judge import EvalPairsDoc, run_judge
 from character_factory_poc.stages.s10_eval.metrics import (
     arm_metrics,
@@ -31,10 +34,39 @@ from character_factory_poc.stages.s10_eval.metrics import (
     evaluate_criteria,
 )
 from character_factory_poc.stages.s10_eval.page import render_g8_page
-from character_factory_poc.stages.s10_eval.prereg import load_prereg
+from character_factory_poc.stages.s10_eval.prereg import (
+    PreregMismatchError,
+    current_rev,
+    load_prereg,
+)
 from character_factory_poc.stages.s10_eval.run import load_runs, load_set_docs
 
 SFT_ARMS: tuple[ArmId, ...] = ("SHORT_GEMMA_SFT", "SHORT_GEMINI_SFT")
+INTEGRITY_FILE = "integrity-blocked.json"
+
+
+class IntegrityBlockedError(FactoryError):
+    """응답 누락·사전 등록 해시 불일치. 보고서를 만들지 않는다(BLOCKED_INTEGRITY)."""
+
+
+def _write_integrity_block(rev_dir: Path, cid: str, problems: list[str]) -> Path:
+    """무결성 차단 기록. 진단용 파생 파일이라 같은 revision에서 다시 쓸 수 있다."""
+    path = rev_dir / INTEGRITY_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "characterId": cid,
+        "evalRev": rev_dir.name,
+        "decision": "BLOCKED_INTEGRITY",
+        "decisionReasons": [f"무결성: {p}" for p in problems] + [sc.DRAFT_NOTE],
+    }
+    path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def _block(rev_dir: Path, cid: str, problems: list[str]) -> IntegrityBlockedError:
+    path = _write_integrity_block(rev_dir, cid, problems)
+    shown = "; ".join(problems[:5]) + (f" 외 {len(problems) - 5}건" if len(problems) > 5 else "")
+    return IntegrityBlockedError(f"BLOCKED_INTEGRITY: {shown}. 보고서를 만들지 않았다. 기록 {path}")
 
 
 def _load_pairs(
@@ -74,6 +106,7 @@ def _recommend(
 ) -> str:
     overall = criteria_overall(prereg, results)
     by_key = {(m.armId, m.metric): m.value for m in metrics}
+    sft_arms = [a.armId for a in prereg.arms if a.armId in SFT_ARMS]
 
     def row(arm: str) -> str:
         return (
@@ -82,7 +115,7 @@ def _recommend(
             f"사과 {by_key[(arm, 'apology_recovery')]:.3f}"
         )
 
-    winners = [arm for arm in SFT_ARMS if all(overall.get(c.id, False) for c in prereg.criteria)]
+    winners = [arm for arm in sft_arms if all(overall.get(c.id, False) for c in prereg.criteria)]
     if winners:
         best = sorted(
             winners,
@@ -94,7 +127,7 @@ def _recommend(
         )[0]
         return f"{best}가 G8 기본 기준을 모두 넘었다({row(best)}). 채택은 G8에서 사람이 정한다."
     failed = [c.id for c in prereg.criteria if not overall.get(c.id, False)]
-    detail = "; ".join(row(a) for a in SFT_ARMS)
+    detail = "; ".join(row(a) for a in sft_arms)
     return (
         "SFT 조건 가운데 G8 기본 기준을 모두 넘은 조건이 없다. 미달 기준: "
         f"{', '.join(failed)}. {detail}. 기준 미달이어도 보고서는 유효하며 채택은 사람이 정한다."
@@ -118,10 +151,26 @@ def build_report(ctx: Context, cid: str) -> Path:
     """응답·판정을 읽어 보고서와 G8 페이지를 쓰고 s10을 사람 대기로 둔다."""
     if ctx.state(cid).gate("G8").status == "APPROVED":
         raise FactoryError("G8이 이미 승인됐다. 다시 평가하려면 새 ev revision을 등록한다")
-    prereg, digest, rev_dir = load_prereg(ctx, cid)
     char_dir = ctx.character_dir(cid)
+    try:
+        prereg, digest, rev_dir = load_prereg(ctx, cid)
+    except PreregMismatchError as exc:
+        _write_integrity_block(
+            char_dir / "s10-eval" / current_rev(ctx, cid), cid, [str(exc).splitlines()[0]]
+        )
+        raise
+    if not (rev_dir / "pairs.json").exists():
+        raise FactoryError(
+            f"짝 판정이 없다: {rev_dir / 'pairs.json'}. cfp eval judge를 먼저 실행한다"
+        )
+    try:
+        set_docs = load_set_docs(prereg, char_dir)
+    except FactoryError as exc:
+        raise _block(rev_dir, cid, [str(exc).splitlines()[0]]) from exc
+    problems = sc.integrity_problems(prereg, digest, rev_dir, set_docs)
+    if problems:
+        raise _block(rev_dir, cid, problems)
     runs = load_runs(prereg, rev_dir)
-    set_docs = load_set_docs(prereg, char_dir)
     pairs_doc, pairs_raw = _load_pairs(rev_dir, prereg, digest, char_dir)
     budget = ctx.budget()
     # 짝 판정은 pairs.json에 이미 있다. 여기서는 지표 판정만 부른다.
@@ -131,6 +180,20 @@ def build_report(ctx: Context, cid: str) -> Path:
 
     metrics = arm_metrics(prereg, runs, set_docs, judge, cid=cid)
     criteria = evaluate_criteria(prereg, metrics)
+    card = sc.build_scorecard(
+        cid=cid,
+        rev=rev_dir.name,
+        prereg=prereg,
+        digest=digest,
+        metrics=metrics,
+        runs=runs,
+        pairs=pairs_raw["pairs"],
+        set_docs=set_docs,
+        char_dir=char_dir,
+    )
+    tasks_obj = dump(validate("improvement-tasks-v1", dump(card.tasks_doc)))
+    tasks_path = rev_dir / "improvement-tasks.json"
+    write_once_json(tasks_path, tasks_obj)
     report = validate(
         "eval-report-v2",
         dump(
@@ -152,6 +215,15 @@ def build_report(ctx: Context, cid: str) -> Path:
                     for p in pairs_raw["pairs"]
                 ],
                 recommendation=_recommend(prereg, metrics, criteria),
+                decision=card.draft.decision,  # type: ignore[arg-type]
+                decisionReasons=card.draft.reasons,
+                suiteCoverage=[dump(s) for s in card.coverage],
+                criticalErrorChecks=[dump(c) for c in card.critical],
+                checkpointSelection=dump(card.selection) if card.selection else None,
+                improvementTasksRef=ArtifactRef(
+                    ref=tasks_path.relative_to(char_dir).as_posix(),
+                    sha256=sha256_of(tasks_obj),
+                ),
             )
         ),
     )
@@ -162,6 +234,7 @@ def build_report(ctx: Context, cid: str) -> Path:
         prereg=prereg,
         report=report,
         pairs=pairs_raw,
+        improvement_tasks=tasks_obj,
     )
     # 페이지는 파생 뷰다. 판정 뒤 최종 보고서로 다시 그릴 수 있게 덮어쓴다.
     (rev_dir / "gate-G8.html").write_text(page, encoding="utf-8")

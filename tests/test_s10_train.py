@@ -22,15 +22,17 @@ from character_factory_poc.providers.training.errors import (
     TrainingIntegrityError,
     TrainingLimitError,
 )
-from character_factory_poc.providers.training.gemma_qlora import GemmaQLoraProvider
+from character_factory_poc.providers.training.gemma_qlora import GemmaQLoraProvider, GemmaSettings
 from character_factory_poc.providers.training.port import TrainRequest
 from character_factory_poc.providers.training.vertex_gemini import VertexGeminiProvider
 from character_factory_poc.stages.s10_train.collect import collect_s10t
 from character_factory_poc.stages.s10_train.io import latest_rev, read_run, run_path
 from character_factory_poc.stages.s10_train.plan import plan_s10t
 from character_factory_poc.stages.s10_train.submit import submit_s10t
+from tests.test_vast_lease import FakeVast, lease_extra
 
 CID = "cf-1"
+N3B_REVISION = "8e256fc6d63003fc0ca8c91b976e6dcc38433385"
 
 
 def _line(system: str, user: str, reply: str) -> str:
@@ -176,6 +178,79 @@ def gemma(
     return GemmaQLoraProvider(cfg)
 
 
+def leased_gemma(tmp_path: Path, host: FakeRemoteHost, vast: FakeVast) -> GemmaQLoraProvider:
+    """remote_host 없이 Vast 임대 모드로 돈다. 준비된 GPU의 SSH는 가짜 호스트로 바꾼다."""
+    cfg = ProviderConfig(
+        adapter="gemma_qlora",
+        model="unsloth/gemma-4-31B-it-unsloth-bnb-4bit",
+        extra={
+            **lease_extra(tmp_path, vast, host=host),
+            "chunk_bytes": 8,
+            "prep_overhead_seconds": 0.0,
+            "max_cost_usd": 20.0,
+            "max_gpu_hours": 8.0,
+        },
+    )
+    return GemmaQLoraProvider(cfg)
+
+
+def finish_remote(
+    host: FakeRemoteHost,
+    job: str,
+    files: dict[str, bytes],
+    checkpoints: list[dict],
+    *,
+    screen: bytes | None = b'{"arm":"base"}\n',
+    bad: str = "",
+    **extra: object,
+) -> None:
+    """원격 학습·선별이 끝난 모습: 파일, complete.json, screen-complete.json."""
+
+    def entry(path: str, data: bytes) -> dict:
+        digest = "0" * 64 if path == bad else hashlib.sha256(data).hexdigest()
+        return {"path": path, "bytes": len(data), "sha256": digest}
+
+    for path, data in files.items():
+        host.files[f"{job}/{path}"] = data
+    host.write_text(
+        f"{job}/complete.json",
+        json.dumps(
+            {
+                "ok": True,
+                "files": [entry(p, d) for p, d in files.items()],
+                "checkpoints": checkpoints,
+                **extra,
+            }
+        ),
+    )
+    if screen is not None:
+        host.files[f"{job}/screen/responses.jsonl"] = screen
+        host.write_text(
+            f"{job}/screen-complete.json",
+            json.dumps({"ok": True, "files": [entry("screen/responses.jsonl", screen)]}),
+        )
+
+
+def test_gemma_defaults_follow_musk_n3b() -> None:
+    s = GemmaSettings.from_extra({})
+    assert s.revision == N3B_REVISION
+    assert s.chat_template == "gemma-4-thinking"
+    assert (s.lora_r, s.lora_alpha, s.lora_dropout) == (16, 32, 0.0)
+    assert (s.learning_rate, s.lr_scheduler) == (5e-5, "constant_with_warmup")
+    assert s.epochs == 2.0
+    assert s.checkpoint_epochs == (0.5, 1.0, 1.5, 2.0)
+    # N3b 실측 236스텝 2,060초 ≈ 8.7초/스텝, 준비 900초, Vast L40S 시간당 상한 $0.90.
+    assert s.step_seconds == 8.7
+    assert s.prep_overhead_seconds == 900.0
+    assert s.hourly_rate_usd == 0.90
+    # 품질 운영 규격 개발 비교: 단발 24 + 6턴 장면 2, 기반 모델도 함께 생성.
+    assert (s.screen_single, s.screen_multi, s.screen_turns) == (24, 2, 6)
+    assert s.screen_include_base is True
+    assert s.remote_python == "/venv/main/bin/python"  # 임대 템플릿의 venv
+    assert GemmaSettings.from_extra({"ssh_host": "h"}).remote_python == "python"
+    assert GemmaSettings.from_extra({"checkpoint_epochs": "2,1"}).checkpoint_epochs == (1.0, 2.0)
+
+
 def test_gemma_plan_has_dataset_hashes_steps_and_cost(tmp_path: Path) -> None:
     dataset, ds_dir = make_dataset(tmp_path)
     host = FakeRemoteHost()
@@ -186,7 +261,7 @@ def test_gemma_plan_has_dataset_hashes_steps_and_cost(tmp_path: Path) -> None:
     assert run.dryRun is True
     assert run.status == "PLANNED"
     assert run.jobId is None
-    assert run.baseModelRevision == "8e256fc6"
+    assert run.baseModelRevision == N3B_REVISION
     assert len(run.transfers) == 3
     assert {t.path for t in run.transfers} == {
         "train.jsonl",
@@ -194,14 +269,24 @@ def test_gemma_plan_has_dataset_hashes_steps_and_cost(tmp_path: Path) -> None:
         "validation-augmented.jsonl",
     }
     assert all(t.sha256 == sha256_file(ds_dir / t.path) for t in run.transfers)
-    # 10대화 × 3 epoch / (배치 1 × 누적 4) = 8스텝, 8 × 6초 = 48초, L40S $0.80/h.
-    assert run.estimate.gpuHours == pytest.approx(48 / 3600, abs=1e-4)
-    assert run.estimate.usd == pytest.approx(round(48 / 3600 * 0.8, 4))
+    # 학습: ceil(10대화 × 2 epoch / (배치 1 × 누적 4)) = 5스텝 × 8.7초 = 43.5초.
+    # 준비는 테스트 설정으로 0초.
+    # 선별: 검증 대화 3개는 모두 한 턴이라 단발 3개·6턴 장면 0개. 체크포인트 4개 + base = 5조건
+    # × 3 = 15생성 × 12초 + 모델 적재 420초 = 600초. 합 643.5초, 시간당 $0.90.
+    seconds = 5 * 8.7 + 15 * 12 + 420
+    assert run.estimate.gpuHours == pytest.approx(seconds / 3600, abs=1e-4)
+    assert run.estimate.usd == pytest.approx(round(seconds / 3600 * 0.9, 4))
     assert "L40S" in run.estimate.basis
+    assert "스텝 5" in run.estimate.basis
     assert run.requestedConfig["loraR"] == 16
     assert run.requestedConfig["loraAlpha"] == 32
     assert run.requestedConfig["maxSeqLength"] == 4096
     assert run.requestedConfig["lossOn"] == "assistant"
+    assert run.requestedConfig["epochs"] == 2.0
+    assert run.requestedConfig["checkpointEpochs"] == [0.5, 1.0, 1.5, 2.0]
+    assert run.requestedConfig["lrScheduler"] == "constant_with_warmup"
+    assert run.requestedConfig["selection"] == "generation"
+    assert run.requestedConfig["screenGenerations"] == 15
     assert host.commands == []
 
 
@@ -350,7 +435,33 @@ def test_gemma_status_needs_complete_json(tmp_path: Path) -> None:
         f"{job}/complete.json",
         json.dumps({"ok": True, "files": [], "checkpoints": []}),
     )
-    assert provider.status(run, request).status == "SUCCEEDED"
+    # 선별이 기본으로 켜져 있어 원격에 screen/requests.jsonl이 있다.
+    # 학습 완료(complete.json)만으로는 끝나지 않는다.
+    assert host.sha256(f"{job}/screen/requests.jsonl") is not None
+    assert provider.status(run, request).status == "RUNNING"
+    host.write_text(f"{job}/screen-complete.json", json.dumps({"ok": True, "files": []}))
+    done = provider.status(run, request)
+    assert done.status == "SUCCEEDED"
+    assert done.appliedConfig["screen"] == "done"
+
+
+def test_gemma_status_without_screening_needs_only_complete_json(tmp_path: Path) -> None:
+    dataset, ds_dir = make_dataset(tmp_path)
+    host = FakeRemoteHost()
+    provider = gemma(host, screen_single=0, screen_multi=0)
+    request = request_for(tmp_path, dataset, ds_dir)
+    run = provider.submit(provider.plan(request), request)
+    job = run.jobId
+    assert job
+    assert host.sha256(f"{job}/screen/requests.jsonl") is None
+    assert "screen_qlora.py" not in host.commands[0][-1]
+
+    host.write_text(
+        f"{job}/complete.json", json.dumps({"ok": True, "files": [], "checkpoints": []})
+    )
+    done = provider.status(run, request)
+    assert done.status == "SUCCEEDED"
+    assert done.appliedConfig["screen"] == "none"
 
 
 def test_gemma_collect_verifies_then_deletes_remote(tmp_path: Path) -> None:
@@ -362,23 +473,27 @@ def test_gemma_collect_verifies_then_deletes_remote(tmp_path: Path) -> None:
     job = run.jobId
     assert job
     adapter = b"adapter-bytes"
-    host.files[f"{job}/adapter/adapter_model.safetensors"] = adapter
-    host.write_text(
-        f"{job}/complete.json",
-        json.dumps(
+    half = b"half-epoch-adapter"
+    screen = b'{"arm":"epoch-2","taskId":"s-1"}\n'
+    finish_remote(
+        host,
+        job,
+        {
+            "checkpoints/epoch-0.5/adapter_model.safetensors": half,
+            "checkpoints/epoch-2/adapter_model.safetensors": adapter,
+        },
+        [
+            {"checkpointId": "epoch-0.5", "epoch": 0.5, "step": 2, "ref": "checkpoints/epoch-0.5"},
             {
-                "ok": True,
-                "modelBindingRef": "adapter",
-                "files": [
-                    {
-                        "path": "adapter/adapter_model.safetensors",
-                        "bytes": len(adapter),
-                        "sha256": hashlib.sha256(adapter).hexdigest(),
-                    }
-                ],
-                "checkpoints": [{"checkpointId": "epoch-3", "epoch": 3, "step": 120, "ref": "ep3"}],
-            }
-        ),
+                "checkpointId": "epoch-2",
+                "epoch": 2.0,
+                "step": 5,
+                "ref": "checkpoints/epoch-2",
+                "validationLoss": 1.25,
+            },
+        ],
+        screen=screen,
+        modelBindingRef="checkpoints/epoch-2",
     )
 
     done = provider.collect(run, request)
@@ -386,15 +501,26 @@ def test_gemma_collect_verifies_then_deletes_remote(tmp_path: Path) -> None:
     assert done.status == "SUCCEEDED"
     assert done.modelBinding is not None
     assert done.modelBinding.provider == "gemma_qlora"
-    assert done.modelBinding.checkpointId == "epoch-3"
-    assert done.checkpoints[0].epoch == 3
-    assert done.checkpoints[0].step == 120
-    local = request.artifact_dir / "adapter" / "adapter_model.safetensors"
+    assert done.modelBinding.checkpointId == "epoch-2"
+    assert done.modelBinding.ref.endswith("checkpoints/epoch-2")
+    assert done.checkpoints[0].epoch == 0.5
+    assert done.checkpoints[1].epoch == 2
+    assert done.checkpoints[1].step == 5
+    assert done.checkpoints[1].validationLoss == 1.25
+    local = request.artifact_dir / "checkpoints" / "epoch-2" / "adapter_model.safetensors"
     assert local.read_bytes() == adapter
+    assert (request.artifact_dir / "screen" / "responses.jsonl").read_bytes() == screen
+    assert (request.artifact_dir / "remote" / "screen-complete.json").is_file()
+    assert (request.artifact_dir / "remote" / "complete.json").is_file()
+    assert done.appliedConfig["remoteDeleted"] is True
+    assert "leaseDestroyed" not in done.appliedConfig
     assert job in host.deleted
 
 
-def test_gemma_collect_hash_mismatch_keeps_remote(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "bad", ["checkpoints/epoch-2/adapter_model.safetensors", "screen/responses.jsonl"]
+)
+def test_gemma_collect_hash_mismatch_keeps_remote(tmp_path: Path, bad: str) -> None:
     dataset, ds_dir = make_dataset(tmp_path)
     host = FakeRemoteHost()
     provider = gemma(host)
@@ -402,23 +528,162 @@ def test_gemma_collect_hash_mismatch_keeps_remote(tmp_path: Path) -> None:
     run = provider.submit(provider.plan(request), request)
     job = run.jobId
     assert job
-    host.files[f"{job}/adapter/adapter_model.safetensors"] = b"x"
-    host.write_text(
-        f"{job}/complete.json",
-        json.dumps(
-            {
-                "ok": True,
-                "files": [
-                    {"path": "adapter/adapter_model.safetensors", "bytes": 1, "sha256": "0" * 64}
-                ],
-                "checkpoints": [],
-            }
-        ),
+    finish_remote(
+        host,
+        job,
+        {"checkpoints/epoch-2/adapter_model.safetensors": b"x"},
+        [{"checkpointId": "epoch-2", "epoch": 2, "ref": "checkpoints/epoch-2"}],
+        bad=bad,
     )
 
     with pytest.raises(TrainingIntegrityError):
         provider.collect(run, request)
     assert host.deleted == []
+
+
+def test_gemma_collect_without_binding_ref_keeps_remote(tmp_path: Path) -> None:
+    dataset, ds_dir = make_dataset(tmp_path)
+    host = FakeRemoteHost()
+    provider = gemma(host)
+    request = request_for(tmp_path, dataset, ds_dir)
+    run = provider.submit(provider.plan(request), request)
+    job = run.jobId
+    assert job
+    finish_remote(host, job, {"training.json": b"{}"}, [])
+
+    with pytest.raises(TrainingIntegrityError):
+        provider.collect(run, request)
+    assert host.deleted == []
+
+
+def test_gemma_lease_submit_records_lease_and_job_script(tmp_path: Path) -> None:
+    dataset, ds_dir = make_dataset(tmp_path)
+    host = FakeRemoteHost()
+    vast = FakeVast()
+    provider = leased_gemma(tmp_path, host, vast)
+    assert provider.uses_lease
+    request = request_for(tmp_path, dataset, ds_dir)
+
+    run = provider.submit(provider.plan(request), request)
+
+    lease = json.loads((request.plan_dir / "lease.json").read_text("utf-8"))
+    assert lease["status"] == "READY"
+    assert lease["instanceId"] == 7001
+    assert len(vast.args("create", "instance")) == 1
+    assert run.status == "SUBMITTED"
+    assert run.appliedConfig["lease"] == "vast"
+    assert run.appliedConfig["instanceId"] == "7001"
+    assert run.appliedConfig["gpu"] == "L40S"
+    assert run.appliedConfig["screenTasks"] == 3
+    assert (request.plan_dir / "screen-requests.jsonl").is_file()
+    probe, command = host.commands  # 준비 확인(SSH로 true 실행) 뒤 학습 시작
+    assert probe == ["true"]
+    assert command[:2] == ["bash", "-lc"]
+    script = command[2]
+    order = [
+        script.index("/venv/main/bin/python train_qlora.py"),
+        script.index("if [ $rc -eq 0 ]; then /venv/main/bin/python screen_qlora.py"),
+        script.index("job-exit.json"),
+        script.index("> job.sh"),
+        script.index("nohup timeout"),
+    ]
+    assert order == sorted(order)
+    assert "--include-base" in script
+    # 다시 제출해도 GPU를 새로 만들지 않는다.
+    assert provider.submit(run, request) == run
+    assert len(vast.args("create", "instance")) == 1
+
+
+def test_gemma_lease_collect_fetches_then_destroys_gpu(tmp_path: Path) -> None:
+    dataset, ds_dir = make_dataset(tmp_path)
+    host = FakeRemoteHost()
+    vast = FakeVast()
+    provider = leased_gemma(tmp_path, host, vast)
+    request = request_for(tmp_path, dataset, ds_dir)
+    run = provider.submit(provider.plan(request), request)
+    job = run.jobId
+    assert job
+    finish_remote(
+        host,
+        job,
+        {"checkpoints/epoch-2/adapter_model.safetensors": b"adapter"},
+        [{"checkpointId": "epoch-2", "epoch": 2, "ref": "checkpoints/epoch-2"}],
+    )
+
+    done = provider.collect(run, request)
+
+    assert (request.artifact_dir / "screen" / "responses.jsonl").is_file()
+    assert job in host.deleted
+    assert vast.args("destroy", "instance") == [
+        ["vastai", "destroy", "instance", "7001", "--yes", "--raw"]
+    ]
+    assert json.loads((request.plan_dir / "lease.json").read_text("utf-8"))["status"] == "DESTROYED"
+    assert done.appliedConfig["leaseDestroyed"] is True
+    assert done.appliedConfig["remoteDeleted"] is True
+
+
+def test_gemma_lease_collect_mismatch_keeps_gpu(tmp_path: Path) -> None:
+    dataset, ds_dir = make_dataset(tmp_path)
+    host = FakeRemoteHost()
+    vast = FakeVast()
+    provider = leased_gemma(tmp_path, host, vast)
+    request = request_for(tmp_path, dataset, ds_dir)
+    run = provider.submit(provider.plan(request), request)
+    assert run.jobId
+    finish_remote(
+        host,
+        run.jobId,
+        {"checkpoints/epoch-2/adapter_model.safetensors": b"adapter"},
+        [{"checkpointId": "epoch-2", "epoch": 2, "ref": "checkpoints/epoch-2"}],
+        bad="checkpoints/epoch-2/adapter_model.safetensors",
+    )
+
+    with pytest.raises(TrainingIntegrityError):
+        provider.collect(run, request)
+    assert host.deleted == []
+    assert vast.args("destroy", "instance") == []
+
+
+def test_gemma_lease_abort_saves_logs_then_destroys_gpu(tmp_path: Path) -> None:
+    dataset, ds_dir = make_dataset(tmp_path)
+    host = FakeRemoteHost()
+    vast = FakeVast()
+    provider = leased_gemma(tmp_path, host, vast)
+    request = request_for(tmp_path, dataset, ds_dir)
+    run = provider.submit(provider.plan(request), request)
+    job = run.jobId
+    assert job
+    host.write_text(f"{job}/train.log", "x" * 250_000 + "OOM at step 3\n")
+    host.write_text(f"{job}/state.json", '{"phase":"training"}')
+    host.write_text(f"{job}/job-exit.json", '{"train":1,"screen":"skip"}\n')
+
+    provider.abort(run, request)
+
+    saved = request.artifact_dir / "remote"
+    log = (saved / "train.log").read_text("utf-8")
+    assert log.endswith("OOM at step 3\n")
+    assert len(log) == 200_000
+    assert (saved / "state.json").is_file()
+    assert (saved / "job-exit.json").is_file()
+    assert len(vast.args("destroy", "instance")) == 1
+    assert json.loads((request.plan_dir / "lease.json").read_text("utf-8"))["status"] == "DESTROYED"
+
+
+def test_gemma_lease_abort_destroys_gpu_that_never_became_ready(tmp_path: Path) -> None:
+    dataset, ds_dir = make_dataset(tmp_path)
+    host = FakeRemoteHost()
+    vast = FakeVast(rows=[{"actual_status": "loading"}])
+    provider = leased_gemma(tmp_path, host, vast)
+    request = request_for(tmp_path, dataset, ds_dir)
+    run = provider.plan(request)
+
+    with pytest.raises(Exception, match="준비되지 않았다"):
+        provider.submit(run, request)
+    provider.abort(run, request)
+
+    assert host.commands == []
+    assert len(vast.args("destroy", "instance")) == 1
+    assert json.loads((request.plan_dir / "lease.json").read_text("utf-8"))["status"] == "DESTROYED"
 
 
 def test_vertex_submit_status_and_checkpoints_with_mock_transport(tmp_path: Path) -> None:

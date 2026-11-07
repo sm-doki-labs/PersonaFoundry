@@ -503,3 +503,23 @@ def test_eval_contracts_registered() -> None:
         "eval-adoption-v1",
     ):
         assert name in names
+
+
+def test_gemma_only_prereg_judges_and_reports_two_arms(tmp_path: Path) -> None:
+    """Gemma만 학습하면 사전 등록·짝 판정·보고서가 두 조건(LONG_BASE, SHORT_GEMMA_SFT)으로 돈다."""
+    ctx, cid = _context(tmp_path)
+    ctx.config.stages["s10t"] = {"providers": ["gemma_qlora"]}
+    vertex = ctx.character_dir(cid) / "s10-train" / "tr1" / "vertex_gemini" / "training-run.json"
+    vertex.unlink()
+    _fake_models(ctx)
+    build = eval_prereg.build_prereg(ctx, cid)
+    assert [a.armId for a in build.prereg.arms] == ["LONG_BASE", "SHORT_GEMMA_SFT"]
+    _synthetic_runs(ctx, cid, build)
+    eval_judge.run_judge(ctx, cid)
+    pairs = json.loads((build.rev_dir / "pairs.json").read_text("utf-8"))
+    assert {(p["armA"], p["armB"]) for p in pairs["pairs"]} == {("LONG_BASE", "SHORT_GEMMA_SFT")}
+    rev_dir = eval_report.build_report(ctx, cid)
+    report = validate("eval-report-v2", json.loads((rev_dir / "report.json").read_text("utf-8")))
+    assert {m.armId for m in report.metrics} == {"LONG_BASE", "SHORT_GEMMA_SFT"}
+    assert "SHORT_GEMINI_SFT" not in report.recommendation
+    assert ctx.state(cid).gate("G8").status == "AWAITING_HUMAN"

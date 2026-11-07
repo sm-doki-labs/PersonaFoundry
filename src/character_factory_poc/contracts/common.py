@@ -18,6 +18,13 @@ class ArtifactRef(Strict):
     sha256: str
 
 
+class ChoiceArtifactRef(Strict):
+    model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
+    kind: Literal["seed", "requirements", "plan", "choice", "review"]
+    path: str = Field(min_length=1)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class RequestedChange(Strict):
     field: str
     note: str

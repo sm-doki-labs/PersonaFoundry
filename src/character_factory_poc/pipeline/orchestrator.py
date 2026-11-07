@@ -138,7 +138,6 @@ def _last_gate_decision(ctx: Context, cid: str, gate: str) -> str | None:
 def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callable[[], Path | None]]:
     from character_factory_poc.stages.s1_reference.run import run_s1
     from character_factory_poc.stages.s2_hero.run import run_s2
-    from character_factory_poc.stages.s3_plan.draft import run_s3_draft
     from character_factory_poc.stages.s3r_refs.select import run_s3r
     from character_factory_poc.stages.s4_frames.run import run_s4
     from character_factory_poc.stages.s4a_backgrounds.run import run_s4a
@@ -151,17 +150,27 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
     appearance = _appearance_axis(ctx, cid, opt)
 
     def s3():
-        if appearance:
-            # D-0033: 외모 축 캐릭터는 s2 승인 뒤 씨앗 → 변형. 브리프 초안은 쓰지 않는다.
-            from character_factory_poc.stages.s3_plan.seed import load_latest_seed, write_seed
-            from character_factory_poc.stages.s3_plan.variants import run_s3_variants
+        # D-0033: 외모 축 캐릭터는 s2 승인 뒤 씨앗 → 변형. D-0080: 페르소나 우선 브리프도
+        # 구형 초안(character-plan-v1) 대신 브리프를 씨앗으로 옮겨 같은 변형 경로를 쓴다.
+        from character_factory_poc.stages.s3_plan.seed import load_latest_seed, write_seed
+        from character_factory_poc.stages.s3_plan.variants import (
+            run_s3_from_brief,
+            run_s3_variants,
+        )
 
-            if opt.seed and load_latest_seed(ctx, cid) is None:
+        if load_latest_seed(ctx, cid) is None:
+            if opt.seed:
                 write_seed(ctx, cid, opt.seed)
-            return run_s3_variants(ctx, cid)
-        if not opt.brief_text:
-            raise NeedsInputError("S3를 돌리려면 --brief가 필요하다(또는 cfp plan import)")
-        return run_s3_draft(ctx, cid, opt.brief_text)
+            elif opt.brief_text and not appearance:
+                return run_s3_from_brief(ctx, cid, opt.brief_text)
+            elif not appearance:
+                raise NeedsInputError(
+                    "S3를 돌리려면 --brief 또는 --seed가 필요하다(또는 cfp plan import)"
+                )
+        # 씨앗은 다른 단계가 돌기 전에 먼저 고정한다. 외모 축은 그 뒤 s2 승인을 기다린다.
+        if appearance and ctx.state(cid).stage("s2").status != "APPROVED":
+            raise GateNotApprovedError(f"{cid}: 외모 축 캐릭터는 s2 승인 뒤 기획한다(D-0042)")
+        return run_s3_variants(ctx, cid)
 
     def s10t():
         from character_factory_poc.stages.s10_train.plan import plan_s10t

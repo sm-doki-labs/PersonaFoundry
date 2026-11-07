@@ -20,7 +20,7 @@ from character_factory_poc.stages.s1_reference.ranking import all_names, load_ra
 from character_factory_poc.stages.s1_reference.run import run_s1
 from character_factory_poc.stages.s2_hero.approve import load_appearance_spec
 from character_factory_poc.stages.s2_hero.run import run_s2
-from character_factory_poc.stages.s3_plan.draft import new_character
+from character_factory_poc.stages.s3_plan.common import new_character
 from tests.support.synthetic import RANKING, scout_features
 
 NAMES = all_names(load_ranking(RANKING))

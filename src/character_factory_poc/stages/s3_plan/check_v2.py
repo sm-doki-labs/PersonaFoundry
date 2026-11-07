@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from character_factory_poc.common.call_context import appearance_reading_problems
 from character_factory_poc.common.canonical import sha256_text
 from character_factory_poc.common.names import MIN_NAME_CHARS, normalize_name
 from character_factory_poc.common.schema import dump, validate
@@ -39,6 +40,17 @@ def check_plan_v2(seed: PlanSeed | None, guard: list[dict]):
                 problems.append(f"coreTraits[{i}]: 형용사 나열 대신 행동을 서술한다")
         if looks_like_bare_adjectives(plan.contrastTrait):
             problems.append("contrastTrait: 형용사 나열 대신 행동을 서술한다")
+        # D-0082: 영상통화 카메라 관찰 규칙과 부딪히는 외모·신체 상태 읽기를 막는다.
+        reading = {
+            "coreTraits": " ".join(plan.coreTraits),
+            "contrastTrait": plan.contrastTrait,
+            "choices": " ".join(c.situation + " " + c.firstMove for c in plan.choices),
+            "misreadings": " ".join(plan.misreadings),
+            "voiceSummary": plan.voiceSummary,
+            "voiceExamples": " ".join(plan.voiceExamples),
+        }
+        for field, value in reading.items():
+            problems.extend(appearance_reading_problems(field, value))
         text = normalize_name(json.dumps(dump(plan), ensure_ascii=False))
         # find_name_leaks와 같은 정규화·부분 문자열 비교이며 이름 원문은 저장하지 않는다.
         for length in {g["length"] for g in guard}:

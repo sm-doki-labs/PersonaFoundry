@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "persona-quality-profile-v1",
+  "profileId": "ko-text-prompt-long-v1",
+  "scope": {
+    "language": "ko",
+    "channel": "text",
+    "prompt": "long",
+    "setting": "contemporary-korea",
+    "adultsOnly": true,
+    "genre": "romance"
+  },
+  "modelBinding": null,
+  "thresholdsFrozen": false,
+  "rubricVersion": "persona-quality-rubric-v1-proposal",
+  "rubricSha256": null,
+  "recipeHash": null,
+  "splitManifestSha256": null,
+  "protocolSha256": null,
+  "thresholds": {
+    "heldoutCharacters": 8,
+    "runsPerCharacter": 2,
+    "scenesPerArtifact": 7,
+    "assistantTurnsPerArtifact": 60,
+    "naturalScenesPerArtifactMin": 6,
+    "naturalSceneRateMin": 0.9,
+    "decisionItemsPerArtifact": 5,
+    "decisionPassesPerArtifactMin": 4,
+    "voiceTurnRateMin": 0.9,
+    "majorErrorsPerArtifactMax": 1,
+    "sameErrorTypePerArtifactMax": 1,
+    "majorErrorTurnRateMax": 0.01,
+    "collapseScenesMax": 0,
+    "doubleReviewedScenes": 32,
+    "binaryAgreementRateMin": 0.85,
+    "longMaxChars": 8000,
+    "shortMaxChars": 2400
+  }
+}

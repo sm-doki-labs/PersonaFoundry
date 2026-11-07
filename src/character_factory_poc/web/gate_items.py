@@ -220,10 +220,37 @@ def plan_variants(char_dir: Path, character_id: str, stage_dir: str, rev: str) -
         mode = "plan"
         seed_rev = plan.get("seedRev") if plan else None
         candidates = [plan] if plan else []
+    choice_evidence = {}
+    requirements = []
+    choice_problems = []
+    explicit = bool(variants and variants.get("schemaVersion") == "plan-variants-v2")
+    if explicit:
+        from character_factory_poc.contracts.choice_design import ChoiceArtifactRef
+        from character_factory_poc.stages.s3_plan.choice_design import verified_ref
+
+        try:
+            req_ref = ChoiceArtifactRef.model_validate(variants["requirements"])
+            req = read_json(verified_ref(Path(char_dir), req_ref))
+            requirements = [
+                dict(id=r["requirementId"], quote=r["quote"]) for r in req["requirements"]
+            ]
+            for variant, ref in variants["designs"].items():
+                body = read_json(
+                    verified_ref(Path(char_dir), ChoiceArtifactRef.model_validate(ref))
+                )
+                choice_evidence[variant] = [
+                    {k: r[k] for k in ("situation", "priority", "acceptedCost", "switchWhen")}
+                    for r in body["rules"]
+                ]
+        except (ValueError, OSError, KeyError) as exc:
+            choice_problems.append(f"선택 근거를 확인할 수 없다: {exc}")
     return {
         "kind": "planVariants",
         "source": "artifacts",
-        "problems": [] if candidates else ["후보가 비었다"],
+        "problems": choice_problems if candidates else ["후보가 비었다"],
+        "requireExplicitSelection": explicit,
+        "choiceEvidence": choice_evidence,
+        "seedRequirements": requirements,
         "mode": mode,
         "axisNote": axis,
         "seedRev": seed_rev,
@@ -570,7 +597,23 @@ def prompts(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict
     probe = read_json(folder / "prompt-probe.json")
     if pair is None:
         return _empty("prompts", ["prompt-pair.json이 없다. S8을 먼저 돌린다"])
+    bundle = read_json(folder / "persona-bundle.json")
+    trait = _latest_trait_sheet(char_dir, character_id)
+    extras = {}
+    if bundle is not None:
+        # Read the pinned revision shown by this G6, not a newer S7 revision.
+        from character_factory_poc.stages.s8_prompts.formation import pinned_path
+
+        trait_dir = pinned_path(char_dir, "s7-traits", str(bundle.get("traitRevision")))
+        trait = read_json(trait_dir / "trait-sheet.json")
+        extras = {
+            "bundle": bundle,
+            "blueprint": read_json(trait_dir / "blueprint.json"),
+            "formationDialogues": read_json(trait_dir / "formation-dialogues.json"),
+            "qualityProfile": read_json(trait_dir / "profile.json"),
+        }
     return {
+        **extras,
         "kind": "prompts",
         "source": "artifacts",
         "problems": [] if probe is not None else ["prompt-probe.json이 없다(표본 응답 없음)"],
@@ -584,7 +627,7 @@ def prompts(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict
         "probes": (probe or {}).get("probes", []),
         "judgeModel": (probe or {}).get("judgeModel", ""),
         "probeNote": (probe or {}).get("note", ""),
-        "traitSheet": _latest_trait_sheet(char_dir, character_id),
+        "traitSheet": trait,
         "helper": (
             "긴 프롬프트·짧은 프롬프트·표본 응답을 비교하고 승인하거나 고칠 점을 적는다. "
             "판정은 참고용이고 승인은 사람이 한다."

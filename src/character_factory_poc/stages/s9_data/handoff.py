@@ -20,6 +20,7 @@ from character_factory_poc.contracts.dataset import BehaviorRow, DataHandoff, Da
 from character_factory_poc.contracts.persona import PromptPair, TraitSheet
 from character_factory_poc.pipeline.agent import AgentSpec, run_agent
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.stages.s9_data import deck
 
 
 @register("data-handoff-output-v1")
@@ -30,7 +31,9 @@ class HandoffOutput(Strict):
     notes: str = ""
 
 
-def check_handoff(out: HandoffOutput) -> list[str]:
+def check_handoff(
+    out: HandoffOutput | deck.ScenarioOutput, *, require_voice_examples: bool = True
+) -> list[str]:
     problems: list[str] = []
     if len(out.behaviorTable) < 3:
         problems.append("behaviorTable은 3행 이상이다")
@@ -39,7 +42,7 @@ def check_handoff(out: HandoffOutput) -> list[str]:
             problems.append(f"{i}행: situation·attention·choice·voice를 모두 채운다")
         elif looks_like_bare_adjectives(row.choice):
             problems.append(f"{i}행: choice가 형용사 나열이다. 동사로 끝나는 행동으로 쓴다")
-    if len(out.voiceExamples) < 2:
+    if require_voice_examples and len(out.voiceExamples) < 2:
         problems.append("voiceExamples는 2개 이상이다")
     if not out.forbidden:
         problems.append("forbidden은 1개 이상이다. 이 클러스터에서 하면 안 되는 패턴을 적는다")
@@ -49,7 +52,7 @@ def check_handoff(out: HandoffOutput) -> list[str]:
 def cluster_input(plan: DataPlan, cluster_id: str) -> dict[str, Any]:
     for c in plan.clusters:
         if c.clusterId == cluster_id:
-            return {
+            out: dict[str, Any] = {
                 "clusterId": c.clusterId,
                 "label": c.label,
                 "share": c.share,
@@ -57,6 +60,15 @@ def cluster_input(plan: DataPlan, cluster_id: str) -> dict[str, Any]:
                 "materials": list(c.materials),
                 "sampleSize": c.sampleSize,
             }
+            pol = getattr(c, "policy", None)
+            if pol is not None:
+                out["description"] = pol.description
+                out["protected"] = pol.protected
+                if pol.turnRule is not None:
+                    from character_factory_poc.stages.s9_data.samples import turn_rule_input
+
+                    out["turnRule"] = turn_rule_input(pol.turnRule)
+            return out
     raise ValueError(f"계획에 없는 클러스터다: {cluster_id}")
 
 
@@ -75,13 +87,40 @@ def build_handoff(
     memo: str = "",
 ) -> DataHandoff:
     budget = ctx.budget()
-    model = ctx.text_model(cid, budget)
     inputs = {
         "trait-sheet": dump(sheet),
         "cluster": cluster_input(plan, cluster_id),
         "prompt-short": pair.short.text,
         "memo": memo,
     }
+    if deck.enabled(ctx):
+        from character_factory_poc.stages.s9_data.plan import data_dir
+
+        # The caller names this workspace <dsN>-<cluster>-handoff. The same
+        # revision owns the request audits, including all format attempts.
+        rev = workspace.name.split("-", 1)[0]
+        out, _ref, _model = deck.request(
+            ctx,
+            cid,
+            budget=budget,
+            stage=stage,
+            rev_dir=data_dir(ctx, cid) / rev,
+            task="scenarios",
+            role="data_deck_scenarios",
+            contract=deck.ScenarioOutput,
+            inputs=inputs,
+            validate_output=lambda out: check_handoff(out, require_voice_examples=False),
+        )
+        return DataHandoff(
+            characterId=cid,
+            planSha256=plan_sha,
+            clusterId=cluster_id,
+            behaviorTable=out.behaviorTable,
+            voiceExamples=[],
+            forbidden=out.forbidden,
+            notes=(out.notes + ("\n\n검토자 메모: " + memo if memo else "")).strip(),
+        )
+    model = ctx.text_model(cid, budget)
     spec = AgentSpec(
         role="data_handoff",
         output_contract="data-handoff-output-v1",

@@ -1,0 +1,96 @@
+{
+  "version": 2,
+  "date": "2026-10-30",
+  "status": "standalone_design_not_connected_to_factory",
+  "transport": {
+    "experiment": "opencodex",
+    "base_url": "http://127.0.0.1:10100/v1"
+  },
+  "billing_note": "OpenAI API credit use requires a separately verified API-billed route; this opencodex route does not establish API credit consumption.",
+  "stages": [
+    {
+      "id": "brief",
+      "task": "기본 프로필·배경·제약 정리",
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high"
+    },
+    {
+      "id": "personality",
+      "task": "성격·행동 원리·관계 변화 초안",
+      "model": "google-antigravity/gemini-3.8-flash",
+      "reasoning_effort": "high"
+    },
+    {
+      "id": "consistency",
+      "task": "성격 초안의 명시적 설정 충돌 검토",
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high"
+    },
+    {
+      "id": "voice",
+      "task": "성격 확정·최종 말투·대표 대사",
+      "model": "google-antigravity/gemini-4-argon",
+      "reasoning_effort": "high"
+    },
+    {
+      "id": "scenarios",
+      "task": "SFT 상황 분포·사용자 발화·사실 맥락 설계",
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "medium"
+    },
+    {
+      "id": "sft_answers",
+      "task": "학습 대상 답변과 말투가 필요한 과거 assistant 발화 생성",
+      "model": "google-antigravity/gemini-4-argon",
+      "reasoning_effort": "high"
+    },
+    {
+      "id": "screening",
+      "task": "설정 충돌·화자 혼동·문맥 오류 전수 검사",
+      "model": "gpt-6.1-terra",
+      "reasoning_effort": "high"
+    },
+    {
+      "id": "adjudication",
+      "task": "검수 이견·통과 및 탈락 표본 재검토",
+      "model": "gpt-6.1-sol",
+      "reasoning_effort": "high"
+    },
+    {
+      "id": "repair",
+      "task": "확인된 오류만 수정하고 캐릭터성 유지",
+      "model": "google-antigravity/gemini-4-argon",
+      "reasoning_effort": "high"
+    }
+  ],
+  "rules": {
+    "default_revision_rounds": 1,
+    "automatic_model_fallback": false,
+    "allow_cross_family_rewrite": false,
+    "preserve_character_flaws": true,
+    "avoid_absolute_behavior_rules": true,
+    "production_dialogue_testing": false,
+    "development_heldout_evaluation": true,
+    "format_duplicate_checks": "code",
+    "prompt_assembly": "deterministic"
+  },
+  "evidence_limit": "One-shot tsundere comparisons only; Argon SFT superiority and Terra screening accuracy remain unverified.",
+  "default_profile": "basic_test",
+  "profiles": {
+    "basic_test": {
+      "description": "기본 테스트: 기준 덱의 Argon 담당 단계를 Gemini 3.8 Flash로 명시적으로 대체한다.",
+      "model_overrides": {
+        "google-antigravity/gemini-4-argon": "google-antigravity/gemini-3.8-flash"
+      }
+    },
+    "demo": {
+      "description": "시연: 기준 덱의 Argon 담당 단계는 Argon으로 실행한다.",
+      "model_overrides": {}
+    },
+    "pre_demo_completion_check": {
+      "description": "시연 완성 전 최종 점검: 기준 덱의 Argon 담당 단계를 Argon으로 실행·확인한다. Flash 테스트 결과만으로 최종 점검 완료로 처리하지 않는다.",
+      "model_overrides": {}
+    }
+  },
+  "profile_resolution": "stages defines the baseline deck; apply the selected profile model_overrides to each stage model before execution. This is explicit profile selection, not automatic error fallback."
+}

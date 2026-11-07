@@ -21,6 +21,7 @@ max_cost_usd_per_command = 20.0
 max_check_retries = 3
 
 [stages.s8]
+long_prompt_max_chars = 8000  # 덱의 무압축 정본 상한
 short_prompt_max_chars = 2400  # 섹션 예산 합계(1550) + 시스템 규칙·출력 규칙·헤더 여유
 # 긴 프롬프트의 시스템 규칙 원문 경로 (Q-0006). 비우면 내장 기본 규칙(resources/system-rules-default-v1.md)을 쓴다.
 system_rules_path = ""
@@ -169,6 +170,8 @@ allow_same_family = false
 
 # 워크숍 웹앱(python -m character_factory_poc.web, LLD §6.5). 모두 선택이며 없으면 기본값이다. 로그인 없음.
 [web]
+# 선택: 저장소 안 studio/ 공장 화면을 같은 서버 /studio에 연결한다. 상대 경로는 공장 루트 기준이다.
+# studio_dir = "studio"
 host = "127.0.0.1"
 port = 8765
 jobs_dir = "work/web-jobs"   # 작업 기록. Git 밖
@@ -194,3 +197,93 @@ gates = ["G1", "G3", "G4a", "G4b", "G4", "G5", "G5b", "G6", "G7", "G9"]
 max_rounds = 3
 normalize = true
 
+
+# 선택·실제 말투 분리 경로(명시적으로 선택할 때만 사용):
+# [stages.s7]
+# formation_profile = "ko-text-choice-voice-long-v2"
+# voice_packs = ["/absolute/path/to/approved-voice-pack.json"]
+# voice_approval_index = "/absolute/path/to/trusted-approvals.json"
+# voice_policy = "/absolute/path/to/voice-binding-policy.json"
+# budget_run_id = "choice-voice-development-1"
+# max_run_tokens = 2000000
+# input_rate_upper_per_million = ...
+# output_rate_upper_per_million = ...
+
+# D-0072: 텍스트 자료 제작 모델 덱. 개발 경로와 모델 프로필은 독립적으로 선택한다.
+[text_pipeline]
+enabled = true
+# D-0084: 연결 끊김·시간 초과·429·5xx만 예산 안에서 다시 보내는 횟수(시도마다 원장·예약을 따로 남긴다).
+transport_retries = 1
+profile = "basic_test"
+route = "opencodex"
+
+[text_pipeline.routes.opencodex]
+adapter = "openai_compat"
+base_url = "http://127.0.0.1:10100/v1"
+api_key_env = ""
+timeout_s = 240
+
+# 사용자 전환 요청 때 실제 주소·인증 환경변수 이름·필요한 모델 ID 매핑을 지정한다.
+# 비어 있는 test 경로는 선택할 수 없다. 인증 값은 이 파일에 넣지 않는다.
+[text_pipeline.routes.test]
+adapter = "openai_compat"
+base_url = ""
+api_key_env = ""
+timeout_s = 240
+# [text_pipeline.routes.test.models]
+# "google-antigravity/gemini-3.8-flash" = "<테스트 서버 모델 ID>"
+# "google-antigravity/gemini-4-argon" = "<테스트 서버 모델 ID>"
+# "gpt-6.1-sol" = "<테스트 서버 모델 ID>"
+# "gpt-6.1-terra" = "<테스트 서버 모델 ID>"
+
+# D-0079: 공식 API 직접 연결. GPT는 OpenAI, Gemini는 Gemini API의 OpenAI 호환 주소로 보낸다.
+# 주소·환경변수 기본값은 코드에 있다(OPENAI_API_KEY, GEMINI_API_KEY). 키 값은 루트 .env에 넣는다.
+# 전환: uv run --locked cfp models select --route api   (되돌리기: --route opencodex)
+[text_pipeline.routes.api]
+timeout_s = 240
+# D-0084: 공식 API는 스트리밍으로 받는다. Gemini는 생각 요약을 함께 받아 긴 생각 중에도 연결을 유지한다.
+stream = true
+# 계열별 주소·환경변수 이름을 바꿀 때만 쓴다.
+# [text_pipeline.routes.api.families.openai]
+# base_url = "https://api.openai.com/v1"
+# api_key_env = "OPENAI_API_KEY"
+# [text_pipeline.routes.api.families.gemini]
+# base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+# api_key_env = "GEMINI_API_KEY"
+# 공식 모델 ID가 기본 규칙(google-antigravity/ 접두사 제거)과 다를 때만 쓴다.
+# [text_pipeline.routes.api.models]
+# "google-antigravity/gemini-4-argon" = "gemini-4-argon"
+
+# D-0079: 호출 비용은 resources/price-table-v1.json(적용 기간·출처 포함)으로 계산한다.
+# 표에 없는 단가나 계약 단가를 쓸 때만 덮어쓴다. 덮어쓴 단가는 원장에 config_override로 남는다.
+# [pricing.models."gpt-6.1-sol"]
+# input_per_million = 2.0
+# cached_input_per_million = 0.10
+# output_per_million = 10.0
+
+# D-0077: QLoRA 학습·선별·평가. 머스크 N3b에서 결과를 낸 설정이 기본값이다(providers/training/gemma_qlora.py).
+# ssh_host를 비워 두면 Vast에서 GPU를 한 대 빌리고 끝나면 지운다(lease.json). API 키는 vastai CLI 설정에서 읽는다.
+[stages.s10t]
+providers = ["gemma_qlora"]      # vertex_gemini도 쓰려면 목록에 더한다
+budget_usd = 6.0                 # 학습+선별 한 번의 상한. 계획(dry run)에서 예상 비용을 먼저 본다
+poll_s = 60                      # train drive가 원격 상태를 확인하는 간격(초)
+selection_judge = true           # 체크포인트 짝 판정(judge 모델, 정순·역순)
+selection_judge_items = 8
+
+[stages.s10t.gemma_qlora]
+vastai_bin = "vastai"            # 예: ~/Documents/Codex/2026-10-14/gem/work/client-env/bin/vastai
+ssh_public_key = "~/.ssh/id_ed25519.pub"
+ssh_private_key = "~/.ssh/id_ed25519"
+gpu_names = ["L40S", "RTX PRO 5000"]
+max_dph = 0.9
+# epochs = 2
+# checkpoint_epochs = [0.5, 1, 1.5, 2]
+# screen_single = 24             # QLoRA 품질 운영 규격 개발 비교: 단발 24 + 6턴 2장면 = 36출력/조건
+# screen_multi = 2
+# screen_include_base = true     # 같은 짧은 프롬프트의 기반 모델(학습 없이도 되는지)
+
+[stages.s10]
+untrained = "ask"
+inference = "vast"               # SHORT_GEMMA_SFT 답을 받을 때 GPU를 빌려 어댑터 서버를 띄운다
+gpu_seconds_per_turn = 10
+gpu_budget_usd = 5.0

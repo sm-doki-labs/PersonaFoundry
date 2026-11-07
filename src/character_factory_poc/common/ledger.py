@@ -49,11 +49,33 @@ class Ledger:
         est_cost_usd: float | None = None,
         images: int = 0,
         seconds: float = 0.0,
+        text_binding: dict | None = None,
+        cached_input_tokens: int | None = None,
+        cache_write_tokens: int | None = None,
+        reasoning_tokens: int | None = None,
+        finish_reason: str | None = None,
+        usage_source: str | None = None,
+        price: dict | None = None,
+        billing: dict | None = None,
+        error_status: int | None = None,
     ) -> str:
+        """호출 한 건을 덧붙인다. 비용 기록 필드(명세 §24.5)는 값이 있을 때만 쓴다."""
         call_id = uuid.uuid4().hex[:12]
+        extra = {
+            "cachedInputTokens": cached_input_tokens,
+            "cacheWriteTokens": cache_write_tokens,
+            "reasoningTokens": reasoning_tokens,
+            "finishReason": finish_reason,
+            "usageSource": usage_source,
+            "price": price,
+            "billing": billing,
+            "errorStatus": error_status,
+        }
         _append(
             self.calls_path,
             {
+                **({"textBinding": text_binding} if text_binding is not None else {}),
+                **{k: v for k, v in extra.items() if v is not None},
                 "callId": call_id,
                 "at": _now(),
                 "stage": stage,
@@ -86,20 +108,35 @@ class Ledger:
         return [json.loads(ln) for ln in self.human_path.read_text("utf-8").splitlines() if ln]
 
     def report(self) -> dict[str, Any]:
+        from character_factory_poc.common.cost_report import counts_as_unpriced
+
         calls = self.calls()
         by_stage: dict[str, dict[str, Any]] = {}
         for c in calls:
             s = by_stage.setdefault(
-                c["stage"], {"calls": 0, "inputTokens": 0, "outputTokens": 0, "estCostUsd": 0.0}
+                c["stage"],
+                {
+                    "calls": 0,
+                    "inputTokens": 0,
+                    "outputTokens": 0,
+                    "estCostUsd": 0.0,
+                    "unpricedCalls": 0,
+                },
             )
             s["calls"] += 1
             s["inputTokens"] += c.get("inputTokens") or 0
             s["outputTokens"] += c.get("outputTokens") or 0
-            s["estCostUsd"] += c.get("estCostUsd") or 0.0
+            cost = c.get("estCostUsd")
+            if cost is not None:
+                s["estCostUsd"] += cost
+            elif counts_as_unpriced(c):
+                # 비용 미확인 호출은 0으로 더하지 않고 따로 센다(FR-67).
+                s["unpricedCalls"] += 1
         human = self.human()
         gates = sorted({h["gate"] for h in human})
         return {
             "totalCalls": len(calls),
+            "unpricedCalls": sum(s["unpricedCalls"] for s in by_stage.values()),
             "byStage": by_stage,
             "humanMinutes": sum(h["minutes"] for h in human),
             "humanByGate": {g: sum(h["minutes"] for h in human if h["gate"] == g) for g in gates},

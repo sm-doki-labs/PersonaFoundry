@@ -36,14 +36,15 @@ from character_factory_poc.contracts.dataset import (
     DataQa,
     DataSample,
     Message,
+    TurnRule,
 )
 from character_factory_poc.contracts.persona import PromptPair, TraitSheet
 from character_factory_poc.pipeline.agent import AgentSpec, run_agent
 from character_factory_poc.pipeline.context import Context
-from character_factory_poc.stages.s9_data import checks, page
+from character_factory_poc.stages.s9_data import checks, deck, page
 from character_factory_poc.stages.s9_data import handoff as handoff_mod
 from character_factory_poc.stages.s9_data import plan as plan_mod
-from character_factory_poc.stages.s9_data.plan import CLUSTERS, S9Config
+from character_factory_poc.stages.s9_data.plan import S9Config
 from character_factory_poc.stages.s9_data.split import FILE_NAME as SPLIT_FILE_NAMES
 
 WRITER_CONTRACT = "data-writer-output-v1"
@@ -55,6 +56,12 @@ class WrittenConversation(Strict):
     scene: str
     sourceId: str = ""
     messages: list[Message] = Field(min_length=2)
+    topicShiftAt: list[int] = Field(
+        default_factory=list, description="긴 대화: 화제가 바뀌는 user 메시지 위치(0부터)"
+    )
+    lateTriggerAt: list[int] = Field(
+        default_factory=list, description="긴 대화: 후반 계기 상황이 시작되는 user 메시지 위치"
+    )
 
 
 class WriterOutput(Strict):
@@ -109,6 +116,23 @@ class WriteSession:
     cfg: S9Config
     examples: list[dict[str, Any]] = field(default_factory=list)
     writer_model: str = ""
+    turn_rule: TurnRule | None = None
+
+
+def turn_rule_input(rule: TurnRule) -> dict[str, Any]:
+    """작성 모델에 넘기는 턴 조건. 출처 문자열은 계획에만 두고 작성 입력에는 넣지 않는다."""
+    return {
+        "minAssistantTurns": rule.minAssistantTurns,
+        "maxAssistantTurns": rule.maxAssistantTurns,
+        "minTopicShifts": rule.minTopicShifts,
+        "minLateTriggers": rule.minLateTriggers,
+        "lateTriggerFromShare": rule.lateTriggerFrom,
+        "description": rule.description,
+        "markers": (
+            "topicShiftAt에 화제가 바뀌는 user 메시지 위치를, lateTriggerAt에 후반 계기 상황이 "
+            "시작되는 user 메시지 위치를 0부터 센 정수로 적는다"
+        ),
+    }
 
 
 def _write_json(path: Path, obj: Any) -> None:
@@ -174,7 +198,7 @@ def make_slots(
 def batch_inputs(
     session: WriteSession, slots: list[Slot], ids: list[str], notes: list[str]
 ) -> dict[str, Any]:
-    return {
+    out: dict[str, Any] = {
         "system": session.system,
         "handoff": dump(session.handoff),
         "batch": {
@@ -192,6 +216,9 @@ def batch_inputs(
         "examples": session.examples,
         "reviewNotes": [n for n in notes if n],
     }
+    if session.turn_rule is not None:
+        out["batch"]["turnRule"] = turn_rule_input(session.turn_rule)
+    return out
 
 
 def _specs(session: WriteSession, slots: list[Slot]) -> list[checks.ConvSpec]:
@@ -206,6 +233,7 @@ def _specs(session: WriteSession, slots: list[Slot]) -> list[checks.ConvSpec]:
             source_facts=session.cfg.source_facts,
             max_length_tokens=session.cfg.max_length_tokens,
             chars_per_token=session.cfg.chars_per_token,
+            turn_rule=session.turn_rule,
         )
         for s in slots
     ]
@@ -247,6 +275,8 @@ def assemble(
             },
         )
         blocking = checks.evaluate(conv, specs[i])
+        if session.turn_rule is not None:
+            blocking["long_structure"] = not checks.structure_problems(item, session.turn_rule)
         warnings = (
             [
                 "답변/사용자 길이 비율이 2를 넘는다",
@@ -272,6 +302,8 @@ def write_batch(
     session: WriteSession, slots: list[Slot], ids: list[str], notes: list[str] | None = None
 ) -> list[Conversation]:
     """한 배치를 쓴다. 차단 검사 실패는 같은 입력으로 다시 쓰고, 첫 성공을 보존한다."""
+    if deck.enabled(session.ctx):
+        return deck.write_batch(session, slots, ids, notes or [""] * len(slots))
     budget = session.ctx.budget()
     model = session.ctx.text_model(session.cid, budget)
     inputs = batch_inputs(session, slots, ids, notes or [""] * len(slots))
@@ -402,7 +434,15 @@ def cluster_qa(rev_dir: Path, cluster: str) -> DataQa | None:
 
 
 def reviews(rev_dir: Path) -> dict[str, DataQa]:
-    return {c: qa for c in CLUSTERS if (qa := cluster_qa(rev_dir, c)) is not None}
+    ids = plan_mod.plan_cluster_ids(rev_dir)
+    return {c: qa for c in ids if (qa := cluster_qa(rev_dir, c)) is not None}
+
+
+def plan_turn_rule(plan: DataPlan, cluster: str) -> TurnRule | None:
+    for c in plan.clusters:
+        if c.clusterId == cluster and c.policy is not None:
+            return c.policy.turnRule
+    return None
 
 
 def requested_changes(rev_dir: Path) -> dict[str, str]:
@@ -489,7 +529,8 @@ def _sample_cluster(
         handoff=handoff,  # type: ignore[arg-type]
         cfg=cfg,
         examples=[],
-        writer_model=ctx.config.provider("text").model or ctx.config.provider("text").adapter,
+        writer_model=deck.writer_model(ctx),
+        turn_rule=plan_turn_rule(plan, cluster),
     )
     convs = write_conversations(session, ids=ids, slots=slots, rev_dir=rev_dir)
     write_once_json(
@@ -548,9 +589,20 @@ def _close_gate(ctx: Context, cid: str, rev: str, rev_dir: Path, plan: DataPlan)
 
 def plan_calls(ctx: Context, cid: str, cfg: S9Config | None = None) -> list[CallPlan]:
     cfg = cfg or plan_mod.s9_config(ctx)
-    clusters = len(CLUSTERS)
+    clusters = len(cfg.cluster_ids)
+    if deck.enabled(ctx):
+        batches = clusters * -(-cfg.sample_size // cfg.batch_size)
+        return [
+            CallPlan(
+                "s9s",
+                "모델 덱 상황 인계안 (형식 재시도 최대 2회 포함)",
+                clusters * (1 + deck.FORMAT_RETRIES),
+                est_cost_usd=None,
+            ),
+            *deck.batch_plan("s9s", batches),
+        ]
     handoffs = handoff_mod.plan_calls(clusters, cfg.max_retries)
-    batches = sum(-(-cfg.sample_size // cfg.batch_size) for _ in CLUSTERS)
+    batches = sum(-(-cfg.sample_size // cfg.batch_size) for _ in cfg.cluster_ids)
     writer = CallPlan(
         "s9s",
         f"클러스터별 샘플 {cfg.sample_size}개 × {clusters} (배치 {cfg.batch_size}, "
@@ -571,14 +623,16 @@ def run_samples(ctx: Context, cid: str) -> Path:
     data_root = plan_mod.data_dir(ctx, cid)
 
     if state.gate("G7a").status == "APPROVED" and st.currentRev:
+        deck.pin(ctx, data_root / st.currentRev)
         return data_root / st.currentRev
     if st.status == "AWAITING_HUMAN":
         rev = st.currentRev
         if not rev:
             raise FactoryError(f"{cid}: s9s가 대기 상태인데 revision이 없다")
         rev_dir = data_root / rev
+        deck.pin(ctx, rev_dir)
         plan = plan_mod.load_plan(rev_dir / "plan.json")
-        if len(reviews(rev_dir)) == len(CLUSTERS):
+        if len(reviews(rev_dir)) == len(plan.clusters):
             return _close_gate(ctx, cid, rev, rev_dir, plan)
         raise FactoryError(
             f"{cid}: G7a 검토가 진행 중이다. 남은 클러스터를 판정하거나 REQUEST_CHANGES를 기록한다"
@@ -599,6 +653,9 @@ def run_samples(ctx: Context, cid: str) -> Path:
     if not (rev_dir / "plan.json").exists():
         plan = plan_mod.build_plan(ctx, cid)
         write_once_json(rev_dir / "plan.json", dump(plan))
+        deck.pin(ctx, rev_dir, create=True)
+    else:
+        deck.pin(ctx, rev_dir)
     plan = plan_mod.load_plan(rev_dir / "plan.json")
     plan_sha = sha256_file(rev_dir / "plan.json")
 

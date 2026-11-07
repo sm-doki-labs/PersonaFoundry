@@ -3,6 +3,10 @@
 G7a에서 채택한 샘플은 그대로 두고, 나머지는 같은 인계안과 채택 샘플을 예시로 쓴다. 차단 검사에
 걸린 대화는 같은 입력으로 다시 쓰고, 데이터셋 전체 반복 검사에서 걸린 대화는 메모를 붙여
 한 번 더 쓴다. 끝까지 실패하면 G7을 열지 않고 CHECK_FAILED로 멈춘다.
+
+창작 인물 정책(D-0078) 계획이면 long 턴 범위 위반도 재작성 대상이고, 분할 뒤 보호 클러스터
+생존을 확인해 모자라면 CHECK_FAILED로 멈춘다. 턴 분포·클러스터 비율은 보고서와 G7 페이지에
+관측값·목표·판정으로 남기고 경고로만 센다(`policy.py`).
 """
 
 from __future__ import annotations
@@ -18,10 +22,11 @@ from character_factory_poc.common.schema import dump, validate
 from character_factory_poc.common.store import read_json, write_manifest, write_once_json
 from character_factory_poc.contracts.dataset import Conversation, DataQa, DatasetRev
 from character_factory_poc.pipeline.context import Context
-from character_factory_poc.stages.s9_data import checks, page, split
+from character_factory_poc.stages.s9_data import checks, deck, page, split
 from character_factory_poc.stages.s9_data import plan as plan_mod
+from character_factory_poc.stages.s9_data import policy as policy_mod
 from character_factory_poc.stages.s9_data import samples as writer
-from character_factory_poc.stages.s9_data.plan import CLUSTERS, S9Config
+from character_factory_poc.stages.s9_data.plan import S9Config
 
 
 def _load_index(rev_dir: Path) -> list[dict[str, Any]]:
@@ -65,6 +70,7 @@ def _generate(
     notes: list[str],
     sources: list[dict[str, Any]],
     round_no: int,
+    turn_rule=None,
 ) -> list[Conversation]:
     to_make = need - len(kept)
     if to_make <= 0:
@@ -83,7 +89,8 @@ def _generate(
         handoff=handoff_model,  # type: ignore[arg-type]
         cfg=cfg,
         examples=_examples(kept),
-        writer_model=ctx.config.provider("text").model or ctx.config.provider("text").adapter,
+        writer_model=deck.writer_model(ctx),
+        turn_rule=turn_rule,
     )
     batch_notes = (notes + [""] * to_make)[:to_make]
     return writer.write_conversations(
@@ -96,7 +103,9 @@ def plan_calls(ctx: Context, cid: str, cfg: S9Config | None = None) -> list[Call
     plan = _plan_or_default(ctx, cid)
     need = split.needed(plan, cfg)
     total = sum(need.values())
-    batches = sum(-(-need[c] // cfg.batch_size) for c in CLUSTERS)
+    batches = sum(-(-need[c] // cfg.batch_size) for c in need)
+    if deck.enabled(ctx):
+        return deck.batch_plan("s9", batches)
     return [
         CallPlan(
             "s9",
@@ -123,10 +132,12 @@ def run_build(ctx: Context, cid: str) -> Path:
     sample_dir = data_root / str(gate_a.rev)
     if not (sample_dir / "plan.json").exists():
         raise FactoryError(f"{cid}: G7a revision의 plan.json이 없다({sample_dir})")
+    deck.pin(ctx, sample_dir)
     plan = plan_mod.load_plan(sample_dir / "plan.json")
     plan_sha = sha256_file(sample_dir / "plan.json")
     qa = writer.reviews(sample_dir)
-    if len(qa) < len(CLUSTERS):
+    cluster_ids = [c.clusterId for c in plan.clusters]
+    if len(qa) < len(cluster_ids):
         raise FactoryError(f"{cid}: G7a에서 모든 클러스터를 승인해야 한다(기록 {sorted(qa)})")
     st = state.stage("s9")
     if st.status == "AWAITING_HUMAN" and st.currentRev:
@@ -157,7 +168,12 @@ def run_build(ctx: Context, cid: str) -> Path:
         flagged = _g7_changes(carry_from)
         carried = [c for c in _carried(ctx, cid, rev_dir) if c.conversationId not in flagged]
     else:
-        carried = [c for c in _adopted(sample_dir, qa) if c.clusterId in CLUSTERS]
+        carried = [c for c in _adopted(sample_dir, qa, cluster_ids) if c.clusterId in cluster_ids]
+    anchors = {
+        c.clusterId: sorted(x.conversationId for x in carried if x.clusterId == c.clusterId)
+        for c in plan.clusters
+        if c.policy is not None and c.policy.protected
+    }
 
     sns = writer.load_sns_sources(cfg.sns_path, cfg.sns_limit)
     pair = _pair(ctx, cid)
@@ -186,16 +202,21 @@ def run_build(ctx: Context, cid: str) -> Path:
                     notes=notes,
                     sources=sources,
                     round_no=0,
+                    turn_rule=writer.plan_turn_rule(plan, cluster),
                 )
             )
     except CheckFailed as e:
         state.transition("s9", "CHECK_FAILED", rev=rev, error=str(e)[:500])
         raise
 
-    report = _check(ctx, convs, cfg)
+    report = _check(ctx, convs, cfg, plan)
     round_no = 1
     try:
-        while report.blocking and round_no <= min(2, max(1, cfg.max_retries)):
+        while (
+            not deck.enabled(ctx)
+            and report.blocking
+            and round_no <= min(2, max(1, cfg.max_retries))
+        ):
             flagged = set(report.blocking_ids)
             by_id = {c.conversationId: c for c in convs}
             kept = [c for c in convs if c.conversationId not in flagged]
@@ -228,9 +249,10 @@ def run_build(ctx: Context, cid: str) -> Path:
                         notes=notes,
                         sources=sns if "SNS_REWRITE" in cfg.materials[cluster] else [],
                         round_no=round_no,
+                        turn_rule=writer.plan_turn_rule(plan, cluster),
                     )
                 )
-            report = _check(ctx, convs, cfg)
+            report = _check(ctx, convs, cfg, plan)
             round_no += 1
     except CheckFailed as e:
         state.transition("s9", "CHECK_FAILED", rev=rev, error=str(e)[:500])
@@ -246,6 +268,13 @@ def run_build(ctx: Context, cid: str) -> Path:
         for c in convs
     }
     result = split.split(convs, plan, cfg, approx)
+    preport = policy_mod.evaluate(plan, convs, result.splits["train"], cfg, anchors)
+    if preport.blocking:
+        report.blocking.extend(preport.blocking)
+        report.metrics["blocking"] = len(report.blocking)
+        _write_report(rev_dir, report, cfg, extra=preport.body())
+        state.transition("s9", "CHECK_FAILED", rev=rev, error="; ".join(report.problems())[:500])
+        raise CheckFailed("s9", report.problems())
     files = split.write_splits(rev_dir, result)
     counts = split.cluster_counts(convs)
     dataset = DatasetRev(
@@ -257,12 +286,17 @@ def run_build(ctx: Context, cid: str) -> Path:
         clusterCounts={k: v for k, v in counts.items()},
         files=files,
         blockingFailures=0,
-        warnings=len(report.warnings) + len(result.warnings),
+        warnings=len(report.warnings) + len(result.warnings) + len(preport.warnings),
         digest=result.digest,
     )
     write_once_json(rev_dir / "dataset.json", dump(dataset))
-    _write_report(rev_dir, report, cfg, extra={"warnings": result.warnings, "approx": approx})
-    _write_page(cid, rev, rev_dir, dataset, report, convs)
+    _write_report(
+        rev_dir,
+        report,
+        cfg,
+        extra={"warnings": result.warnings, "approx": approx, **preport.body()},
+    )
+    _write_page(cid, rev, rev_dir, dataset, report, convs, preport)
     write_manifest(rev_dir)
     state.transition("s9", "AWAITING_HUMAN", rev=rev)
     state.set_gate("G7", "AWAITING_HUMAN", rev, None)
@@ -274,9 +308,11 @@ def _pair(ctx: Context, cid: str):
     return pair
 
 
-def _adopted(sample_dir: Path, qa: dict[str, DataQa]) -> list[Conversation]:
+def _adopted(
+    sample_dir: Path, qa: dict[str, DataQa], cluster_ids: list[str] | tuple[str, ...]
+) -> list[Conversation]:
     out: list[Conversation] = []
-    for cluster in CLUSTERS:
+    for cluster in cluster_ids:
         record = qa.get(cluster)
         if record is None:
             continue
@@ -297,13 +333,18 @@ def _cluster_notes(record: DataQa | None, sample_dir: Path, cluster: str) -> lis
     return notes
 
 
-def _check(ctx: Context, convs: list[Conversation], cfg: S9Config) -> checks.DatasetReport:
-    return checks.dataset_report(
+def _check(ctx: Context, convs: list[Conversation], cfg: S9Config, plan) -> checks.DatasetReport:
+    report = checks.dataset_report(
         convs,
         phrase_ngram=cfg.phrase_ngram,
         phrase_max_conversations=cfg.phrase_max_conversations,
         bubble_max_conversations=cfg.bubble_max_conversations,
     )
+    items = policy_mod.conversation_items(plan, convs)
+    if items:
+        report.blocking.extend(items)
+        report.metrics["blocking"] = len(report.blocking)
+    return report
 
 
 def _write_report(
@@ -336,6 +377,7 @@ def _write_page(
     dataset: DatasetRev,
     report: checks.DatasetReport,
     convs: list[Conversation],
+    preport: policy_mod.PolicyReport | None = None,
 ) -> None:
     import secrets
 
@@ -357,6 +399,11 @@ def _write_page(
         "note": "토큰 수는 글자 수 근사다(supervisedTokens=None)",
     }
     html = page.render_g7_page(
-        subject_id=cid, dataset=dataset, report=body, counts=counts, samples=picked
+        subject_id=cid,
+        dataset=dataset,
+        report=body,
+        counts=counts,
+        samples=picked,
+        policy_view=preport.body() if preport is not None else None,
     )
     (rev_dir / "gate-G7.html").write_text(html, encoding="utf-8")

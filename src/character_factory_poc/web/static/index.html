@@ -21,6 +21,8 @@ img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:10px;display:bl
 .t{font-size:19px;font-weight:700;letter-spacing:-.02em;margin-top:2px}
 .d{font-size:13.5px;color:#9a9aa3;line-height:1.55;margin-top:6px}
 .note{margin-top:32px;font-size:13px;color:#6b6b73;text-align:center;line-height:1.6}
+.authoring-link{display:inline-block;padding:10px 4px;margin-top:20px;min-height:44px;background:none;border:0;border-radius:4px;font-size:13px;color:#b9bec7;text-decoration:underline;text-underline-offset:4px}
+.authoring-link:hover{transform:none;box-shadow:none}
 code{font-size:12px;color:#b9bec7}
 @media (max-width:1100px){.grid{grid-template-columns:1fr;max-width:520px}}
 </style>
@@ -33,6 +35,7 @@ code{font-size:12px;color:#b9bec7}
   <a href="d-ops.html"><img src="previews/d.jpg" alt="캐릭터 진행 현황 미리보기"><div class="meta"><div class="k">운영</div><div class="t">캐릭터 · 진행 현황</div><div class="d">runs의 실제 캐릭터를 단계·관문 상태와 함께 봅니다. 대기 관문, 진행률, 작업 실행이 여기 모입니다.</div></div></a>
   <a href="c-glass.html"><img src="previews/c.jpg" alt="작업실 미리보기"><div class="meta"><div class="k">작업실</div><div class="t">작업실</div><div class="d">실제 캐릭터의 갈래별 진행과 대기 관문을 봅니다. 관문 칩을 누르면 얼굴 고르기, 기획 선택, 장면·영상 검토, 프롬프트 승인 화면이 열립니다.</div></div></a>
 </div>
+<a class="authoring-link" href="trait-authoring.html">캐릭터 기본 설정 · 추가 특질 선택</a>
 <p class="note">로컬 서버입니다. 프로젝트 목록·단계 진행·대기 관문은 <code>/api/projects</code>에서 옵니다.</p>
 <script src="shared/api.js"></script>
 <script>

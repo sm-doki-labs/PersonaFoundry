@@ -11,4 +11,3 @@
 출력은 JSON 객체 하나만 쓴다.
 
 {"correct": true | false, "reason": "..."}
-

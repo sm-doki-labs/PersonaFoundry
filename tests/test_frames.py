@@ -9,8 +9,6 @@ from pathlib import Path
 import pytest
 
 import character_factory_poc.contracts  # noqa: F401
-from character_factory_poc.common.names import find_name_leaks
-from character_factory_poc.common.schema import validate
 from character_factory_poc.pipeline.approve import approve_gate
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.providers.fake import FakeTextModel
@@ -18,10 +16,10 @@ from character_factory_poc.providers.fake_image import FakeImageModel
 from character_factory_poc.stages.s1_reference.ranking import all_names, load_ranking
 from character_factory_poc.stages.s1_reference.run import run_s1
 from character_factory_poc.stages.s2_hero.run import run_s2
-from character_factory_poc.stages.s3_plan.check import check_plan_draft
-from character_factory_poc.stages.s3_plan.draft import new_character, run_s3_draft
+from character_factory_poc.stages.s3_plan.common import new_character
+from tests.support.legacy import approve_v1_plan
 from tests.support.synthetic import RANKING, scout_features
-from tests.test_agentic import BRIEF, CATALOG, _plan_from_preset
+from tests.test_agentic import CATALOG, _plan_from_preset
 
 NAMES = all_names(load_ranking(RANKING))
 LIGHT = {
@@ -87,41 +85,21 @@ def _through_s2(ctx: Context) -> str:
     return cid
 
 
+def frames_plan(cid: str, rev: str = "pr1", appearance_rev: str | None = "ar1") -> dict:
+    """과거 외모 연결 v1 기획서(챕터 조명·구도 포함). 신규 기획은 v2다(D-0080)."""
+    plan = _plan_from_preset(cid, rev)
+    plan["appearanceRev"] = appearance_rev
+    plan["chapters"] = [
+        dict(c, lighting=LIGHT[c["chapterId"]], composition=COMPO[c["chapterId"]])
+        for c in plan["chapters"]
+    ]
+    return plan
+
+
 def _through_g3(ctx: Context) -> str:
     cid = _through_s2(ctx)
-    run_s3_draft(ctx, cid, BRIEF)
-    approve_gate(ctx, cid, "G3", {"decision": "APPROVE", "reviewer": "u"})
+    approve_v1_plan(ctx, cid, frames_plan(cid))
     return cid
-
-
-def test_s3_draft_receives_appearance_and_records_rev(ctx):
-    cid = _through_s2(ctx)
-    out = run_s3_draft(ctx, cid, BRIEF)
-    plan = json.loads((out / "plan.json").read_text("utf-8"))
-    assert plan["appearanceRev"] == "ar1"
-    app = json.loads((out / "workspace" / "inputs" / "appearance.json").read_text("utf-8"))
-    assert app["appearanceRev"] == "ar1" and "청순" in app["descriptionKo"]
-    assert "성격" in app["use"]
-    assert find_name_leaks(json.dumps(app, ensure_ascii=False), NAMES) == []
-
-
-def test_s3_without_g2_has_no_appearance(ctx):
-    cid = new_character(ctx, "persona")
-    out = run_s3_draft(ctx, cid, BRIEF)
-    assert not (out / "workspace" / "inputs" / "appearance.json").exists()
-    assert json.loads((out / "plan.json").read_text("utf-8"))["appearanceRev"] is None
-
-
-def test_s3_check_with_appearance_requires_rev_and_frame_lines():
-    p = _plan_from_preset("cf-20260101-x", "pr1")
-    p["appearanceRev"] = "ar9"
-    problems = check_plan_draft(BRIEF, "ar1")(validate("character-plan-v1", p))
-    assert any("appearanceRev" in x for x in problems)
-    assert any("ch1.lighting" in x for x in problems)
-    assert any("ch3.composition" in x for x in problems)
-    assert not any(
-        "lighting" in x for x in check_plan_draft(BRIEF)(validate("character-plan-v1", p))
-    )
 
 
 def _png(w: int, h: int) -> bytes:

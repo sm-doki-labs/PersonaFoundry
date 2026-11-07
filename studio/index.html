@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>캐릭터 공장 · 메인 화면 시안 3종</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+*{box-sizing:border-box}
+body{margin:0;min-height:100dvh;background:#16181d;color:#ededf0;font-family:"Pretendard Variable",Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 32px}
+h1{margin:0;font-size:28px;letter-spacing:-.02em}
+p.lead{margin:8px 0 36px;color:#8b8b94;font-size:15px}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,420px));gap:24px}
+.grid.pick{grid-template-columns:repeat(2,minmax(0,560px));margin-bottom:40px}
+.sub{align-self:flex-start;max-width:1308px;width:100%;margin:0 auto 14px;font-size:13px;font-weight:700;color:#8b8b94}
+a{color:inherit;text-decoration:none;display:flex;flex-direction:column;gap:14px;padding:12px 12px 18px;border-radius:18px;background:#16161a;border:1px solid rgba(255,255,255,.07);transition:transform 260ms cubic-bezier(.2,.8,.2,1),border-color 200ms,box-shadow 260ms}
+a:hover{transform:translateY(-4px);border-color:rgba(255,255,255,.2);box-shadow:0 30px 60px -30px rgba(0,0,0,.9)}
+a:focus-visible{outline:2px solid #b9bec7;outline-offset:3px}
+img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:10px;display:block}
+.k{font-size:12px;font-weight:700;color:#b9bec7}
+.t{font-size:19px;font-weight:700;letter-spacing:-.02em;margin-top:2px}
+.d{font-size:13.5px;color:#9a9aa3;line-height:1.55;margin-top:6px}
+.meta{padding:0 6px}
+.note{margin-top:32px;font-size:13px;color:#6b6b73}
+@media (max-width:1100px){.grid{grid-template-columns:1fr;max-width:520px}}
+</style>
+</head>
+<body>
+<h1>캐릭터 공장 · 리퀴드 글래스</h1>
+<p class="lead">작업실은 사람이 고르는 화면, 운영 현황은 팀들이 동시에 일하는 모습을 보는 화면이에요.</p>
+<div class="grid pick">
+  <a href="d-ops.html"><img src="previews/d.jpg" alt="실행 목록과 운영 현황 미리보기"><div class="meta"><div class="k">새 화면</div><div class="t">캐릭터 · 진행 현황</div><div class="d">모든 작업을 캐릭터 단위로 묶어요. 캐릭터 목록에서 기획 중·제작 중·출시 준비·출시됨을 함께 보고, 캐릭터 페이지에서 자산별 현재 승인본과 작업 요청을 관리해요.</div></div></a>
+  <a href="d-ops.html#job/seoha-new/floor"><img src="previews/floor.png" alt="공장 현장 미리보기"><div class="meta"><div class="k">새 화면</div><div class="t">공장 현장</div><div class="d">진행 현황과 같은 데이터를 공장 바닥으로 보여 줘요. 팀마다 벨트가 돌고, 산출물 상자가 결재 차단기 앞에 줄을 서고, 라인 끝에서 캐릭터 포장대로 모여요.</div></div></a>
+  <a href="c-glass.html"><img src="previews/c.jpg" alt="작업실 미리보기"><div class="meta"><div class="k">선택한 스타일</div><div class="t">작업실</div><div class="d">결재함의 한 건을 열었을 때 보는 화면이에요. 후보를 눌러 고르고, 고른 결과가 캐릭터 카드에 모여요.</div></div></a>
+</div>
+<div class="sub">처음 비교한 스타일 시안</div>
+<div class="grid">
+  <a href="a-studio.html"><img src="previews/a.jpg" alt="A 시안 미리보기"><div class="meta"><div class="k">A · 추천</div><div class="t">시네마틱 다크 스튜디오</div><div class="d">어두운 작업실에 호박색 포인트. 후보는 게임 캐릭터 선택창처럼 고르고, 고른 사진이 필름 띠 모양의 캐릭터 카드로 날아가 꽂혀요.</div></div></a>
+  <a href="b-editorial.html"><img src="previews/b.jpg" alt="B 시안 미리보기"><div class="meta"><div class="k">B</div><div class="t">에디토리얼 매거진 + 벤토</div><div class="d">종이 질감과 명조체. 고르면 빨간 펜으로 동그라미가 쳐지고, 끝나면 캐릭터가 잡지 표지로 나와요. Persona Studio와 느낌이 이어져요.</div></div></a>
+  <a href="c-glass.html"><img src="previews/c.jpg" alt="C 시안 미리보기"><div class="meta"><div class="k">C</div><div class="t">리퀴드 글래스</div><div class="d">반투명 유리 패널. 고른 사진의 색이 화면 전체 배경으로 번져서, 고를 때마다 분위기가 바뀌어요.</div></div></a>
+</div>
+<p class="note">공통 조작 · 카드 클릭 또는 숫자 키 1~3으로 고르기 · Enter로 확정 · 알림의 되돌리기로 한 단계 취소</p>
+</body>
+</html>
+

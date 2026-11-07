@@ -1,0 +1,290 @@
+{
+  "frozen": false,
+  "note": "개발용 초안이다. 행동 기대값과 사실 분기는 형성 전에 독립 검토자가 봉인한다. 보류 평가에는 재사용하지 않는다.",
+  "scenes": [
+    {
+      "expectedChoices": {},
+      "id": "daily",
+      "turns": [
+        {
+          "branches": [],
+          "user": "오늘 뭐 하다 쉬는 중이야?"
+        },
+        {
+          "branches": [],
+          "user": "그건 어떻게 시작했어?"
+        },
+        {
+          "branches": [],
+          "user": "나는 오늘 별일 없이 보냈어."
+        },
+        {
+          "branches": [],
+          "user": "네가 요즘 자주 하는 작은 습관은 뭐야?"
+        },
+        {
+          "branches": [],
+          "user": "그 얘기 좀 더 듣고 싶다."
+        },
+        {
+          "branches": [],
+          "user": "나도 다음에 한번 해볼까."
+        }
+      ]
+    },
+    {
+      "expectedChoices": {},
+      "id": "playful",
+      "turns": [
+        {
+          "branches": [],
+          "user": "별것 아닌데 오늘 내가 좀 웃겼어."
+        },
+        {
+          "branches": [],
+          "user": "커피 주문하다가 다른 메뉴 이름을 말했거든."
+        },
+        {
+          "branches": [],
+          "user": "직원이 웃어서 나도 웃었어."
+        },
+        {
+          "branches": [],
+          "user": "너도 그런 실수 해?"
+        },
+        {
+          "branches": [],
+          "user": "실수하고 나면 오래 생각나는 편이야?"
+        },
+        {
+          "branches": [],
+          "user": "다음엔 그냥 웃고 넘어가려고."
+        }
+      ]
+    },
+    {
+      "expectedChoices": {},
+      "id": "listening",
+      "turns": [
+        {
+          "branches": [],
+          "user": "오늘 회사 일 때문에 기분이 좀 안 좋아."
+        },
+        {
+          "branches": [],
+          "user": "일정이 왜 촉박해졌는지는 나도 아직 몰라."
+        },
+        {
+          "branches": [],
+          "user": "지금은 누구 탓인지 정하고 싶진 않아."
+        },
+        {
+          "branches": [],
+          "user": "조언보다는 그냥 들어줬으면 좋겠어."
+        },
+        {
+          "branches": [],
+          "user": "네가 요즘 지쳤던 일도 있어?"
+        },
+        {
+          "branches": [],
+          "user": "얘기하니까 조금 낫다."
+        }
+      ]
+    },
+    {
+      "expectedChoices": {},
+      "id": "affection",
+      "turns": [
+        {
+          "branches": [],
+          "user": "너랑 이야기하면 편하더라."
+        },
+        {
+          "branches": [],
+          "user": "오늘은 그냥 그 말을 해주고 싶었어."
+        },
+        {
+          "branches": [],
+          "user": "네가 어떻게 느끼는지도 궁금하긴 해."
+        },
+        {
+          "branches": [],
+          "user": "지금 꼭 답해줄 필요는 없어."
+        },
+        {
+          "branches": [],
+          "user": "나는 네 일상 얘기 듣는 것도 좋아."
+        },
+        {
+          "branches": [],
+          "user": "조금 더 이야기할까?"
+        }
+      ]
+    },
+    {
+      "expectedChoices": {},
+      "id": "conflict",
+      "turns": [
+        {
+          "branches": [],
+          "user": "아까 내 말이 좀 불편하게 들렸어?"
+        },
+        {
+          "branches": [],
+          "user": "나는 네 반응을 내가 원하는 쪽으로 정하고 싶진 않아."
+        },
+        {
+          "branches": [],
+          "user": "서운한 부분이 있다면 듣고 싶어."
+        },
+        {
+          "branches": [],
+          "user": "내가 잘못 기억한 것도 있을 수 있어."
+        },
+        {
+          "branches": [],
+          "user": "이 대화에서 실제로 한 말부터 확인하자."
+        },
+        {
+          "branches": [],
+          "user": "이제 다른 얘기를 해도 괜찮을까?"
+        }
+      ]
+    },
+    {
+      "expectedChoices": {},
+      "id": "change",
+      "turns": [
+        {
+          "branches": [],
+          "user": "내일 잠깐 만나는 건 어때?"
+        },
+        {
+          "branches": [],
+          "user": "내 쪽에 갑자기 마감 일이 생겼어."
+        },
+        {
+          "branches": [],
+          "user": "이건 전에 말한 걸 부정하는 게 아니라 새로 생긴 일이야."
+        },
+        {
+          "branches": [],
+          "user": "그래서 다른 날로 제안하고 싶어."
+        },
+        {
+          "branches": [],
+          "user": "아직 합의하지 않았다면 천천히 정하자."
+        },
+        {
+          "branches": [],
+          "user": "일정 얘기는 여기까지 하고 다른 얘기 하자."
+        }
+      ]
+    },
+    {
+      "expectedChoices": {},
+      "id": "continuity",
+      "turns": [
+        {
+          "branches": [],
+          "user": "오늘 하루는 어땠어?"
+        },
+        {
+          "branches": [],
+          "user": "네가 요즘 좋아하는 걸 하나만 꼽으면?"
+        },
+        {
+          "branches": [],
+          "user": "그런 걸 좋아하게 된 계기가 있어?"
+        },
+        {
+          "branches": [],
+          "user": "나는 요즘 집에서 보내는 시간이 늘었어."
+        },
+        {
+          "branches": [],
+          "user": "집에 있으면 주로 뭘 해?"
+        },
+        {
+          "branches": [],
+          "user": "그건 나랑 좀 비슷하다."
+        },
+        {
+          "branches": [],
+          "user": "별일 없이 떠드는 것도 괜찮네."
+        },
+        {
+          "branches": [],
+          "user": "점심에는 뭐 먹었어?"
+        },
+        {
+          "branches": [],
+          "user": "나도 그런 메뉴 좋아해."
+        },
+        {
+          "branches": [],
+          "user": "최근에 웃긴 일이 있었어?"
+        },
+        {
+          "branches": [],
+          "user": "실수하고 웃고 넘길 수 있으면 좋겠다."
+        },
+        {
+          "branches": [],
+          "user": "누가 도와달라고 하면 바로 돕는 편이야?"
+        },
+        {
+          "branches": [],
+          "user": "지금은 조언 말고 내 얘기를 좀 들어줘."
+        },
+        {
+          "branches": [],
+          "user": "일이 많아서 피곤했어."
+        },
+        {
+          "branches": [],
+          "user": "원인은 아직 나도 잘 모르겠어."
+        },
+        {
+          "branches": [],
+          "user": "듣고 나니 너는 어떤 생각이 들어?"
+        },
+        {
+          "branches": [],
+          "user": "고마워. 이제 다른 얘기 하자."
+        },
+        {
+          "branches": [],
+          "user": "이번 주말에는 뭘 할 생각이야?"
+        },
+        {
+          "branches": [],
+          "user": "내 쪽 일정이 방금 바뀌었어."
+        },
+        {
+          "branches": [],
+          "user": "이전 말을 고치는 게 아니라 새로 생긴 상황이야."
+        },
+        {
+          "branches": [],
+          "user": "아직 정하지 않은 건 미정으로 두자."
+        },
+        {
+          "branches": [],
+          "user": "너한테 편한 대화 속도는 어느 정도야?"
+        },
+        {
+          "branches": [],
+          "user": "나는 이렇게 서로 얘기하는 게 좋다."
+        },
+        {
+          "branches": [],
+          "user": "오늘은 여기까지 이야기할까?"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": "persona-quality-scenes-v1",
+  "split": "development"
+}

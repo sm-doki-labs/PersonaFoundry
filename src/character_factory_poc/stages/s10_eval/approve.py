@@ -2,6 +2,8 @@
 
 사람 20쌍 판정과 LLM 합의 일치율을 최종 보고서에 반영하고, 채택한 조건(model_binding ref 또는
 LONG_BASE)을 gate-record와 adoption.json에 남긴다.
+보고서의 정책 결정값(decision)은 자동 초안이다. 사람 채택과 함께 기록할 뿐 채택을 막거나 바꾸지
+않는다(D-0078).
 """
 
 from __future__ import annotations
@@ -9,6 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any, Literal
+
+from pydantic import Field
 
 from character_factory_poc.common.canonical import sha256_of
 from character_factory_poc.common.errors import FactoryError
@@ -35,6 +39,9 @@ class EvalAdoption(Strict):
     llmHumanAgreement: float
     report: ArtifactRef
     recordedAt: str
+    draftDecision: str | None = Field(
+        default=None, description="보고서의 정책 결정값 초안. 사람 채택과 나란히 남긴다"
+    )
 
 
 def load_report(rev_dir: Path) -> EvalReport:
@@ -42,6 +49,20 @@ def load_report(rev_dir: Path) -> EvalReport:
     if not path.exists():
         raise FactoryError(f"평가 보고서가 없다: {path}. cfp eval report를 먼저 실행한다")
     return validate("eval-report-v2", json.loads(path.read_text("utf-8")))  # type: ignore[return-value]
+
+
+def load_improvement_tasks(char_dir: Path, report: EvalReport) -> dict[str, Any] | None:
+    """보고서가 가리키는 improvement-tasks.json. 없거나 해시가 다르면 None이다."""
+    ref = report.improvementTasksRef
+    if ref is None:
+        return None
+    path = char_dir / ref.ref
+    if not path.is_file():
+        return None
+    obj = json.loads(path.read_text("utf-8"))
+    if sha256_of(obj) != ref.sha256:
+        raise FactoryError(f"개선 과제 장부가 보고서 뒤에 바뀌었다: {ref.ref}")
+    return obj
 
 
 def load_pairs(rev_dir: Path) -> tuple[EvalPairsDoc, dict[str, Any]]:
@@ -117,14 +138,18 @@ def approve_g8(ctx: Context, cid: str, answer: dict[str, Any]) -> Path:
     arm_id = _adopted_arm(prereg, adopted)
     picks = _picks(answer, set(pairs.humanPairIds))
     agreement, matched, total = llm_human_agreement(picks, pairs_raw["pairs"])
+    tasks = load_improvement_tasks(char_dir, report)
+    recommendation = (
+        report.recommendation
+        + f" G8 사람 판정 {total}쌍 중 LLM 합의와 {matched}쌍 일치({agreement:.3f})."
+    )
+    if report.decision is not None:
+        recommendation += f" 정책 결정 초안 {report.decision}, 사람 채택 {arm_id}."
     final = report.model_copy(
         update={
             "humanPicks": picks,
             "llmHumanAgreement": agreement,
-            "recommendation": (
-                report.recommendation
-                + f" G8 사람 판정 {total}쌍 중 LLM 합의와 {matched}쌍 일치({agreement:.3f})."
-            ),
+            "recommendation": recommendation,
         }
     )
     final = validate("eval-report-v2", dump(final))  # type: ignore[assignment]
@@ -137,6 +162,7 @@ def approve_g8(ctx: Context, cid: str, answer: dict[str, Any]) -> Path:
         pairs=pairs_raw,
         final=True,
         adopted=adopted,
+        improvement_tasks=tasks,
     )
     (rev_dir / "gate-G8.html").write_text(page, encoding="utf-8")
     report_ref = ArtifactRef(
@@ -156,6 +182,7 @@ def approve_g8(ctx: Context, cid: str, answer: dict[str, Any]) -> Path:
                 llmHumanAgreement=agreement,
                 report=report_ref,
                 recordedAt=now_iso(),
+                draftDecision=report.decision,
             )
         ),
     )

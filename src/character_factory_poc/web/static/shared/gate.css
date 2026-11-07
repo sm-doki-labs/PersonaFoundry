@@ -163,3 +163,7 @@ body.gate-page{overflow:auto;min-height:100dvh}
 .gate-wrap .appbar .top-right{flex:0 0 auto}
 .gate-status{white-space:nowrap}
 @media (max-width:720px){.gate-wrap .appbar .brand small{display:none}}
+
+/* 공장 상세 창에서는 자체 탐색 대신 검수 내용과 결정을 바로 보여 준다. */
+.gate-embedded .gate-wrap .topbar{display:none}
+.gate-embedded .gate-wrap{padding:12px;grid-template-rows:auto}

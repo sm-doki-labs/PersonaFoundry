@@ -20,6 +20,34 @@ def _root(args) -> Path:
     return Path(args.root).resolve()
 
 
+def cmd_models(args) -> int:
+    from character_factory_poc.common.text_deck import deck, select
+
+    try:
+        ctx = Context.load(_root(args), execute=False)
+        if args.models_action == "select":
+            if args.profile is None and args.route is None:
+                raise ValueError("--profile 또는 --route가 필요하다")
+            select(ctx.config, profile=args.profile, route=args.route)
+            ctx = Context.load(_root(args), execute=False)
+        if not ctx.text_deck_enabled:
+            print("텍스트 모델 덱 꺼짐: 기존 providers.text/judge를 사용한다.")
+            return 0
+        print(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "bindings": [ctx.config.text_binding(s["id"]) for s in deck()["stages"]],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    except (ValueError, OSError) as exc:
+        raise FactoryError(str(exc)) from exc
+
+
 def cmd_status(args) -> int:
     ctx = Context.load(_root(args), execute=False)
     st = ctx.state(args.character_id)
@@ -43,11 +71,26 @@ def cmd_status(args) -> int:
 
 
 def cmd_plan_import(args) -> int:
-    from character_factory_poc.stages.s3_plan.importer import import_plan
+    from character_factory_poc.common.errors import NeedsInputError
+    from character_factory_poc.stages.s3_plan.importer import import_plan, plan_version
+    from character_factory_poc.stages.s3_plan.own import plan_calls as own_calls
 
-    ctx = Context.load(_root(args), execute=True)
-    plan = import_plan(ctx, args.slug, Path(args.source), args.brief)
-    print(f"기획서 고정: {plan.characterId} {plan.planRev} (G3 승인 기록: manual-plan)")
+    ctx = Context.load(_root(args), execute=args.execute, max_calls=args.max_calls)
+    try:
+        out = import_plan(ctx, args.slug, Path(args.source), args.brief)
+    except NeedsInputError as e:
+        raw = json.loads(Path(args.source).read_text("utf-8"))
+        if plan_version(raw) == "character-plan-v1":
+            print(f"{e}\n{format_plan(own_calls(ctx))}")
+            return 0
+        raise
+    if out["mode"] == "approved":
+        print(f"기획서 고정: {out['characterId']} {out['planRev']} (G3 승인 기록: manual-plan)")
+    else:
+        print(
+            f"구형 기획서를 신형 후보로 올렸다: {out['characterId']} {out['planRev']} "
+            f"(G3 대기, {out['path'] / 'gate-G3.html'})"
+        )
     return 0
 
 
@@ -63,7 +106,28 @@ def cmd_persona_traits(args) -> int:
         raw = path.read_text("utf-8")
         docs[path.stem] = json.loads(raw) if path.suffix == ".json" else raw
     if not args.execute:
-        print(format_plan(s7.plan_calls(retries)))
+        if ctx.config.stage("s7").get("formation_profile"):
+            from character_factory_poc.stages.s7_traits.formation import (
+                format_retries,
+                plan_calls,
+            )
+
+            if ctx.config.stage("s7").get("formation_profile") == "ko-text-choice-voice-long-v2":
+                from character_factory_poc.common.budget import CallPlan
+
+                print(
+                    format_plan(
+                        [
+                            CallPlan(
+                                "s7-choice-voice", "설계·뼈대·말투·보존 검토(형식 재시도 포함)", 12
+                            )
+                        ]
+                    )
+                )
+            else:
+                print(format_plan(plan_calls(format_retries(ctx))))
+        else:
+            print(format_plan(s7.plan_calls(retries, deck_enabled=ctx.text_deck_enabled)))
         return 0
     out = s7.run_s7(ctx, args.character_id, refs, docs or None)
     print(f"특질 시트: {out}")
@@ -83,10 +147,87 @@ def cmd_persona_prompts(args) -> int:
     retries = int(ctx.config.stage("s8").get("max_check_retries", 3))
     probes = _read_lines(args.probes)
     if not args.execute:
-        print(format_plan(s8.plan_calls(retries, len(probes))))
+        if ctx.text_deck_enabled or ctx.config.stage("s7").get("formation_profile"):
+            print("고정 컴파일: 모델 호출0회. 품질 검증은 persona qualify에서 별도로 실행한다.")
+        else:
+            print(format_plan(s8.plan_calls(retries, len(probes))))
         return 0
     out = s8.run_s8(ctx, args.character_id, probes, args.allow_same_family)
     print(f"프롬프트 쌍: {out}\n검토 페이지: {out / 'gate-G6.html'}")
+    return 0
+
+
+def cmd_persona_traitcheck(args) -> int:
+    from character_factory_poc.stages.s8_prompts import trait_check as tc
+
+    ctx = Context.load(_root(args), execute=args.execute, max_calls=args.max_calls)
+    if not args.execute:
+        print(format_plan(tc.plan_calls(samples=args.samples)))
+        return 0
+    out = tc.run_trait_check(
+        ctx,
+        args.character_id,
+        prompt_path=args.prompt,
+        ledger_path=args.ledger,
+        items_path=args.items,
+        out_dir=args.out,
+        samples=args.samples,
+        rejudge=args.rejudge,
+    )
+    m = json.loads(Path(out).read_text("utf-8"))["metrics"]
+    print(f"특질 시험: {out}")
+    print(json.dumps({k: v for k, v in m.items() if k != "traits"}, ensure_ascii=False))
+    return 0
+
+
+def cmd_persona_chapters(args) -> int:
+    from character_factory_poc.stages.s8_prompts import chapter_start as s8c
+
+    ctx = Context.load(_root(args), execute=args.execute, max_calls=args.max_calls)
+    if not args.execute:
+        print(format_plan(s8c.plan_calls()))
+        return 0
+    out = s8c.run_chapter_start(ctx, args.character_id)
+    print(f"챕터 시작 설정: {out}")
+    return 0
+
+
+def cmd_persona_qualify(args) -> int:
+    from character_factory_poc.stages.persona_quality.protocol import load_cohort
+    from character_factory_poc.stages.persona_quality.report import report_qualification
+    from character_factory_poc.stages.persona_quality.run import (
+        plan_qualification,
+        run_qualification,
+    )
+
+    if args.quality_action == "report":
+        result = report_qualification(
+            Path(args.run), Path(args.human_reviews) if args.human_reviews else None
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    cohort = load_cohort(Path(args.cohort))
+    plan = plan_qualification(cohort)
+    if args.quality_action == "plan" or not args.execute:
+        print(json.dumps(plan, ensure_ascii=False, indent=2))
+        return 0
+    from character_factory_poc.providers.factory import make_text_model
+    from character_factory_poc.stages.persona_quality.tokenizer import RemoteTokenCounter
+
+    ctx = Context.load(_root(args), execute=True, max_calls=args.max_calls)
+    cfg = ctx.config.providers.get("dialogue")
+    if cfg is None:
+        raise FactoryError("providers.dialogue must bind the frozen service model")
+    model = make_text_model(cfg)
+    if hasattr(model, "max_retries"):
+        model.max_retries = 0
+    if not args.tokenizer_url:
+        raise FactoryError("--tokenizer-url must identify an exact tokenizer for the bound model")
+    counter = RemoteTokenCounter(args.tokenizer_url, cfg.model)
+    folder = Path(args.output) if args.output else ctx.config.runs_dir / "quality" / cohort.id
+    print(json.dumps(plan, ensure_ascii=False))
+    out = run_qualification(ctx, cohort, folder, dialogue_model=model, token_counter=counter)
+    print(f"품질 원문: {out}")
     return 0
 
 
@@ -130,7 +271,7 @@ def cmd_review(args) -> int:
 
 def cmd_ref_run(args) -> int:
     from character_factory_poc.stages.s1_reference import run as s1
-    from character_factory_poc.stages.s3_plan.draft import new_character
+    from character_factory_poc.stages.s3_plan.common import new_character
 
     ctx = Context.load(_root(args), execute=args.execute, max_calls=args.max_calls)
     ranking = json.loads(Path(args.ranking).read_text("utf-8"))
@@ -261,8 +402,19 @@ def cmd_plan_seed(args) -> int:
         v = getattr(args, k, None)
         if v not in (None, ""):
             fields[k] = v
-    seed = write_seed(ctx, args.character_id, fields)
+    options = {"trait_ids": args.trait}
+    if getattr(args, "expected_seed_rev", None) is not None:
+        options["expected_seed_rev"] = args.expected_seed_rev
+    seed = write_seed(ctx, args.character_id, fields, **options)
     print(f"기획 씨앗 고정: {seed.seedRev} (다음: cfp plan variants {args.character_id})")
+    return 0
+
+
+def cmd_plan_suggest(args) -> int:
+    from character_factory_poc.stages.s3_plan.trait_recommendations import recommend_traits
+
+    result = recommend_traits(args.personality, selected_ids=args.trait, search=args.search)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -371,17 +523,18 @@ def cmd_video_actions(args) -> int:
 
 
 def cmd_plan_draft(args) -> int:
-    from character_factory_poc.stages.s3_plan import draft as s3
+    """D-0080: 브리프를 씨앗으로 옮겨 변형 3안을 만든다(구형 Planner 초안을 대체)."""
+    from character_factory_poc.stages.s3_plan.common import new_character
+    from character_factory_poc.stages.s3_plan.variants import plan_calls, run_s3_from_brief
 
     ctx = Context.load(_root(args), execute=args.execute, max_calls=args.max_calls)
-    retries = int(ctx.config.stage("s3").get("max_check_retries", 3))
     if not args.execute:
-        print(format_plan(s3.plan_calls(retries)))
+        print(format_plan(plan_calls(ctx)))
         return 0
-    cid = s3.new_character(ctx, args.slug)
+    cid = new_character(ctx, args.slug)
     brief = Path(args.brief).read_text("utf-8")
-    out = s3.run_s3_draft(ctx, cid, brief)
-    print(f"기획서 초안: {out} (G3 대기)")
+    out = run_s3_from_brief(ctx, cid, brief)
+    print(f"기획 변형: {out} (G3 대기, {out / 'gate-G3.html'})")
     return 0
 
 
@@ -392,7 +545,7 @@ def cmd_run(args) -> int:
         validate_auto_approve,
         validate_until,
     )
-    from character_factory_poc.stages.s3_plan.draft import new_character
+    from character_factory_poc.stages.s3_plan.common import new_character
 
     ctx = Context.load(_root(args), execute=args.execute, max_calls=args.max_calls)
     opt = RunOptions(
@@ -438,8 +591,49 @@ def cmd_run(args) -> int:
 
 
 def cmd_ledger_report(args) -> int:
+    from character_factory_poc.common import cost_report
+
     ctx = Context.load(_root(args), execute=False)
-    print(json.dumps(ctx.ledger(args.character_id).report(), ensure_ascii=False, indent=2))
+    ledger = ctx.ledger(args.character_id)
+    out = ledger.report()
+    out["cost"] = cost_report.build(ledger.calls())
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_ledger_cost(args) -> int:
+    """원장으로 cost-report-v1을 만든다(FR-69). 재계산도 원래 원장을 고치지 않는다."""
+    from character_factory_poc.common import cost_report
+
+    ctx = Context.load(_root(args), execute=False)
+    source = Path(args.target)
+    if source.suffix == ".jsonl" or source.is_file():
+        if not source.is_file():
+            print(f"오류: 원장 파일이 없다: {source}", file=sys.stderr)
+            return 1
+        ledger_dir = source.resolve().parent
+        rows = [json.loads(ln) for ln in source.read_text("utf-8").splitlines() if ln.strip()]
+    else:
+        ledger = ctx.ledger(args.target)
+        if not ledger.calls_path.exists():
+            print(f"오류: 원장이 없다: {ledger.calls_path}", file=sys.stderr)
+            return 1
+        ledger_dir = ledger.folder.resolve()
+        rows = ledger.calls()
+    report = cost_report.build(
+        rows, recompute=args.recompute, overrides=ctx.price_overrides() if args.recompute else None
+    )
+    text = json.dumps(report, ensure_ascii=False, indent=2)
+    if args.out:
+        out = Path(args.out)
+        if not out.is_absolute():
+            out = _root(args) / out
+        if out.resolve().is_relative_to(ledger_dir):
+            print("오류: 보고서는 원장 폴더 밖(runs/·work/ 아래)에 쓴다", file=sys.stderr)
+            return 1
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text + "\n", encoding="utf-8")
+    print(text)
     return 0
 
 
@@ -532,16 +726,36 @@ def cmd_data(args) -> int:
 def cmd_train(args) -> int:
     """S10 학습: plan은 비용 추정만(dry run), submit·collect는 --execute가 있어야 부른다."""
     from character_factory_poc.stages.s10_train.collect import collect_s10t
+    from character_factory_poc.stages.s10_train.drive import cleanup_s10t, drive_s10t
     from character_factory_poc.stages.s10_train.plan import plan_s10t
     from character_factory_poc.stages.s10_train.submit import submit_s10t
 
     ctx = _ctx(args)
     providers = [p.strip() for p in args.providers.split(",")] if args.providers else None
-    fn = {"plan": plan_s10t, "submit": submit_s10t, "collect": collect_s10t}[args.sub]
+    fn = {
+        "plan": plan_s10t,
+        "submit": submit_s10t,
+        "collect": collect_s10t,
+        "drive": drive_s10t,
+    }.get(args.sub)
     if args.sub != "plan" and not args.execute:
         print(
             f"dry run: train {args.sub}는 유료 학습을 부른다. --execute와 사용자 지시가 있어야 한다"
         )
+        return 0
+    if args.sub == "cleanup":
+        removed = cleanup_s10t(ctx, args.character_id, providers)
+        print("임대 GPU 삭제: " + (", ".join(removed) if removed else "남은 GPU 없음"))
+        return 0
+    if args.sub == "guard":
+        from character_factory_poc.stages.s10_train.guard import run_guard
+
+        if not args.plan_dir:
+            print("오류: train guard는 --plan-dir(학습 공급자 폴더)이 있어야 한다", file=sys.stderr)
+            return 1
+        adapter = providers[0] if providers else "gemma_qlora"
+        result = run_guard(_root(args), args.character_id, adapter, Path(args.plan_dir))
+        print(f"guard 종료: {result}")
         return 0
     out = fn(ctx, args.character_id, providers)
     print(f"학습 {args.sub}: {out}")
@@ -613,13 +827,33 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_status)
 
     plan = sub.add_parser("plan").add_subparsers(dest="sub", required=True)
-    s = plan.add_parser("import", help="사용자가 쓴 기획서를 고정하고 G3 승인으로 기록한다(D-0013)")
+    s = plan.add_parser(
+        "import",
+        help="v2 기획서는 고정하고 G3 승인으로 기록한다. 구형 v1은 신형 후보로 올린다(D-0080)",
+    )
     s.add_argument("slug")
     s.add_argument("--from", dest="source", required=True)
     s.add_argument("--brief", default=None)
+    s.add_argument("--execute", action="store_true", help="구형 v1을 올릴 때 모델을 부른다")
+    s.add_argument("--max-calls", type=int, default=None)
     s.set_defaults(fn=cmd_plan_import)
 
     persona = sub.add_parser("persona").add_subparsers(dest="sub", required=True)
+    quality = persona.add_parser("qualify", help="기본 품질 규약과 첫 응답 검증").add_subparsers(
+        dest="quality_action", required=True
+    )
+    for action in ("plan", "run"):
+        q = quality.add_parser(action)
+        q.add_argument("cohort")
+        q.add_argument("--execute", action="store_true")
+        q.add_argument("--output")
+        q.add_argument("--tokenizer-url")
+        q.add_argument("--max-calls", type=int)
+        q.set_defaults(fn=cmd_persona_qualify)
+    q = quality.add_parser("report")
+    q.add_argument("run")
+    q.add_argument("--human-reviews")
+    q.set_defaults(fn=cmd_persona_qualify)
     s = persona.add_parser("traits", help="S7 상세 특질 시트")
     s.add_argument("character_id")
     s.add_argument("--execute", action="store_true")
@@ -636,6 +870,24 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--probes", default=None, help="말투 확인 문장 파일(한 줄에 하나)")
     s.add_argument("--allow-same-family", action="store_true")
     s.set_defaults(fn=cmd_persona_prompts)
+    s = persona.add_parser("chapters", help="S8c 챕터 시작 설정(장면 사실·경계·관계 설정, D-0089)")
+    s.add_argument("character_id")
+    s.add_argument("--execute", action="store_true")
+    s.add_argument("--max-calls", type=int, default=None)
+    s.set_defaults(fn=cmd_persona_chapters)
+    s = persona.add_parser("traitcheck", help="특질 장부 기반 자동 특질 시험(D-0091)")
+    s.add_argument("character_id")
+    s.add_argument("--execute", action="store_true")
+    s.add_argument("--max-calls", type=int, default=None)
+    s.add_argument("--prompt", default=None, help="시험할 대화 프롬프트(기본: 현재 S8 long.md)")
+    s.add_argument(
+        "--ledger", default=None, help="특질 장부(기본: 현재 S7 rev의 trait-ledger.json)"
+    )
+    s.add_argument("--items", default=None, help="이미 만든 문항 파일(같은 문항으로 비교할 때)")
+    s.add_argument("--out", default=None)
+    s.add_argument("--samples", type=int, default=1)
+    s.add_argument("--rejudge", default=None, help="이전 report.json의 응답을 판정만 다시 한다")
+    s.set_defaults(fn=cmd_persona_traitcheck)
     s = persona.add_parser("probe", help="고정된 프롬프트 쌍으로 말투 확인 표본만 다시 돌린다")
     s.add_argument("character_id")
     s.add_argument("--execute", action="store_true")
@@ -746,7 +998,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--gender", default=None, choices=["female", "male", "other"])
     s.add_argument("--background", default=None)
     s.add_argument("--notes", default=None)
+    s.add_argument(
+        "--trait", action="append", default=None, help="추가 특질 ID(반복 가능, 선택 사항)"
+    )
+    s.add_argument("--expected-seed-rev", default=None, help="저장 기준 씨앗 버전(예: sd1)")
     s.set_defaults(fn=cmd_plan_seed)
+    s = plan.add_parser("suggest", help="기본 성격에서 추가 행동 특질을 추천한다(모델 호출 없음)")
+    s.add_argument("--personality", required=True)
+    s.add_argument("--trait", action="append", default=[], help="이미 선택한 특질 ID")
+    s.add_argument("--search", default="", help="행동 표현 직접 검색")
+    s.set_defaults(fn=cmd_plan_suggest)
     s = plan.add_parser("variants", help="S3: 씨앗 → 상세 변형 3안 → G3 대기(D-0033)")
     s.add_argument("character_id")
     s.add_argument("--execute", action="store_true")
@@ -786,7 +1047,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-calls", type=int, default=None)
     s.set_defaults(fn=cmd_scene_poses)
 
-    s = plan.add_parser("draft", help="Planner가 브리프와 프리셋 카탈로그로 기획서를 쓴다(G3 대기)")
+    s = plan.add_parser(
+        "draft", help="브리프를 씨앗으로 옮겨 기획 변형 3안을 만든다(G3 대기, D-0080)"
+    )
     s.add_argument("slug")
     s.add_argument("--brief", required=True)
     s.add_argument("--execute", action="store_true")
@@ -850,12 +1113,21 @@ def build_parser() -> argparse.ArgumentParser:
         ("plan", "학습 계획과 비용 추정(dry run, 호출 없음)"),
         ("submit", "학습 제출(--execute, 유료)"),
         ("collect", "학습 결과 회수(--execute)"),
+        ("drive", "제출부터 완료 대기·회수·체크포인트 선택·GPU 반납까지(--execute, 유료)"),
+        ("cleanup", "남은 임대 GPU를 찾아 지운다(--execute)"),
     ):
         s = train.add_parser(name, help=help_text)
         s.add_argument("character_id")
         s.add_argument("--providers", default=None, help="쉼표 목록. 없으면 [stages.s10t]")
         s.add_argument("--execute", action="store_true")
         s.set_defaults(fn=cmd_train)
+    # 숨은 진입점: drive가 띄우는 분리 감시(guard)를 손으로 다시 띄울 때 쓴다.
+    s = train.add_parser("guard")
+    s.add_argument("character_id")
+    s.add_argument("--providers", default=None)
+    s.add_argument("--plan-dir", default=None)
+    s.add_argument("--execute", action="store_true")
+    s.set_defaults(fn=cmd_train)
 
     ev = sub.add_parser("eval", help="S10 평가와 G8").add_subparsers(dest="sub", required=True)
     for name, help_text in (
@@ -889,10 +1161,25 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--port", type=int, default=None)
     s.set_defaults(fn=cmd_web)
 
+    models = sub.add_parser("models", help="텍스트 모델 덱·호출 경로 설정").add_subparsers(
+        dest="models_action", required=True
+    )
+    s = models.add_parser("show", help="유효 모델·프로필·호출 경로를 확인한다(호출 없음)")
+    s.set_defaults(fn=cmd_models)
+    s = models.add_parser("select", help="프로필/경로 선택을 work에 저장한다(호출 없음)")
+    s.add_argument("--profile", choices=["basic_test", "demo", "pre_demo_completion_check"])
+    s.add_argument("--route", choices=["opencodex", "test", "api"])
+    s.set_defaults(fn=cmd_models)
+
     ledger = sub.add_parser("ledger").add_subparsers(dest="sub", required=True)
     s = ledger.add_parser("report")
     s.add_argument("character_id")
     s.set_defaults(fn=cmd_ledger_report)
+    s = ledger.add_parser("cost", help="비용 보고서 cost-report-v1(원장은 고치지 않는다)")
+    s.add_argument("target", help="캐릭터 ID 또는 calls.jsonl 경로")
+    s.add_argument("--recompute", action="store_true", help="현재 단가표로 다시 환산한다")
+    s.add_argument("--out", default=None, help="보고서 JSON을 쓸 경로(runs/나 work/ 아래 권장)")
+    s.set_defaults(fn=cmd_ledger_cost)
 
     report = sub.add_parser("report", help="사람 시간 보고서").add_subparsers(
         dest="sub", required=True

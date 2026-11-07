@@ -34,7 +34,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-cfp = ["prompts/*.md", "prompts/review/*.md", "resources/*.json", "web/static/**/*"]
+character_factory_poc = ["prompts/*.md", "prompts/review/*.md", "resources/*.json", "resources/*.md", "web/static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

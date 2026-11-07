@@ -22,7 +22,6 @@ from character_factory_poc.pipeline.gates import now_iso
 from character_factory_poc.pipeline.review import review_fields
 from character_factory_poc.stages.s9_data import plan as plan_mod
 from character_factory_poc.stages.s9_data import samples as writer
-from character_factory_poc.stages.s9_data.plan import CLUSTERS
 
 _VERDICTS = {"ADOPT", "FIX", "REJECT"}
 
@@ -98,8 +97,9 @@ def approve_g7a(ctx: Context, cid: str, answer: dict) -> Path:
     rev = gate.rev
     rev_dir = plan_mod.data_dir(ctx, cid) / rev
     cluster = str(answer.get("cluster") or "")
-    if cluster not in CLUSTERS:
-        raise FactoryError(f"G7a: cluster는 {', '.join(CLUSTERS)} 중 하나다")
+    cluster_ids = plan_mod.plan_cluster_ids(rev_dir)
+    if cluster not in cluster_ids:
+        raise FactoryError(f"G7a: cluster는 {', '.join(cluster_ids)} 중 하나다")
     if writer.cluster_qa(rev_dir, cluster) is not None:
         raise FactoryError(f"G7a: {cluster}는 이 revision에서 이미 판정했다")
     decision = str(answer.get("decision") or "")
@@ -157,7 +157,7 @@ def approve_g7a(ctx: Context, cid: str, answer: dict) -> Path:
         return rev_dir
 
     decided = writer.reviews(rev_dir)
-    all_selected = len(decided) == len(CLUSTERS)
+    all_selected = len(decided) == len(cluster_ids)
     state.set_gate(
         "G7a",
         "APPROVED" if all_selected else "AWAITING_HUMAN",

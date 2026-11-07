@@ -18,7 +18,7 @@ from character_factory_poc.providers.factory import make_image_model
 from character_factory_poc.providers.fake import FakeTextModel
 from character_factory_poc.providers.fake_image import solid_png
 from character_factory_poc.stages.s1_reference.run import run_s1
-from character_factory_poc.stages.s3_plan.draft import new_character
+from character_factory_poc.stages.s3_plan.common import new_character
 from tests.support.synthetic import RANKING, scout_features
 
 

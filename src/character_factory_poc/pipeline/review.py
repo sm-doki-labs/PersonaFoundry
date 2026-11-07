@@ -406,6 +406,9 @@ def _build_prompts(items: dict[str, Any], char_dir: Path, rev_dir: Path) -> list
         "shortAdopted": items.get("shortAdopted", False),
         "probes": items.get("probes", []),
         "traitSheet": items.get("traitSheet"),
+        "bundle": items.get("bundle"),
+        "blueprint": items.get("blueprint"),
+        "formationDialogues": items.get("formationDialogues"),
     }
     return [ReviewUnit(None, "G6 프롬프트 쌍", context, tuple(candidates))]
 
@@ -454,7 +457,12 @@ REVIEWERS: dict[str, ReviewSpec] = {
     "G4": ReviewSpec("vision", _build_frames, "G4.md", ("frames.json", "inputs.json")),
     "G5": ReviewSpec("vision", _build_intro, "G5.md", ("videos.json", "inputs.json")),
     "G5b": ReviewSpec("vision", _build_actions, "G5b.md", ("clips.json", "inputs.json")),
-    "G6": ReviewSpec("llm", _build_prompts, "G6.md", ("prompt-pair.json", "prompt-probe.json")),
+    "G6": ReviewSpec(
+        "llm",
+        _build_prompts,
+        "G6.md",
+        ("prompt-pair.json", "prompt-probe.json", "persona-bundle.json"),
+    ),
     "G7": ReviewSpec("llm", _build_dataset, "G7.md", ("dataset.json", "check-report.json")),
     "G9": ReviewSpec("deterministic", _build_package, "", ("package.json",)),
 }
@@ -604,7 +612,9 @@ def _body(gate: str, unit: ReviewUnit, choosing: bool) -> str:
     )
 
 
-def _check_text_reviewer(ctx: Context) -> None:
+def _check_text_reviewer(ctx: Context, gate: str = "") -> None:
+    if ctx.text_deck_enabled and gate in {"G3", "G6", "G7a", "G7"}:
+        return
     judge = ctx.config.provider("judge")
     text = ctx.config.provider("text")
     if ctx._judge is None and judge.adapter == "fake" and text.adapter != "fake":
@@ -629,7 +639,11 @@ def _call_text(
     ctx: Context, cid: str, gate: str, rev: str, unit: ReviewUnit, system: str, budget: Budget
 ) -> tuple[str, ReviewerRef]:
     try:
-        model = ctx.judge_model(cid, budget)
+        model = (
+            ctx.task_model(cid, budget, "adjudication")
+            if ctx.text_deck_enabled and gate in {"G3", "G6", "G7a", "G7"}
+            else ctx.judge_model(cid, budget)
+        )
     except ValueError as exc:
         raise FactoryError(str(exc)) from exc
     ref = f"{gate}/{rev}/{unit.chapter_id or 'all'}"
@@ -647,7 +661,11 @@ def _call_text(
     reviewer = ReviewerRef(
         provider=model.name,
         model=model.model,
-        family=ctx.config.provider("judge").family(),
+        family=(
+            ctx.config.task_provider("adjudication").family()
+            if ctx.text_deck_enabled and gate in {"G3", "G6", "G7a", "G7"}
+            else ctx.config.provider("judge").family()
+        ),
     )
     return response.text, reviewer
 
@@ -946,7 +964,7 @@ def _write_review(
             )
         _check_vision_reviewer(ctx)
     else:
-        _check_text_reviewer(ctx)
+        _check_text_reviewer(ctx, gate)
     system = _prompt_text(spec)
     budget = ctx.budget()
     budget.check_plan([CallPlan(stage=gate, description=f"{gate} 사전 검토", calls=len(units))])

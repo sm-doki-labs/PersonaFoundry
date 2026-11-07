@@ -20,21 +20,25 @@ def _read_input(workspace: Path, name: str) -> Any:
 
 def stage_checks(stage: str, workspace: Path) -> tuple[str, list]:
     """(계약 이름, 검사 함수 목록). 검사 함수는 검증된 모델을 받아 문제 목록을 돌려준다."""
+    shape_only = {
+        "cv-requirements": "seed-requirements-draft-v1",
+        "cv-choices": "plan-variants-output-v2",
+        "cv-design": "formation-draft-v2",
+        "cv-beats": "formation-beats-draft-v1",
+        "cv-render": "rendered-dialogues-draft-v1",
+    }
+    if stage in shape_only:
+        return shape_only[stage], []
     if stage == "s1":
         from character_factory_poc.stages.s1_reference.features import check_features
 
         people = _read_input(workspace, "people.json") or []
         vocab = _read_input(workspace, "vocab.json") or {}
         return "appearance-features-v1", [check_features(people, vocab)]
-    if stage == "s3":
-        from character_factory_poc.stages.s3_plan.check import check_plan_draft
-
-        brief = _read_input(workspace, "brief.md") or ""
-        appearance = _read_input(workspace, "appearance.json") or {}
-        return "character-plan-v1", [check_plan_draft(brief, appearance.get("appearanceRev"))]
     if stage == "s7":
         from character_factory_poc.stages.s7_traits.check import (
             check_matches_plan,
+            check_speech_level,
             check_trait_sheet,
         )
 
@@ -42,6 +46,7 @@ def stage_checks(stage: str, workspace: Path) -> tuple[str, list]:
         return "trait-sheet-v1", [
             check_trait_sheet,
             check_matches_plan(plan.get("name", ""), plan.get("coreTraits", [])),
+            check_speech_level(plan.get("voiceSummary", "") or ""),
         ]
     if stage == "s8":
         from character_factory_poc.stages.s8_prompts.build import make_section_checks

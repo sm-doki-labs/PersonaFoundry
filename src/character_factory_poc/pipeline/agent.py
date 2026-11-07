@@ -83,6 +83,11 @@ def _render_inputs(inputs: dict[str, Any]) -> str:
 # ---------------------------------------------------------------- API 백엔드
 
 
+#: 에이전트·덱 호출의 출력 상한(추론·생각 토큰 포함). 12,000이면 Gemini 3.8 Flash high의 변형 초안이
+#: 매번 잘렸고(실측 필요량 11.5~18.5천), 32,000에서 4/4 정상 종료했다(K-0069, 2026-11-04).
+AGENT_MAX_OUTPUT_TOKENS = 32000
+
+
 def run_agent(
     spec: AgentSpec,
     workspace: Path,
@@ -120,7 +125,7 @@ def run_agent(
             stage=spec.stage,
             messages=tuple(history),
             ref=f"{ref}#{attempts}",
-            max_output_tokens=12000,
+            max_output_tokens=AGENT_MAX_OUTPUT_TOKENS,
             temperature=spec.temperature,
             response_json=True,
         )

@@ -56,7 +56,7 @@ def run_s3_own(ctx: Context, cid: str, user_text: str) -> Path:
             rev_dir / "workspace",
             inputs,
             [check_own(seed, guard, user_text)],
-            ctx.text_model(cid, budget),
+            ctx.role_model(cid, budget, "plan_normalizer"),
             ref=f"{cid}/{rev}",
             contract_example=example,
             backend=ctx.agent_backend(cid, budget, "s3-own"),

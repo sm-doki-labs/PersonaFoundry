@@ -1,2 +1,3 @@
-이 파일은 Q-0006(현행 시스템 규칙 원문)이 확정되기 전의 내장 기본값이다. 문장은 gemini-sft-poc `prod_frame.py`(split-frame-r5-v40)의 ACTOR_IDENTITY·INPUT_AND_BOUNDARIES·SPOKEN_KOREAN 블록에서 발췌해 줄였다. 운영 원문을 쓰려면 `factory.toml`의 `[stages.s8] system_rules_path`에 경로를 적는다.
+이 파일은 Q-0006(현행 운영 시스템 규칙 원문)이 확정되기 전의 자체 작성 내장 기본값이다. 운영 원문의 정확한 복사본이 아니다. 2026-10-29 한소민 방법론과 실제 공장 대화 결함을 근거로 조건부 특질 적용·사실 소유자·일정 유지·조회 능력·반복 방지를 보완했다. 한소민의 고유 성격·배경·말투는 복제하지 않았다. 상세 근거는 docs/reports/2026-10-29-somin-transfer.md에 있다.
 
+운영 원문을 쓰려면 factory.toml의 [stages.s8] system_rules_path에 경로를 적는다. 이미 고정된 prompt-pair와 그 원문 해시는 소스 변경으로 덮어쓰지 않으며 새 pv revision에만 반영한다.

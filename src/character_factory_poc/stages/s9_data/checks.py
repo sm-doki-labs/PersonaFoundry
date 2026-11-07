@@ -3,6 +3,11 @@
 두 층이다. 한 대화 안의 차단 검사는 작성 응답을 받은 자리에서 돌리고, 실패하면 같은 입력으로
 다시 쓴다. 데이터셋 전체 검사(중복·같은 말끝·같은 사과 문장)는 모든 대화를 모은 뒤 돌린다.
 토큰화 도구가 없으므로 길이는 글자 수 근사로 재고, 근사임을 보고서에 남긴다.
+
+클러스터에 턴 조건(`TurnRule`, 창작 인물 정책의 long)이 있으면 `turn_range`(assistant 턴 수
+하한·상한)와 `long_structure`(작성자가 표시한 화제 전환·후반 계기 위치)를 차단 검사로 더한다.
+`long_structure`는 작성자의 자기 표시를 기계로 확인할 뿐이고, 내용이 실제로 전환됐는지는 G7a·G7
+사람 검토가 본다.
 """
 
 from __future__ import annotations
@@ -12,7 +17,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from character_factory_poc.contracts.dataset import Conversation, Message
+from character_factory_poc.contracts.dataset import Conversation, Message, TurnRule
 
 BLOCKING_NAMES: tuple[str, ...] = (
     "roles_alternate",
@@ -23,6 +28,8 @@ BLOCKING_NAMES: tuple[str, ...] = (
     "source_facts_absent",
     "forbidden_phrases",
     "max_length",
+    "turn_range",
+    "long_structure",
 )
 DATASET_BLOCKING_NAMES: tuple[str, ...] = (
     "duplicate_messages",
@@ -47,6 +54,7 @@ class ConvSpec:
     source_facts: tuple[str, ...] = ()
     max_length_tokens: int = 4096
     chars_per_token: float = 1.5
+    turn_rule: TurnRule | None = None
 
 
 def normalize(text: str) -> str:
@@ -65,6 +73,49 @@ def conversation_text(conv: Conversation) -> str:
 
 def assistant_text(conv: Conversation) -> str:
     return "\n".join(m.content for m in conv.messages if m.role == "assistant")
+
+
+def assistant_turns(messages: list[Message] | list[dict[str, Any]]) -> int:
+    return sum(
+        1 for m in messages if (m.role if isinstance(m, Message) else m.get("role")) == "assistant"
+    )
+
+
+def turn_range_ok(conv: Conversation, rule: TurnRule) -> bool:
+    turns = assistant_turns(list(conv.messages))
+    return rule.minAssistantTurns <= turns <= rule.maxAssistantTurns
+
+
+def structure_problems(item: dict[str, Any], rule: TurnRule | None) -> list[str]:
+    """작성 응답의 topicShiftAt·lateTriggerAt 표시를 확인한다. 위치는 0부터 센 user 메시지다."""
+    if rule is None or (rule.minTopicShifts == 0 and rule.minLateTriggers == 0):
+        return []
+    messages = list(item.get("messages") or [])
+    total = len(messages)
+
+    def user_positions(key: str) -> list[int] | None:
+        raw = item.get(key) or []
+        if not isinstance(raw, list) or any(type(x) is not int for x in raw):
+            return None
+        return sorted({x for x in raw if 0 < x < total and messages[x].get("role") == "user"})
+
+    problems: list[str] = []
+    shifts = user_positions("topicShiftAt")
+    if shifts is None or len(shifts) < rule.minTopicShifts:
+        problems.append(
+            f"long_structure: topicShiftAt에 화제가 바뀌는 user 메시지 위치를 "
+            f"{rule.minTopicShifts}개 이상 적는다(받은 값 {item.get('topicShiftAt')!r})"
+        )
+    late = user_positions("lateTriggerAt")
+    start = rule.lateTriggerFrom * total
+    late_ok = [x for x in late or [] if x >= start]
+    if late is None or len(late_ok) < rule.minLateTriggers:
+        problems.append(
+            f"long_structure: lateTriggerAt에 대화 {round(rule.lateTriggerFrom * 100)}% 이후"
+            f"(메시지 {int(start)}번 이후)의 계기 상황 user 메시지 위치를 "
+            f"{rule.minLateTriggers}개 이상 적는다(받은 값 {item.get('lateTriggerAt')!r})"
+        )
+    return problems
 
 
 def _alternates(messages: list[Message]) -> bool:
@@ -103,6 +154,8 @@ def evaluate(conv: Conversation, spec: ConvSpec) -> dict[str, bool]:
     if spec.forbidden:
         speech = assistant_text(conv)
         results["forbidden_phrases"] = not any(f and f in speech for f in spec.forbidden)
+    if spec.turn_rule is not None:
+        results["turn_range"] = turn_range_ok(conv, spec.turn_rule)
     return results
 
 
@@ -115,6 +168,8 @@ _REASON: dict[str, str] = {
     "source_facts_absent": "원본 화자의 사실이 캐릭터 설정·대사에 들어갔다",
     "forbidden_phrases": "인계안의 금지 표현이 캐릭터 대사에 있다",
     "max_length": "학습 길이(토큰 근사) 상한을 넘었다",
+    "turn_range": "클러스터의 assistant 턴 수 범위(긴 대화 하한·상한)를 벗어났다",
+    "long_structure": "긴 대화의 화제 전환·후반 계기 위치 표시가 조건에 못 미친다",
 }
 
 
@@ -123,7 +178,16 @@ def problems_of(results: dict[str, bool]) -> list[str]:
 
 
 def conversation_problems(conv: Conversation, spec: ConvSpec) -> list[str]:
-    return problems_of(evaluate(conv, spec))
+    problems = problems_of(evaluate(conv, spec))
+    if spec.turn_rule is not None and not turn_range_ok(conv, spec.turn_rule):
+        turns = assistant_turns(list(conv.messages))
+        rule = spec.turn_rule
+        problems = [p for p in problems if not p.startswith("turn_range:")]
+        problems.append(
+            f"turn_range: assistant 턴이 {turns}개다. {rule.minAssistantTurns}~"
+            f"{rule.maxAssistantTurns}턴으로 쓴다(user·assistant 한 쌍이 한 턴)"
+        )
+    return problems
 
 
 def batch_problems(written: list[dict[str, Any]], specs: list[ConvSpec], system: str) -> list[str]:
@@ -146,6 +210,7 @@ def batch_problems(written: list[dict[str, Any]], specs: list[ConvSpec], system:
             provenance={"writerModel": "probe", "requestRef": "probe"},
         )
         problems.extend(f"{i + 1}번째: {p}" for p in conversation_problems(conv, spec))
+        problems.extend(f"{i + 1}번째: {p}" for p in structure_problems(item, spec.turn_rule))
         scene = str(item.get("scene") or "").strip()
         if not 5 <= len(scene) <= 200:
             problems.append(f"{i + 1}번째: scene은 5~200자의 한 문장이어야 한다(받은 값 {scene!r})")

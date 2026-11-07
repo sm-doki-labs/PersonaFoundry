@@ -7,7 +7,7 @@ export-result-v1은 패키지 → 대상 시스템 적재물의 기록이다
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -80,7 +80,7 @@ class Persona(Strict):
     personaVersion: str
     traitSheet: str
     longPrompt: str
-    shortPrompt: str
+    shortPrompt: str | None = None
 
 
 class Sft(Strict):
@@ -89,6 +89,56 @@ class Sft(Strict):
     trainingRuns: list[str] = Field(default_factory=list, description="training-run-v2 경로")
     evalReport: str | None = None
     adoptedBinding: str | None = Field(default=None, description="G8에서 채택한 model_binding ref")
+    serving: str | None = Field(
+        default=None,
+        description="채택 어댑터 서빙 기록(sft-serving-v1, PackageFile.path). "
+        "실제 gemma_qlora SFT를 채택했을 때만 있다",
+    )
+
+
+class AdapterFile(Strict):
+    """패키지에 복사하지 않고 해시로만 참조하는 어댑터 파일."""
+
+    path: str = Field(description="adapterRef 기준 파일 이름")
+    sha256: str
+    bytes: int
+
+
+class ServingGeneration(Strict):
+    """서빙 생성 설정. 이름은 serve_qlora 요청 본문과 같다(D-0077 선별 설정)."""
+
+    temperature: float = 0.7
+    top_p: float = 0.9
+    top_k: int = 50
+    max_new_tokens: int = 512
+
+
+class CheckpointSelectionRef(Strict):
+    path: str = Field(description="캐릭터 폴더 기준 checkpoint-selection.json 경로")
+    sha256: str
+    decision: str | None = None
+
+
+@register("sft-serving-v1")
+class SftServing(Strict):
+    """G8 채택 어댑터를 그대로 서빙하기 위한 기록. 가중치는 해시로 참조한다."""
+
+    schemaVersion: Literal["sft-serving-v1"] = "sft-serving-v1"
+    characterId: str
+    armId: Literal["SHORT_GEMMA_SFT"] = "SHORT_GEMMA_SFT"
+    adoptedBinding: str
+    provider: Literal["gemma_qlora"]
+    trainingRun: ArtifactRef = Field(description="패키지 안 training-run-v2 경로와 해시")
+    baseModel: str
+    baseModelRevision: str = ""
+    chatTemplate: str
+    thinkingEnabled: Literal[False] = False
+    checkpointId: str
+    adapterRef: str = Field(description="어댑터 폴더의 로컬 경로")
+    adapterFiles: list[AdapterFile] = Field(min_length=2)
+    generation: ServingGeneration = Field(default_factory=ServingGeneration)
+    runtimeVersions: dict[str, Any] = Field(default_factory=dict)
+    checkpointSelection: CheckpointSelectionRef | None = None
 
 
 class GateRef(Strict):

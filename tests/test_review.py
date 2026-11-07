@@ -29,7 +29,7 @@ from character_factory_poc.pipeline.review import (
     review_path,
 )
 from character_factory_poc.providers.fake_vision import FakeVisionModel
-from character_factory_poc.stages.s3_plan.draft import new_character
+from character_factory_poc.stages.s3_plan.common import new_character
 from character_factory_poc.web import create_app
 from tests.support.flow import make_ctx
 from tests.support.synthetic import RANKING

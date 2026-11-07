@@ -38,7 +38,7 @@ from character_factory_poc.stages.s1_reference.features import (
 )
 from character_factory_poc.stages.s1_reference.ranking import all_names, build_people, load_ranking
 from character_factory_poc.stages.s1_reference.run import run_s1
-from character_factory_poc.stages.s3_plan.draft import new_character
+from character_factory_poc.stages.s3_plan.common import new_character
 from tests.support.synthetic import RANKING, scout_features
 
 NAMES = all_names(load_ranking(RANKING))

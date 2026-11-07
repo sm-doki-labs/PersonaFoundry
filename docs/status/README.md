@@ -17,17 +17,18 @@
 
 | 날짜 | 문서 | 요지 |
 |---|---|---|
-| 2026-10-28 | [handoff-2026-10-28-agentic.md](handoffs/handoff-2026-10-28-agentic.md) | 에이전틱 실행(D-0049·D-0050): 결정 뒤 자동 재개·물결 실행, 관문 사전 검토, 수정 요청 재작업, 대기열·`cfp report hil`, 유료 단계 실행 확인. B·C·D는 하위 에이전트 병렬 구축. 515 passed. |
-| 2026-10-28 | [handoff-2026-10-28-prompt-only.md](handoffs/handoff-2026-10-28-prompt-only.md) | 학습 없이 긴 프롬프트로 패키지까지(D-0048, K-0038 해결), 학습 제출은 `--submit-training`만. G7a~G9 브라우저 확인과 화면 문제 7가지 수정. 464 passed. |
-| 2026-10-27 | [handoff-2026-10-27-poc-h.md](handoffs/handoff-2026-10-27-poc-h.md) | H 갈래: 그래프·관문·`cfp` 명령·웹 G7a~G9 연결(D-0047). 여성·남성 합성 브리프가 S1 → G9 → 일회용 DB 적재까지 통과, 462 passed. K-0011·K-0012·K-0037 해결, K-0038·K-0039. |
-| 2026-10-27 | [handoff-2026-10-27-poc-m8-2.md](handoffs/handoff-2026-10-27-poc-m8-2.md) | C·D1·D2·E·G2 합침, 이름 바꾸기(`character_factory_poc`·`cfp`·`CFP_`), 444 passed(일회용 Docker DB 실제 적재 포함). 다음은 H 갈래(그래프·관문·CLI 연결, 전체 흐름 테스트). |
-| 2026-10-27 | [handoff-2026-10-27-poc-m8-1.md](handoffs/handoff-2026-10-27-poc-m8-1.md) | 새 Git 프로젝트 `character-factory-poc`로 이동. PoC 계약(S9~S11·패키지·내보내기, LLD v1.3)과 A 외모 한 번 고르기(`picked`)·B 순위 수집(랭키파이, D-0046)·F Grok OAuth·G 워크숍 서버 뼈대 합침, 347 passed, 실제 호출 없음. K-0035~K-0037, Q-0022. |
-| 2026-10-27 | [handoff-2026-10-27-poc-plan.md](handoffs/handoff-2026-10-27-poc-plan.md) | 3일 PoC 계획 확정(D-0044 확정, D-0045 제안): 결과물은 캐릭터가 아닌 파이프라인 코드, S9~S11·워크숍 웹앱·패키지와 우리 앱 변환기·순위 수집·Grok OAuth 어댑터, 가짜 공급자로 끝까지 통과, 실제 호출은 순위 수집·이미지·LLM만. 코드 변경 없음. |
-| 2026-10-27 | [handoff-2026-10-27-face-once.md](handoffs/handoff-2026-10-27-face-once.md) | 외모를 G1에서 한 번만 고르고 S2를 자동 기준 사진·동일인 검사로, G2 제거(D-0042 확정, D-0043 제안). PRD·명세·LLD v1.2, K-0033(데모 G1 미리보기 9장이 같은 replay 그림)·K-0034(코드 미반영), Q-0021. 코드 변경·실제 호출 없음. |
-| 2026-10-22 | [handoff-2026-10-22-s6-clips.md](handoffs/handoff-2026-10-22-s6-clips.md) | S6 동작 목록을 앱 통화 영상으로 확정(D-0040, D-0041): 앱 `clip_key`·표준 37편·첫 실행 6편×3챕터, 무표정 첫 프레임, sexy 제외, 계약 v2, Q-0010 해결, 278 passed, 실제 호출 없음. |
-| 2026-10-22 | [handoff-2026-10-22-s6.md](handoffs/handoff-2026-10-22-s6.md) | S6 동작 영상 L1 골격(D-0038, D-0039): G4 승인 이미지 → 동작 카탈로그 → 동작별 영상 → G5b 선택·제외·부분 재생성, 하위 에이전트 구현, 267 passed, 실제 영상 호출 없음. |
-| 2026-10-22 | [handoff-2026-10-22-l2.md](handoffs/handoff-2026-10-22-l2.md) | 노드 성숙도 L0~L4와 규칙, 기획·장면 흐름 실제 1회로 L2(자동 검사 끔, G3·G4a·G4b 자동 승인, G4 대기), 오염 검사 오탐 수정. |
-| 2026-10-22 | [handoff-2026-10-22-docs.md](handoffs/handoff-2026-10-22-docs.md) | 알려진 문제 대장(K-0001~K-0024)과 현재 상태 문서 신설, 인계 문서를 `handoffs/`로 이동, README·AGENTS·문서 인덱스 정리. 코드 변경 없음. |
+| 2026-11-04 | [handoff-2026-11-04-official-api.md](handoffs/handoff-2026-11-04-official-api.md) | 텍스트 덱 api 경로(OpenAI·Gemini 직접), 요청 형식, 단가표 비용 기록·예산·보고. 4갈래 병렬+독립 검토 반영, 오프라인 1191 passed, 실제 API 0회. |
+| 2026-11-02 | [handoff-2026-11-02-qlora-pipeline.md](handoffs/handoff-2026-11-02-qlora-pipeline.md) | N3b QLoRA를 S9→S10t(임대·선별·선택)→S10(GPU 평가)→S11에 연결, 창작 인물 정책을 S9·S10에 반영, 독립 검토 P0 수정. 오프라인 1048 passed, 실제 GPU 0회. |
+| 2026-10-30 | [handoff-2026-10-30-agentic-studio-runtime.md](handoffs/handoff-2026-10-30-agentic-studio-runtime.md) | 기본 실제 모드·작업/관문/이벤트 연결, 가짜 공급자 브라우저 G3재작업→G6, 868회귀·Node35개, 서버 종료. |
+| 2026-10-30 | [handoff-2026-10-30-text-studio-connection.md](handoffs/handoff-2026-10-30-text-studio-connection.md) | DeepSeek2개 병렬 API/UI 연결, 실제 설정·출처 패널과 기존 각본 구분, Chrome 회귀 검증·실제 캐릭터0건. |
+| 2026-10-30 | [handoff-2026-10-30-text-model-deck.md](handoffs/handoff-2026-10-30-text-model-deck.md) | 텍스트 덱·opencodex 기본·별도 test 전환, 역할별 출처와 불변 재개. 실제 호출 없음·K-0058. |
+| 2026-10-30 | [handoff-2026-10-30-tsundere-persona-live.md](handoffs/handoff-2026-10-30-tsundere-persona-live.md) | Gemini 개념 피드백 후 한지완 생성·비교40첫응답. 호감 반응 차이·행동 선택은 제한적, 초회 실패/복구 보존·35검사. |
+| 2026-10-30 | [handoff-2026-10-30-apology-reassessment.md](handoffs/handoff-2026-10-30-apology-reassessment.md) | 동일 문맥의 사과는 허용 가능한 변주로 재판정.1/32·누적0/20, 결함 분류 정정. 코드/추가 호출 없음. |
+| 2026-10-29 | [handoff-2026-10-29-service-persona-runtime.md](handoffs/handoff-2026-10-29-service-persona-runtime.md) | 서비스8섹션·성향 통합, runtime 예시/챕터/조건표 제외.785검사·실제107요청/96응답. G6대기·표현 강도/판정 한계. |
+| 2026-10-29 | [handoff-2026-10-29-video-pipeline-audit.md](handoffs/handoff-2026-10-29-video-pipeline-audit.md) | 영상8단계 코드 감사, offline190통과, 현재fake/QA꺼짐, 실제영상 미검증. |
+| 2026-10-29 | [handoff-2026-10-29-trait-persona-prompt-audit.md](handoffs/handoff-2026-10-29-trait-persona-prompt-audit.md) | 성격/voiceProfile 전달 누락·ID순 예시 선정 확인,6683자 정확 재현. 제품/추가 호출0, 품질 인과 대조 미실행. |
+| 2026-10-29 | [handoff-2026-10-29-trait-persona-gemini-live.md](handoffs/handoff-2026-10-29-trait-persona-gemini-live.md) | 윤서진1명 실제 생성·Gemini42응답·HTTP57회. 대화 시안 사용 가능, 상담체/개성 한계. G6대기·정식 NOT_RUN, 대조군 없음. |
+| 2026-10-29 | [handoff-2026-10-29-trait-recommendations.md](handoffs/handoff-2026-10-29-trait-recommendations.md) | 추가 특질144개 추천·선택·저장·전달, 독립4건 수정,773 passed/1 skipped,브라우저·wheel 확인. 실제 모델 품질 재검증 없음. |
 
 새 인계를 쓰면 `handoffs/`에 두고 이 표의 맨 위에 한 줄을 추가한다. 표는 최근 10개만 유지하고 나머지는 `handoffs/` 파일 목록으로 찾는다.
 

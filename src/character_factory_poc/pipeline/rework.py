@@ -180,7 +180,12 @@ def _instruct(
     if not notes or not bool(config.get("normalize", True)):
         return raw, None
     try:
-        resp = ctx.text_model(cid, ctx.budget()).complete(
+        model = (
+            ctx.task_model(cid, ctx.budget(), "brief")
+            if ctx.text_deck_enabled and sid in {"s3", "s7", "s8", "s9s", "s9"}
+            else ctx.text_model(cid, ctx.budget())
+        )
+        resp = model.complete(
             ChatRequest(
                 kind="REWORK",
                 stage=sid,

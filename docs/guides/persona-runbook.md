@@ -8,7 +8,7 @@
 uv run cfp run x --new-slug <slug> --until G6 --brief brief.md --probes probes.txt --execute
 ```
 
-Planner가 브리프와 프리셋 카탈로그로 기획서를 쓰고 G3에서 멈춘다. G3를 `cfp gate import ... G3`로 승인한 뒤 같은 명령을 다시 실행하면 S7·S8을 이어서 돌리고 G6에서 멈춘다. 실험에서만 `--auto-approve G3`로 건너뛸 수 있다(기록에 남는다, D-0015). `[agent] backend = "codex_exec"`이면 각 단계 에이전트가 작업 공간 안에서 파일을 읽고 `./check.sh`로 스스로 검사한다. 실행 예는 [에이전틱 실행 보고서](../reports/2026-10-14-agentic-p29-run.md)에 있다.
+브리프를 씨앗으로 옮겨 기획 변형 3안을 만들고 G3에서 멈춘다(D-0080). 변형 경로는 원문 요구 추출 → 초안 → 설정 충돌 검토 → 최종 말투 순서다. G3를 `cfp gate import ... G3`로 고른 뒤 같은 명령을 다시 실행하면 S7·S8을 이어서 돌리고 G6에서 멈춘다. 실험에서만 `--auto-approve G3`로 건너뛸 수 있다(기록에 남는다, D-0015). `[agent] backend = "codex_exec"`이면 각 단계 에이전트가 작업 공간 안에서 파일을 읽고 `./check.sh`로 스스로 검사한다. 실행 예는 [에이전틱 실행 보고서](../reports/2026-10-14-agentic-p29-run.md)에 있다.
 
 ## 1. 설정
 
@@ -18,13 +18,13 @@ Planner가 브리프와 프리셋 카탈로그로 기획서를 쓰고 G3에서 �
 
 ## 2. 기획서 들여오기 (S3, G3)
 
-[기획서 템플릿](../templates/character-plan-template.json)을 복사해 채운다. 성격은 형용사가 아니라 행동으로 쓴다.
+[기획서 템플릿](../templates/character-plan-template.json)(character-plan-v2)을 복사해 채운다. 성격은 형용사가 아니라 행동으로 쓴다.
 
 ```
 uv run cfp plan import <slug> --from runs/briefs/<slug>/plan.json
 ```
 
-`character_id`(`cf-YYYYMMDD-<slug>`)와 `pr1`이 발급되고, G3가 `reviewer=user, manual-plan`으로 승인 기록된다. 산출물은 `runs/characters/<character_id>/s3-plan/pr1/`다.
+v2 기획서는 `character_id`(`cf-YYYYMMDD-<slug>`)·씨앗 `sd1`·`pr1`이 발급되고, G3가 `reviewer=user, manual-plan`으로 승인 기록된다. 예전 형식(character-plan-v1) 파일은 그대로 고정하지 않는다. `--execute`를 붙이면 원문을 보존한 채 기획 정리 모델이 v2 후보 `u1`로 올리고 G3에서 사람 승인을 기다린다. 산출물은 `runs/characters/<character_id>/s3-plan/pr1/`다.
 
 ## 3. 상세 특질 시트 (S7)
 

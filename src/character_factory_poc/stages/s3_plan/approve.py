@@ -21,6 +21,10 @@ def approve_g3_variants(ctx: Context, cid: str, answer: dict) -> Path:
         raise FactoryError(f"{cid}: G3가 대기 상태가 아니다({gate.status})")
     char_dir = ctx.character_dir(cid)
     folder = char_dir / "s3-plan" / gate.rev
+    if read_json(folder / "variants.json").get("schemaVersion") == "plan-variants-v2":
+        from character_factory_poc.stages.s3_plan.choice_flow import approve_choice_variants
+
+        return approve_choice_variants(ctx, cid, answer)
     variants: PlanVariants = validate("plan-variants-v1", read_json(folder / "variants.json"))
     decision = answer.get("decision")
     ids = [p.variantId for p in variants.candidates]

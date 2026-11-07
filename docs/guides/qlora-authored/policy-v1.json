@@ -1,0 +1,1196 @@
+{
+  "schemaVersion": "qlora-authored-policy-v1",
+  "status": "draft_proposal",
+  "createdAt": "2026-11-02",
+  "subjectKind": "authored_character",
+  "valueConvention": "Every numeric value is {value, source}. source is a file path (optionally with section) or \"proposal\". A null value means undecided (미정). Nothing here is 확정 unless a decision ID says so.",
+  "parentSpec": {
+    "system": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/01-SYSTEM_SPEC_KO.md",
+    "dataset": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/02-DATASET_PROTOCOL_KO.md",
+    "evaluation": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/03-EVALUATION_PROTOCOL_KO.md",
+    "contracts": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/05-CONTRACTS_AND_TEMPLATES_KO.md",
+    "publicFigureCounterpart": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/04-MUSK_KO_POLICY.md"
+  },
+  "referenceCase": {
+    "id": "somin-final-sft-2026-10-22-r3",
+    "trainedAdapter": {
+      "value": "eaba1901be3b0d5649dfb418f6bda7cd6bf76e0133c4caecccc92631d58b405f",
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-longchat200-2026-10-23-r1/protocol.json",
+      "note": "r3 epoch-3 sha256; development candidate only"
+    },
+    "trainConversations": {
+      "value": 644,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+    },
+    "trainReplies": {
+      "value": 3977,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+    },
+    "trainSupervisedTokens": {
+      "value": 109157,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+    },
+    "trainSplitGroups": {
+      "value": 519,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+    },
+    "interactionReplies": {
+      "value": 1803,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)",
+      "note": "argon 348 + history 876 + ownership 189 + sulk 390"
+    },
+    "interactionSupervisedTokens": {
+      "value": 61575,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+    },
+    "conversationsGe7Turns": {
+      "value": 150,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+    },
+    "conversationsGe15Turns": {
+      "value": 37,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)",
+      "note": "all 37 in original_sft"
+    },
+    "repliesAtPositionGe15": {
+      "value": 242,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)",
+      "note": "all in original_sft"
+    },
+    "maxTurns": {
+      "value": 30,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+    },
+    "validationOriginal": {
+      "conversations": {
+        "value": 61,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/verification.json"
+      },
+      "replies": {
+        "value": 337,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/verification.json"
+      },
+      "supervisedTokens": {
+        "value": 7114,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/verification.json"
+      }
+    },
+    "validationAugmented": {
+      "conversations": {
+        "value": 32,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/verification.json"
+      },
+      "replies": {
+        "value": 203,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/verification.json"
+      },
+      "supervisedTokens": {
+        "value": 7044,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/verification.json"
+      }
+    },
+    "commonSpecState": "PACKAGE_FROZEN / CHECKPOINTS_RECEIVED / DEVELOPMENT_EVALUATED; adapter-vs-prompt decision INCONCLUSIVE (no B0/B1 found)"
+  },
+  "canon": {
+    "groundTruth": "approved canon only (G6 APPROVED prompt pair + trait sheet)",
+    "requiredAssets": [
+      "core.identity",
+      "core.personality_behaviors",
+      "core.voice",
+      "core.fact_rules",
+      "relationships[4]",
+      "channels",
+      "behavior_table (notice -> choose -> wrong_variant)",
+      "voice_rulebook (numeric targets with positions)",
+      "curated_exemplars"
+    ],
+    "exemplarCount": {
+      "value": 20,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §4.1"
+    },
+    "traitsPerReply": {
+      "min": {
+        "value": 1,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/데이터셋-프롬프트-구축-가이드.md §4"
+      },
+      "max": {
+        "value": 2,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/데이터셋-프롬프트-구축-가이드.md §4"
+      }
+    },
+    "relationships": [
+      "STRONGLY_FAVORABLE",
+      "FAVORABLE",
+      "NEUTRAL",
+      "UNFAVORABLE"
+    ],
+    "channels": [
+      "text",
+      "call",
+      "video_call",
+      "face_to_face"
+    ],
+    "factRules": {
+      "selfFictionAllowed": true,
+      "selfFictionMustPersist": true,
+      "selfFictionScope": [
+        "own_schedule",
+        "own_taste",
+        "own_current_action"
+      ],
+      "forbiddenWithoutEvidence": [
+        "user_facts",
+        "shared_past",
+        "joint_agreement",
+        "nickname_without_agreement",
+        "external_lookup_claims"
+      ],
+      "distinguish": [
+        "owner",
+        "proposed",
+        "confirmed",
+        "cancelled"
+      ],
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/prompt-components.json (core 4th paragraph), /Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/prompt-policy-change.json"
+    },
+    "policyChangeLog": {
+      "required": true,
+      "recordsChangedInReference": {
+        "value": 642,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/prompt-policy-change.json"
+      }
+    },
+    "sameSystemForTrainAndEval": true
+  },
+  "materials": {
+    "origins": [
+      "authored_canon",
+      "legacy_authored_sft",
+      "sns_flow_reference",
+      "synthetic_authored",
+      "hypothetical_scenario"
+    ],
+    "transformations": [
+      "short_system_conversion",
+      "context_repair",
+      "content_beats",
+      "voice_render",
+      "line_fix",
+      "mechanical_fix",
+      "generated_augmentation"
+    ],
+    "factoryMaterialCodes": {
+      "base": [
+        "SNS_REWRITE",
+        "SYNTH"
+      ],
+      "others": [
+        "SYNTH"
+      ],
+      "disabled": [
+        "NIKL"
+      ],
+      "source": "/Users/johnhuh619/projects/character-factory-poc/src/character_factory_poc/stages/s9_data/plan.py DEFAULT_MATERIALS"
+    },
+    "snsOverlapCheck": {
+      "ngramChars": {
+        "value": 10,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/데이터셋-프롬프트-구축-가이드.md §7.1"
+      },
+      "maxMatches": {
+        "value": 0,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/데이터셋-프롬프트-구축-가이드.md §7.1"
+      }
+    },
+    "snsSourceSpeakerFactsTransfer": false,
+    "snsReuseAcrossCharacters": false,
+    "reviewStates": [
+      "accepted",
+      "pending_review",
+      "quarantined",
+      "excluded"
+    ],
+    "authorSelfReviewState": "pending_review"
+  },
+  "clusters": [
+    {
+      "id": "base",
+      "label": "말투·관계·일상 기반",
+      "targetShare": {
+        "value": 0.51,
+        "source": "proposal",
+        "note": "Somin 0.5606 minus 0.05 moved to long"
+      },
+      "minShare": null,
+      "maxShare": null,
+      "protected": false,
+      "materials": [
+        "SNS_REWRITE",
+        "SYNTH",
+        "legacy_authored_sft if approved"
+      ],
+      "referenceShares": {
+        "conversations": {
+          "value": 0.5606,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "replies": {
+          "value": 0.5466,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "supervisedTokens": {
+          "value": 0.4359,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        }
+      },
+      "description": "Everyday talk, relationship and channel register, short replies. Must also supply 1-4 turn conversations and most non-text channel / formal-register cases."
+    },
+    {
+      "id": "situation",
+      "label": "상황 대응: 경청·조건·거절 수용·자기 잘못 수습",
+      "targetShare": {
+        "value": 0.08,
+        "source": "/Users/johnhuh619/projects/character-factory-poc/docs/status/decisions.md#D-0045 (status 제안)"
+      },
+      "minShare": null,
+      "maxShare": null,
+      "protected": true,
+      "materials": [
+        "SYNTH"
+      ],
+      "referenceShares": {
+        "conversations": {
+          "value": 0.0839,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "replies": {
+          "value": 0.0875,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "supervisedTokens": {
+          "value": 0.1223,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        }
+      },
+      "description": "Fact vs unknown, condition response, owning own mistake, listening, accepting refusal; contrast pairs share one split_group."
+    },
+    {
+      "id": "history",
+      "label": "이력 정확성: 회상·변경·미제공 사실·조건 유지",
+      "targetShare": {
+        "value": 0.22,
+        "source": "/Users/johnhuh619/projects/character-factory-poc/docs/status/decisions.md#D-0045 (status 제안)"
+      },
+      "minShare": null,
+      "maxShare": null,
+      "protected": true,
+      "materials": [
+        "SYNTH"
+      ],
+      "referenceShares": {
+        "conversations": {
+          "value": 0.2236,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "replies": {
+          "value": 0.2203,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "supervisedTokens": {
+          "value": 0.2777,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        }
+      },
+      "description": "Correct and false recall, time/place change, facts never given, keeping several conditions, correcting pleasant false premises."
+    },
+    {
+      "id": "ownership",
+      "label": "주체·자기 일정: 생성·유지·합의·취소 구분",
+      "targetShare": {
+        "value": 0.07,
+        "source": "/Users/johnhuh619/projects/character-factory-poc/docs/status/decisions.md#D-0045 (status 제안)"
+      },
+      "minShare": null,
+      "maxShare": null,
+      "protected": true,
+      "materials": [
+        "SYNTH"
+      ],
+      "referenceShares": {
+        "conversations": {
+          "value": 0.0668,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "replies": {
+          "value": 0.0475,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "supervisedTokens": {
+          "value": 0.0561,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        }
+      },
+      "description": "Create and keep own schedule, user facts, owner separation, joint agreement vs proposal vs cancellation."
+    },
+    {
+      "id": "conflict",
+      "label": "서운함·갈등: 표현·사과·회복·덜 풀림·선 긋기",
+      "targetShare": {
+        "value": 0.07,
+        "source": "/Users/johnhuh619/projects/character-factory-poc/docs/status/decisions.md#D-0045 (status 제안)"
+      },
+      "minShare": null,
+      "maxShare": null,
+      "protected": true,
+      "materials": [
+        "SYNTH"
+      ],
+      "referenceShares": {
+        "conversations": {
+          "value": 0.0652,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "replies": {
+          "value": 0.0981,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "supervisedTokens": {
+          "value": 0.108,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        }
+      },
+      "referenceStructure": {
+        "short": {
+          "value": 11,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "flow": {
+          "value": 13,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "arc": {
+          "value": 18,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "endingsResolved": {
+          "value": 18,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "endingsPartlyResolved": {
+          "value": 10,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        },
+        "endingsBoundary": {
+          "value": 3,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        }
+      },
+      "description": "Light sulk, real hurt, boundary, own fault, unfair blame; mix resolved / partly resolved / boundary endings; no threats, no unwarranted co-apology."
+    },
+    {
+      "id": "long",
+      "label": "긴 대화: 15~30턴·화제 전환 2회 이상·후반 계기 상황",
+      "targetShare": {
+        "value": 0.05,
+        "source": "proposal",
+        "note": "authored characters lack an original source of 15+ turn dialogues"
+      },
+      "minShare": {
+        "value": 0.05,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1 (15턴 이상 5% 이상)"
+      },
+      "maxShare": null,
+      "protected": true,
+      "materials": [
+        "SNS_REWRITE (2-3 flows stitched)",
+        "SYNTH"
+      ],
+      "referenceShares": {
+        "conversationsGe15InSomin": {
+          "value": 0.0575,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)",
+          "note": "37/644, all original_sft"
+        }
+      },
+      "description": "Text channel only; topic changes at least twice; agreed facts re-mentioned only when asked or changed; short backchannel turns mixed in; last turn not a recap; 2-3 trigger situations after 50-65% of the dialogue.",
+      "turnRule": {
+        "minTopicShifts": {
+          "value": 2,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1; policy clusters[long].description (2026-11-02 숫자 필드로 옮김)"
+        },
+        "minLateTriggers": {
+          "value": 2,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1 (2-3 trigger situations); policy clusters[long].description (2026-11-02 숫자 필드로 옮김)"
+        },
+        "lateTriggerFrom": {
+          "value": 0.5,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1 (after 50-65%); policy clusters[long].description (2026-11-02 숫자 필드로 옮김)"
+        }
+      }
+    }
+  ],
+  "dataset": {
+    "targetTrainConversations": {
+      "value": 640,
+      "source": "/Users/johnhuh619/projects/character-factory-poc/src/character_factory_poc/stages/s9_data/plan.py s9_config default target"
+    },
+    "sampleReviewSize": {
+      "value": 12,
+      "source": "/Users/johnhuh619/projects/character-factory-poc/src/character_factory_poc/stages/s9_data/plan.py sample_size default"
+    },
+    "sampleCoverageRule": "per cluster; increase until every origin x transformation and every risk type appears at least once",
+    "commonSpecStartSample": {
+      "value": 24,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/02-DATASET_PROTOCOL_KO.md §5"
+    },
+    "sampleGate": {
+      "gate": "G7a",
+      "autoApprove": false,
+      "source": "/Users/johnhuh619/projects/character-factory-poc/docs/status/decisions.md#D-0047 (status 제안)"
+    },
+    "validationBase": {
+      "value": 60,
+      "source": "/Users/johnhuh619/projects/character-factory-poc/src/character_factory_poc/stages/s9_data/plan.py validation.base default"
+    },
+    "validationAugmentedShare": {
+      "value": 0.1,
+      "source": "/Users/johnhuh619/projects/character-factory-poc/src/character_factory_poc/stages/s9_data/plan.py validation.augmented_share default"
+    },
+    "evalPerCluster": {
+      "value": 2,
+      "source": "/Users/johnhuh619/projects/character-factory-poc/src/character_factory_poc/stages/s9_data/plan.py validation.eval_per_cluster default"
+    },
+    "maxLengthTokens": {
+      "value": 4096,
+      "source": "/Users/johnhuh619/projects/character-factory-poc/src/character_factory_poc/stages/s9_data/plan.py checks.max_length_tokens default"
+    },
+    "longDialogueMinTurns": {
+      "value": 15,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+    },
+    "longDialogueTargetShare": {
+      "value": 0.05,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1 (minimum)"
+    },
+    "turnMix": {
+      "unit": "assistant turns per conversation, train split",
+      "1-4": {
+        "min": {
+          "value": 0.25,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+        },
+        "max": {
+          "value": 0.35,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+        },
+        "somin": {
+          "value": 0.332,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        }
+      },
+      "5-9": {
+        "min": {
+          "value": 0.45,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+        },
+        "max": {
+          "value": 0.55,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+        },
+        "somin": {
+          "value": 0.537,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        }
+      },
+      "10-14": {
+        "min": {
+          "value": 0.07,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+        },
+        "max": {
+          "value": 0.1,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+        },
+        "somin": {
+          "value": 0.073,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        }
+      },
+      "15-19": {
+        "min": {
+          "value": 0.02,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+        },
+        "max": {
+          "value": 0.05,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+        },
+        "somin": {
+          "value": 0.025,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        }
+      },
+      "20-30": {
+        "min": {
+          "value": 0.03,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+        },
+        "max": {
+          "value": 0.05,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+        },
+        "somin": {
+          "value": 0.033,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        }
+      },
+      "maxTurns": {
+        "min": {
+          "value": 25,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+        },
+        "max": {
+          "value": 30,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+        }
+      },
+      "supervisedTokenShareTurnsGe10": {
+        "min": {
+          "value": 0.25,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+        },
+        "max": {
+          "value": 0.3,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.1"
+        },
+        "somin": {
+          "value": 0.282,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/train.jsonl + train-index.jsonl + train-tokenized.jsonl (counted 2026-11-02, method: docs/guides/qlora-authored/02-cluster-ratios.md §1)"
+        }
+      }
+    },
+    "repetitionTargets": {
+      "recapTurnShareMax": {
+        "value": 0.05,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.3"
+      },
+      "lastTurnRecapShareMax": {
+        "value": 0.15,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.3"
+      },
+      "closingClicheShareMax": {
+        "value": 0.015,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/somin-qlora-project/docs/캐릭터-SFT-데이터셋-구축-현행.md §11.3"
+      }
+    },
+    "reportDenominators": [
+      "conversations",
+      "replies",
+      "supervised_tokens",
+      "input_tokens",
+      "unique_split_groups"
+    ],
+    "supervision": "all assistant turns; system and user masked; local tokenization must match server by hash",
+    "split": {
+      "unit": "split_group (same skeleton, same source dialogue, contrast pair, segmented original)",
+      "levels": [
+        "train",
+        "loss_validation",
+        "development_generation",
+        "regression",
+        "quarantined_legacy",
+        "final_holdout"
+      ],
+      "legacyWithoutSourceIdIndependenceClaim": false,
+      "evalOverlap": {
+        "ngramChars": {
+          "value": 10,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/verification.json sulk_eval"
+        },
+        "maxMatches": {
+          "value": 0,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/verification.json sulk_eval"
+        }
+      }
+    },
+    "protectedAnchors": {
+      "required": true,
+      "recordSurvivorsBeforeAfterRebalance": true,
+      "removalReasons": [
+        "permission",
+        "contamination",
+        "misattribution",
+        "content_unfit"
+      ],
+      "minSurvivalRatio": {
+        "value": 0.9,
+        "source": "proposal",
+        "note": "공장 split.py의 학습 목표 90% 경고선과 같은 운영 시작값"
+      }
+    },
+    "allocationAxesInsideClusters": [
+      "relationship",
+      "channel"
+    ],
+    "allocationMinimumPerInteractionCluster": {
+      "formalRegisterScenes": null,
+      "voiceChannelScenes": null,
+      "note": "미정"
+    }
+  },
+  "screening": {
+    "single": {
+      "value": 6,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/03-EVALUATION_PROTOCOL_KO.md §5"
+    },
+    "multi": {
+      "value": 2,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/03-EVALUATION_PROTOCOL_KO.md §5"
+    },
+    "turns": {
+      "value": 3,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/03-EVALUATION_PROTOCOL_KO.md §5"
+    },
+    "outputsPerCondition": {
+      "value": 12,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/03-EVALUATION_PROTOCOL_KO.md §5"
+    },
+    "seeds": {
+      "value": 1,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/03-EVALUATION_PROTOCOL_KO.md §5"
+    }
+  },
+  "developmentComparison": {
+    "single": {
+      "value": 24,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/03-EVALUATION_PROTOCOL_KO.md §5"
+    },
+    "multi": {
+      "value": 2,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/03-EVALUATION_PROTOCOL_KO.md §5"
+    },
+    "turns": {
+      "value": 6,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/03-EVALUATION_PROTOCOL_KO.md §5"
+    },
+    "outputsPerCondition": {
+      "value": 36,
+      "source": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/03-EVALUATION_PROTOCOL_KO.md §5"
+    }
+  },
+  "evaluation": {
+    "controls": [
+      {
+        "id": "B0",
+        "config": "base model + same short canon system"
+      },
+      {
+        "id": "B1",
+        "config": "base model + long canon prompt (LONG_BASE)"
+      },
+      {
+        "id": "B2",
+        "config": "incumbent adapter + same short system"
+      },
+      {
+        "id": "C",
+        "config": "new adapter + same short system"
+      }
+    ],
+    "learningEffectRequiresSamePrompt": true,
+    "firstOutputOnly": true,
+    "regenerateForQuality": false,
+    "historyPolicy": {
+      "rollouts": "self_generated",
+      "fixedHistoryItems": "anchored_same_for_all_conditions"
+    },
+    "perTurnSeed": true,
+    "blind": true,
+    "orderSwap": true,
+    "orderUnstableLabel": "ORDER_UNSTABLE",
+    "judges": {
+      "minFamilies": {
+        "value": 2,
+        "source": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/03-EVALUATION_PROTOCOL_KO.md §7"
+      },
+      "mustDifferFromAuthoringAndGenerationFamily": true,
+      "calibrationSetRequired": true,
+      "calibrationPassThreshold": null,
+      "uncalibratedLabel": "JUDGE_UNCALIBRATED",
+      "humanBlindPairs": {
+        "value": 20,
+        "source": "/Users/johnhuh619/projects/character-factory-poc/docs/status/decisions.md#D-0047 (G8 블라인드 20쌍) (status 제안)"
+      },
+      "minConsensusShare": {
+        "value": 0.5,
+        "source": "proposal",
+        "note": "consensus pairs / planned pairs; below this the decision draft is INCONCLUSIVE"
+      }
+    },
+    "suites": [
+      {
+        "id": "canon_fact",
+        "purpose": "canon fact memory and restraint outside canon, no external lookup claims",
+        "items": {
+          "value": 12,
+          "source": "proposal"
+        },
+        "seeds": {
+          "value": 2,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-r3-training-2026-10-22-r1/manual-scores.json"
+        },
+        "turns": null,
+        "history": "fixed",
+        "axes": [
+          "canon_fidelity",
+          "context",
+          "korean_naturalness"
+        ]
+      },
+      {
+        "id": "history_accuracy",
+        "purpose": "recall, change, correction of false premise, facts never given",
+        "items": {
+          "value": 12,
+          "source": "proposal"
+        },
+        "seeds": {
+          "value": 2,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-r3-training-2026-10-22-r1/manual-scores.json"
+        },
+        "turns": null,
+        "history": "fixed",
+        "axes": [
+          "context",
+          "dialogue_consistency"
+        ]
+      },
+      {
+        "id": "owner_separation",
+        "purpose": "user vs character vs third-party facts, joint agreement vs proposal",
+        "items": {
+          "value": 9,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/evaluation/ownership-rubrics-12.jsonl (OE04-OE12)"
+        },
+        "seeds": {
+          "value": 2,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-r3-training-2026-10-22-r1/manual-scores.json"
+        },
+        "turns": null,
+        "history": "fixed",
+        "axes": [
+          "context",
+          "canon_fidelity"
+        ]
+      },
+      {
+        "id": "self_schedule",
+        "purpose": "create own schedule, recall after other topics, change, cancel, reject invented joint plan",
+        "items": {
+          "value": 2,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-schedule-eval-2026-10-22-r1/결과-보고서.md (initial schedules)"
+        },
+        "branches": {
+          "value": 4,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-schedule-eval-2026-10-22-r1/결과-보고서.md"
+        },
+        "checks": {
+          "value": 12,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-schedule-eval-2026-10-22-r1/결과-보고서.md"
+        },
+        "turns": null,
+        "history": "self_generated",
+        "axes": [
+          "dialogue_consistency",
+          "judgment"
+        ]
+      },
+      {
+        "id": "hurt_recovery",
+        "purpose": "hurt expression, apology handling, recovery, boundary without threat",
+        "items": {
+          "value": 12,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/evaluation/sulk-rubrics-12.jsonl"
+        },
+        "seeds": {
+          "value": 2,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-r3-training-2026-10-22-r1/manual-scores.json"
+        },
+        "rollouts": {
+          "scripts": {
+            "value": 2,
+            "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-rude-recovery-2026-10-23-r1/protocol.json"
+          },
+          "seeds": {
+            "value": 3,
+            "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-rude-recovery-2026-10-23-r1/protocol.json"
+          },
+          "turns": {
+            "value": 12,
+            "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-rude-recovery-2026-10-23-r1/protocol.json"
+          },
+          "sincereApologyTurns": {
+            "value": 14,
+            "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-sincere-apology-2026-10-23-r1/대화-비교.md"
+          }
+        },
+        "history": "fixed + self_generated",
+        "axes": [
+          "judgment",
+          "condition_response",
+          "persona_voice"
+        ]
+      },
+      {
+        "id": "register_voice",
+        "purpose": "register per relationship and channel, habit position, pressure to switch register",
+        "items": {
+          "value": 6,
+          "source": "proposal"
+        },
+        "relationships": {
+          "value": 4,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-final-sft-2026-10-22-r3/prompt-components.json"
+        },
+        "channels": {
+          "value": 2,
+          "source": "proposal",
+          "note": "text vs voice"
+        },
+        "turns": null,
+        "history": "fixed",
+        "axes": [
+          "persona_voice",
+          "korean_naturalness"
+        ]
+      },
+      {
+        "id": "long_repetition",
+        "purpose": "memory probes, bubble repetition, conflict persistence over 200 turns",
+        "personas": {
+          "value": 4,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-longchat200-2026-10-23-r1/protocol.json"
+        },
+        "turns": {
+          "value": 200,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-longchat200-2026-10-23-r1/protocol.json"
+        },
+        "memoryProbes": {
+          "day1": {
+            "value": 40,
+            "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-longchat200-2026-10-23-r1/결과-보고서.md"
+          },
+          "at100": {
+            "value": 16,
+            "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-longchat200-2026-10-23-r1/결과-보고서.md"
+          },
+          "at200": {
+            "value": 28,
+            "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-longchat200-2026-10-23-r1/결과-보고서.md"
+          }
+        },
+        "conflictWindow": {
+          "start": {
+            "value": 145,
+            "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-longchat200-2026-10-23-r1/protocol.json"
+          },
+          "end": {
+            "value": 155,
+            "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/somin-longchat200-2026-10-23-r1/결과-보고서.md"
+          }
+        },
+        "history": "self_generated",
+        "axes": [
+          "dialogue_consistency",
+          "context",
+          "persona_voice"
+        ]
+      },
+      {
+        "id": "distinctiveness",
+        "purpose": "same scene, different choice from other characters (blind attribution)",
+        "scenes": {
+          "value": 5,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/charlong200-2026-10-26-r2/결과-보고서.md"
+        },
+        "personas": {
+          "value": 4,
+          "source": "/Users/johnhuh619/Documents/Codex/2026-10-14/gem/outputs/charlong200-2026-10-26-r2/결과-보고서.md"
+        },
+        "turns": null,
+        "history": "self_generated (taken from long_repetition)",
+        "axes": [
+          "judgment",
+          "persona_voice"
+        ]
+      }
+    ],
+    "axes": [
+      {
+        "id": "judgment",
+        "meaning": "chooses per canon behavior table; avoids listed wrong variants",
+        "scale": "0-4"
+      },
+      {
+        "id": "context",
+        "meaning": "keeps facts, owners, premises",
+        "scale": "0-4"
+      },
+      {
+        "id": "condition_response",
+        "meaning": "changes on real new conditions, holds under mere pressure",
+        "scale": "0-4"
+      },
+      {
+        "id": "canon_fidelity",
+        "meaning": "replaces source_fidelity: keeps canon facts, self fiction consistent, no user fact invention",
+        "scale": "0-4"
+      },
+      {
+        "id": "korean_naturalness",
+        "meaning": "natural Korean chat",
+        "scale": "0-4"
+      },
+      {
+        "id": "persona_voice",
+        "meaning": "register per relationship and channel, decoration reduced in serious scenes",
+        "scale": "0-4"
+      },
+      {
+        "id": "dialogue_consistency",
+        "meaning": "keeps earlier choices and own schedule unless justified",
+        "scale": "0-4"
+      }
+    ],
+    "binaryMetrics": [
+      "memory_probe_correct",
+      "bubble_repetition_rate_101_200",
+      "perfunctory_apology_accepted",
+      "threat_or_cutoff",
+      "attribution_accuracy"
+    ],
+    "criticalErrors": [
+      "user_fact_fabrication",
+      "shared_past_or_agreement_fabrication",
+      "emotion_subject_flip",
+      "relationship_threat_or_emotional_coercion",
+      "repetition_loop_empty_or_truncated_output"
+    ],
+    "gates": {
+      "bubbleRepetition101to200Max": {
+        "value": 0.05,
+        "source": "/Users/johnhuh619/projects/character-factory-poc/docs/status/decisions.md#D-0045 (status 제안)"
+      },
+      "memoryProbeAccuracyMin200": {
+        "value": 0.9,
+        "source": "/Users/johnhuh619/projects/character-factory-poc/docs/status/decisions.md#D-0045 (status 제안)"
+      },
+      "sincereApologyRecoveryMin": {
+        "value": 4,
+        "source": "/Users/johnhuh619/projects/character-factory-poc/docs/status/decisions.md#D-0045 (status 제안)",
+        "note": "out of 6 scripts"
+      },
+      "sincereApologyScripts": {
+        "value": 6,
+        "source": "/Users/johnhuh619/projects/character-factory-poc/docs/status/decisions.md#D-0045 (status 제안)"
+      },
+      "criticalErrorsMax": {
+        "value": 0,
+        "source": "proposal"
+      },
+      "axisRegressionMargin": null,
+      "compositeScoreThreshold": null
+    },
+    "decisions": [
+      "RELEASE_ACCEPTED",
+      "MODEL_ACCEPTED",
+      "DEVELOPMENT_RECOMMENDED",
+      "KEEP_INCUMBENT",
+      "INCONCLUSIVE",
+      "BLOCKED_INTEGRITY",
+      "BLOCKED_QUALITY"
+    ],
+    "decisionsSource": "/Users/johnhuh619/Documents/Codex/2026-10-27/new-chat/docs/qlora-quality-system/01-SYSTEM_SPEC_KO.md §3",
+    "reviewMode": {
+      "allowed": [
+        "llm_only",
+        "human_confirmed"
+      ],
+      "mustBeFixedBeforeRun": true
+    },
+    "noTrainingPath": {
+      "allowed": true,
+      "source": "/Users/johnhuh619/projects/character-factory-poc/docs/status/decisions.md#D-0048 (확정)"
+    }
+  },
+  "improvement": {
+    "oneInterventionPerRound": true,
+    "interventionOrder": [
+      "eval",
+      "prompt_same_weights",
+      "data_within_cluster",
+      "checkpoint",
+      "training_config"
+    ],
+    "neverCopyEvalItemsIntoTrain": true,
+    "failureTypes": [
+      {
+        "id": "eval_seed_copy",
+        "signal": "rollout repeats previous turn verbatim",
+        "causeLocation": "eval",
+        "firstIntervention": "per-turn seed, rerun same candidates"
+      },
+      {
+        "id": "eval_input_mismatch",
+        "signal": "train and eval system differ",
+        "causeLocation": "eval",
+        "firstIntervention": "align eval system to training canon text"
+      },
+      {
+        "id": "user_fact_fabrication",
+        "signal": "states user facts, shared past or agreement without evidence",
+        "causeLocation": "data",
+        "firstIntervention": "check canon fact rule, then add ownership/history scenes"
+      },
+      {
+        "id": "false_promise_acceptance",
+        "signal": "accepts pleasant false promise",
+        "causeLocation": "data",
+        "firstIntervention": "history scenes correcting pleasant false premises"
+      },
+      {
+        "id": "owner_confusion",
+        "signal": "user or third-party fact spoken as own",
+        "causeLocation": "data",
+        "firstIntervention": "ownership owner-separation decoy scenes"
+      },
+      {
+        "id": "self_schedule_drift",
+        "signal": "own schedule changes or disappears later",
+        "causeLocation": "data",
+        "firstIntervention": "ownership + long scenes recalling own schedule after topic shifts"
+      },
+      {
+        "id": "overbroad_fact_rule",
+        "signal": "refuses to create own schedule or taste",
+        "causeLocation": "prompt",
+        "firstIntervention": "narrow canon fact rule to user facts, shared past, agreements; log policy change"
+      },
+      {
+        "id": "refused_fact_hedging",
+        "signal": "answers 'not sure' about something it refused",
+        "causeLocation": "data",
+        "firstIntervention": "history scenes; do not tune epochs if all checkpoints fail"
+      },
+      {
+        "id": "perfunctory_apology_acceptance",
+        "signal": "accepts perfunctory apology after long context",
+        "causeLocation": "data",
+        "firstIntervention": "long-cluster late trigger with perfunctory apology"
+      },
+      {
+        "id": "emotion_subject_flip",
+        "signal": "asks 'still angry?' when the user is silent",
+        "causeLocation": "data",
+        "firstIntervention": "conflict scenes where character keeps own feeling through silence"
+      },
+      {
+        "id": "unwarranted_co_apology",
+        "signal": "apologizes together when user is at fault",
+        "causeLocation": "data",
+        "firstIntervention": "fix existing conflict dialogues containing co-apology"
+      },
+      {
+        "id": "relationship_threat",
+        "signal": "threat or cutoff after continued rudeness",
+        "causeLocation": "data",
+        "firstIntervention": "conflict scenes with calm distancing, no threat"
+      },
+      {
+        "id": "hurt_unexpressed",
+        "signal": "only asks back, never states hurt with reason",
+        "causeLocation": "data",
+        "firstIntervention": "conflict real-hurt type scenes"
+      },
+      {
+        "id": "register_break",
+        "signal": "register or channel notation breaks",
+        "causeLocation": "prompt",
+        "firstIntervention": "relationship/channel sentence A/B on same weights, then data"
+      },
+      {
+        "id": "habit_decoration",
+        "signal": "habit repeated without position",
+        "causeLocation": "data",
+        "firstIntervention": "rulebook positions + renderer frequency caps"
+      },
+      {
+        "id": "long_recap_repetition",
+        "signal": "re-confirms agreed plan every turn late in long chat",
+        "causeLocation": "data",
+        "firstIntervention": "turn mix + recap metrics, fix the offending bundle"
+      },
+      {
+        "id": "distinctiveness_loss",
+        "signal": "blind attribution confuses with other characters",
+        "causeLocation": "prompt",
+        "firstIntervention": "define the scene choice in canon behavior table, then data"
+      },
+      {
+        "id": "loss_generation_divergence",
+        "signal": "both validations rise or loss falls while generation regresses",
+        "causeLocation": "checkpoint",
+        "firstIntervention": "compare saved epochs on same suites, per-family validation loss"
+      },
+      {
+        "id": "own_apology_without_repair",
+        "signal": "character's own apology after its mistake is perfunctory, repeats sorry, or lacks a concrete repair action (factory APOLOGY script)",
+        "causeLocation": "data",
+        "firstIntervention": "situation/conflict scenes where the character owns the mistake and names one concrete repair action",
+        "source": "proposal (2026-11-02, factory APOLOGY set direction differs from perfunctory_apology_acceptance)"
+      },
+      {
+        "id": "empty_or_loop_output",
+        "signal": "empty reply or repetition loop (same 4-gram 3+ times, or same as previous own turn) in first outputs",
+        "causeLocation": "eval",
+        "firstIntervention": "check actual request, generation settings and adapter load against the contract; then compare earlier checkpoints",
+        "source": "proposal (2026-11-02, mirrors checkpoint selection defect metrics)"
+      }
+    ],
+    "setRoles": [
+      "final_holdout",
+      "development",
+      "regression",
+      "judge_calibration"
+    ],
+    "demotionRules": [
+      {
+        "from": "final_holdout",
+        "to": "development",
+        "when": "opened once for a frozen candidate"
+      },
+      {
+        "from": "development",
+        "to": "regression",
+        "when": "data was fixed targeting its failures, or used in two or more selection rounds"
+      },
+      {
+        "from": "regression",
+        "to": "regression",
+        "when": "exposed to authors or authoring models; record prompt_exposure"
+      }
+    ],
+    "promotion": false,
+    "ledgers": {
+      "version": "docs/guides/qlora-authored/04-continuous-improvement.md §9",
+      "decision": "docs/guides/qlora-authored/04-continuous-improvement.md §10"
+    }
+  },
+  "undecided": [
+    "cluster minShare/maxShare except long.minShare",
+    "axis regression margins",
+    "judge calibration threshold",
+    "formal-register and voice-channel minimum scenes per interaction cluster",
+    "final_holdout size for authored characters"
+  ]
+}

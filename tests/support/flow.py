@@ -24,8 +24,8 @@ from character_factory_poc.providers.fake_image import FakeImageModel
 from character_factory_poc.providers.fake_video import FakeVideoModel
 from character_factory_poc.stages.s1_reference.run import run_s1
 from character_factory_poc.stages.s2_hero.run import run_s2
-from character_factory_poc.stages.s3_plan.draft import new_character
-from tests.support.synthetic import RANKING, scout_features
+from character_factory_poc.stages.s3_plan.common import new_character
+from tests.support.synthetic import PLAN, RANKING, scout_features
 from tests.test_agentic import CATALOG
 
 Responder = Callable[[Any], Any]
@@ -184,6 +184,59 @@ def sample_plan_v2(
     }
     plan.update(over)
     return plan
+
+
+VARIANT_MOVES = [
+    ["서가에서 책을 고르며 기다린다", "무엇을 보고 한 말인지 되묻는다", "지금 마음을 나눠 말한다"],
+    ["도착 시간을 물어 일정을 조정한다", "칭찬의 이유를 기억해 둔다", "다음 만남을 먼저 정한다"],
+    ["근처에서 할 일을 찾아 시간을 쓴다", "상대의 장점을 되돌려 말한다", "더 필요한 시간을 말한다"],
+]
+
+
+def variants_for_seed(seed: dict[str, Any], ids: dict[str, Any], count: int = 3) -> dict[str, Any]:
+    """씨앗·ids를 읽어 변형 검사를 통과하는 가짜 plan-variants-output-v1을 만든다(D-0080)."""
+    plans = []
+    for i in range(count):
+        p = sample_plan_v2(
+            ids["characterId"],
+            ids["planRev"],
+            f"v{i + 1}",
+            ids["seedRev"],
+            appearanceRev=ids.get("appearanceRev"),
+            notes="",
+        )
+        for key in ("job", "age", "gender"):
+            if seed.get(key):
+                p[key] = seed[key]
+        # 기존 가짜 특질 시트(synthetic.trait_sheet)가 언급하는 핵심 성격과 맞춘다.
+        p["coreTraits"] = list(PLAN["coreTraits"])
+        p["contrastTrait"] = PLAN["contrastTrait"]
+        for choice, move in zip(p["choices"], VARIANT_MOVES[i % 3], strict=True):
+            choice["firstMove"] = move if i < 3 else f"{move}({i + 1})"
+        plans.append(p)
+    return {"variants": plans, "axisNote": "기다림·조율·자기 시간의 우선순위가 다르다"}
+
+
+def variants_from_workspace(ws: Path) -> dict[str, Any] | None:
+    """codex 가짜 작성자용: 작업 공간 inputs에 seed가 있으면 변형 출력을 만든다."""
+    inputs = ws / "inputs"
+    if not (inputs / "seed.json").exists():
+        return None
+    seed = json.loads((inputs / "seed.json").read_text("utf-8"))
+    ids = json.loads((inputs / "ids.json").read_text("utf-8"))
+    count_path = inputs / "variant-count.json"
+    count = json.loads(count_path.read_text("utf-8")) if count_path.exists() else 3
+    return variants_for_seed(seed, ids, int(count))
+
+
+def v2_plan(cid: str, **over: Any) -> dict[str, Any]:
+    """외모 없는 v2 기획서. 가짜 특질 시트(synthetic.trait_sheet)의 핵심 성격과 맞춘다."""
+    defaults: dict[str, Any] = {
+        "appearanceRev": None,
+        "coreTraits": list(PLAN["coreTraits"]),
+        "contrastTrait": PLAN["contrastTrait"],
+    }
+    return sample_plan_v2(cid, **(defaults | over))
 
 
 def approve_plan_v2(ctx: Context, cid: str, plan: dict[str, Any] | None = None) -> Path:

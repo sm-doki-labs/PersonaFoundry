@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -14,10 +15,10 @@ from typing import Any
 import character_factory_poc.contracts  # noqa: F401
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.providers.fake import FakeTextModel
-from character_factory_poc.stages.s3_plan.importer import import_plan
 from character_factory_poc.stages.s7_traits.sheet import run_s7
 from character_factory_poc.stages.s8_prompts.approve import approve_g6
 from character_factory_poc.stages.s8_prompts.build import run_s8
+from tests.support.legacy import import_plan
 from tests.support.synthetic import PLAN, prompter_output, trait_sheet
 
 WORDS = ("창가", "골목", "버스", "노을", "서가", "커피", "우산", "기타", "테라스", "계단")
@@ -172,6 +173,14 @@ class FakeWriterModel(FakeTextModel):
 
     def writer(self, req) -> dict[str, Any]:
         batch = _block(req, "batch")
+        rule = batch.get("turnRule")
+        if rule:
+            # 창작 인물 정책(D-0078)의 long 클러스터: 턴 하한·화제 전환·후반 계기 표시를 지킨다.
+            items = []
+            for _ in range(batch["count"]):
+                self.n += 1
+                items.append(self._long_item(self.n, rule))
+            return {"conversations": items}
         sources = {int(s["index"]): s for s in batch.get("sources", [])}
         items = []
         for i in range(batch["count"]):
@@ -185,6 +194,26 @@ class FakeWriterModel(FakeTextModel):
             for item in items:
                 item["messages"][1]["content"] = self.always_reject
         return {"conversations": items}
+
+    def _long_item(self, n: int, rule: dict[str, Any]) -> dict[str, Any]:
+        turns = int(rule["minAssistantTurns"])
+        messages = []
+        for t in range(turns):
+            word = WORDS[(n + t) % 10]
+            messages.append({"role": "user", "content": f"{n}-{t} 이번엔 {word} 얘기 해 볼래?"})
+            messages.append(
+                {"role": "assistant", "content": f"{word}라면 {n}번 대화 {t}턴째에 좋지."}
+            )
+        start = math.ceil(len(messages) * float(rule["lateTriggerFromShare"]))
+        start += start % 2
+        return {
+            "skeletonKey": f"long-{n}",
+            "scene": f"{WORDS[n % 10]} 근처에서 오래 문자를 주고받는 밤.",
+            "sourceId": "",
+            "messages": messages,
+            "topicShiftAt": [4, 10],
+            "lateTriggerAt": [start, start + 2],
+        }
 
     def _sns_item(self, source: dict[str, Any], n: int) -> dict[str, Any]:
         bad = self.sns_bad_first and not self.sns_bad_served

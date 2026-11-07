@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 from character_factory_poc.pipeline.graph import GATES
 from character_factory_poc.pipeline.orchestrator import RunOptions, run_until
 from character_factory_poc.providers.fake import FakeTextModel
-from character_factory_poc.stages.s3_plan.draft import new_character
+from character_factory_poc.stages.s3_plan.common import new_character
 from character_factory_poc.web import create_app
 from tests.support.data_fakes import FakeWriterModel, s9_toml, write_sns
 from tests.support.flow import make_ctx

@@ -12,10 +12,10 @@ from character_factory_poc.cli import main
 from character_factory_poc.common.errors import GateNotApprovedError
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.providers.fake import FakeTextModel
-from character_factory_poc.stages.s3_plan.importer import import_plan
 from character_factory_poc.stages.s7_traits.sheet import run_s7
 from character_factory_poc.stages.s8_prompts.approve import approve_g6
 from character_factory_poc.stages.s8_prompts.build import run_s8
+from tests.support.legacy import import_plan
 from tests.support.synthetic import PLAN, prompter_output, trait_sheet
 
 
@@ -29,18 +29,6 @@ def _import(ctx: Context, tmp_path: Path) -> str:
     src.write_text(json.dumps(PLAN, ensure_ascii=False), encoding="utf-8")
     plan = import_plan(ctx, "haneul", src)
     return plan.characterId
-
-
-def test_plan_import_records_g3(ctx, tmp_path):
-    cid = _import(ctx, tmp_path)
-    st = ctx.state(cid)
-    assert st.gate("G3").status == "APPROVED"
-    assert st.stage("s3").status == "APPROVED"
-    rec = json.loads((ctx.character_dir(cid) / "gates" / "G3-pr1.json").read_text("utf-8"))
-    assert rec["reviewer"] == "user" and "manual-plan" in rec["reasons"]
-    plan_path = ctx.character_dir(cid) / "s3-plan" / "pr1" / "plan.json"
-    plan = json.loads(plan_path.read_text("utf-8"))
-    assert plan["evidence"]["coreTraits"][0]["kind"] == "USER"
 
 
 def test_s7_requires_g3(ctx):

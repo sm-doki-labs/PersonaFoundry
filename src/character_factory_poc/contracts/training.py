@@ -37,9 +37,14 @@ class Transfer(Strict):
 
 class Checkpoint(Strict):
     checkpointId: str
-    epoch: int | None = None
+    epoch: int | float | None = Field(
+        default=None, description="공급자가 보고한 원값. Gemma는 0.5 epoch 단위(D-0077)"
+    )
     step: int | None = None
     ref: str = Field(description="어댑터 파일 경로 또는 공급자 체크포인트 이름")
+    validationLoss: float | None = Field(
+        default=None, description="기록용. 체크포인트 선택은 생성 결과로 한다(D-0077)"
+    )
 
 
 class ModelBinding(Strict):
@@ -179,3 +184,27 @@ class EvalReport(Strict):
     humanPicks: list[HumanPick] = Field(default_factory=list)
     llmHumanAgreement: float | None = None
     recommendation: str = Field(description="G8 참고용. 결정은 사람이 한다")
+    # D-0078 정책 점수표(s10_eval/scorecard.py). 없으면 이전 보고서와 같다.
+    decision: (
+        Literal[
+            "RELEASE_ACCEPTED",
+            "MODEL_ACCEPTED",
+            "DEVELOPMENT_RECOMMENDED",
+            "KEEP_INCUMBENT",
+            "INCONCLUSIVE",
+            "BLOCKED_INTEGRITY",
+            "BLOCKED_QUALITY",
+        ]
+        | None
+    ) = Field(default=None, description="정책 결정값 자동 초안. G8 사람 결정을 대신하지 않는다")
+    decisionReasons: list[str] = Field(default_factory=list)
+    suiteCoverage: list[dict[str, Any]] = Field(
+        default_factory=list, description="정책 suite별 커버리지(scorecard SuiteCoverage)"
+    )
+    criticalErrorChecks: list[dict[str, Any]] = Field(
+        default_factory=list, description="정책 criticalErrors별 측정 여부(scorecard CriticalCheck)"
+    )
+    checkpointSelection: dict[str, Any] | None = Field(
+        default=None, description="s10-train의 checkpoint-selection.json 요약"
+    )
+    improvementTasksRef: ArtifactRef | None = None

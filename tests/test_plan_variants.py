@@ -18,8 +18,9 @@ from character_factory_poc.common.errors import (
 from character_factory_poc.common.schema import dump, validate
 from character_factory_poc.common.store import verify_manifest
 from character_factory_poc.pipeline.approve import approve_gate
+from character_factory_poc.stages.s1_reference.run import run_s1
 from character_factory_poc.stages.s3_plan.check_v2 import codex_checks
-from character_factory_poc.stages.s3_plan.draft import new_character
+from character_factory_poc.stages.s3_plan.common import new_character
 from character_factory_poc.stages.s3_plan.importer import load_approved_plan_v2
 from character_factory_poc.stages.s3_plan.own import plan_calls as own_calls
 from character_factory_poc.stages.s3_plan.own import run_s3_own
@@ -73,17 +74,44 @@ def test_seed_revision_and_gender_prefill(tmp_path):
 
 
 @pytest.mark.parametrize("runner", [run_s3_variants, lambda c, i: run_s3_own(c, i, "상세 기획")])
-def test_requires_s2_and_seed(tmp_path, runner):
+def test_requires_seed_and_waits_for_started_appearance(tmp_path, runner):
     ctx, agents = make_ctx(tmp_path)
+    # D-0080: S1을 시작하지 않은 페르소나 우선 캐릭터는 외모 없이 씨앗만 있으면 된다.
     cid = new_character(ctx, "not-ready")
-    with pytest.raises(GateNotApprovedError, match="s2"):
+    with pytest.raises(NeedsInputError, match="cfp plan seed"):
         runner(ctx, cid)
+    # 외모 축을 시작했지만 s2 승인 전이면 지금처럼 기다린다.
+    started = new_character(ctx, "started")
+    run_s1(ctx, started, RANKING)
+    write_seed(ctx, started, SEED)
+    with pytest.raises(GateNotApprovedError, match="s2"):
+        runner(ctx, started)
     cid = through_s2(ctx)
     calls = len(agents.calls)
     with pytest.raises(NeedsInputError, match="cfp plan seed"):
         runner(ctx, cid)
     assert len(agents.calls) == calls
     assert not (ctx.character_dir(cid) / "s3-plan/pr1").exists()
+
+
+def test_persona_first_variants_have_no_appearance(tmp_path):
+    from tests.support.flow import variants_for_seed
+
+    ctx, agents = make_ctx(tmp_path)
+    cid = new_character(ctx, "persona-first")
+    write_seed(ctx, cid, SEED)
+    seen = {}
+
+    def respond(req):
+        seen["called"] = True
+        return variants_for_seed(SEED, {"characterId": cid, "planRev": "pr1", "seedRev": "sd1"})
+
+    agents.set("s3-variants", respond)
+    folder = run_s3_variants(ctx, cid)
+    variants = json.loads((folder / "variants.json").read_text())
+    assert seen["called"] and len(variants["candidates"]) == 3
+    assert all(c["appearanceRev"] is None for c in variants["candidates"])
+    assert ctx.state(cid).gate("G3").status == "AWAITING_HUMAN"
 
 
 def test_variants_select_and_edit(ready):

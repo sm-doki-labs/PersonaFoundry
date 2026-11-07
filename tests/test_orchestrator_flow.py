@@ -18,7 +18,7 @@ from tests.test_scene_flow import backgrounds, poses, scenes
 
 def test_seed_wait_runs_intro_video_lane_then_full_scene_flow(tmp_path):
     ctx, agents = make_ctx(tmp_path)
-    from character_factory_poc.stages.s3_plan.draft import new_character
+    from character_factory_poc.stages.s3_plan.common import new_character
 
     cid = new_character(ctx, "lanes")
     agents.set("s3-variants", lambda req: output(cid))

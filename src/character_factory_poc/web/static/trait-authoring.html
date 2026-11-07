@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#16181d">
+  <title>캐릭터 설정 · 캐릭터 공장</title>
+  <link rel="stylesheet" href="shared/base.css">
+  <link rel="stylesheet" href="shared/glass.css">
+  <link rel="stylesheet" href="shared/trait-authoring.css">
+  <script src="shared/trait-authoring.js" defer></script>
+</head>
+<body class="theme-glass trait-authoring">
+  <a class="skip" href="#main">본문으로 이동</a>
+  <header class="page-header"><a href="index.html">캐릭터 공장 <span aria-hidden="true">/</span> 워크숍</a><span>캐릭터 설정</span></header>
+  <main id="main">
+    <div class="intro"><h1>어떤 캐릭터인가요?</h1><p>기본 성격을 적고, 더하고 싶은 행동 특질을 골라 주세요.</p></div>
+    <div class="character-bar">
+      <label for="character">캐릭터</label>
+      <select id="character" disabled><option value="">캐릭터를 불러오는 중…</option></select>
+      <button id="retry-projects" type="button" hidden>목록 다시 불러오기</button>
+    </div>
+    <p id="page-status" role="status" aria-live="polite">설정을 불러오는 중…</p>
+    <div class="recovery"><button id="retry-seed" type="button" hidden>설정 다시 불러오기</button><button id="retry-catalog" type="button" hidden>특질 목록 다시 불러오기</button></div>
+    <noscript>이 화면을 사용하려면 브라우저에서 자바스크립트를 켜 주세요.</noscript>
+    <form id="authoring-form">
+      <fieldset id="editor" disabled>
+        <legend class="sr-only">기본 설정과 추가 특질</legend>
+        <div class="authoring-grid">
+          <section class="fields" aria-labelledby="basic-heading">
+            <h2 id="basic-heading">기본 설정</h2>
+            <label for="personality">성격 <span class="field-note">필수</span></label>
+            <textarea id="personality" name="personality" rows="4" required aria-describedby="personality-hint" placeholder="예: 조용하고 다정하지만, 자기 기준은 분명한 성격"></textarea>
+            <p class="hint" id="personality-hint">형용사나 짧은 문장으로 자유롭게 적어 주세요. 추가 특질은 고르지 않아도 됩니다.</p>
+            <details id="extra-fields" class="extra-fields">
+              <summary>직업·배경 등 기본 정보 추가</summary>
+              <div class="field"><label for="job">직업 <span class="field-note">선택</span></label><input id="job" name="job" type="text" autocomplete="off" placeholder="예: 독립 서점 운영자"></div>
+              <div class="field-pair">
+                <div><label for="age">나이 <span class="field-note">선택</span></label><input id="age" name="age" type="number" min="18" step="1" inputmode="numeric" placeholder="18세 이상"></div>
+                <div><label for="gender">성별 <span class="field-note">선택</span></label><select id="gender" name="gender"><option value="">미정</option><option value="female">여성</option><option value="male">남성</option><option value="other">기타</option></select></div>
+              </div>
+              <div class="field"><label for="background">배경 <span class="field-note">선택</span></label><textarea id="background" name="background" rows="3" placeholder="캐릭터의 생활이나 경험을 적어 주세요."></textarea></div>
+              <div class="field"><label for="notes">메모 <span class="field-note">선택</span></label><textarea id="notes" name="notes" rows="3" placeholder="기획할 때 지켜야 할 내용을 적어 주세요."></textarea></div>
+            </details>
+          </section>
+          <section class="traits" aria-labelledby="traits-heading">
+            <div class="section-heading"><h2 id="traits-heading">추가 특질</h2><span class="field-note">선택 사항</span></div>
+            <p class="hint">기본 성격에 더할 행동을 최대 5개까지 고를 수 있습니다.</p>
+            <div class="selected-panel" aria-labelledby="selected-heading">
+              <div class="section-heading"><h3 id="selected-heading">현재 선택</h3><span id="selected-count">0 / 5</span></div>
+              <p id="selected-empty" class="hint">아직 고른 특질이 없습니다. 기본 성격만으로도 저장할 수 있습니다.</p>
+              <ul id="selected-list" class="trait-list"></ul>
+              <p class="hint preservation">입력을 바꾸거나 다시 추천받아도 선택은 유지됩니다.</p>
+            </div>
+            <div class="discovery">
+              <button id="recommend" type="button">성격에 맞는 특질 추천받기</button>
+              <p class="hint">입력한 단어를 바탕으로 후보를 찾습니다. 캐릭터에 어울리는지는 직접 판단해 주세요.</p>
+              <label for="search">특질 직접 찾기</label>
+              <div class="search-row"><input id="search" type="search" autocomplete="off" placeholder="예: 배려, 갈등, 호기심"><button id="search-button" type="button">검색</button></div>
+              <button id="browse" type="button" class="text-button">검색어 없이 둘러보기</button>
+              <div id="results-region" aria-busy="false">
+                <p id="results-status" role="status" aria-live="polite">성격을 적고 추천받거나, 원하는 행동을 검색해 보세요.</p>
+                <ul id="results-list" class="trait-list"></ul>
+              </div>
+            </div>
+          </section>
+        </div>
+        <footer class="save-bar"><div><p id="save-note">설정만 저장합니다. 유료 생성은 시작하지 않습니다.</p><p id="dirty-status" class="hint">저장할 캐릭터를 선택해 주세요.</p></div><button id="save" class="primary" type="submit">설정 저장</button></footer>
+      </fieldset>
+    </form>
+    <div id="save-result" role="status" aria-live="polite" hidden><p id="saved-message"></p><a id="next-link" hidden>캐릭터 진행 현황으로 이동 <span aria-hidden="true">→</span></a></div>
+  </main>
+</body>
+</html>

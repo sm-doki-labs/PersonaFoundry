@@ -115,7 +115,11 @@ def build_pair_cases(
     """조건 쌍 × 세트의 판정 사례를 고정 순서로 만든다. 아직 판정하지 않은 상태다."""
     cases: list[dict[str, Any]] = []
     n = 0
+    # Gemma만 학습한 경우처럼 사전 등록에 없는 조건의 쌍은 건너뛴다(D-0077).
+    registered = {arm.armId for arm in prereg.arms}
     for arm_a, arm_b in ARM_PAIRS:
+        if arm_a not in registered or arm_b not in registered:
+            continue
         for spec in prereg.sets:
             run_a = runs[(arm_a, spec.setId)]
             run_b = runs[(arm_b, spec.setId)]

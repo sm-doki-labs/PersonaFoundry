@@ -33,7 +33,7 @@ from character_factory_poc.providers.xai_video import XaiVideoModel, estimate_co
 from character_factory_poc.stages.s1_reference.run import run_s1
 from character_factory_poc.stages.s2_hero.approve import load_appearance_spec
 from character_factory_poc.stages.s2_hero.run import run_s2
-from character_factory_poc.stages.s3_plan.draft import new_character
+from character_factory_poc.stages.s3_plan.common import new_character
 from character_factory_poc.stages.s5_intro.approve import load_approved_intro
 from character_factory_poc.stages.s5_intro.first_frame import crop_to_ratio, parse_ratio
 from character_factory_poc.stages.s5_intro.run import run_s5

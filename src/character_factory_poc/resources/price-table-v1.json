@@ -1,0 +1,80 @@
+{
+  "version": "price-table-v1",
+  "currency": "USD",
+  "unit": "per_million_tokens",
+  "outputIncludesReasoning": true,
+  "entries": [
+    {
+      "model": "gpt-6.1-sol",
+      "family": "openai",
+      "effectiveFrom": "2026-11-04",
+      "effectiveTo": null,
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.10,
+      "cacheWritePerMillion": 2.50,
+      "outputPerMillion": 10,
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "checkedAt": "2026-11-04"
+    },
+    {
+      "model": "gpt-6.1-terra",
+      "family": "openai",
+      "effectiveFrom": "2026-11-04",
+      "effectiveTo": null,
+      "inputPerMillion": 1,
+      "cachedInputPerMillion": 0.05,
+      "cacheWritePerMillion": 1.25,
+      "outputPerMillion": 5,
+      "source": "https://developers.openai.com/api/docs/pricing",
+      "checkedAt": "2026-11-04"
+    },
+    {
+      "model": "gemini-3.8-flash",
+      "family": "gemini",
+      "effectiveFrom": "2026-11-04",
+      "effectiveTo": "2026-12-31",
+      "inputPerMillion": 0.75,
+      "cachedInputPerMillion": 0.075,
+      "cacheWritePerMillion": null,
+      "outputPerMillion": 3.75,
+      "source": "https://ai.google.dev/gemini-api/docs/pricing",
+      "checkedAt": "2026-11-04"
+    },
+    {
+      "model": "gemini-3.8-flash",
+      "family": "gemini",
+      "effectiveFrom": "2027-01-01",
+      "effectiveTo": null,
+      "inputPerMillion": 1.50,
+      "cachedInputPerMillion": 0.15,
+      "cacheWritePerMillion": null,
+      "outputPerMillion": 7.50,
+      "source": "https://ai.google.dev/gemini-api/docs/latest-model",
+      "checkedAt": "2026-11-04"
+    },
+    {
+      "model": "gemini-4-argon",
+      "family": "gemini",
+      "effectiveFrom": "2026-11-04",
+      "effectiveTo": "2026-11-30",
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": null,
+      "cacheWritePerMillion": null,
+      "outputPerMillion": 10,
+      "source": "https://ai.google.dev/gemini-api/docs/pricing",
+      "checkedAt": "2026-11-04"
+    },
+    {
+      "model": "gemini-4-argon",
+      "family": "gemini",
+      "effectiveFrom": "2026-12-01",
+      "effectiveTo": null,
+      "inputPerMillion": 4,
+      "cachedInputPerMillion": null,
+      "cacheWritePerMillion": null,
+      "outputPerMillion": 20,
+      "source": "https://ai.google.dev/gemini-api/docs/pricing",
+      "checkedAt": "2026-11-04"
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+/* Workshop tokens and system font come from glass.css. */
+body.trait-authoring{overflow:auto;color-scheme:dark;--space:8px;--focus:#cfd3da}
+.trait-authoring .page-header{max-width:1200px;margin:auto;padding:24px 32px;display:flex;justify-content:space-between;gap:16px;color:var(--muted);font-size:13px;border-bottom:1px solid var(--line)}
+.trait-authoring a{color:var(--text);text-underline-offset:4px}
+.trait-authoring .page-header a{text-decoration:none}
+.trait-authoring .page-header span[aria-hidden]{padding:0 8px;color:var(--faint)}
+.trait-authoring main{max-width:1120px;margin:auto;padding:40px 32px 64px}
+.trait-authoring .intro{margin-bottom:32px}
+.trait-authoring h1{font-size:30px;letter-spacing:-.025em;line-height:1.3;margin-bottom:8px}
+.trait-authoring h2{font-size:19px;letter-spacing:-.02em;margin-bottom:20px}
+.trait-authoring h3{font-size:15px;margin:0}
+.trait-authoring .intro p,.trait-authoring .hint{color:var(--muted);line-height:1.65}
+.trait-authoring .hint{font-size:13px;margin:8px 0 0}
+.trait-authoring label{display:block;font-size:14px;font-weight:600;margin-bottom:8px}
+.trait-authoring .field-note{font-size:12px;font-weight:400;color:var(--muted);margin-left:6px}
+.trait-authoring input,.trait-authoring select,.trait-authoring textarea{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line-2);border-radius:6px;background:var(--well);color:var(--text);font:inherit;font-size:16px;line-height:1.5}
+.trait-authoring input::placeholder,.trait-authoring textarea::placeholder{color:var(--faint)}
+.trait-authoring textarea{resize:vertical;min-height:96px}
+.trait-authoring button{min-height:44px;padding:10px 16px;border:1px solid var(--line-2);border-radius:8px;font-size:14px;font-weight:600;background:rgba(255,255,255,.035);line-height:1.5;touch-action:manipulation}
+.trait-authoring :is(button,input,select,textarea,a):focus-visible{outline:2px solid var(--focus);outline-offset:3px}
+.trait-authoring :is(button,input,select,textarea):disabled{opacity:.5;cursor:not-allowed}
+.trait-authoring fieldset:disabled button{cursor:not-allowed}
+.trait-authoring .primary{background:var(--solid);color:var(--solid-ink);border-color:var(--solid);min-width:136px}
+.trait-authoring .character-bar{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.trait-authoring .character-bar label{margin:0}
+.trait-authoring .character-bar select{width:min(100%,340px)}
+.trait-authoring #page-status{min-height:24px;margin:12px 0 16px;color:var(--muted);overflow-wrap:anywhere}
+.trait-authoring .recovery{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.trait-authoring .recovery:has(>button:not([hidden])){padding-bottom:8px}
+.trait-authoring fieldset{border:0;padding:0;margin:0;min-width:0}
+.trait-authoring .authoring-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:40px;align-items:start}
+.trait-authoring .fields{padding-right:40px;border-right:1px solid var(--line)}
+.trait-authoring .extra-fields{margin-top:24px;border-top:1px solid var(--line);padding-top:8px}
+.trait-authoring .extra-fields summary{min-height:44px;padding:10px 0;color:var(--muted);font-size:14px;font-weight:600;cursor:pointer;touch-action:manipulation}
+.trait-authoring .extra-fields summary:focus-visible{outline:2px solid var(--focus);outline-offset:3px;border-radius:6px}
+.trait-authoring .field,.trait-authoring .field-pair{margin-top:24px}
+.trait-authoring .field-pair{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.trait-authoring .section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.trait-authoring .section-heading h2{margin:0}
+.trait-authoring .selected-panel{padding:20px;margin:24px 0;border:1px solid var(--line-2);border-left:3px solid var(--accent);border-radius:10px;background:rgba(255,255,255,.025)}
+.trait-authoring #selected-count{font-size:13px;font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
+.trait-authoring .trait-list{list-style:none;margin:0;padding:0}
+.trait-authoring .trait-row{padding:16px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.trait-authoring .trait-row:last-child{border-bottom:0;padding-bottom:0}
+.trait-authoring .trait-row p{white-space:pre-wrap}
+.trait-authoring .trait-actions{display:flex;gap:8px;margin-top:12px;align-items:center}
+.trait-authoring .trait-actions button{font-size:13px;padding:8px 12px}
+.trait-authoring .preservation{padding-top:12px;border-top:1px solid var(--line);margin-top:16px}
+.trait-authoring .discovery>button:first-child{width:100%;text-align:center}
+.trait-authoring .discovery>label{margin-top:24px}
+.trait-authoring .search-row{display:flex;gap:8px}
+.trait-authoring .search-row input{min-width:0;flex:1}
+.trait-authoring .search-row button{flex:none}
+.trait-authoring .text-button{border:0;background:none;padding-left:0;color:var(--muted);text-decoration:underline;text-underline-offset:4px}
+.trait-authoring #results-status{font-size:13px;color:var(--muted);margin:16px 0 0}
+.trait-authoring #results-region[aria-busy=true]{opacity:.7}
+.trait-authoring .save-bar{border-top:1px solid var(--line-2);margin-top:40px;padding-top:24px;display:flex;justify-content:space-between;gap:24px;align-items:center}
+.trait-authoring #save-note{font-size:14px}
+.trait-authoring #save-result{margin-top:24px;padding:20px;background:var(--ok-soft);border:1px solid var(--line-2);border-radius:10px}
+.trait-authoring #next-link{display:inline-block;margin-top:12px;min-height:44px;padding:10px 0}
+.trait-authoring [data-tone=error]{color:var(--bad)!important}
+.trait-authoring .sr-only,.trait-authoring .skip:not(:focus){position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.trait-authoring .skip:focus{position:fixed;top:8px;left:8px;padding:12px;background:var(--bg);z-index:5}
+@media(hover:hover){.trait-authoring button:not(:disabled):hover{border-color:var(--accent);background:rgba(255,255,255,.09)}.trait-authoring .primary:not(:disabled):hover{background:#e3e5e9}.trait-authoring a:hover{color:#fff}}
+@media(max-width:760px){.trait-authoring main{padding:28px 20px 48px}.trait-authoring .page-header{padding:20px}.trait-authoring h1{font-size:26px}.trait-authoring .authoring-grid{grid-template-columns:1fr;gap:32px}.trait-authoring .fields{padding-right:0;border-right:0}.trait-authoring .traits{border-top:1px solid var(--line);padding-top:24px}.trait-authoring .save-bar{align-items:stretch;flex-direction:column;gap:16px}.trait-authoring .character-bar{gap:8px}.trait-authoring .character-bar select{width:100%}}
+@media(prefers-reduced-motion:reduce){.trait-authoring *{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
