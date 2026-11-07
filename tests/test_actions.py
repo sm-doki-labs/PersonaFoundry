@@ -608,3 +608,62 @@ def test_invalid_neutral_frame_fails_before_video_submission(flow, data):
         run(ctx, cid)
     assert not video.submits
     assert ctx.state(cid).stage("s6").status == "CHECK_FAILED"
+
+
+def test_change_request_keeps_decided_choices_for_the_next_revision(flow):
+    """수정 요청 때 정한 쓰기·빼기는 choices/에 남고 새 판은 다시 만들지 않은 칸만 넘겨받는다."""
+    from character_factory_poc.web.gate_items import actions
+
+    ctx, cid, _ = flow
+    first = run(ctx, cid)
+    manifest = (first / "manifest.sha256").read_bytes()
+    clips = picks(first)
+    chosen = {aid: cand for aid, cand in clips.items() if aid.startswith(("ch1-", "ch2-"))}
+    chosen.pop("ch1-idle_bad")
+    answer = {
+        "decision": "REQUEST_CHANGES",
+        "requestedChanges": [{"field": "ch2-glad_good", "note": "고개 움직임을 줄여 주세요"}],
+        "picks": chosen,
+        "excluded": ["ch1-idle_bad"],
+    }
+    approve_gate(ctx, cid, "G5b", answer)
+    char_dir = ctx.character_dir(cid)
+    saved = read_json(char_dir / "choices" / "G5b-va1.json")
+    assert saved["schemaVersion"] == "action-choices-draft-v1"
+    assert saved["picks"] == chosen and saved["excluded"] == ["ch1-idle_bad"]
+    assert saved["recordRef"] == "gates/G5b-va1.json"
+    # 판 폴더는 그대로다.
+    assert (first / "manifest.sha256").read_bytes() == manifest
+
+    second = run(ctx, cid)
+    carried = actions(char_dir, cid, "s6-actions", second.name)["carried"]
+    assert carried["fromRev"] == "va1" and carried["regenerated"] == ["ch2-glad_good"]
+    assert carried["excluded"] == ["ch1-idle_bad"]
+    expected = {aid: cand for aid, cand in chosen.items() if aid != "ch2-glad_good"}
+    assert carried["picks"] == expected
+    # 처음 판에는 넘겨받을 것이 없다.
+    assert actions(char_dir, cid, "s6-actions", "va1")["carried"] is None
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"picks": {"ch1-missing": "v1"}},
+        {"picks": {"ch1-idle_good": "v9"}},
+        {"picks": {"ch1-idle_good": "v1"}, "excluded": ["ch1-idle_good"]},
+        {"excluded": ["ch1-idle_bad", "ch1-idle_bad"]},
+        {"picks": ["ch1-idle_good"]},
+    ],
+)
+def test_invalid_choices_with_change_request_do_not_decide_gate(flow, extra):
+    ctx, cid, _ = flow
+    run(ctx, cid)
+    answer = {
+        "decision": "REQUEST_CHANGES",
+        "requestedChanges": [{"field": "ch2-glad_good", "note": "수정"}],
+        **extra,
+    }
+    with pytest.raises(FactoryError):
+        approve_gate(ctx, cid, "G5b", answer)
+    assert ctx.state(cid).gate("G5b").status == "AWAITING_HUMAN"
+    assert not (ctx.character_dir(cid) / "choices").exists()

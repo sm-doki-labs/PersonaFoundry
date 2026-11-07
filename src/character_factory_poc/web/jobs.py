@@ -328,7 +328,7 @@ class JobManager:
                 job.blocked = list(log.blocked)
                 job.held = list(getattr(log, "held", []))
                 job.status = "succeeded"
-            except Exception as exc:  # 작업 실패를 기록하고 서버는 계속 돈다
+            except (Exception, SystemExit) as exc:  # 작업 실패를 기록하고 서버는 계속 돈다
                 job.status = "failed"
                 job.error = f"{type(exc).__name__}: {exc}"
                 self._append_log(job, f"작업 실패: {job.error}")

@@ -157,13 +157,19 @@ def faces(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[s
             if not isinstance(preview, dict) or str(preview.get("clusterId")) != cluster_id:
                 continue
             file = asset(char_dir, character_id, stage_dir, rev, preview.get("filePath"))
+            settings = preview.get("settings") if isinstance(preview.get("settings"), dict) else {}
+            variation = settings.get("variation")
+            if not isinstance(variation, int):
+                variation = 1
             cluster_faces.append(
                 {
                     "previewId": preview.get("previewId"),
                     "prompt": preview.get("prompt", ""),
                     "sha256": preview.get("fileSha256", ""),
                     "file": file,
-                    "recommended": cluster_id == recommended,
+                    "variation": variation,
+                    # 추천 외모군의 첫 얼굴 한 장만 추천으로 표시한다(D-0105, 외모군당 여러 장).
+                    "recommended": cluster_id == recommended and not cluster_faces,
                 }
             )
         members = [
@@ -175,7 +181,7 @@ def faces(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[s
                 "clusterId": cluster_id,
                 "recommended": cluster_id == recommended,
                 "memberCount": candidate.get("memberCount", len(members)),
-                "rationale": rationale.get(cluster_id, ""),
+                "rationale": _plain_rationale(candidate, rationale.get(cluster_id, "")),
                 "tags": _tags(candidate.get("commonTags")),
                 "limitations": candidate.get("limitations", []),
                 "popularity": candidate.get("popularity"),
@@ -193,10 +199,31 @@ def faces(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[s
         "recommended": recommended,
         "clusters": clusters,
         "helper": (
-            "외모군마다 얼굴 한 장이다. 얼굴 하나를 고르면 외모군이 그 얼굴에서 정해지고, "
-            "S2 기준 이미지와 이후 장면·영상의 얼굴 기준이 된다(D-0042)."
+            "외모군마다 각도·표정이 다른 얼굴이 2~3장 있어요. 한 장을 고르면 그 얼굴이 기준 사진이 "
+            "되고, 이후 모든 장면과 영상의 얼굴 기준이 돼요."
         ),
     }
+
+
+def _plain_rationale(candidate: dict[str, Any], fallback: str) -> str:
+    """외모군 근거를 검토자가 읽는 말로 바꾼다. 원래 근거(백분위·IQR)는 보고서에 그대로 남는다."""
+    lists = candidate.get("listCount")
+    members = candidate.get("memberCount")
+    if not isinstance(lists, int) or not isinstance(members, int):
+        return fallback
+    text = f"순위 목록 {lists}개에 걸쳐 {members}명이 함께 가진 특징이에요."
+    pop = candidate.get("popularity") or {}
+    median = pop.get("medianPercentile")
+    if isinstance(median, (int, float)):
+        # 백분위는 1위가 1.0이다. 사람이 읽기 쉽게 '목록 위에서 몇 % 지점'으로 바꾼다.
+        top = max(1, min(100, round((1 - float(median)) * 100)))
+        text += f" 구성원 순위는 중간값으로 목록 위에서 {top}% 지점이에요."
+        spread = pop.get("iqr")
+        if isinstance(spread, (int, float)) and spread >= 0.3:
+            text += " 사람마다 순위 차이가 커요."
+    else:
+        text += " 목록이 짧아 순위를 비교하지 못했어요."
+    return text
 
 
 def plan_variants(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[str, Any]:
@@ -259,8 +286,8 @@ def plan_variants(char_dir: Path, character_id: str, stage_dir: str, rev: str) -
         "selection": selection,
         "approvedPlan": plan,
         "helper": (
-            "같은 상황에서 무엇을 먼저 고르는지 비교한 뒤 한 안을 고른다. 고칠 칸은 "
-            "수정 요청 JSON으로 함께 보낼 수 있다(D-0033)."
+            "같은 상황에서 무엇을 먼저 고르는지 비교한 뒤 한 안을 골라요. 고른 안의 칸은 "
+            "확정할 때 함께 고칠 수 있어요."
         ),
     }
 
@@ -482,6 +509,39 @@ def intro(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[s
     }
 
 
+def _carried_choices(
+    char_dir: Path, inputs: dict[str, Any], by_action: dict[str, list[dict[str, Any]]]
+) -> dict[str, Any] | None:
+    """다시 만든 판이면 지난 판에서 정한 쓰기·빼기 중 그대로 쓸 수 있는 것만 돌려준다(D-0115).
+
+    다시 만든 동작은 영상이 바뀌어 넘기지 않는다. 쓰기는 지난 판에서 고른 영상을 이 판이
+    그대로 재사용했을 때만 넘긴다.
+    """
+    prev = inputs.get("previousRev")
+    if not prev:
+        return None
+    draft = read_json(Path(char_dir) / "choices" / f"G5b-{prev}.json")
+    if not draft:
+        return None
+    regenerate = set(inputs.get("regenerate") or [])
+    picks: dict[str, str] = {}
+    for aid, candidate in (draft.get("picks") or {}).items():
+        if aid in regenerate:
+            continue
+        same = [c for c in by_action.get(aid, []) if c.get("candidateId") == candidate]
+        if same and same[0].get("reusedFrom") == prev:
+            picks[aid] = candidate
+    excluded = [
+        aid for aid in draft.get("excluded") or [] if aid not in regenerate and aid in by_action
+    ]
+    return {
+        "fromRev": prev,
+        "picks": picks,
+        "excluded": excluded,
+        "regenerated": sorted(regenerate),
+    }
+
+
 def actions(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[str, Any]:
     """G5b: 동작별 후보 고르기·빼기·다시 만들기."""
     folder = Path(char_dir) / stage_dir / rev
@@ -557,6 +617,7 @@ def actions(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict
         "kind": "actions",
         "source": "artifacts",
         "problems": [],
+        "carried": _carried_choices(char_dir, inputs, by_action),
         "frameRev": inputs.get("frameRev"),
         "preset": inputs.get("preset"),
         "resolution": inputs.get("resolution"),
@@ -645,6 +706,12 @@ def _conv_view(conv: dict[str, Any]) -> dict[str, Any]:
     return {k: conv.get(k) for k in ("conversationId", "clusterId", "system", "messages")}
 
 
+def _sent_verdicts(path: Path) -> dict[str, Any]:
+    """이미 보낸 판정(qa 파일)을 화면이 다시 보이도록 읽는다. 없으면 빈 값이다."""
+    qa = read_json(path) or {}
+    return {"sentVerdicts": qa.get("verdicts") or {}, "sentNotes": qa.get("notes") or {}}
+
+
 def data_samples(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[str, Any]:
     """G7a: 클러스터별 인계안과 샘플 전문, 이미 판정한 클러스터 표시."""
     from character_factory_poc.stages.s9_data.samples import load_samples
@@ -667,6 +734,7 @@ def data_samples(char_dir: Path, character_id: str, stage_dir: str, rev: str) ->
                 "handoff": read_json(rev_dir / "handoffs" / f"{cid}.json"),
                 "samples": convs,
                 "reviewed": (Path(char_dir) / "gates" / f"G7a-{rev}-{cid}.json").is_file(),
+                **_sent_verdicts(rev_dir / "qa" / f"G7a-{cid}.json"),
             }
         )
     return {
@@ -701,13 +769,21 @@ def data_dataset(char_dir: Path, character_id: str, stage_dir: str, rev: str) ->
         f"차단 실패 {dataset.get('blockingFailures', 0)}건, 경고 {dataset.get('warnings', 0)}건"
     ]
     notes += [str(n) for n in report.get("warnings", [])][:5] if isinstance(report, dict) else []
+    plan = read_json(rev_dir / "plan.json") or {}
+    labels = {
+        str(c.get("clusterId")): str(c.get("label") or c.get("clusterId"))
+        for c in plan.get("clusters", [])
+        if isinstance(c, dict)
+    }
     return {
         "kind": "dataset",
         "source": "artifacts",
+        "clusterLabels": labels,
         "dataset": dataset,
         "samples": samples,
         "notes": notes,
         "verdicts": _VERDICTS,
+        **_sent_verdicts(rev_dir / "qa" / f"G7-{rev}.json"),
         "page": asset(char_dir, character_id, stage_dir, rev, "gate-G7.html"),
     }
 

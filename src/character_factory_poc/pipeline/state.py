@@ -3,6 +3,9 @@
 D-0049: 단계가 동시에 돌 수 있으므로 쓰기는 파일 잠금(state.json.lock) 아래 디스크의 최신
 state.json을 다시 읽고 그 위에 변경을 적용한다. 관문이 열리고 결정된 사건은
 ledger/gate-events.jsonl에 남긴다.
+
+D-0101: 단계 상태가 바뀔 때마다 ledger/stage-events.jsonl에 한 줄을 덧붙인다. state.json은
+updatedAt 하나만 덮어쓰므로 시작·종료 시각과 회차별 실패 이유는 이 기록에서 읽는다.
 """
 
 from __future__ import annotations
@@ -37,11 +40,17 @@ def _now() -> str:
 
 
 GATE_EVENTS = "gate-events.jsonl"
+STAGE_EVENTS = "stage-events.jsonl"
 
 
 def gate_events_path(char_dir: Path) -> Path:
     """관문 사건 기록(LLD §6.6). 원장 폴더에 한 줄씩 덧붙인다."""
     return Path(char_dir) / "ledger" / GATE_EVENTS
+
+
+def stage_events_path(char_dir: Path) -> Path:
+    """단계 상태 전이 기록(D-0101, LLD §23). 원장 폴더에 한 줄씩 덧붙인다."""
+    return Path(char_dir) / "ledger" / STAGE_EVENTS
 
 
 class StateFile:
@@ -102,6 +111,7 @@ class StateFile:
             st = self.stage(sid)
             if new not in _ALLOWED[st.status]:
                 raise StateTransitionError(f"{sid}: {st.status} → {new} 전이는 허용되지 않는다")
+            old = st.status
             if new == "RUNNING":
                 st.attempts += 1
             st.status = new
@@ -110,6 +120,18 @@ class StateFile:
             st.lastError = error
             st.updatedAt = _now()
             self._write()
+            event = {
+                "at": st.updatedAt,
+                "stage": sid,
+                "from": old,
+                "to": new,
+                "rev": st.currentRev,
+                "attempt": st.attempts,
+                "error": error,
+            }
+        # 이력은 화면용 보조 기록이다. 덧붙이기가 실패해도 상태 전이는 이미 저장됐다.
+        with contextlib.suppress(OSError):
+            append_jsonl(stage_events_path(self.path.parent), event)
 
     def require_deps(self, sid: str) -> None:
         """의존 관문·단계가 승인됐고 선행 단계가 끝났는지 (FR-02, D-0042)."""

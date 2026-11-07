@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Foundry</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%236e56cf'/%3E%3Cpath d='M8.5 17V7h7.5M8.5 12h5' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='16.4' cy='16.4' r='1.7' fill='white'/%3E%3C/svg%3E">
+<script>
+  // 저장된 테마를 먼저 적용해 깜빡임을 막는다. 값이 없으면 운영체제 설정을 따른다.
+  (function () { try { var t = localStorage.getItem('fd-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-fd-theme', t); } catch (e) {} })();
+</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="shared/foundry-tokens.css">
+<link rel="stylesheet" href="shared/flow.css">
+</head>
+<body class="fl">
+<div class="fd-shell">
+  <aside class="fd-side" data-side aria-label="탐색"></aside>
+  <div class="fd-main">
+    <header class="fd-head" data-top></header>
+    <div class="fd-body">
+      <main class="fd-canvas" aria-label="진행">
+        <div data-banner></div>
+        <div data-head style="display:flex;flex-direction:column;gap:16px"></div>
+        <section class="fl-graph" data-graph aria-label="공정 그래프" hidden>
+          <span class="fl-graph-head">공정</span>
+          <div class="fl-zoom" data-zoombar role="toolbar" aria-label="그래프 보기"></div>
+          <div class="fl-view" data-view tabindex="0" aria-label="공정 그래프 보기 영역. 더하기·빼기 키로 확대·축소, 0은 화면 맞춤, 확대했을 때 화살표로 이동">
+            <svg class="w" aria-hidden="true"></svg>
+            <div class="fl-grid" data-grid></div>
+          </div>
+          <div class="fl-legend" data-legend aria-label="범례"></div>
+        </section>
+      </main>
+      <aside class="fd-inspector" data-panel aria-label="선택한 단계" aria-live="polite" hidden></aside>
+    </div>
+  </div>
+</div>
+<div class="fd-scrim" data-scrim hidden></div>
+<section class="fd-sheet" data-sheet role="dialog" aria-modal="true" aria-labelledby="fd-sheet-title" hidden></section>
+<script src="shared/runtime.js"></script>
+<script src="shared/flow.js"></script>
+<script>
+  window.factoryFlow = window.FactoryFlow.mount({ root: document, apiBase: '' });
+</script>
+</body>
+</html>

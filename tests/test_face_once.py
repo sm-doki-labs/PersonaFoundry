@@ -118,9 +118,19 @@ def test_ref_faces_remakes_only_faces_and_carries_the_rest(tmp_path):
     assert carry["files"]["report.json"] == sha256_file(out / "report.json")
 
     previews = json.loads((out / "previews.json").read_text())
-    assert [p["previewId"] for p in previews] == ["c1-1", "c2-1", "c3-1"]
+    assert [p["previewId"] for p in previews] == [
+        "c1-1",
+        "c1-2",
+        "c1-3",
+        "c2-1",
+        "c2-2",
+        "c2-3",
+        "c3-1",
+        "c3-2",
+        "c3-3",
+    ]  # D-0105: 외모군 3개 × 3장
     assert all("Revision note: 눈매가 더 차분했으면" in p["prompt"] for p in previews)
-    assert len(image.requests) == 3 and all(r.stage == "s1" for r in image.requests)
+    assert len(image.requests) == 9 and all(r.stage == "s1" for r in image.requests)
     assert all(
         (out / p["filePath"]).read_bytes() != (rf1 / p["filePath"]).read_bytes() for p in previews
     )

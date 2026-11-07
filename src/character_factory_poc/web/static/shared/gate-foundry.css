@@ -1,0 +1,242 @@
+/* 진행 화면(studio/factory.html)의 검토 시트 안에서 여는 관문 화면을 Foundry 톤으로 맞춘다(D-0102).
+   gate.html?skin=foundry&theme=light|dark 일 때만 body.fd가 붙는다. 관문 화면 단독·기존 화면은 글래스 테마 그대로다.
+   색은 foundry-tokens.css의 의미 토큰만 쓴다. */
+body.fd{
+  --bg:var(--fd-bg-app);--text:var(--fd-fg);--muted:var(--fd-fg-muted);--faint:var(--fd-fg-subtle);
+  --line:var(--fd-line);--line-2:var(--fd-line-strong);
+  --solid:var(--fd-primary-bg);--solid-ink:var(--fd-primary-fg);--accent:var(--fd-accent);--accent-ink:var(--fd-white);
+  --ok:var(--fd-success-fg);--warn:var(--fd-attention-fg);--bad:var(--fd-danger-fg);
+  --ok-soft:var(--fd-success-bg);--warn-soft:var(--fd-attention-bg);--bad-soft:var(--fd-danger-bg);
+  --well:var(--fd-bg-inset);--well-line:var(--fd-line);
+  --glass-bg:var(--fd-bg-surface);--glass-blur:none;--glass-shadow:var(--fd-shadow-xs);
+  --r-panel:var(--fd-r-4);--r-card:var(--fd-r-3);--r-inner:var(--fd-r-2);--r-ctl:var(--fd-r-2);
+  --font-body:var(--fd-font);--focus:var(--fd-focus);
+  background:var(--fd-bg-app);color:var(--fd-fg);font-family:var(--fd-font);font-size:var(--fd-fs-4);letter-spacing:-.005em
+}
+body.fd .ambient{display:none}
+body.fd ::selection{background:var(--fd-accent-bg)}
+body.fd a{color:var(--fd-accent-fg)}
+body.fd .glass{backdrop-filter:none;-webkit-backdrop-filter:none;background:var(--fd-bg-surface);border:1px solid var(--fd-line);box-shadow:var(--fd-shadow-xs)}
+body.fd.gate-embedded .gate-wrap{padding:var(--fd-space-4) var(--fd-space-5);gap:var(--fd-space-4);grid-template-columns:minmax(0,1fr) 300px}
+
+/* 머리 */
+body.fd .gate-head .kicker{height:22px;padding:0 8px;border-radius:999px;font-size:var(--fd-fs-2);font-weight:500;background:var(--fd-bg-subtle);border:1px solid var(--fd-line);color:var(--fd-fg-muted)}
+body.fd .gate-head h1{margin-top:var(--fd-space-2);font-size:var(--fd-fs-7);font-weight:600;letter-spacing:-.02em;line-height:1.25}
+body.fd .gate-head .desc{font-size:var(--fd-fs-3);color:var(--fd-fg-muted)}
+body.fd .gate-meta{color:var(--fd-fg-subtle)}
+body.fd .gate-meta code,body.fd code{font-family:var(--fd-mono);font-size:var(--fd-fs-2);color:var(--fd-fg-muted)}
+body.fd .gate-banner{border-radius:var(--fd-r-3);border:1px solid var(--fd-line);background:var(--fd-bg-surface);font-size:var(--fd-fs-3)}
+body.fd .gate-banner b{font-weight:600}
+body.fd .gate-banner.is-warn,body.fd .gate-banner.is-synthetic{border-color:var(--fd-attention-line);background:var(--fd-attention-bg)}
+body.fd .gate-banner.is-bad{border-color:var(--fd-danger-line);background:var(--fd-danger-bg)}
+body.fd .gate-banner.is-ok{border-color:color-mix(in srgb,var(--fd-success-fg) 32%,transparent);background:var(--fd-success-bg)}
+body.fd .gate-banner.is-muted{background:var(--fd-bg-subtle);color:var(--fd-fg-muted)}
+
+/* 구역과 후보 카드 */
+body.fd .gate-section{padding:var(--fd-space-4);border-radius:var(--fd-r-4);background:var(--fd-bg-surface);border:1px solid var(--fd-line);box-shadow:var(--fd-shadow-xs)}
+body.fd .gate-section>h2{font-size:var(--fd-fs-5);font-weight:600;letter-spacing:-.01em}
+body.fd .gate-section>.section-sub{color:var(--fd-fg-muted);font-size:var(--fd-fs-2)}
+/* 관문 화면이 안쪽 묶음에 직접 넣은 어두운 배경(style 속성)을 무채색 보조 면으로 바꾼다. */
+body.fd .gate-section .gate-section{background:var(--fd-bg-subtle)!important;box-shadow:none;border-color:var(--fd-line)}
+body.fd .gate-card{border-radius:var(--fd-r-3);border:1px solid var(--fd-line);background:var(--fd-bg-surface);transition:border-color var(--fd-dur-1),background var(--fd-dur-1)}
+body.fd .gate-card:hover{border-color:var(--fd-line-strong);transform:none}
+body.fd .gate-card:has(input:checked),body.fd .gate-card.is-picked{border-color:var(--fd-accent);background:var(--fd-accent-bg);box-shadow:0 0 0 1px var(--fd-accent) inset}
+body.fd .gate-card input[type=radio],body.fd input[type=checkbox]{accent-color:var(--fd-accent)}
+body.fd .gate-card .card-title{font-weight:600}
+body.fd .gate-card .pick-line{font-weight:500}
+body.fd .gate-card img,body.fd .gate-card video,body.fd .gate-body img{background:var(--fd-bg-inset);border-radius:var(--fd-r-2)}
+body.fd .gate-chip,body.fd .badge-chip,body.fd .pill,body.fd .chip{background:var(--fd-bg-subtle);border:1px solid var(--fd-line);color:var(--fd-fg-muted);font-weight:500}
+body.fd .badge-chip.is-good{background:var(--fd-success-bg);color:var(--fd-success-fg);border-color:transparent}
+body.fd .badge-chip.is-bad{background:var(--fd-danger-bg);color:var(--fd-danger-fg);border-color:transparent}
+body.fd .badge-chip.is-warn{background:var(--fd-attention-bg);color:var(--fd-attention-fg);border-color:transparent}
+body.fd .facts dt{color:var(--fd-fg-subtle)}
+body.fd .doc-block .doc,body.fd .probe,body.fd .pair{background:var(--fd-bg-surface);border:1px solid var(--fd-line);border-radius:var(--fd-r-3)}
+body.fd .probe .probe-a div,body.fd .profile-card div,body.fd .pair .pair-answer{background:var(--fd-bg-subtle);border-radius:var(--fd-r-2)}
+body.fd .pair .pair-answer.is-picked{border-color:var(--fd-accent);background:var(--fd-accent-bg)}
+body.fd .metric-table th,body.fd .metric-table td,body.fd .gate-table th,body.fd .gate-table td{border-bottom-color:var(--fd-line)}
+body.fd .empty{border-color:var(--fd-line-strong);color:var(--fd-fg-muted);border-radius:var(--fd-r-3)}
+
+/* 입력 */
+body.fd .gate-body input[type=text],body.fd .gate-body input[type=number],body.fd .gate-body textarea,body.fd .side-more input,body.fd .side-more textarea,body.fd select{border-radius:var(--fd-r-2);border:1px solid var(--fd-line-strong);background:var(--fd-bg-surface);color:var(--fd-fg);font-family:var(--fd-font)}
+body.fd .gate-body input[type=text]:focus,body.fd .gate-body input[type=number]:focus,body.fd .gate-body textarea:focus,body.fd .side-more input:focus,body.fd .side-more textarea:focus{outline:2px solid var(--fd-focus);outline-offset:1px}
+body.fd .gate-more pre,body.fd .answer-json{background:var(--fd-bg-inset);border-color:var(--fd-line);border-radius:var(--fd-r-2);font-family:var(--fd-mono)}
+body.fd .verdict-row label{border:1px solid var(--fd-line-strong);border-radius:var(--fd-r-2);font-weight:500}
+body.fd .verdict-row label:has(input:checked){background:var(--fd-accent-bg);color:var(--fd-accent-fg);border-color:var(--fd-accent)}
+body.fd .seg button{height:30px;border-radius:var(--fd-r-2);border:1px solid var(--fd-line-strong);background:var(--fd-bg-surface);color:var(--fd-fg);font-weight:500}
+body.fd .seg button[aria-pressed=true]{background:var(--fd-primary-bg);color:var(--fd-primary-fg);border-color:var(--fd-primary-bg)}
+
+/* 결정 영역과 버튼 */
+body.fd .gate-side{border-radius:var(--fd-r-4);padding:var(--fd-space-4);top:var(--fd-space-4)}
+body.fd .gate-side h2{font-size:var(--fd-fs-4);font-weight:600}
+body.fd .side-hint{color:var(--fd-fg-muted);font-size:var(--fd-fs-2)}
+body.fd .btn{height:32px;padding:0 12px;border-radius:var(--fd-r-2);font-size:var(--fd-fs-3);font-weight:500;background:var(--fd-bg-surface);border:1px solid var(--fd-line-strong);color:var(--fd-fg);box-shadow:var(--fd-shadow-xs)}
+body.fd .btn:hover:not(:disabled):not(.is-on):not(.is-active){background:var(--fd-bg-hover)}
+body.fd .btn:active:not(:disabled){transform:none}
+body.fd .btn.is-on,body.fd .btn.is-active{background:var(--fd-bg-active);border-color:var(--fd-line-strong)}
+body.fd .btn--primary{background:var(--fd-primary-bg);color:var(--fd-primary-fg);border-color:var(--fd-primary-bg);box-shadow:var(--fd-shadow-xs)}
+body.fd .btn--primary:hover:not(:disabled){background:var(--fd-primary-hover)}
+body.fd .btn--danger{background:var(--fd-bg-surface);color:var(--fd-danger-fg);border-color:var(--fd-danger-line)}
+body.fd .btn--danger:hover:not(:disabled){background:var(--fd-danger-bg)}
+body.fd .btn--ghost{background:var(--fd-bg-surface)}
+body.fd .btn:focus-visible{outline:2px solid var(--fd-focus);outline-offset:2px}
+body.fd .side-more{border-top-color:var(--fd-line)}
+body.fd .gate-status{height:24px;border-radius:999px;background:var(--fd-bg-subtle);border:1px solid var(--fd-line);font-weight:500}
+body.fd .gate-status.is-awaiting{background:var(--fd-attention-bg);color:var(--fd-attention-fg);border-color:var(--fd-attention-line)}
+body.fd .gate-status.is-approved{background:var(--fd-success-bg);color:var(--fd-success-fg)}
+body.fd .gate-status.is-rejected{background:var(--fd-danger-bg);color:var(--fd-danger-fg)}
+/* 시트 폭(최대 960px)에서도 결정 영역을 오른쪽에 붙여 둔다. 아주 좁을 때만 한 줄로 쌓는다. */
+@media (max-width:1100px){
+  body.fd.gate-embedded .gate-wrap{grid-template-columns:minmax(0,1fr) 260px}
+  body.fd.gate-embedded .gate-side{position:sticky;top:var(--fd-space-4);max-height:calc(100dvh - 32px)}
+}
+@media (max-width:680px){
+  body.fd.gate-embedded .gate-wrap{grid-template-columns:minmax(0,1fr)}
+  body.fd.gate-embedded .gate-side{position:static;max-height:none}
+}
+/* 블라인드 비교·기술 정보(D-0104) */
+body.fd .blind-bar{background:var(--fd-bg-surface);border-color:var(--fd-line);box-shadow:var(--fd-shadow-sm);backdrop-filter:none;border-radius:var(--fd-r-3)}
+body.fd .blind-meter{background:var(--fd-bg-active)}
+body.fd .blind-meter i{background:var(--fd-accent)}
+body.fd .blind-keys kbd,body.fd .seg kbd{border-color:var(--fd-line-strong);color:var(--fd-fg-muted);background:var(--fd-bg-subtle);font-family:var(--fd-mono)}
+body.fd .seg button[aria-pressed=true] kbd{color:inherit;border-color:currentColor;background:transparent}
+body.fd .pair{padding:var(--fd-space-3)}
+body.fd .pair:focus,body.fd .pair:focus-visible{outline:2px solid var(--fd-focus);outline-offset:2px}
+body.fd .pair.is-done{border-color:color-mix(in srgb,var(--fd-success-fg) 28%,var(--fd-line))}
+body.fd .pair.is-done .pair-state{color:var(--fd-success-fg)}
+body.fd .pair .pair-answer{border:1px solid var(--fd-line)}
+body.fd .pair .pair-answer b,body.fd .pair .pair-prompt span{color:var(--fd-fg-subtle)}
+body.fd .card-tech{color:var(--fd-fg-subtle)}
+body.fd .side-tech summary{color:var(--fd-fg-subtle)}
+body.fd .gate-raw details{color:var(--fd-fg-subtle)}
+body.fd .field{display:flex;align-items:center;gap:10px}
+body.fd .field select{height:32px;padding:0 10px;min-width:220px}
+body.fd .gate-section>details.gate-more>summary{font-size:var(--fd-fs-4);font-weight:600;color:var(--fd-fg)}
+body.fd .card-tech[open]{white-space:pre-wrap;line-height:1.5}
+/* 얼굴 고르기 갤러리(D-0105) */
+body.fd .face-chip{border-color:var(--fd-line-strong);color:var(--fd-fg-muted);background:var(--fd-bg-surface)}
+body.fd .face-chip[aria-pressed=true]{background:var(--fd-primary-bg);color:var(--fd-primary-fg);border-color:var(--fd-primary-bg)}
+body.fd .face-pick,body.fd .face-compare-card{background:var(--fd-bg-surface);border-color:var(--fd-line);border-radius:var(--fd-r-3)}
+body.fd .face-pick:hover:not(:disabled),body.fd .face-compare-card:hover{border-color:var(--fd-line-strong)}
+body.fd .face-tile.is-picked .face-pick,body.fd .face-compare-card.is-picked{border-color:var(--fd-accent);box-shadow:0 0 0 2px var(--fd-accent) inset;background:var(--fd-accent-bg)}
+body.fd .face-pick img,body.fd .face-compare-card img,body.fd .face-side img.big{background:var(--fd-bg-inset);border-radius:var(--fd-r-2)}
+body.fd .face-letter{background:var(--fd-bg-subtle);color:var(--fd-fg-muted);border:1px solid var(--fd-line)}
+body.fd .face-cap kbd{border-color:var(--fd-line-strong);color:var(--fd-fg-subtle);background:var(--fd-bg-subtle);font-family:var(--fd-mono)}
+body.fd .face-tray{background:var(--fd-bg-surface);border-color:var(--fd-line);box-shadow:var(--fd-shadow-sm);backdrop-filter:none;border-radius:var(--fd-r-3)}
+body.fd .face-slot{border-color:var(--fd-line-strong)}
+body.fd .face-tray-hint,body.fd .face-side-empty{color:var(--fd-fg-subtle)}
+body.fd .face-side-empty{border-color:var(--fd-line-strong);border-radius:var(--fd-r-3)}
+body.fd .face-cluster{border-top-color:var(--fd-line)}
+/* 기획안 가로 비교표(D-0106) */
+body.fd .plan-scroll{border-color:var(--fd-line);border-radius:var(--fd-r-3);background:var(--fd-bg-surface)}
+body.fd .plan-table th,body.fd .plan-table td{border-bottom-color:var(--fd-line)}
+body.fd .plan-table thead th,body.fd .plan-table tbody th{background:var(--fd-bg-surface)}
+body.fd .plan-table tr.plan-group th{background:var(--fd-bg-subtle);color:var(--fd-fg-subtle)}
+body.fd .plan-table td.is-picked,body.fd .plan-table th.is-picked{background:var(--fd-accent-bg)}
+body.fd .plan-table tbody th.is-picked{background:var(--fd-accent-bg)}
+body.fd .plan-table tr.is-same td{color:var(--fd-fg-muted)}
+body.fd .plan-diff-dot{background:var(--fd-attention-solid)}
+body.fd .plan-col-label kbd{border-color:var(--fd-line-strong);color:var(--fd-fg-subtle);background:var(--fd-bg-subtle);font-family:var(--fd-mono)}
+body.fd .plan-toggle input{accent-color:var(--fd-accent)}
+body.fd .field-list .field{display:grid;grid-template-columns:110px minmax(0,1fr);align-items:start;gap:10px}
+body.fd .field-list .field>span{white-space:nowrap;padding-top:8px;color:var(--fd-fg-muted);font-size:var(--fd-fs-2)}
+/* 챕터별 배경 줄(D-0107) */
+body.fd .bg-bar{background:var(--fd-bg-surface);border-color:var(--fd-line);box-shadow:var(--fd-shadow-sm);backdrop-filter:none;border-radius:var(--fd-r-3)}
+body.fd .bg-keys{color:var(--fd-fg-subtle)}
+body.fd .bg-keys kbd,body.fd .bg-cap kbd,body.fd .bg-custom-pick kbd{border-color:var(--fd-line-strong);color:var(--fd-fg-subtle);background:var(--fd-bg-subtle);font-family:var(--fd-mono)}
+body.fd .bg-row{background:var(--fd-bg-surface);border-color:var(--fd-line);border-radius:var(--fd-r-3)}
+body.fd .bg-row.is-current{border-color:var(--fd-accent);box-shadow:inset 3px 0 0 var(--fd-accent)}
+body.fd .bg-row:focus-visible{outline-color:var(--fd-focus)}
+body.fd .bg-ch{color:var(--fd-fg-muted);background:var(--fd-bg-subtle);border:1px solid var(--fd-line)}
+body.fd .bg-arc,body.fd .bg-sub{color:var(--fd-fg-muted)}
+body.fd .bg-state{color:var(--fd-fg-subtle)}
+body.fd .bg-state.is-done{color:var(--fd-success-fg)}
+body.fd .bg-tile{background:var(--fd-bg-surface);border-color:var(--fd-line);border-radius:var(--fd-r-3)}
+body.fd .bg-tile:hover:not(:disabled):not(.bg-custom){border-color:var(--fd-line-strong)}
+body.fd .bg-tile.is-picked{border-color:var(--fd-accent);box-shadow:0 0 0 2px var(--fd-accent) inset;background:var(--fd-accent-bg)}
+body.fd .bg-custom{border-color:var(--fd-line-strong)}
+body.fd .bg-art{background:var(--fd-bg-inset);border-radius:var(--fd-r-2)}
+body.fd .bg-check{background:var(--fd-accent);color:#fff}
+body.fd .bg-custom-pick{color:var(--fd-fg)}
+body.fd .bg-detail>summary{color:var(--fd-fg-muted)}
+body.fd .bg-side-title span,body.fd .bg-side-what{color:var(--fd-fg-subtle)}
+body.fd .bg-side-item{color:var(--fd-fg)}
+body.fd .bg-side-item:hover{border-color:var(--fd-line);background:var(--fd-bg-subtle)}
+body.fd .bg-side-item.is-done .bg-side-what{color:var(--fd-fg-muted)}
+body.fd .bg-side-slot{border-color:var(--fd-line-strong);color:var(--fd-fg-muted)}
+body.fd .bg-side-item img{background:var(--fd-bg-inset)}
+/* 장면·자세 챕터 탭(D-0108) */
+body.fd .pose-tabs{border-bottom-color:var(--fd-line)}
+body.fd .pose-tab{border-color:var(--fd-line);background:var(--fd-bg-surface);color:var(--fd-fg-muted);border-radius:var(--fd-r-2)}
+body.fd .pose-tab:hover{border-color:var(--fd-line-strong)}
+body.fd .pose-tab b{color:var(--fd-fg)}
+body.fd .pose-tab-sub,body.fd .pose-tabs-count{color:var(--fd-fg-subtle)}
+body.fd .pose-tab-mark{border-color:var(--fd-line-strong)}
+body.fd .pose-tab.is-done .pose-tab-mark{background:var(--fd-success-fg);color:var(--fd-bg-surface)}
+body.fd .pose-tab[aria-selected=true]{border-color:var(--fd-accent);box-shadow:0 0 0 1px var(--fd-accent) inset;background:var(--fd-accent-bg)}
+body.fd .pose-plate{background:var(--fd-bg-inset);border-radius:var(--fd-r-2)}
+body.fd .pose-old{color:var(--fd-fg-subtle)}
+body.fd .pose-custom-cell.is-picked{background:var(--fd-accent-bg)}
+/* 완성 이미지 챕터별 확인(D-0109) */
+body.fd .frame-ref,body.fd .frame-card{background:var(--fd-bg-surface);border-color:var(--fd-line);border-radius:var(--fd-r-3)}
+body.fd .frame-card.is-ok{border-color:color-mix(in srgb,var(--fd-success-fg) 45%,var(--fd-line))}
+body.fd .frame-card.is-fix{border-color:var(--fd-attention-solid);box-shadow:0 0 0 1px var(--fd-attention-solid) inset}
+body.fd .frame-card.is-ok .frame-verdict-ro{color:var(--fd-success-fg)}
+body.fd .frame-card.is-fix .frame-verdict-ro,body.fd .bg-side-item.is-fix .bg-side-what{color:var(--fd-attention-fg,var(--fd-attention-solid))}
+body.fd .frame-img,body.fd .frame-ref-img img{background:var(--fd-bg-inset);border-radius:var(--fd-r-2)}
+body.fd .frame-zoom-inner{background:var(--fd-bg-surface);border-color:var(--fd-line);box-shadow:var(--fd-shadow-lg,0 20px 50px rgba(0,0,0,.35))}
+body.fd .frame-zoom-pair figcaption{color:var(--fd-fg-muted)}
+body.fd .frame-kept{color:var(--fd-fg-subtle)}
+/* 소개 영상·동작 영상(D-0110, D-0111) */
+body.fd .intro-col{background:var(--fd-bg-surface);border-color:var(--fd-line);border-radius:var(--fd-r-3)}
+body.fd .intro-col.is-picked{border-color:var(--fd-accent);box-shadow:0 0 0 2px var(--fd-accent) inset;background:var(--fd-accent-bg)}
+body.fd .intro-col img,body.fd .clip video,body.fd .clip-broken{background:var(--fd-bg-inset);border-radius:var(--fd-r-2)}
+body.fd .clip-broken{border-color:var(--fd-line-strong);color:var(--fd-fg-muted)}
+body.fd .intro-cap kbd{border-color:var(--fd-line-strong);color:var(--fd-fg-subtle);background:var(--fd-bg-subtle);font-family:var(--fd-mono)}
+body.fd .action-cell{border-color:var(--fd-line);background:var(--fd-bg-surface);border-radius:var(--fd-r-2)}
+body.fd .action-cell:hover{border-color:var(--fd-line-strong)}
+body.fd .action-cell.is-keep .action-cell-state{color:var(--fd-success-fg)}
+body.fd .action-cell-state,body.fd .action-mood,body.fd .action-cell-n{color:var(--fd-fg-subtle)}
+body.fd .action-cell.is-keep .action-cell-state{color:var(--fd-success-fg)}
+body.fd .action-cell.is-open{border-color:var(--fd-accent);box-shadow:0 0 0 2px var(--fd-accent) inset}
+body.fd .action-cell-note{color:var(--fd-attention-fg)}
+body.fd .action-cell-note.is-bad,body.fd .plan-col-sub.is-bad{color:var(--fd-danger-fg,#cf222e)}
+body.fd .action-cell img{background:var(--fd-bg-inset)}
+body.fd .action-cell-note.is-new{color:var(--fd-accent-fg)}
+/* 데이터 샘플·학습 데이터(D-0112, D-0113) */
+body.fd .sample-row{background:var(--fd-bg-surface);border-color:var(--fd-line);border-radius:var(--fd-r-2)}
+body.fd .sample-row:hover{border-color:var(--fd-line-strong)}
+body.fd .sample-row.is-open{border-color:var(--fd-accent);box-shadow:inset 3px 0 0 var(--fd-accent);background:var(--fd-accent-bg)}
+body.fd .sample-row-text{color:var(--fd-fg-muted)}
+body.fd .sample-chip{border-color:var(--fd-line-strong);color:var(--fd-fg-subtle)}
+body.fd .sample-row.is-adopt .sample-chip{color:var(--fd-success-fg)}
+body.fd .sample-row.is-fix .sample-chip,body.fd .sample-row-warn,body.fd .dataset-warn,body.fd .kpi.is-warn b{color:var(--fd-attention-fg)}
+body.fd .sample-row.is-reject .sample-chip,body.fd .kpi.is-bad b{color:var(--fd-danger-fg)}
+body.fd .kpi.is-good b{color:var(--fd-success-fg)}
+body.fd .sample-read,body.fd .kpi{background:var(--fd-bg-surface);border-color:var(--fd-line);border-radius:var(--fd-r-3)}
+body.fd .kpi span{color:var(--fd-fg-subtle)}
+body.fd .bubble span{color:var(--fd-fg-subtle)}
+body.fd .bubble.is-user{background:var(--fd-bg-subtle);border:1px solid var(--fd-line)}
+body.fd .bubble.is-char{background:var(--fd-accent-bg);color:var(--fd-fg)}
+body.fd .dataset-bar{background:var(--fd-bg-active)}
+body.fd .dataset-bar i{background:var(--fd-accent)}
+/* 출시 전 점검표(D-0114) */
+body.fd .pkg-checks{background:var(--fd-bg-surface);border-color:var(--fd-line);border-radius:var(--fd-r-3)}
+body.fd .pkg-checks li+li{border-top-color:var(--fd-line)}
+body.fd .pkg-check{color:var(--fd-fg)}
+body.fd .pkg-check:hover{background:var(--fd-bg-subtle)}
+body.fd .pkg-check.is-ok .pkg-mark{background:var(--fd-success-fg)}
+body.fd .pkg-check.is-bad .pkg-mark{background:var(--fd-danger-fg)}
+body.fd .pkg-check.is-warn .pkg-mark{background:var(--fd-attention-solid)}
+body.fd .pkg-check.is-info .pkg-mark{background:var(--fd-fg-subtle)}
+body.fd .pkg-mark{color:var(--fd-bg-surface)}
+body.fd .pkg-detail-text{color:var(--fd-fg-muted)}
+body.fd .pkg-check.is-bad .pkg-detail-text{color:var(--fd-danger-fg)}
+body.fd .pkg-manual-row input{accent-color:var(--fd-accent)}
+body.fd .action-carried{color:var(--fd-accent-fg)}
+/* 사용성 정리(D-0129) */
+body.fd .gate-wrap details>summary::before{color:var(--fd-fg-subtle)}
+body.fd .side-keys{color:var(--fd-fg-subtle)}
+body.fd .side-keys kbd,body.fd .keys-list kbd{border-color:var(--fd-line-strong);color:var(--fd-fg-muted);background:var(--fd-bg-subtle);font-family:var(--fd-mono)}
+body.fd .scroll-hint{color:var(--fd-fg-subtle)}
+body.fd .side-status.is-wait{color:var(--fd-attention-fg)}
+body.fd .metric-help,body.fd .action-undo{color:var(--fd-fg-muted)}

@@ -111,7 +111,7 @@ def test_s2_requires_exactly_one_face(ctx):
     stale = _through_g1(ctx, face="c2-1", slug="stale")
     state = ctx.state(stale)
     rec = json.loads((ctx.character_dir(stale) / state.gate("G1").recordRef).read_text("utf-8"))
-    rec["selections"] = ["c2", "c2-1", "c2-3"]
+    rec["selections"] = ["c2", "c2-1", "c2-9"]
     (ctx.character_dir(stale) / state.gate("G1").recordRef).write_text(
         json.dumps(rec, ensure_ascii=False), encoding="utf-8"
     )

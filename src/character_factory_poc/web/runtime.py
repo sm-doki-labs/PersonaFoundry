@@ -17,7 +17,9 @@ from fastapi import Body, FastAPI
 
 from character_factory_poc.common.config import load_config
 from character_factory_poc.common.ids import character_id, check_slug
+from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.graph import GATES, STAGES
+from character_factory_poc.pipeline.scheduler import paid_providers
 from character_factory_poc.pipeline.state import StateFile
 from character_factory_poc.web import reads
 from character_factory_poc.web.errors import WebError
@@ -31,7 +33,9 @@ def install_runtime_routes(app: FastAPI, root: Path, conf: Any, jobs: Any) -> No
 
     @app.get("/api/runtime/graph")
     def runtime_graph() -> dict[str, Any]:
-        return _graph()
+        graph = _graph(_paid_stages(factory, conf))
+        graph["orchestrator"] = _resume_settings(factory, conf)
+        return graph
 
     @app.post("/api/runtime/characters", status_code=201)
     def create_runtime_character(
@@ -41,7 +45,30 @@ def install_runtime_routes(app: FastAPI, root: Path, conf: Any, jobs: Any) -> No
         return {"characterId": _create_character(factory, conf, slug, brief)}
 
 
-def _graph() -> dict[str, Any]:
+def _paid_stages(root: Path, conf: Any) -> dict[str, list[str]]:
+    """설정에서 paid=true인 공급자를 쓰는 단계(D-0101). 설정을 못 읽으면 빈 표다."""
+    try:
+        ctx = Context(config=load_config(root, conf.config_path), execute=False)
+        return {sid: paid_providers(ctx, sid) for sid in STAGES if paid_providers(ctx, sid)}
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
+def _resume_settings(root: Path, conf: Any) -> dict[str, Any]:
+    """결정 뒤 자동 재개 설정(D-0049). 화면이 '목표 뒤에 이어서 도는지'를 미리 알린다(D-0101)."""
+    try:
+        orch = dict(load_config(root, conf.config_path).orchestrator)
+    except (OSError, ValueError):
+        orch = {}
+    return {
+        "autoResume": bool(orch.get("auto_resume", False)),
+        "resumeUntil": str(orch.get("resume_until", "sx")),
+        "maxParallel": int(orch.get("max_parallel", 1)),
+    }
+
+
+def _graph(paid: dict[str, list[str]] | None = None) -> dict[str, Any]:
+    paid = paid or {}
     gate_stage = {stage.gate: sid for sid, stage in STAGES.items() if stage.gate}
     return {
         "stages": [
@@ -53,6 +80,7 @@ def _graph() -> dict[str, Any]:
                 "after": sorted(stage.after),
                 "gate": stage.gate,
                 "implemented": stage.implemented,
+                "paid": paid.get(sid, []),
             }
             for sid, stage in STAGES.items()
         ],

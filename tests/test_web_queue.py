@@ -114,7 +114,10 @@ def test_held_stages_come_with_the_paid_providers(tmp_path: Path) -> None:
     )
     with TestClient(create_app(root)) as client:
         detail = client.get(f"/api/characters/{CID}").json()
+        listed = client.get("/api/projects").json()["characters"]
     assert detail["held"] == [{"stage": "s5", "providers": ["video: xai_video/grok-video"]}]
+    # 목록도 같은 기준으로 싣는다(개요·받은 일이 모든 캐릭터의 유료 확인을 센다).
+    assert next(c for c in listed if c["id"] == CID)["held"] == detail["held"]
 
     # 실행을 확인하면 같은 단계가 held에서 빠진다(끝난 단계는 싣지 않는다).
     char = root / "runs" / "characters" / CID

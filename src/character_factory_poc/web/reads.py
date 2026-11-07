@@ -13,10 +13,12 @@ from pathlib import Path
 from typing import Any
 
 from character_factory_poc.common.config import load_config
+from character_factory_poc.common.ledger import Ledger
 from character_factory_poc.pipeline.graph import GATES, STAGES
 from character_factory_poc.pipeline.queue import gate_queue
 from character_factory_poc.pipeline.review import load_review
 from character_factory_poc.pipeline.rework import rework_status
+from character_factory_poc.pipeline.state import gate_events_path, stage_events_path
 from character_factory_poc.web.errors import WebError
 from character_factory_poc.web.gate_items import build_gate_items, file_url
 
@@ -25,6 +27,10 @@ BRIEFS_DIR = "runs/briefs"
 MAX_FILES = 500
 MAX_BRIEF_FILES = 100
 DONE_STATUSES = {"APPROVED", "SKIPPED"}
+# D-0101: 단계·관문 이력은 원장 끝부분만 읽는다. 회차 이력은 단계마다 최근 몇 번만 돌려준다.
+MAX_TIMELINE_LINES = 20000
+MAX_HISTORY = 10
+_RUN_ENDS = {"AWAITING_HUMAN", "APPROVED", "CHECK_FAILED", "REJECTED", "SKIPPED"}
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
@@ -232,6 +238,121 @@ def read_json_file(path: Path) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def _read_jsonl(path: Path, limit: int = MAX_TIMELINE_LINES) -> list[dict[str, Any]]:
+    """덧붙이기 기록의 끝부분. 읽지 못한 줄은 건너뛰고 파일이 없으면 빈 목록이다."""
+    try:
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    out: list[dict[str, Any]] = []
+    for line in lines[-limit:]:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            out.append(row)
+    return out
+
+
+def stage_timeline(char_dir: Path) -> dict[str, dict[str, Any]]:
+    """단계별 마지막 시작·종료·결정 시각과 회차 이력(D-0101). 기록이 없는 옛 캐릭터는 빈 dict다.
+
+    RUNNING이 회차 하나를 연다. AWAITING_HUMAN·APPROVED·CHECK_FAILED·REJECTED·SKIPPED가 열린 회차를
+    닫는다. 이미 닫힌 뒤 오는 APPROVED·REJECTED는 사람 결정으로 본다.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for event in _read_jsonl(stage_events_path(char_dir)):
+        sid, to, at = event.get("stage"), event.get("to"), event.get("at")
+        if not isinstance(sid, str) or not isinstance(to, str):
+            continue
+        rec = out.setdefault(
+            sid, {"startedAt": None, "endedAt": None, "decidedAt": None, "attempts": []}
+        )
+        attempts = rec["attempts"]
+        open_attempt = attempts[-1] if attempts and attempts[-1]["endedAt"] is None else None
+        if to == "RUNNING":
+            if open_attempt is not None:
+                open_attempt["endedAt"] = at
+                open_attempt["result"] = "RESTARTED"
+            attempts.append(
+                {
+                    "attempt": event.get("attempt"),
+                    "rev": event.get("rev"),
+                    "startedAt": at,
+                    "endedAt": None,
+                    "result": None,
+                    "error": None,
+                    "decision": None,
+                }
+            )
+            rec.update(startedAt=at, endedAt=None, decidedAt=None)
+        elif to in _RUN_ENDS:
+            if open_attempt is not None:
+                open_attempt.update(endedAt=at, result=to, error=event.get("error"))
+                if event.get("rev"):
+                    open_attempt["rev"] = event.get("rev")
+                rec["endedAt"] = at
+            else:
+                rec["decidedAt"] = at
+                if attempts:
+                    attempts[-1]["decision"] = to
+        del attempts[:-MAX_HISTORY]
+    return out
+
+
+def gate_timeline(char_dir: Path) -> dict[str, dict[str, Any]]:
+    """관문별 마지막으로 열린 시각과 결정 시각(ledger/gate-events.jsonl, D-0101)."""
+    out: dict[str, dict[str, Any]] = {}
+    for event in _read_jsonl(gate_events_path(char_dir)):
+        gate, at = event.get("gate"), event.get("at")
+        if not isinstance(gate, str):
+            continue
+        if event.get("event") == "opened":
+            out[gate] = {
+                "openedAt": at,
+                "openedRev": event.get("rev"),
+                "decidedAt": None,
+                "decision": None,
+            }
+        elif event.get("event") == "decided":
+            rec = out.setdefault(gate, {"openedAt": None, "openedRev": event.get("rev")})
+            rec["decidedAt"] = at
+            rec["decision"] = event.get("status")
+    return out
+
+
+def cost_summary(char_dir: Path) -> dict[str, Any] | None:
+    """원장 호출 기록의 추정 비용 합계. 비용 없는 호출은 0으로 더하지 않고 따로 센다(FR-67)."""
+    folder = Path(char_dir) / "ledger"
+    if not (folder / "calls.jsonl").exists():
+        return {"estUsd": 0.0, "calls": 0, "unpricedCalls": 0}
+    try:
+        report = Ledger(folder).report()
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    total = sum(float(s.get("estCostUsd") or 0) for s in report["byStage"].values())
+    return {
+        "estUsd": round(total, 4),
+        "calls": report["totalCalls"],
+        "unpricedCalls": report["unpricedCalls"],
+    }
+
+
+def _add_times(char_dir: Path, stages: list[dict[str, Any]], gates: list[dict[str, Any]]) -> None:
+    timeline = stage_timeline(char_dir)
+    for row in stages:
+        times = timeline.get(row["id"], {})
+        row["startedAt"] = times.get("startedAt")
+        row["endedAt"] = times.get("endedAt")
+        row["decidedAt"] = times.get("decidedAt")
+    opened = gate_timeline(char_dir)
+    for row in gates:
+        times = opened.get(row["id"], {})
+        row["openedAt"] = times.get("openedAt")
+        row["decidedAt"] = times.get("decidedAt")
+
+
 def _stage_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
     raw_stages = state.get("stages") if isinstance(state.get("stages"), dict) else {}
     raw_gates = state.get("gates") if isinstance(state.get("gates"), dict) else {}
@@ -320,6 +441,7 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
     state, error = read_state(char_dir)
     stages = _stage_rows(state)
     gates = _gate_rows(state)
+    _add_times(char_dir, stages, gates)
     persona = _persona(char_dir)
     pending = [g for g in gates if g["status"] == "AWAITING_HUMAN"]
     return {
@@ -341,14 +463,15 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
 
 
 def _lane_status(items: list[dict[str, Any]]) -> str:
-    if any(s["status"] == "RUNNING" for s in items):
-        return "running"
-    if any(s["status"] == "CHECK_FAILED" for s in items):
-        return "failed"
+    # D-0101: 사람이 할 일과 실패를 실행 중보다 먼저 알린다(같은 갈래에서 겹쳐도 가려지지 않게).
     if any(s["status"] == "AWAITING_HUMAN" for s in items):
         return "gate"
     if any((s["gateStatus"] or "") == "AWAITING_HUMAN" for s in items):
         return "gate"
+    if any(s["status"] == "CHECK_FAILED" for s in items):
+        return "failed"
+    if any(s["status"] == "RUNNING" for s in items):
+        return "running"
     if items and all(s["status"] in DONE_STATUSES for s in items):
         return "done"
     return "pending"
@@ -394,6 +517,8 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
     char_dir = character_dir(root, character_id)
     state, error = read_state(char_dir)
     summary = character_summary(char_dir)
+    timeline = stage_timeline(char_dir)
+    history = {sid: timeline[sid]["attempts"] for sid in STAGES if sid in timeline}
     return {
         "id": character_id,
         "dir": f"{CHARACTERS_DIR}/{character_id}",
@@ -408,6 +533,8 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
         "queue": summary["queue"],
         "progress": summary["progress"],
         "updatedAt": summary["updatedAt"],
+        "history": history,
+        "cost": cost_summary(char_dir),
     }
 
 
@@ -665,7 +792,15 @@ def state_signature(root: Path, character_id: str) -> str:
     raw_stages = state.get("stages") if isinstance(state.get("stages"), dict) else {}
     raw_gates = state.get("gates") if isinstance(state.get("gates"), dict) else {}
     payload = {
-        "stages": {sid: _field(raw_stages.get(sid), "status") for sid in STAGES},
+        # D-0101: 같은 RUNNING으로 다시 들어간 재시도와 새 revision도 화면에 알린다.
+        "stages": {
+            sid: [
+                _field(raw_stages.get(sid), "status"),
+                _field(raw_stages.get(sid), "attempts"),
+                _field(raw_stages.get(sid), "currentRev"),
+            ]
+            for sid in STAGES
+        },
         "gates": {
             gid: [_field(raw_gates.get(gid), "status"), _field(raw_gates.get(gid), "rev")]
             for gid in GATES

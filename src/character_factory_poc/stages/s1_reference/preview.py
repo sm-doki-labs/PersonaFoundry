@@ -62,6 +62,34 @@ def appearance_parts(
     return parts
 
 
+# 같은 외모군 안에서 고를 거리를 주려고 얼굴 각도·표정만 바꾼다. 외모 태그는 그대로다(D-0105).
+VARIATION_HINTS = (
+    "Facing the camera, gentle closed-mouth smile.",
+    "Three-quarter view, calm neutral expression.",
+    "Slight head tilt, bright open expression.",
+)
+
+
+def face_counts(n_clusters: int, total: int, low: int, high: int) -> list[int]:
+    """외모군 순서(추천 순)대로 얼굴 장수를 나눈다(D-0105).
+
+    total을 외모군 수로 나눠 low~high 사이로 맞추고, 남는 장수는 앞 외모군부터 하나씩 더한다.
+    예: 4개·10장·2~3장 → [3, 3, 2, 2], 3개 → [3, 3, 3], 5개 → [2, 2, 2, 2, 2].
+    """
+    if n_clusters <= 0:
+        return []
+    base = max(low, min(high, total // n_clusters))
+    counts = [base] * n_clusters
+    left = total - base * n_clusters
+    for i in range(n_clusters):
+        if left <= 0:
+            break
+        if counts[i] < high:
+            counts[i] += 1
+            left -= 1
+    return counts
+
+
 def build_prompt(
     cluster: AppearanceCluster,
     scope: RankingScope,
@@ -80,7 +108,8 @@ def build_prompt(
         "An original person, not based on any real individual."
     )
     if total > 1:
-        parts.append(f"Variation {n} of {total}.")
+        hint = VARIATION_HINTS[(n - 1) % len(VARIATION_HINTS)]
+        parts.append(f"Variation {n} of {total}. {hint}")
     if revision_note:
         # D-0043 (2): G1 REQUEST_CHANGES의 고칠 점. 이름 유출 검사는 호출부가 한다.
         parts.append(f"Revision note: {revision_note}")
@@ -96,17 +125,18 @@ def generate_previews(
     report: ReferenceReport,
     vocab: dict[str, Any],
     names: list[str],
-    per_cluster: int,
+    per_cluster: int | list[int],
     size: str,
     revision_note: str = "",
 ) -> list[ReferencePreview]:
     """프롬프트마다 이름 유출을 먼저 검사하고(FR-35) 통과한 것만 이미지 모델에 보낸다."""
     prompts = []
-    for c in report.candidates:
-        for n in range(1, per_cluster + 1):
-            prompt = build_prompt(
-                c, report.scope, vocab, n, per_cluster, revision_note=revision_note
-            )
+    counts = (
+        per_cluster if isinstance(per_cluster, list) else [per_cluster] * len(report.candidates)
+    )
+    for c, count in zip(report.candidates, counts, strict=True):
+        for n in range(1, count + 1):
+            prompt = build_prompt(c, report.scope, vocab, n, count, revision_note=revision_note)
             if find_name_leaks(prompt + " " + NEGATIVE, names):
                 raise NameLeakError(
                     f"미리보기 프롬프트({c.clusterId}-{n})에 순위 목록의 이름이 있다. "

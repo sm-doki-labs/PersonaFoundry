@@ -17,18 +17,16 @@
 
 | 날짜 | 문서 | 요지 |
 |---|---|---|
-| 2026-11-04 | [handoff-2026-11-04-official-api.md](handoffs/handoff-2026-11-04-official-api.md) | 텍스트 덱 api 경로(OpenAI·Gemini 직접), 요청 형식, 단가표 비용 기록·예산·보고. 4갈래 병렬+독립 검토 반영, 오프라인 1191 passed, 실제 API 0회. |
-| 2026-11-02 | [handoff-2026-11-02-qlora-pipeline.md](handoffs/handoff-2026-11-02-qlora-pipeline.md) | N3b QLoRA를 S9→S10t(임대·선별·선택)→S10(GPU 평가)→S11에 연결, 창작 인물 정책을 S9·S10에 반영, 독립 검토 P0 수정. 오프라인 1048 passed, 실제 GPU 0회. |
-| 2026-10-30 | [handoff-2026-10-30-agentic-studio-runtime.md](handoffs/handoff-2026-10-30-agentic-studio-runtime.md) | 기본 실제 모드·작업/관문/이벤트 연결, 가짜 공급자 브라우저 G3재작업→G6, 868회귀·Node35개, 서버 종료. |
-| 2026-10-30 | [handoff-2026-10-30-text-studio-connection.md](handoffs/handoff-2026-10-30-text-studio-connection.md) | DeepSeek2개 병렬 API/UI 연결, 실제 설정·출처 패널과 기존 각본 구분, Chrome 회귀 검증·실제 캐릭터0건. |
-| 2026-10-30 | [handoff-2026-10-30-text-model-deck.md](handoffs/handoff-2026-10-30-text-model-deck.md) | 텍스트 덱·opencodex 기본·별도 test 전환, 역할별 출처와 불변 재개. 실제 호출 없음·K-0058. |
-| 2026-10-30 | [handoff-2026-10-30-tsundere-persona-live.md](handoffs/handoff-2026-10-30-tsundere-persona-live.md) | Gemini 개념 피드백 후 한지완 생성·비교40첫응답. 호감 반응 차이·행동 선택은 제한적, 초회 실패/복구 보존·35검사. |
-| 2026-10-30 | [handoff-2026-10-30-apology-reassessment.md](handoffs/handoff-2026-10-30-apology-reassessment.md) | 동일 문맥의 사과는 허용 가능한 변주로 재판정.1/32·누적0/20, 결함 분류 정정. 코드/추가 호출 없음. |
-| 2026-10-29 | [handoff-2026-10-29-service-persona-runtime.md](handoffs/handoff-2026-10-29-service-persona-runtime.md) | 서비스8섹션·성향 통합, runtime 예시/챕터/조건표 제외.785검사·실제107요청/96응답. G6대기·표현 강도/판정 한계. |
-| 2026-10-29 | [handoff-2026-10-29-video-pipeline-audit.md](handoffs/handoff-2026-10-29-video-pipeline-audit.md) | 영상8단계 코드 감사, offline190통과, 현재fake/QA꺼짐, 실제영상 미검증. |
-| 2026-10-29 | [handoff-2026-10-29-trait-persona-prompt-audit.md](handoffs/handoff-2026-10-29-trait-persona-prompt-audit.md) | 성격/voiceProfile 전달 누락·ID순 예시 선정 확인,6683자 정확 재현. 제품/추가 호출0, 품질 인과 대조 미실행. |
-| 2026-10-29 | [handoff-2026-10-29-trait-persona-gemini-live.md](handoffs/handoff-2026-10-29-trait-persona-gemini-live.md) | 윤서진1명 실제 생성·Gemini42응답·HTTP57회. 대화 시안 사용 가능, 상담체/개성 한계. G6대기·정식 NOT_RUN, 대조군 없음. |
-| 2026-10-29 | [handoff-2026-10-29-trait-recommendations.md](handoffs/handoff-2026-10-29-trait-recommendations.md) | 추가 특질144개 추천·선택·저장·전달, 독립4건 수정,773 passed/1 skipped,브라우저·wheel 확인. 실제 모델 품질 재검증 없음. |
+| 2026-11-08 | [handoff-2026-11-08-ux-fixes.md](handoffs/handoff-2026-11-08-ux-fixes.md) | 서브에이전트 4명 사용성 검토 반영(일괄 확정 보호·5초 취소·쉬운 말·단위·단축키 통일·예상 비용·다음 검토·사용 안내 등). 팀장용은 미룸(K-0097). 가짜 공급자 밝은·어두운 화면 확인. |
+| 2026-11-08 | [handoff-2026-11-08-action-carry.md](handoffs/handoff-2026-11-08-action-carry.md) | G5b 다시 만들기 요청 때 쓰기·빼기를 choices/에 남기고 새 판에서 그대로 쓴 칸을 미리 채움(K-0095 해결). 가짜 공급자 밝은·어두운 화면 확인. |
+| 2026-11-08 | [handoff-2026-11-08-remaining-gates.md](handoffs/handoff-2026-11-08-remaining-gates.md) | 남은 관문 화면 7개(G4b 탭·G4 큰 이미지·G5 함께 재생·G5b 표·G7a·G7 받은 편지함·G9 점검표). 가짜 공급자로 밝은·어두운 화면 17/17 완주, 실제 자료 미검증(K-0096). |
+| 2026-11-08 | [handoff-2026-11-08-chapter-backgrounds.md](handoffs/handoff-2026-11-08-chapter-backgrounds.md) | G4a 챕터 배경 고르기를 챕터별 줄로(후보 가로 나열·줄 끝 직접 적기·다음 챕터 자동 이동·다 고르기 전 확정 잠금). 가짜 공급자 밝은·어두운 화면, 고르기·직접 적기·확정·기록 보기 확인. |
+| 2026-11-08 | [handoff-2026-11-08-plan-compare.md](handoffs/handoff-2026-11-08-plan-compare.md) | G3 기획안 고르기를 같은 항목 가로 비교표로(다른 줄 표시·같은 줄 접기·숫자 키). 가짜 공급자 밝은·어두운 화면, 고르기·한 칸 고치기·확정 확인. |
+| 2026-11-08 | [handoff-2026-11-08-face-gallery.md](handoffs/handoff-2026-11-08-face-gallery.md) | G1 얼굴 고르기를 갤러리 + 추려서 비교로, S1 얼굴 10장(외모군 3~4개 × 2~3장, 각도·표정만 다름). 가짜 공급자 밝은·어두운 화면 확인, 실제 10장 미검증(K-0094). |
+| 2026-11-08 | [handoff-2026-11-08-gate-copy.md](handoffs/handoff-2026-11-08-gate-copy.md) | 관문 화면 해요체·코드 한국어 이름·기술 정보 접기, G8 블라인드 20쌍 진행 막대·단축키·자동 이동·보존·잠금. 밝은·어두운 화면 20쌍 완주, 1240 passed·노드 43. |
+| 2026-11-07 | [handoff-2026-11-07-overview-zoom.md](handoffs/handoff-2026-11-07-overview-zoom.md) | 전체 캐릭터 개요·받은 일 대기열(다음 건), 그래프 맞춤·확대·크게 보기, 실패 기록 결함(K-0089) 수정·다시 실행 이어가기, 유료 두 단계 확인. 페르소나 3모델 검토, 1237 passed·노드 43. |
+| 2026-11-07 | [handoff-2026-11-07-foundry-brand.md](handoffs/handoff-2026-11-07-foundry-brand.md) | 진행 화면을 Foundry 브랜드·토큰의 3단 화면과 검토 시트로 바꾸고 관문 시트도 같은 톤. 가짜 공급자로 밝은·어두운 화면 각각 17/17·12/12 완주, 1230 passed·노드 42. |
+| 2026-11-07 | [handoff-2026-11-07-factory-flow.md](handoffs/handoff-2026-11-07-factory-flow.md) | 새 진행 화면 factory.html(팀 묶음 그래프·지금 할 일·상세 검토)과 단계 이력·관문 대기 시각 API. 가짜 공급자로 화면에서만 17/17·12/12 완주, 1230 passed·노드 41. |
 
 새 인계를 쓰면 `handoffs/`에 두고 이 표의 맨 위에 한 줄을 추가한다. 표는 최근 10개만 유지하고 나머지는 `handoffs/` 파일 목록으로 찾는다.
 
