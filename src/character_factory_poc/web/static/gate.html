@@ -8,8 +8,19 @@
 <link rel="stylesheet" href="shared/base.css">
 <link rel="stylesheet" href="shared/glass.css">
 <link rel="stylesheet" href="shared/gate.css">
+<link rel="stylesheet" href="shared/foundry-tokens.css">
+<link rel="stylesheet" href="shared/gate-foundry.css">
 </head>
 <body class="theme-glass gate-page">
+<script>
+  // 진행 화면의 검토 시트에서 열 때만 Foundry 톤을 쓴다(D-0102). 그 밖에는 글래스 테마 그대로다.
+  (function () {
+    var params = new URLSearchParams(location.search);
+    if (params.get('skin') !== 'foundry') return;
+    document.documentElement.setAttribute('data-fd-theme', params.get('theme') === 'dark' ? 'dark' : 'light');
+    document.body.classList.add('fd');
+  })();
+</script>
 <div class="ambient" aria-hidden="true"><div class="amb is-on" style="background-image:url('assets/hero-b.jpg')"></div><div class="amb-veil"></div></div>
 <div class="gate-wrap">
   <header class="topbar appbar glass">
@@ -32,24 +43,29 @@
     </section>
     <section class="gate-body" data-body aria-live="polite"></section>
     <section class="gate-raw" data-raw hidden>
-      <details><summary>이 revision 파일</summary><ul data-files></ul></details>
-      <details><summary>최근 관문 기록 JSON</summary><pre data-records></pre></details>
+      <details><summary>기술 정보 · 이 버전의 파일</summary><ul data-files></ul></details>
+      <details><summary>기술 정보 · 결정 기록 원문</summary><pre data-records></pre></details>
     </section>
   </main>
 
   <aside class="gate-side glass" aria-label="결정">
     <h2>결정</h2>
-    <p class="side-hint" data-side-hint>고른 뒤 아래 버튼을 누르면 관문 기록이 남습니다.</p>
+    <div class="side-extra" data-side-extra></div>
+    <p class="side-hint" data-side-hint>고른 뒤 아래 버튼을 누르면 결정이 기록돼요.</p>
     <div class="side-actions" data-actions></div>
-    <details class="side-more">
-      <summary>검토자 · 소요 시간 · 사유 (선택)</summary>
-      <label>검토자 <input type="text" data-reviewer value="user"></label>
-      <label>소요 분 <input type="number" data-minutes min="0" step="any" value="0"></label>
-      <label>사유·메모 <textarea data-reasons rows="3"></textarea></label>
-    </details>
-    <button type="button" class="btn btn--ghost btn--wide" data-preview>답 JSON 보기</button>
-    <pre class="answer-json" data-answer-json hidden></pre>
     <p class="side-status" role="status" data-status></p>
+    <p class="side-keys"><kbd>⌘/Ctrl</kbd>+<kbd>Enter</kbd> 주 버튼 · <button type="button" class="link-btn" data-keys-open><kbd>?</kbd> 단축키</button> · <a href="/studio/help.html" target="_blank" rel="noopener">사용 안내</a></p>
+    <details class="side-more">
+      <summary>메모 남기기 (선택)</summary>
+      <label>이유·메모 <textarea data-reasons rows="3" placeholder="왜 이렇게 골랐는지 짧게 남겨 주세요"></textarea></label>
+      <label>검토한 사람 <input type="text" data-reviewer placeholder="이름 (한 번 적으면 기억해요)" autocomplete="name"></label>
+      <label>걸린 시간(분) <input type="number" data-minutes min="0" step="any" value="0"></label>
+    </details>
+    <details class="side-more side-tech">
+      <summary>기술 정보</summary>
+      <button type="button" class="btn btn--ghost btn--wide" data-preview>보낼 답 미리 보기</button>
+      <pre class="answer-json" data-answer-json hidden></pre>
+    </details>
   </aside>
 </div>
 <script src="shared/api.js"></script>

@@ -15,10 +15,12 @@ from pathlib import Path
 from typing import Any
 
 from character_factory_poc.common.errors import (
+    AgentFormatError,
     CheckFailed,
     FactoryError,
     GateNotApprovedError,
     NeedsInputError,
+    StateTransitionError,
 )
 from character_factory_poc.pipeline.approve import approve_gate
 from character_factory_poc.pipeline.context import Context
@@ -274,6 +276,17 @@ def _skip_note(ctx: Context, cid: str, sid: str, runners: dict) -> str | None:
     return ""
 
 
+def _mark_failed(ctx: Context, cid: str, sid: str, message: str) -> None:
+    """실행 중으로 남은 단계를 CHECK_FAILED로 바꾼다. 이미 다른 상태면 그대로 둔다."""
+    try:
+        state = ctx.state(cid)
+        st = state.stage(sid)
+        if st.status == "RUNNING":
+            state.transition(sid, "CHECK_FAILED", rev=st.currentRev, error=message[:2000])
+    except (StateTransitionError, OSError):
+        pass
+
+
 def _step(
     ctx: Context, cid: str, sid: str, opt: RunOptions, runners: dict, log: RunLog
 ) -> str | None:
@@ -326,12 +339,31 @@ def _step(
             return None
         except CheckFailed as e:
             # 검사 실패는 그 단계만 멈춘다. 다른 갈래는 계속 돈다(D-0035).
+            _mark_failed(ctx, cid, sid, str(e))
             log.add(f"{sid}: 검사 실패 — {e}")
             log.blocked.append(sid)
             if opt.until == sid:
                 log.stopped_at = sid
                 return "return"
             return None
+        except (AgentFormatError, SystemExit) as e:
+            # 형식 재시도를 다 쓴 경우와, 단계가 검사 실패를 SystemExit(메시지)로 알리는
+            # 경우도 검사 실패와 같이 그 단계만 멈춘다. 상태가 RUNNING으로 남지 않게
+            # CHECK_FAILED로 바꾼다(K-0089).
+            if isinstance(e, SystemExit) and not isinstance(e.code, str):
+                raise
+            message = e.code if isinstance(e, SystemExit) else str(e)
+            _mark_failed(ctx, cid, sid, message)
+            log.add(f"{sid}: 검사 실패 — {message}")
+            log.blocked.append(sid)
+            if opt.until == sid:
+                log.stopped_at = sid
+                return "return"
+            return None
+        except Exception as e:
+            # 예상하지 못한 오류는 작업을 실패로 끝내되, 단계가 실행 중으로 남지 않게 한다(K-0089).
+            _mark_failed(ctx, cid, sid, f"{type(e).__name__}: {e}")
+            raise
         finally:
             log.timings[sid] = {"start": started, "end": _now()}
         ran = True

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>사용 안내 · Foundry</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="shared/foundry-tokens.css">
+<script>
+  // 진행 화면에서 고른 테마를 그대로 쓴다.
+  (function () {
+    var t = null;
+    try { t = localStorage.getItem('fd-theme'); } catch (e) { /* 기본값 */ }
+    if (!t) t = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-fd-theme', t);
+  })();
+</script>
+<style>
+  body{margin:0;background:var(--fd-bg-app);color:var(--fd-fg);font-family:'Pretendard Variable',Pretendard,system-ui,sans-serif;line-height:1.65}
+  main{max-width:760px;margin:0 auto;padding:32px 20px 64px}
+  h1{font-size:26px;margin:0 0 6px}
+  h2{font-size:18px;margin:36px 0 8px;padding-top:12px;border-top:1px solid var(--fd-line)}
+  p,li{font-size:14.5px}
+  .lead{color:var(--fd-fg-muted)}
+  nav.toc{display:flex;flex-wrap:wrap;gap:6px 14px;margin:16px 0 0;font-size:13.5px}
+  a{color:var(--fd-accent-fg)}
+  dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;font-size:14px}
+  dt{font-weight:600}
+  dd{margin:0;color:var(--fd-fg-muted)}
+  table{border-collapse:collapse;width:100%;font-size:14px}
+  th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--fd-line);vertical-align:top}
+  th{color:var(--fd-fg-subtle);font-weight:600}
+  kbd{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 5px;border:1px solid var(--fd-line-strong);border-radius:4px;background:var(--fd-bg-subtle);font:600 12px/1 ui-monospace,monospace}
+  .box{padding:12px 14px;border:1px solid var(--fd-line);border-radius:10px;background:var(--fd-bg-surface)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Foundry 사용 안내</h1>
+  <p class="lead">캐릭터를 만드는 동안 AI가 단계마다 후보를 만들고, 사람은 중간중간 고르거나 승인해요. 처음이라면 위에서부터 순서대로 읽어 보세요.</p>
+  <nav class="toc" aria-label="목차"><a href="#start">처음 할 일</a><a href="#screen">화면 읽는 법</a><a href="#words">용어</a><a href="#decide">결정 버튼</a><a href="#cost">비용</a><a href="#keys">단축키</a><a href="#stuck">막혔을 때</a></nav>
+
+  <h2 id="start">처음 할 일</h2>
+  <ol>
+    <li>왼쪽 위 <b>새 캐릭터</b>에서 짧은 이름과 브리프를 적고 등록해요. 등록만 하고 바로 돌지 않아요.</li>
+    <li><b>어디까지 실행할까요</b>에서 처음에는 <b>얼굴 고르기까지</b>를 골라 보세요. 비용이 드는 영상 단계 전에 멈춰요.</li>
+    <li><b>실행 시작</b>을 누르면 단계가 돌아요. 사람이 할 일이 생기면 가운데 <b>지금 할 일</b>에 나타나요.</li>
+    <li><b>검토하기</b>를 누르면 오른쪽에서 검토 화면이 열려요. 고르고 오른쪽 <b>결정</b> 칸의 버튼을 누르면 다음 단계가 이어서 돌아요.</li>
+  </ol>
+
+  <h2 id="screen">화면 읽는 법</h2>
+  <dl>
+    <dt>지금 할 일</dt><dd>사람이 해야 하는 일(검토, 유료 실행 확인, 멈춘 단계)이에요. 위에 있을수록 급해요. "뒤의 N단계가 기다려요"는 이 일을 해야 이어지는 단계 수예요.</dd>
+    <dt>방금 한 일</dt><dd>최근에 보낸 결정과 끝난 일이에요. "다음 검토" 버튼으로 이어서 볼 수 있어요.</dd>
+    <dt>공정 그래프</dt><dd>팀(외모·기획·장면·영상·페르소나·데이터·학습·패키지)별로 단계를 묶어 보여요. 사람 모양 표시는 사람 검토가 있는 단계, 동전 모양은 유료 단계예요.</dd>
+    <dt>받은 일</dt><dd>모든 캐릭터에서 사람이 할 일이 있는 캐릭터를 모아 봐요. 숫자는 할 일 건수예요.</dd>
+  </dl>
+
+  <h2 id="words">용어</h2>
+  <dl>
+    <dt>검토(관문)</dt><dd>사람이 결정해야 다음으로 넘어가는 지점이에요. 얼굴 고르기, 기획안 고르기 같은 이름으로 보여요. 기록에는 G1, G3 같은 코드로 남아요.</dd>
+    <dt>버전</dt><dd>한 단계가 만든 결과 한 벌이에요. 수정 요청이나 반려를 하면 새 버전이 생겨요.</dd>
+    <dt>팀</dt><dd>비슷한 단계를 묶은 이름이에요. 사람 조직이 아니에요.</dd>
+    <dt>이어받음</dt><dd>수정 요청 뒤 새 버전에서, 지난 버전에서 정한 판단을 미리 채워 둔 것이에요. 다시 만든 칸만 보면 돼요.</dd>
+    <dt>블라인드 비교</dt><dd>어느 응답이 어떤 조건인지 숨기고 더 나은 쪽을 고르는 평가예요. 다 고른 뒤에 조건 이름과 지표가 열려요.</dd>
+    <dt>학습</dt><dd>만든 대화 데이터로 모델을 캐릭터 말투에 맞게 다듬는 일이에요. 학습 없이 긴 프롬프트로 진행할 수도 있어요.</dd>
+  </dl>
+
+  <h2 id="decide">결정 버튼</h2>
+  <table>
+    <tr><th>버튼</th><th>하는 일</th><th>되돌리기</th></tr>
+    <tr><td>확정·승인</td><td>고른 내용으로 다음 단계를 이어서 돌려요.</td><td>되돌릴 수 없어요. 확정 전에 오른쪽 요약을 확인하세요.</td></tr>
+    <tr><td>수정 요청</td><td>적은 고칠 점만 반영해 새 버전을 만들어요. 고친 부분 외에는 그대로 둬요.</td><td>누른 뒤 5초 동안 <b>보내기 취소</b>를 누를 수 있어요.</td></tr>
+    <tr><td>반려(처음부터)</td><td>이 단계 결과 전체를 버리고 처음부터 다시 만들어요. 앞 단계 결과는 그대로예요.</td><td>확인 창이 한 번 더 뜨고, 보낸 뒤 5초 동안 취소할 수 있어요.</td></tr>
+    <tr><td>보지 않고 첫 후보로 확정</td><td>후보를 보지 않고 모두 첫 후보로 확정하는 빠른 처리예요. 하나라도 고르면 이 버튼은 사라져요.</td><td>확인 창이 한 번 더 떠요.</td></tr>
+  </table>
+
+  <h2 id="cost">비용</h2>
+  <div class="box">
+    <p>소개 영상과 동작 영상은 돈이 드는 유료 단계예요. 실행 전에 <b>비용 확인</b>을 누르면 이번 실행에서 몇 편을 만들고 얼마가 드는지 예상 금액을 보여 줘요. 예상 금액은 공장 설정에 적힌 단가(초당 가격)로 계산해요.</p>
+    <p>"지금까지 쓴 추정 비용"은 이 캐릭터에 이미 쓴 돈이에요. 이번 실행 금액과 다른 숫자예요.</p>
+    <p>단가가 설정되지 않았으면 금액을 계산하지 못했다고 알려 줘요. 이때는 실행하기 전에 운영 담당에게 단가를 확인해 주세요. 유료 단계가 두 개 기다리면 <b>함께 보기</b>로 합계를 보고 한 번에 실행할 수 있어요.</p>
+  </div>
+
+  <h2 id="keys">단축키</h2>
+  <p>검토 화면에서 <kbd>?</kbd>를 누르면 그 화면의 단축키가 나와요. 모든 검토 화면에서 같은 키:</p>
+  <table>
+    <tr><td><kbd>J</kbd> / <kbd>→</kbd></td><td>다음 항목(챕터·칸·대화·쌍)</td></tr>
+    <tr><td><kbd>K</kbd> / <kbd>←</kbd></td><td>이전 항목</td></tr>
+    <tr><td><kbd>1</kbd>~<kbd>9</kbd></td><td>후보 고르기(화면마다 뜻이 화면 위에 적혀 있어요)</td></tr>
+    <tr><td><kbd>⌘/Ctrl</kbd> + <kbd>Enter</kbd></td><td>오른쪽 결정 칸의 주 버튼 누르기</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>열린 창이나 검토 화면 닫기</td></tr>
+  </table>
+  <p>글을 적는 칸 안에서는 단축키가 꺼져요.</p>
+
+  <h2 id="stuck">막혔을 때</h2>
+  <ul>
+    <li><b>단계가 멈췄어요</b>: 지금 할 일의 이유를 읽고 <b>다시 실행</b>을 눌러요. 같은 실패가 두 번 이상이면 <b>오류 내용 복사</b>를 눌러 운영 담당에게 붙여 보내 주세요(캐릭터·단계·회차가 함께 복사돼요).</li>
+    <li><b>확정 버튼이 눌리지 않아요</b>: 오른쪽 결정 칸 버튼 위 안내에 남은 일이 적혀 있어요(예: "1개 챕터가 남았어요").</li>
+    <li><b>잘못 보냈어요</b>: 수정 요청·반려는 5초 안에 취소할 수 있어요. 확정은 되돌릴 수 없으니 운영 담당에게 알려 주세요.</li>
+    <li><b>진행 중인 작업이 없다고 나와요</b>: <b>이어서 실행</b>을 누르면 멈춘 지점부터 목표까지 이어서 돌아요.</li>
+  </ul>
+</main>
+</body>
+</html>

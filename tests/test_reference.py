@@ -84,14 +84,26 @@ def test_s1_offline_to_g1_select(ctx):
     assert "가상 하윤" in (out / "gate-G1.html").read_text("utf-8")
 
     previews = json.loads((out / "previews.json").read_text("utf-8"))
-    assert len(previews) == 3  # 외모군마다 얼굴 1장(D-0043 (1))
+    assert len(previews) == 9  # 외모군 3개 × 3장, 목표 10장에서 외모군당 최대 3장(D-0105)
+    assert [p["previewId"] for p in previews] == [
+        "c1-1",
+        "c1-2",
+        "c1-3",
+        "c2-1",
+        "c2-2",
+        "c2-3",
+        "c3-1",
+        "c3-2",
+        "c3-3",
+    ]
     assert all((out / p["filePath"]).read_bytes().startswith(b"\x89PNG") for p in previews)
     assert "not based on any real individual" in previews[0]["prompt"]
     assert "a fictional Korean woman in their 20s" in previews[0]["prompt"]
-    assert "Variation" not in previews[0]["prompt"]
+    assert "Variation 1 of 3. Facing the camera" in previews[0]["prompt"]
+    assert "Three-quarter view" in previews[1]["prompt"]
     assert "인물 인상 한국인" in (out / "gate-G1.html").read_text("utf-8")
     kinds = [c["kind"] for c in ctx.ledger(cid).calls()]
-    assert kinds.count("AGENT") == 1 and kinds.count("IMAGE") == 3
+    assert kinds.count("AGENT") == 1 and kinds.count("IMAGE") == 9
 
     approve_gate(
         ctx,
@@ -254,7 +266,7 @@ def test_ranking_validation_and_dry_run(tmp_path, capsys):
     path.write_text(json.dumps(RANKING, ensure_ascii=False), encoding="utf-8")
     assert main(["--root", str(tmp_path), "ref", "run", "x", "--ranking", str(path)]) == 0
     printed = capsys.readouterr().out
-    assert "인물 14명" in printed and "합계 8회" in printed
+    assert "인물 14명" in printed and "합계 14회" in printed  # Scout 최대 4회 + 얼굴 최대 10장
     assert find_name_leaks(printed, NAMES) == []
     assert not (tmp_path / "runs").exists()
 
@@ -358,3 +370,18 @@ def test_previous_v1_report_skips_agreement(ctx):
     assert out.name == "rf2"
     repro = json.loads((out / "report.json").read_text("utf-8"))["reproducibility"]
     assert repro == {"previousRev": "rf1", "agreementWithPrevious": None, "comparedPeople": 0}
+
+
+def test_face_counts_split_ten_faces_over_clusters() -> None:
+    """얼굴 10장을 외모군 순서대로 2~3장씩 나눈다(D-0105)."""
+    from character_factory_poc.stages.s1_reference.preview import face_counts
+    from character_factory_poc.stages.s1_reference.run import DEFAULTS, preview_counts
+
+    assert face_counts(4, 10, 2, 3) == [3, 3, 2, 2]
+    assert face_counts(3, 10, 2, 3) == [3, 3, 3]
+    assert face_counts(5, 10, 2, 3) == [2, 2, 2, 2, 2]
+    assert face_counts(2, 10, 2, 3) == [3, 3]
+    assert face_counts(0, 10, 2, 3) == []
+    assert preview_counts(DEFAULTS, 4) == [3, 3, 2, 2]
+    # faces_total = 0이면 예전처럼 외모군마다 previews_per_cluster장이다.
+    assert preview_counts(DEFAULTS | {"faces_total": 0, "previews_per_cluster": 1}, 3) == [1, 1, 1]

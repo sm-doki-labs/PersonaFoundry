@@ -27,7 +27,7 @@ from character_factory_poc.stages.s1_reference.features import (
     scout_people_input,
 )
 from character_factory_poc.stages.s1_reference.page import render_g1_page
-from character_factory_poc.stages.s1_reference.preview import generate_previews
+from character_factory_poc.stages.s1_reference.preview import face_counts, generate_previews
 from character_factory_poc.stages.s1_reference.ranking import (
     all_names,
     build_people,
@@ -36,12 +36,16 @@ from character_factory_poc.stages.s1_reference.ranking import (
 )
 from character_factory_poc.stages.s1_reference.report import build_report
 
-# D-0018·D-0043 제안값. factory.toml [stages.s1]로 바꾼다. G1은 외모군마다 얼굴 한 장을 견준다.
+# D-0018·D-0043·D-0105 제안값. factory.toml [stages.s1]로 바꾼다.
+# G1은 얼굴 faces_total장(외모군마다 min~previews_per_cluster장)을 갤러리로 견준다(D-0105).
+# faces_total = 0이면 예전처럼 외모군마다 previews_per_cluster장이다.
 DEFAULTS: dict[str, Any] = {
     "cluster_k": 4,
     "min_members_per_cluster": 3,
     "min_common_fields": 2,
-    "previews_per_cluster": 1,
+    "faces_total": 10,
+    "min_previews_per_cluster": 2,
+    "previews_per_cluster": 3,
     "max_check_retries": 3,
     "image_size": "1024x1024",
     "min_list_size_for_percentile": 3,
@@ -50,6 +54,16 @@ DEFAULTS: dict[str, Any] = {
 
 def s1_config(ctx: Context) -> dict[str, Any]:
     return DEFAULTS | ctx.config.stage("s1")
+
+
+def preview_counts(cfg: dict[str, Any], n_clusters: int) -> list[int]:
+    """외모군마다 만들 얼굴 장수(D-0105)."""
+    total = int(cfg.get("faces_total", 0) or 0)
+    high = int(cfg["previews_per_cluster"])
+    if total <= 0:
+        return [high] * n_clusters
+    low = min(high, int(cfg.get("min_previews_per_cluster", 1)))
+    return face_counts(n_clusters, total, low, high)
 
 
 def settings_from(cfg: dict[str, Any]) -> ReportSettings:
@@ -70,11 +84,12 @@ IMAGE_NOTES = {
 
 def plan_calls(cfg: dict[str, Any], image_adapter: str = "fake") -> list[CallPlan]:
     retries = int(cfg["max_check_retries"])
-    k, n = int(cfg["cluster_k"]), int(cfg["previews_per_cluster"])
+    k = int(cfg["cluster_k"])
+    images = sum(preview_counts(cfg, k))
     note = IMAGE_NOTES.get(image_adapter, image_adapter)
     return [
         CallPlan("s1", f"Scout 외모 특징 태깅 (재시도 포함 최대 {1 + retries}회)", 1 + retries),
-        CallPlan("s1", f"외모군 미리보기 이미지 (후보 최대 {k}개 × {n}장, {note})", k * n),
+        CallPlan("s1", f"얼굴 미리보기 (외모군 최대 {k}개, 최대 {images}장, {note})", images),
     ]
 
 
@@ -185,7 +200,7 @@ def _run(ctx, cid, rev, rev_dir, ranking, cfg, settings, budget) -> None:
         report=report,
         vocab=vocab,
         names=names,
-        per_cluster=settings.previewsPerCluster,
+        per_cluster=preview_counts(cfg, len(report.candidates)),
         size=str(cfg["image_size"]),
     )
     previews_json = [dump(p) for p in previews]

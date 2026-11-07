@@ -419,3 +419,101 @@
 - 브리프 성격은 9명 모두 핵심 성격 첫 문장에 꼼꼼·책임감과 관찰력을 함께 가졌다. 이름은 모두 새것, 음식은 짬뽕·갈치조림·감자탕·국물 떡볶이·돼지국밥 등으로 갈렸고, 내력은 프로게이머 연습생, 원양어선 조리 보조, 탄광촌에서 동생 학비를 대는 사람처럼 달라졌다.
 - 남은 수렴: 결점 단서가 고집이나 경쟁심이면 셋 모두 통제형이 됐다. 브리프의 꼼꼼·책임감이 결점을 통제 쪽으로 끈다. 세 실행을 동시에 돌려 서로를 피할 목록에 넣지 못했고 단서가 실행마다 따로 뽑혀 천체 망원경·전통주·클라이밍·부산 영도가 겹쳤다. 최근 실행이 받은 단서를 빼고 뽑게 고쳤다(시험 `tests/test_diversity.py`, 경로 오프셋 버그를 시험이 잡아 수정).
 - 원장: 기획 3회 1.25달러, 판정 0.08달러(단가표 추정). `uv run pytest -q` → **1222 passed, 1 skipped**.
+
+## 2026-11-07 진행 화면과 단계 이력(D-0101)
+
+- 서버 시험: `uv run --locked pytest -q -p no:cacheprovider` → **1230 passed, 1 skipped**(새 `tests/test_web_history.py` 8개 포함). 로그 `work/factory-flow-20261107/pytest-full-2.log`. `ruff check src tests`, `ruff format --check`, `git diff --check` 통과.
+- 화면 시험: `cd studio && node --test tests/flow.test.cjs tests/runtime.test.cjs tests/runtime-host.test.cjs tests/runtime-integration-contract.test.cjs tests/text-pipeline.test.cjs` → 41 passed(새 flow 6개). 실제 서버 그래프로 팀 사이 선 10개, 목표 범위, 대기 시간·재시도·새 판·실패·유료 보류 표시, 할 일 순서, 결정 알림을 확인했다.
+- 가짜 공급자 완주(브라우저): `uv run --locked python work/factory-flow-20261107/e2e_server.py --root /tmp/cf-flow-e2e-r1 --port 8796`. `tests/test_offline_pipeline.setup`의 합성 캐릭터(가상 순위 목록, 가짜 글·이미지·영상·판정·학습)를 모든 단계 PENDING·작업 0건으로 띄우고, 영상 공급자에 paid=true를 붙였다(자동 재개 켬, 재개 목표 sx). Codex 내장 브라우저에서 `/studio/factory.html`만 조작해 시작 전 화면 → "끝까지" 실행 → G1 → G3 → G6 수정 요청(pv1 반려 → pv2 생성) → G6 → G4a → G7a → G4b → G7 → G4 → G5 → G8(블라인드 20쌍) → G9 순서로 12개 관문을 결정하고, 유료 단계 s5·s6을 실행 확인으로 돌렸다. 결과: `cf-20261107-poc-female` 17/17 단계와 12/12 관문 APPROVED, sx APPROVED. 단계 이력에 s8 1회차(pv1, 결정 REJECTED)와 2회차(pv2, APPROVED)가 남았다. 원장 3,034호출, 추정 비용 $0(가짜 공급자, 단가 미확인 0). 조작 기록 `work/factory-flow-20261107/e2e-steps.json`, 캡처 `work/factory-flow-20261107/shots/`(03 실행 확인과 검토, 04 검토 여러 건, 05 G6 검토 영역, 06 유료 확인, 07 완료, 08 완료 390px).
+- 빈 화면·등록·연결 끊김: 빈 루트 `/tmp/cf-flow-empty-r1`(가짜 공급자 설정) 서버 8797에서 첫 화면(캐릭터 없음) → 새 캐릭터 등록(`cf-20261107-flow-check`, 작업 0건 유지) → 목표 "프롬프트 승인까지"를 고르면 3단계·검토 2번과 범위 밖 팀이 흐려짐을 확인했다(캡처 01, 02). 서버를 강제 종료하자 머리줄이 "다시 연결하는 중"으로 바뀌었다(캡처 09). Ctrl-C 종료는 열린 SSE 연결 때문에 끝나지 않았다(K-0087).
+- 실행하지 않은 것: 실제 모델·이미지·영상·학습 호출, 어두운 화면 설정 캡처, 실패·반려의 브라우저 표시(K-0086). 실제 `runs/characters`는 건드리지 않았다.
+
+## 2026-11-07 Foundry 브랜드·3단 화면·관문 화면 테마(D-0102)
+
+- 서버 시험: `uv run --locked pytest -q -p no:cacheprovider` → **1230 passed, 1 skipped**. 로그 `work/factory-flow-20261107/pytest-full-3.log`. `ruff check src tests`, `ruff format --check src tests`(407 files), `git diff --check` 통과.
+- 화면 시험: `cd studio && node --test tests/flow.test.cjs tests/runtime*.test.cjs tests/text-pipeline.test.cjs` → 42 passed(flow 7개, 새 시험은 토큰 두 사본 일치와 관문 덮어쓰기가 `body.fd` 안에만 있는지 확인).
+- 가짜 공급자 완주, 밝은 화면(브라우저 1512×982): `uv run --locked python work/factory-flow-20261107/e2e_server.py --root /tmp/cf-flow-e2e-light --port 8796`. D-0101과 같은 합성 캐릭터(모든 단계 PENDING, 영상 paid=true, 자동 재개 sx)를 `/studio/factory.html`에서만 조작했다. G1 → G3 → G6 수정 요청 → G6 → G4a → G7a → G4b → G7 → G4 → G8 → s5 실행 확인 → G5 → s6 실행 확인 → G5b → G9 → 완료. 결과: `cf-20261107-poc-female` 17/17 단계, 12/12 관문 APPROVED, sx APPROVED. s8 회차 이력에 pv1 REJECTED → pv2 APPROVED. 콘솔 오류 없음. 캡처 `work/factory-flow-20261107/shots-light/`(01 시작 전, 02 첫 검토, 03 G1 검토 시트, 04 검토 여러 건, 05 G6 시트, 06 G8 시트, 07 유료 확인, 08 완료).
+- 가짜 공급자 완주, 어두운 화면: 같은 서버 스크립트 `--root /tmp/cf-flow-e2e-dark --port 8798`, 어두운 화면으로 바꾼 뒤 같은 순서로 완주했다. 결과는 밝은 화면과 같다(17/17, 12/12, sx APPROVED, s8 pv1 REJECTED → pv2 APPROVED, 콘솔 오류 없음). 시트 안 관문 화면도 어두운 토큰으로 열렸다. 조작 기록 `work/factory-flow-20261107/e2e-steps-dark.json`, 캡처 `work/factory-flow-20261107/shots-dark/`(같은 이름).
+- 좁은 폭: 새 합성 루트 `/tmp/cf-flow-narrow`(포트 8799, 시작 전 상태)에서 1280px은 사이드바가 아이콘 줄로 줄고 3단이 유지되며, 390px은 사이드바 대신 캐릭터 고르기 목록이 나오고 그래프가 한 줄로 쌓이는 것을 밝은·어두운 화면 모두 확인했다. 390px에서는 테마 버튼이 보이지 않는다(K-0088). 캡처 `work/factory-flow-20261107/shots-narrow/`(light-1280, dark-1280, light-390, dark-390).
+- 서버 8796·8798·8799는 Ctrl-C가 열린 SSE 연결 때문에 끝나지 않아(K-0087) 프로세스를 강제 종료했다.
+- 실행하지 않은 것: 실제 모델·이미지·영상·학습 호출, 실패·반려의 브라우저 표시(K-0086), 따로 연 관문 화면(`/gate.html`, 글래스 모양 유지)의 회귀 캡처, 다른 브라우저 엔진. 실제 `runs/characters`는 건드리지 않았다.
+
+## 2026-11-07 실패·반려 브라우저 확인, 캐릭터 개요·받은 일, 그래프 보기, 페르소나 검토(D-0103)
+
+- 서버 시험: `uv run --locked pytest -q -p no:cacheprovider` → **1237 passed, 1 skipped**(새 `tests/test_stage_failure_state.py` 2개, `test_web_queue` 목록 held 확인 포함). 로그 `work/factory-flow-20261107/pytest-full-4.log`. `ruff check src tests`, `ruff format --check src tests`(418 files), `git diff --check`, 토큰 두 사본 `cmp` 통과.
+- 화면 시험: `cd studio && node --test tests/flow.test.cjs tests/runtime*.test.cjs tests/text-pipeline.test.cjs` → 43 passed(flow 8개).
+- 실패 주입 서버: `work/factory-flow-20261107/e2e_fail_server.py --root /tmp/cf-fail-light2 --port 8801 --fail s7`(루트에 `FAIL-s7`이 있는 동안 s7 가짜 에이전트가 형식에 맞지 않는 답을 낸다. `--reuse`는 같은 루트를 다시 띄운다). 고치기 전에는 s7이 RUNNING으로 남고 작업은 `AgentFormatError`로 실패했다(K-0089, 캡처 `shots-fail/light-01-failed-raw.png`). 고친 뒤 s7이 1·2회차 CHECK_FAILED로 기록되고 장면 갈래는 G4a 대기까지 계속 돌았다. 실패 이유는 쉬운 문장, 원문은 기술 정보로 보였다(밝은 `light-02-failed`, 어두운 `dark-02-failed`, 390폭 `light-03-failed-390`·`dark-03-failed-390`). `FAIL-s7`을 지우고 다시 실행하자 3회차 통과(`light-04-retry-recovered`). 이때 다시 실행이 s7만 돌아 s8이 조용히 멈추는 것을 확인해, 다시 실행을 목표까지로 바꾸고 '이어서 실행' 알림을 더했다(`light-05-stalled-resume`). 이어서 실행 → s8 → G6.
+- 반려: G6에서 반려 2번(pv1 → pv2 → pv3). 가짜 공급자가 새 판을 바로 만들어 처음에는 시트가 닫히지 않고 알림도 없었다. 관문 화면이 결정을 부모에 알리게 고친 뒤 시트가 닫히고 '처음부터 다시 만들도록 보냈어요' 알림과 회차 이력(1·2회차 다시 만들기, 3회차 대기)이 보였다(`light-07-rejected`). 반려 버튼은 확인 창이 뜨고 취소하면 G3이 AWAITING_HUMAN(pr1)으로 남았다.
+- 개요·받은 일: 같은 서버에 `cafe-owner`, `night-runner`를 등록·실행해 3명으로 `#all`·`#all/mine`을 확인했다. 목록 API에 held가 없어 지금 보는 캐릭터만 유료 확인을 세던 것을 서버에서 고쳤다. 받은 일에서 검토 종류 '얼굴 고르기 · 2건'으로 거르고 검토하기 → 시트에 '다음 건 · night-runner (1건 남음)' → 결정 → 알림의 다음 건 → 두 번째 결정까지 이어졌다(`light-08-overview`, `light-09-inbox-batch`, `light-10-batch-sheet`, `light-11-batch-next-note`, 어두운 `dark-06-overview`, 390폭 `dark-07-overview-390`·`light-14-overview-390`). brief만 있는 캐릭터에 '이어서 실행'이 잘못 뜨던 것을(외모 축은 s2 승인 뒤 기획) 서버의 lastJob.blocked로 빼도록 고쳤다.
+- 그래프 보기: 확대 150%에서 연결선이 칸을 따라감, 화살표 이동, 크게 보기·Esc 복귀, 어두운 크게 보기(`light-12-zoom-150`, `light-13-focus`, `dark-04-focus`). 유료 '비용 확인' → '견적 없음' 패널 → 취소(`dark-05-paid-confirm`). 시트를 닫으면 배경 inert가 풀렸다. 끌기·휠 이동은 코드로만 확인했다(브라우저 자동 조작 도구에 끌기 시험을 하지 않았다).
+- 페르소나 검토(서브에이전트, 읽기 전용, 캡처·코드만): 기획 PD(Claude Opus 5.5), 운영 엔지니어(GPT-6 Astra), 첫 관객·접근성(GPT-6.1 Sol). 셋 다 상위 개요(목록–상세)·받은 일 대기열·유료 두 단계 확인·초점 문제를 짚었고, 확대는 둘이 찬성·하나가 과하다고 봤다. 반영한 것과 남긴 것(K-0090~K-0093)은 D-0103·알려진 문제에 적었다. 대비 수치·화면 읽기 동작은 검토자의 추정이고 측정하지 않았다.
+- 실행하지 않은 것: 실제 모델·유료 공급자 호출, 화면 읽기 프로그램 실측, 다른 브라우저 엔진. 실제 `runs/characters`는 건드리지 않았다.
+
+## 2026-11-08 관문 화면 해요체·블라인드 20쌍(D-0104)
+
+- 서버 시험: `uv run --locked pytest -q -p no:cacheprovider` → **1240 passed, 1 skipped**(새 `tests/test_gate_copy.py` 3개). 로그 `work/factory-flow-20261107/pytest-full-5.log`. `ruff check src tests`, `ruff format --check src tests`(420 files), `git diff --check` 통과. 화면 노드 43 passed. `gate.js`는 `node --check` 통과.
+- 준비: `work/factory-flow-20261107/prep_g8.py --root /tmp/cf-g8`가 가짜 공급자 합성 캐릭터 `cf-20261108-poc-female`를 앞 관문 11개를 웹 API로 결정하며 G8 대기까지 돌렸다(학습 제출 켬, 실제 호출 0회). `e2e_fail_server.py --root /tmp/cf-g8 --port 8802 --reuse`로 띄웠다.
+- 밝은 화면(1512×982): 진행 화면 시트로 G8을 열어 단축키 1·2·3으로 7쌍(고를 때마다 다음 쌍으로 이동, 고정 막대 7/20, 보내기 잠김·'13쌍이 남았어요'), 나머지 13쌍을 버튼으로 골랐다. 20/20이 되자 지표가 열리고(조건·지표 이름 한국어), 채택 칸으로 초점이 갔고 보내기가 풀렸다. 캡처 `shots-gate/light-01-g8-top`, `light-02-g8-keyboard`, `light-03-g8-all-picked`, `light-04-g8-metrics`.
+- 어두운 화면: 다시 연 G8에서 9쌍을 고른 뒤 시트를 닫았다 열자 9/20이 그대로였다. 나머지를 고르고 지표·채택을 본 뒤 보내자 시트가 닫히고 '평가·블라인드 20쌍: 결정을 기록했어요'가 남았으며 G9가 열렸다(`dark-01-g8-progress`, `dark-02-g8-metrics`, `dark-03-g8-adopt`, `dark-04-g8-decided`, `dark-05-g9`).
+- 다른 관문 문장: G1·G6·G7a 결정 기록(밝은·어두운), G9(밝은 챕터·관계 단계 한국어). 얼굴 근거는 '목록 위에서 54% 지점이에요', 결정 기록은 '이미 결정했어요 · 고름 · tester · 시각'으로 보였다(`light-05-g1-readonly`, `light-06-g6-readonly`, `light-07-g7a-readonly`, `light-08-g9-chapters`, `dark-06-g1-readonly`, `dark-07-g6-readonly`, `dark-08-g7a-readonly`). 단독 관문 화면(`/gate.html`, 글래스)도 같은 문장으로 열리고 콘솔 오류가 없었다(`glass-01-g9-standalone`).
+- 반려 확인 창, 수정 요청 흐름은 이번에 다시 누르지 않았다(D-0103에서 확인). 실제 모델·유료 호출 없음, 실제 `runs/characters` 손대지 않음. 서버 8802는 강제 종료했다(K-0087).
+
+## 2026-11-08 얼굴 고르기 갤러리(D-0105)
+
+- 서버 시험: `uv run --locked pytest -q -p no:cacheprovider` → **1241 passed, 1 skipped**(배분 규칙 시험 1개 추가). 로그 `work/factory-flow-20261107/pytest-full-6.log`. `ruff check src tests`, `ruff format --check src tests`(420 files), `git diff --check` 통과. 화면 노드 43 passed. `gate.js` `node --check` 통과.
+- 가짜 공급자: `e2e_fail_server.py --root /tmp/cf-g1-gallery --port 8803`(새 합성 캐릭터) → `until=G1` 작업. 합성 순위 목록은 외모군 3개라 얼굴 9장(3·3·3)이 만들어졌다. 외모군 4개(10장, 3·3·2·2)는 배분 시험으로만 확인했다.
+- 밝은 화면(1512×982, 진행 화면 시트): 갤러리 9장·거르기 칩·추천은 얼굴 1에만(`shots-g1/light-01-gallery-empty`). 마우스와 숫자 키로 고르기, S와 ♡로 3장 추리기, 결정 칸에 고른 얼굴·태그·각도·근거, 주 버튼 '얼굴 4로 확정'(`light-02-gallery-shortlist`). 나란히 비교에서 얼굴 4 고르기(`light-03-compare`).
+- 어두운 화면: 외모군 B 거르기·2장 추리기(`dark-01-gallery-filter`), 나란히 비교에서 얼굴 5(c2-2) 고르기(`dark-02-compare`), '얼굴 5로 확정' → 시트 닫힘·'얼굴 고르기: 결정을 기록했어요'·S2 기준 사진 완료·G3 열림(`dark-03-decided`). 기록 `gates/G1-rf1.json`은 `selections = [c2, c2-2]`.
+- 결정 기록 보기(밝은 화면): 얼굴 5가 고른 상태로 잠겨 보이고 추리기·트레이는 숨는다(`light-04-readonly-record`).
+- 시트를 연 직후에는 초점이 부모 창의 닫기 버튼에 있어, 숫자 키는 시트 안을 한 번 누른 뒤 먹는다. 실제 이미지 공급자 호출 없음.
+
+## 2026-11-08 기획안 가로 비교표(D-0106)
+
+- 서버 시험: `uv run --locked pytest -q -p no:cacheprovider` → **1241 passed, 1 skipped**. 로그 `work/factory-flow-20261107/pytest-full-7.log`. `ruff check src tests`, `ruff format --check src tests`, `git diff --check` 통과. 화면 노드 43 passed. `gate.js` `node --check` 통과.
+- 가짜 공급자: `e2e_fail_server.py --root /tmp/cf-g1-gallery --port 8803 --reuse`(D-0105에서 G1 결정 뒤 G3 대기). 가짜 기획 3안은 '같은 상황에서 고르는 행동' 3줄만 다르고 19줄이 같다.
+- 밝은 화면(1512×982, 시트): '3개 항목이 서로 달라요 · 같은 항목 19개', 다른 항목만 보기로 시작, 숫자 키 2로 안 2 열 강조·결정 칸 요약·'안 2로 확정'(`shots-g3/light-01-only-diff`). 표 폭 599px로 시트 안에 가로 넘침 없이 들어갔다.
+- 어두운 화면: 안 3 고르기 → '모두 보기'로 22줄 전부(`dark-01-all-rows`), 고치기 칸 한국어 이름(`dark-02-edit-fields`), '대비되는 면' 한 칸을 고쳐 '안 3으로 확정'(`dark-03-picked-only-diff`) → 시트 닫힘·알림, G3 `selections = [v3]`, 확정 `plan.json`의 `contrastTrait`에 고친 문장이 들어갔다.
+- 결정 기록 보기(밝은 화면): 안 3 열이 '고른 안'으로 잠겨 보인다(`light-02-readonly-record`).
+- 실제 기획 모델 호출 없음. 후보가 4개 이상이거나 직접 쓴 안(u1)이 함께 있는 경우는 화면으로 보지 않았다.
+
+## 2026-11-08 챕터별 배경 줄(D-0107)
+
+- 서버 시험: `uv run --locked pytest -q` → **1241 passed, 1 skipped**. 로그 `work/factory-flow-20261107/pytest-full-8.log`. `ruff check src tests`, `ruff format --check src tests`, `git diff --check` 통과(저장소 전체 `ruff check .`는 손대지 않은 `scripts/trait_persona_gemini_20261029.py` 줄 길이 17건으로 실패, 이번 변경과 무관). 화면 노드 43 passed. `tests/test_gate_copy.py` 3 passed. `gate.js` `node --check` 통과.
+- 가짜 공급자: 밝은 화면은 `e2e_fail_server.py --root /tmp/cf-g1-gallery --port 8803 --reuse`(G3 결정 뒤 G4a 대기), 어두운 화면은 확정 전에 복사한 `/tmp/cf-g4a-dark`(포트 8804). 가짜 배경은 챕터 3개 × 후보 3개, 9:16.
+- 밝은 화면(1512×982, 진행 화면 시트): 처음 열면 '0 / 3 챕터 골랐어요'·확정 잠금·'3개 챕터가 남았어요(1장, 2장, 3장)'(`shots-g4a/01-light-empty`). 숫자 키 2로 1장 후보 2 → 2장으로 이동, 2장 직접 적기 → '2 / 3'·'1개 챕터가 남았어요(3장)'·확정 잠금(`02-light-partial`). 3장 후보 3 → '배경 3개로 확정' 풀림·고른 배경 자세히 펼침(`03-light-all-picked`). 확정 → 시트 닫힘·'챕터 배경 고르기: 결정을 기록했어요'·G4b 열림(`04-light-after-confirm`). `selection.json`은 `picks = {ch1: ch1-b2, ch3: ch3-b3}`, `custom = {ch2: …}`, 기록 `gates/G4a-bg1.json`은 `selections = [ch1-b2, ch3-b3, custom:ch2]`·G4a `APPROVED`. 결정 기록 보기에서 고른 배경이 잠겨 보이고 나머지는 흐리며 단축키 안내가 숨는다(`05-light-readonly`).
+- 어두운 화면: 빈 메모로 '다시 만들기' → '다시 만들 챕터에 고칠 점을 적어 주세요'·접은 칸 열림·1장 칸 초점. 키보드만으로 1 → 3 → 4(3장 직접 적기, 입력 칸 초점)·글 입력 → '배경 3개로 확정'(`12-dark-all-picked`). 확정 → `picks = {ch1: ch1-b1, ch2: ch2-b3}`, `custom = {ch3: …}`, G4b 대기. 기록 보기(`13-dark-readonly`).
+- 휴대폰 폭(390×844, 관문 화면 단독·기록): 줄 머리가 위, 후보는 옆으로 넘기며 고른 후보 자리로 넘어가 있다(`14-dark-phone`).
+- 실제 이미지 공급자 호출 없음. 후보가 4개 이상이거나 자동 검사 미통과·검토 의견이 붙은 후보는 화면으로 보지 않았다.
+
+## 2026-11-08 나머지 관문 화면(D-0108~D-0114)
+
+- 서버 시험: `uv run --locked pytest -q` → **1242 passed, 1 skipped**. 로그 `work/factory-flow-20261107/pytest-full-9.log`. `ruff check src tests`, `ruff format --check src tests`, `git diff --check` 통과. 화면 노드 43 passed. `tests/test_gate_copy.py` 4 passed(관문 화면 함수 존재 시험 추가). `gate.js` `node --check` 통과.
+- 가짜 공급자: `e2e_fail_server.py --root /tmp/cf-g1-gallery --port 8803 --reuse`로 G4b부터 마지막 내보내기까지 진행 화면 시트에서 결정해 **17/17 완료**했다. 유료 표시 단계(S5·S6)는 가짜 영상 공급자라 비용 0. 관문마다 결정 전 사본을 `/tmp/cf-g4b-snap`·`cf-g4-snap`·`cf-g5-snap`·`cf-g7a-snap`·`cf-g7-snap`·`cf-g9-snap`에 남겼다. 화면은 `work/factory-flow-20261107/shots-gates/`.
+- G4b(어두운 화면 고르기·확정, 밝은 화면 기록): 숫자 키 2로 1장 자세 2, 표정 한 칸 고치기(표에 줄 긋기로 반영, 초점 유지), N으로 2장 → 4로 직접 적기 → 3장 1 → '자세 3개로 확정'. `selection.json`은 `picks = {ch1: ch1-p2, ch3: ch3-p1}`, `custom = {ch2: …}`, `tweaks = {ch1: {expression: …}}`.
+- G4(밝은 화면 수정 요청, 어두운 화면 승인): 크게 보기에서 1장 괜찮아요 → 2장으로 자동 이동 → 고칠게요·메모 → 3장 괜찮아요 → '챕터 1개 수정 요청'(fr1 기록 `requestedChanges = [ch2]`). 고친 판 fr2에서 2장 카드에 지난 요청이 보이고 1·3장은 미리 괜찮아요 → 2장 괜찮아요 → '챕터 3개 모두 승인'. Escape는 크게 보기만 닫고 시트는 남는다.
+- G5(어두운 화면): 가짜 영상이 재생되지 않아 두 칸 모두 '이 영상을 재생하지 못했어요'·파일 링크, '길이·해상도를 못 읽음' 칩, 숫자 키 2 → '영상 2로 확정'.
+- G5b(어두운 화면 다시 만들기, 밝은 화면 확정): 칸 열기 → 1(쓰기)·X(빼기)로 다음 칸 자동 이동, 반가움 칸 고칠 점 → '남은 칸 모두 첫 후보로' → '동작 1개 다시 만들기 요청' → 비용 확인 뒤 va2. va2에서 다시 만든 칸 표시, 3장 여섯 칸을 모두 빼면 열 머리 경고·확정 잠금, 하나를 쓰기로 바꿔 '동작 13개로 확정'(기록 `selections` 13개).
+- G7a(밝은 화면 묶음 1·2, 어두운 화면 3~5): 1·2·3 키와 고쳐 쓰기 메모, 묶음을 보내면 시트가 남고 다음 묶음 탭으로 이동. 보낸 묶음을 다시 열면 판정·메모가 보인다(처음에는 '판정 없음'으로 나와 서버가 `sentVerdicts`를 주도록 고쳤다).
+- G7(어두운 화면 요약, 밝은 화면 판정·승인): 대화 23·답변 46·학습 토큰 '—'·막는 문제 없음·경고 1건, 묶음별 막대. J/3으로 버리기, J/2로 고쳐 쓰기 → 메모 전에는 승인 잠금 → 승인. `qa/G7-ds1.json`에 REJECT·FIX와 메모가 들어갔다.
+- G9(어두운 화면 점검표, 밝은 화면 승인): 자동 점검 7개(통과 4, 확인 필요 2: 가짜 공급자 영상 14개·학습 없이 긴 프롬프트, 안내 1: 앱 적재), 사람 확인 3개를 표시해야 승인이 풀림. 항목을 누르면 아래 세부 내용이 열린다. 승인 → 내보내기까지 17/17.
+- 결정 기록 보기(관문 화면 단독): G5b·G4·G5·G9·G7이 잠긴 상태로 보인다. 휴대폰 폭(390): G7 받은 편지함은 목록이 가로로 넘어가고, G5b·G4b 표는 최소 폭을 두고 옆으로 넘기며 항목 열이 고정된다. 문서 가로 넘침 없음.
+- 실제 모델·이미지·영상 호출 없음(K-0096).
+
+## 2026-11-08 동작 영상 판단 이월(D-0115)
+
+- 서버 시험: `uv run --locked pytest -q` → **1248 passed, 1 skipped**. 로그 `work/factory-flow-20261107/pytest-full-10.log`. `tests/test_actions.py` 63 passed(이월 1건·틀린 값 5건 추가). `ruff check src tests`, `ruff format --check src tests`, `git diff --check` 통과. 화면 노드 43 passed. `gate.js` `node --check` 통과.
+- 가짜 공급자: G5·G5b 대기 사본(`/tmp/cf-g5-snap`)을 `/tmp/cf-g5b-light`(포트 8803)·`/tmp/cf-g5b-dark`(8804)로 복사해 진행 화면 시트에서 확인했다. 화면은 `work/factory-flow-20261107/shots-g5b-carry/`.
+- 밝은 화면: 18칸을 모두 정하고(쓰기 15·빼기 3) 한 칸에 고칠 점 → '동작 1개 다시 만들기 요청'. `choices/G5b-va1.json`에 쓰기 15·빼기 3. 비용 확인 뒤 va2에서 '17 / 18 칸 정했어요 · 지난 판에서 17칸 이어받음', 다시 만든 칸만 '정하기'(`02-light-va2-prefilled`). '남은 칸 열기'로 그 칸이 지난 요청과 함께 열림 → 1 → '동작 15개로 확정'. `approved-actions.json` 15개·빼기 3개.
+- 어두운 화면: 3칸만 정하고(2장 기본 대기 쓰기, 2장 무표정 빼기, 3장 쑥스러움 빼기) 2장 반가움·3장 쑥스러움에 고칠 점 → 요청(`11-dark-partial-request`). va2 `carried`는 쓰기 1·빼기 1이고, 빼기로 정했다 다시 만든 3장 쑥스러움은 넘기지 않았다(`12-dark-va2-prefilled`). 남은 칸 모두 첫 후보로 → '동작 17개로 확정'.
+- 확인 중 알게 된 점: 크게 보기 창은 정하면 다음 칸으로 넘어가므로, 메모는 그때 열려 있는 칸에 적힌다(밝은 화면에서 다시 만든 칸이 의도와 달리 '피식'이 됐다). 화면은 열린 칸 기준으로 맞게 동작했다.
+- 실제 영상 공급자 호출 없음.
+
+## 2026-11-08 사용성 정리(D-0129)
+
+- 서버 시험: `uv run --locked pytest -q` → **1258 passed, 1 skipped**. 로그 `work/factory-flow-20261107/pytest-full-11.log`. 예상 비용 API 시험 추가. `ruff check src tests`, `ruff format --check src tests`, `git diff --check` 통과. 화면 노드 43 passed(기대값 4곳 갱신). `tests/test_gate_copy.py` 4 passed. `gate.js`·`flow.js` `node --check` 통과.
+- 가짜 공급자: 대기 관문이 다른 사본 6개(`/tmp/ux-g3`·`ux-g4`·`ux-g4b`·`ux-g5`·`ux-g7`·`ux-g9`, 포트 8803~8808)로 진행 화면 시트에서 확인했다. 화면은 `work/ux-fix-20261108/`.
+- 밝은 화면: 개요 숫자 단위(3명·7건·5/17단계), 이름 없는 캐릭터 '이름 미정 · cafe-owner (11/7)', 사이드바 '사용 안내'. G3에서 안 2 고르면 '보지 않고 첫 후보로 확정'이 숨음, 고치기 칸 종류(글·숫자·한 줄에 하나·고급 2칸), ?로 단축키 창·Esc로 닫힘(시트는 남음), 말투 예시에 한 줄을 더하고 ⌘+Enter → 확정, `plan.json` `voiceExamples`에 새 줄. G7 '직접 본 대화 3 / 20', '아직 안 본 대화 17개는 기본값인 쓰기로 들어가요', 묶음 이름 한국어, 학습 토큰 '—'.
+- 어두운 화면: G4 세 챕터 괜찮아요 → Ctrl+Enter 승인 → '방금 한 일'에 '다음 검토 · 프롬프트 승인' → 누르면 G6 시트가 열림. 소개 영상 비용 확인 '이번 실행 예상 비용 $0.82 · 단가 720p 초당 $0.05', '함께 보기' 합계 $11.50·'2개 모두 유료로 실행'(실행하지 않고 취소). G6 수정 요청을 빈 칸으로 누르면 아래 칸으로 옮겨 초점, 적고 누르면 '5초 뒤에 보내요 · 지금 보내기 · 보내기 취소' → 취소 → '보내지 않았어요', 버튼 다시 풀림, G6은 대기 그대로. G5b '모두 쓰기'(2장)·'모두 빼기'(3장) → 3장 경고·확정 잠금, '3장 6칸을 빼기로 바꿨어요 · 되돌리기' → 되돌림, '남은 N칸 첫 후보로 채우기', 칸 크게 보기에서 J로 다음 칸, ?로 동작 영상 단축키 표. G9 승인 뒤 내보내기 안내 문구. 사용 안내 페이지 어두운 테마.
+- G4b(밝은 화면): 자세 하나 고르면 일괄 확정 숨김, J로 다음 탭. 반려 버튼은 시험 도구가 확인 창을 자동 승인한 뒤 5초 안에 취소하지 못해 실제로 보내졌다(ps1 반려 → ps2 생성). 반려 확인 창 문구 자체는 화면으로 보지 못했다.
+- 휴대폰 폭(390): 개요 숫자 단위, 카드 배치. 실제 모델 호출 없음.
+- 화면 작업만 담은 브랜치(`codex/foundry-screens`, 트윈 갈래·시험 경로 코드 제외)에서 다시 돌렸다: 서버 **1244 passed, 1 skipped**(트윈·시험 경로 시험이 빠진 만큼 적다), 화면 노드 43 passed, `ruff check`·`ruff format --check`·`node --check`(gate.js·flow.js)·`git diff --check` 통과.

@@ -241,6 +241,30 @@ class ApprovedClip(Strict):
         return self
 
 
+@register("action-choices-draft-v1")
+class ActionChoicesDraft(Strict):
+    """G5b 다시 만들기 요청 때 이미 정한 쓰기·빼기(D-0115).
+
+    새 판에서 그대로 쓴 영상의 칸을 미리 채운다.
+
+    다 정하지 않아도 된다. 판 폴더는 바꾸지 않으려고 캐릭터 폴더 choices/G5b-<판>.json에 둔다.
+    """
+
+    schemaVersion: Literal["action-choices-draft-v1"] = "action-choices-draft-v1"
+    characterId: str
+    actionRev: str = Field(pattern=r"^va\d+$")
+    picks: dict[str, str] = Field(default_factory=dict)  # actionId → candidateId
+    excluded: list[str] = Field(default_factory=list)
+    recordRef: str
+    createdAt: str
+
+    @model_validator(mode="after")
+    def _disjoint(self) -> ActionChoicesDraft:
+        if len(self.excluded) != len(set(self.excluded)) or set(self.picks) & set(self.excluded):
+            raise ValueError("한 동작은 쓰기와 빼기 중 하나에만 담는다")
+        return self
+
+
 @register("action-videos-approved-v2")
 class ApprovedActions(Strict):
     """G5b에서 사람이 고른 동작 영상. 앱 통화 영상 세트(R1 내보내기)의 입력이다."""

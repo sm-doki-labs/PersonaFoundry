@@ -35,7 +35,7 @@ from character_factory_poc.stages.s1_reference.features import load_vocab
 from character_factory_poc.stages.s1_reference.page import render_g1_page
 from character_factory_poc.stages.s1_reference.preview import generate_previews
 from character_factory_poc.stages.s1_reference.ranking import all_names, load_ranking
-from character_factory_poc.stages.s1_reference.run import s1_config
+from character_factory_poc.stages.s1_reference.run import preview_counts, s1_config
 
 CARRIED = ("ranking.json", "people.json", "features.json", "report.json")
 
@@ -72,8 +72,7 @@ def plan_calls(ctx: Context, cid: str) -> list[CallPlan]:
     cfg = s1_config(ctx)
     prev, note = _last_request(ctx, cid)
     _, report = _report(ctx, cid, prev)
-    per = int(cfg["previews_per_cluster"])
-    n = len(report.candidates) * per
+    n = sum(preview_counts(cfg, len(report.candidates)))
     return [
         CallPlan(
             "s1",
@@ -139,7 +138,7 @@ def _run(
         report=report,
         vocab=vocab,
         names=names,
-        per_cluster=int(cfg["previews_per_cluster"]),
+        per_cluster=preview_counts(cfg, len(report.candidates)),
         size=str(cfg["image_size"]),
         revision_note=note,
     )

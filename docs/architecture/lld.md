@@ -1,10 +1,10 @@
 # 에이전틱 캐릭터 공장 상세 설계 (LLD)
 
-- 문서 버전: v1.15
+- 문서 버전: v1.25
 - 작성일: 2026-10-14
-- 수정일: 2026-11-04
+- 수정일: 2026-11-07
 - 상태: 초안, 사용자 검토 전
-- 근거: [PRD v1.14](../product/prd.md), [시스템 명세 v1.14](spec.md). 이 문서는 명세를 코드로 옮기는 세부만 정하고 다른 결정을 담지 않는다. 절마다 근거가 되는 명세 절을 `(명세 §n)`으로 적는다.
+- 근거: [PRD v1.17](../product/prd.md), [시스템 명세 v1.24](spec.md). 이 문서는 명세를 코드로 옮기는 세부만 정하고 다른 결정을 담지 않는다. 절마다 근거가 되는 명세 절을 `(명세 §n)`으로 적는다.
 - 변경 이력: v0.1 최초 작성 / v0.2(2026-10-20) S1을 화제성 순위 → 외모 특징 프록시로 바꾸고 §2~§5·§8.1·§9~§13을 고쳤다(D-0017, D-0018) / v0.3(2026-10-20) 인물 인상 칸과 계약 v2(§5.2·§5.5·§8.1·§10, D-0020, D-0021) / v0.4(2026-10-21) G1 참조 사진·S2 구현(§2~§5·§5.7·§5.8·§8.1·§8.2·§9·§10·§12·§13, D-0022, D-0023) / v0.5(2026-10-21) S3 외모 연결, S4·G4 구현(§2~§5·§5.10·§8.3·§8.4·§12, D-0024~D-0026) / v0.6(2026-10-21) S5·G5와 xai_video·grok_web 어댑터(§2~§5·§5.11·§8.5·§9·§10·§12·§13, D-0028~D-0030) / v0.7(2026-10-21) 9:16 세로 첫 프레임과 `intro-inputs-v2`(§3·§4·§5.11·§8.5, D-0031), 실제 grok.com 화면에 맞춘 `grok_web`(§9, D-0032) / v0.8(2026-10-22) 씨앗 → 변형 기획, S3r 참고 자료, S4a·S4b·S4 배경 → 자세 → 완성 이미지, 갈래별 진행 오케스트레이터(§2~§6·§8.3·§8.3a·§8.4·§11·§12, D-0033~D-0035) / v0.9(2026-10-22) 이미지 자동 검사·수정 루프(§2·§3·§5.10b·§8.4a·§9·§11·§12, D-0036, D-0037) / v1.0(2026-10-22) S6 동작 영상 골격과 G5b(§2~§5·§5.11a·§6.1·§8.5a·§11·§12, D-0038, D-0039) / v1.1(2026-10-22) 앱 통화 영상 카탈로그, 무표정 첫 프레임, 계약 v2(§2~§4·§5.11a·§8.5·§11·§12, D-0040, D-0041) / v1.2(2026-10-27) 얼굴은 G1에서 한 장만 고르고 S2를 자동 기준 사진·동일인 검사로 바꿔 G2를 없앴다. 아직 코드에는 반영하지 않았다(§2~§4·§5.7·§5.8·§5.9·§5.17·§6.1·§8.1~§8.5·§11~§13, D-0042, D-0043) / v1.3(2026-10-27) 3일 PoC 계약: §4 명령(S1 수집·S9~S11·내보내기·웹앱), §5.14·§5.15·§5.17을 새 계약(`data-plan-v1` 등, `training-run-v2` 등, `character-package-v1`·`export-result-v1`)으로 바꾸고, §6.5 워크숍 API, §8.8~§8.11(S9 샘플·대량 두 단계와 G7a, S10 학습·평가 분리, 패키지, 우리 앱 내보내기), §9 어댑터(`grok_oauth`, 순위 수집기, `gemma_qlora`, `vertex_gemini`), §12 M8을 더했다(D-0044, D-0045) / v1.4(2026-10-28) 학습 없이 긴 프롬프트로 패키지까지 가는 G8 결정(§8.9), 학습 제출 분리(`--submit-training`), G8 답 형식(§6.5)(D-0048) / v1.5(2026-10-28) 에이전틱 실행: §3 설정, §4 명령, §5.16 관문 기록 선택 칸, §5.19~§5.21 새 계약, §6.6~§6.10 물결 실행·자동 재개·사전 검토·재작업·대기열, §11 시험, §12 M9(D-0049) / v1.6(2026-10-29) 한소민 근거로 정본 직접 보존·조건부 적용·사실 소유자 구분을 보완했다(D-0053·D-0054)
 
 ## 1. 범위와 기준
@@ -859,3 +859,106 @@ v1.14 변경(2026-11-02): §21을 더하고 §8.9의 Gemma 기본값을 D-0077�
 4. 실제 호출 확인은 사용자가 키를 넣고 실행을 지시한 뒤 `--execute`로 한다.
 
 v1.15 변경(2026-11-04): 공식 API 직접 연결의 파일 소유·갈래 계약·통합 순서를 추가했다(D-0079).
+
+## 23. 진행 화면 구현(명세 §25, D-0101)
+
+- `pipeline.state`: `STAGE_EVENTS = "stage-events.jsonl"`, `stage_events_path(char_dir)`. `StateFile.transition`은 잠금 안에서 전이를 저장한 뒤 `{at, stage, from, to, rev, attempt, error}`를 `ledger/stage-events.jsonl`에 덧붙인다. OSError는 무시한다.
+- `web.reads.stage_timeline(char_dir)`: RUNNING이 회차를 열고 AWAITING_HUMAN·APPROVED·CHECK_FAILED·REJECTED·SKIPPED가 닫는다. 닫힌 뒤 오는 APPROVED·REJECTED는 사람 결정(`decision`, `decidedAt`)이다. 열린 회차에 RUNNING이 다시 오면 앞 회차를 RESTARTED로 닫는다. 단계마다 최근 10회차를 남기고 파일은 끝 20,000줄만 읽는다. 깨진 줄은 건너뛴다.
+- `web.reads.gate_timeline(char_dir)`: `opened` 사건이 `openedAt`을 새로 쓰고 `decided`가 `decidedAt`·`decision`을 쓴다. `cost_summary(char_dir)`: `Ledger.report()`의 `estCostUsd` 합, `totalCalls`, `unpricedCalls`. 호출 기록이 없으면 0, 읽지 못하면 None.
+- `character_summary`: stages 행에 `startedAt`·`endedAt`·`decidedAt`, gates 행(`pendingGates` 포함)에 `openedAt`·`decidedAt`. `character_detail`: `history{stage: attempts[]}`와 `cost`. `state_signature`의 단계 값은 `[status, attempts, currentRev]`. `_lane_status` 순서는 gate, failed, running.
+- `web.runtime`: `GET /api/runtime/graph`의 `stages[].paid`(`scheduler.paid_providers`)와 `orchestrator{autoResume, resumeUntil, maxParallel}`. `web.app`: studio 허용 목록에 `factory.html`.
+- `studio/factory.html`, `shared/flow.js`, `shared/flow.css`. `flow.js`는 `runtime.js`의 순수 함수(`buildGraph`, `pendingGatesFor`, `extractHeld`, `runRequest`, `confirmHeldRequest`, `createCharacterRequest`, `gateUrl`)를 재사용한다. 팀 칸은 LANES id를 그리드 영역에 대응한다(appearance ap, scene sc, video vd, plan pl, persona ps, data dt, training tr, release pk). 같은 줄에서 칸을 건너뛰는 선은 사이 칸 위로 돌린다. 검토는 상세 영역의 `/gate.html?...&embedded=1` iframe이다. 갱신은 `/api/events` 신호를 받아 다시 읽고, 연결이 끊기면 30초마다 다시 읽는다. 시각 표시는 30초마다 다시 그린다.
+- 시험: `tests/test_web_history.py`(8개), `studio/tests/flow.test.cjs`(6개).
+
+v1.16 변경(2026-11-07): 단계 이력 기록, 읽기 모델 확장, 진행 화면 구현을 추가했다(D-0101).
+
+## 24. 브랜드·토큰·테마 구현(명세 §26, D-0102)
+
+- 토큰: `studio/shared/foundry-tokens.css`와 `src/character_factory_poc/web/static/shared/foundry-tokens.css`(같은 내용). 변수 접두사 `--fd-`. 기본 색 `--fd-slate-1..12`, `--fd-violet-*`, `--fd-blue-*`, Primer 상태 `--fd-attention-*`·`--fd-success-*`·`--fd-danger-*`·`--fd-done-*`. 의미 토큰 `--fd-bg-*`·`--fd-fg-*`·`--fd-line*`·`--fd-primary-*`·`--fd-accent-*`·`--fd-run-*`, 간격 `--fd-space-*`(4pt), 모서리 `--fd-r-*`(4/6/8/12), 그림자 `--fd-shadow-*`(떠 있는 층). 테마 선택자는 `:root,[data-fd-theme="light"]`, `[data-fd-theme="dark"]`, 속성이 없을 때 `@media (prefers-color-scheme: dark)`.
+- 진행 화면: `studio/factory.html`은 파비콘, 첫 그림 전 테마 읽기(localStorage `fd-theme`), `.fd-shell`(`.fd-side`, `.fd-head`, `.fd-canvas`, `.fd-inspector`)과 `.fd-sheet`·`.fd-scrim`을 둔다. `studio/shared/flow.css`는 토큰만 쓴다. 1439px 이하에서 사이드바를 아이콘 줄로, 1099px 이하에서 사이드바를 숨기고 `.fd-pick` 고르기 목록을 보이며 인스펙터를 캔버스 아래로 내린다. 캔버스 컨테이너 질의(760px 이하)로 그래프를 한 줄로 쌓는다.
+- `studio/shared/flow.js`: 순수 함수는 그대로 두고 `MARK`(로고 SVG)와 아이콘(sun·moon·monitor·inbox·plus·close)을 더했다. `mount`가 사이드바(브랜드, 새 캐릭터, 받은 일 수, 캐릭터 목록과 상태 점·할 일 수, 테마 버튼 `data-act="theme"`·`aria-pressed`, 이전 화면·모델 설정 링크), 머리줄(경로, 상태 알약, 지표, 연결 상태), 캔버스, 인스펙터(속성 목록, 미리보기, 회차 이력), 검토 시트를 그린다. 시트는 `gateUrl(...)`에 `&embedded=1&skin=foundry&theme=<지금 테마>`를 붙인 iframe이고 Escape·바깥 누르기로 닫으며 연 버튼으로 초점을 돌린다. 문서 제목은 "… · Foundry"다. 캐릭터 이름이 id와 같으면 제목 옆 id를 숨긴다.
+- 관문 화면: `src/character_factory_poc/web/static/gate.html`이 토큰과 `shared/gate-foundry.css`를 읽는다. 머리 스크립트는 주소에 `skin=foundry`가 있을 때만 `body.fd`와 `data-fd-theme`을 붙인다. `gate-foundry.css`의 모든 규칙은 `body.fd` 아래에 있어 따로 연 관문 화면에는 영향이 없다. 글래스 변수를 토큰으로 다시 묶고, 안쪽 구획의 인라인 반투명 배경을 덮으며, 결정 옆 칸은 680px 폭까지 오른쪽 260px을 유지한다.
+- 시험: `studio/tests/flow.test.cjs`에 토큰 두 사본 일치와 관문 덮어쓰기 범위(`body.fd`) 확인 1개를 더해 7개.
+
+v1.17 변경(2026-11-07): Foundry 토큰·테마·3단 화면·관문 화면 테마 연결 구현을 추가했다(D-0102).
+
+## 25. 개요·받은 일·그래프 보기·실패 기록 구현(명세 §27, D-0103)
+
+- 서버: `pipeline/orchestrator._step`이 `AgentFormatError`와 문자열 코드의 `SystemExit`을 검사 실패로 다룬다(`_mark_failed`: RUNNING이면 CHECK_FAILED로 전이, 오류 2,000자까지). 그 밖의 `Exception`은 `_mark_failed` 뒤 다시 던진다. `web/jobs.py`는 `(Exception, SystemExit)`를 작업 실패로 기록한다. `web/app.py`의 `/api/projects`가 캐릭터마다 `held`(`_held`)를 싣는다. 시험 `tests/test_stage_failure_state.py`(형식·검사 실패 2개), `tests/test_web_queue.py`(목록 held).
+- 경로: `#all`(전체), `#all/mine`(받은 일), `#all/run|fail|done`, `#c/<id>`(캐릭터). `flow.js`의 `summaryOf(c)`가 `viewsFor`·`buildTasks`로 멈춤·검토·유료 확인 수, 완료 수, 팀 8칸 상태, 순위(rank 0~6), 가장 오래된 대기 시각을 만든다. 사이드바(전체 캐릭터·받은 일·캐릭터 목록), 머리줄, 개요(`overviewHTML`, `rowHTML`, `<table>`, 760px 이하는 카드)가 이 값을 쓴다. 개요의 검토하기는 `state.pendingReview`와 `state.batch`(관문 id)를 두고 캐릭터 경로로 간다. `refresh`가 상세를 읽은 뒤 시트를 연다. `nextInBatch`가 같은 관문을 기다리는 다음 캐릭터(오래 기다린 순)를 고르고, 시트 머리와 결정 알림에 "다음 건"을 둔다.
+- 그래프 보기: `factory.html`의 `.fl-view[data-view]`(svg + grid)와 `.fl-zoom[data-zoombar]`. `zoom = {z, x, y, h}`, 단계 `[0.75, 1, 1.25, 1.5, 2]`. 확대 중에는 보기 높이를 고정(`h`)하고 `.fl-grid`에 `translate·scale`을 준다. `drawEdges`는 보기 영역 기준 화면 좌표로 그린다. 포인터 끌기(5px 넘으면 이동, 뒤따르는 클릭 삼킴), 휠(Ctrl/⌘ 확대, 확대 중 이동), 보기 영역 키(+ − 0, 화살표). 크게 보기는 `.fd-shell.focus`, Esc로 끈다. 760px 이하 컨테이너에서는 확대를 끈다.
+- 할 일: 실패 항목은 `failReason`의 요약, `N회차 실패`, 2회차 이상이면 `copy-error`(클립보드에 캐릭터·단계·회차·오류·회차별 오류). 앞 단계가 끝났고 작업이 없으며 `lastJob.blocked`에 없는 목표 범위 단계는 `ready` 항목(이어서 실행). 다시 실행은 `runRequest(id, currentUntil() || resumeUntil)`. `currentUntil`은 실행 확인·단계 하나짜리 작업을 뺀다. 결정 알림은 할 일 아래에 둔다.
+- 유료 확인: `state.confirming`이 있으면 할 일 줄에 `confirmHTML`(공급자, "견적 없음", 지금까지 추정 비용)과 `confirm-go`·`confirm-cancel`. 비용 값이 없으면 머리줄은 "—".
+- 시트: 열면 `.fd-shell`에 `inert`. 관문 화면(`shared/gate.js`)이 결정 저장 뒤 `postMessage({type:'foundry:gate-decided', characterId, gate, decision, status})`, Escape에 `{type:'foundry:close'}`를 보낸다(같은 출처만 받음). 받은 상태가 AWAITING_HUMAN이 아니면 시트를 닫고 알림을 남긴다(G7a 묶음별 결정은 유지). 같은 관문의 상태 비교 알림은 60초 동안 겹치지 않게 뺀다. 반려는 `window.confirm`으로 한 번 더 묻는다. `render`는 다시 그리기 전후로 초점 요소(id·data-act·data-gate·data-stage 등)와 입력 커서를 되살린다.
+- 토큰: `--fd-fg-subtle`을 밝은 화면 slate-10·11 반반, 어두운 화면 6:4 혼합으로 바꿔 보조 글자 대비를 AA로 올렸다(두 사본 같음).
+- 시험: `studio/tests/flow.test.cjs` 8개(실패 문구·회차·복사·이어서 실행·서버 차단 제외·회복 알림 추가).
+
+v1.18 변경(2026-11-07): 개요·받은 일·다음 건, 그래프 확대·크게 보기, 실패 기록·이어서 실행, 유료 두 단계 확인, 시트 결정 알림·초점 구현을 추가했다(D-0103).
+
+## 26. 관문 화면 문장·블라인드 비교 구현(명세 §28, D-0104)
+
+- `web/static/shared/gate.js`: `DECISION_KO`·`VERDICT_KO`·`PICK_KO`·`ARM_KO`·`METRIC_KO`·`STAGE_KO`·`GENDER_KO`로 코드를 한국어로 보인다(보내는 값은 그대로). 모든 안내·배너·오류 문장을 해요체로 바꿨다. 메타 줄은 이름·판·상태만, 결정 기록 배너는 결정·검토자(user 제외)·시각만 보인다. 사전 검토가 없을 때 안내는 AWAITING_HUMAN에서만 보인다. G1 생성 지시와 G7a 상황 설정은 `details.card-tech`, G6은 표본 응답 → `details.gate-more` 안의 프롬프트 원문 순서다.
+- G8: `renderEval`이 쌍 카드(`article.pair`, 머리줄에 번호·상태·선택 버튼과 단축키, 앞 대화 `details.pair-history`, 마지막 사용자 말)와 고정 막대(`.blind-bar`: 수·막대·`data-next-pair`·단축키 안내)를 그린다. `applyPick`이 고른 값을 반영하고 `sessionStorage`(`fd-blind:<캐릭터>:<관문>:<판>`)에 남긴 뒤 다음 안 고른 쌍으로 초점·스크롤을 옮긴다(움직임 줄이기 설정을 따름). 다 고르면 채택 칸으로 간다. `onEvalKey`는 입력 칸 밖에서 1·A/2·B/3/N/P를 받는다. `updateBlind`가 수·막대·지표 열기와 결정 버튼 잠금, 결정 칸 안내 문장을 맞춘다. `restorePicks`는 같은 판의 쌍만 되살린다.
+- `gate.html`: 결정 칸은 버튼 → 상태 줄 → '메모 남기기(선택)'(이유·검토한 사람·걸린 시간) → '기술 정보'(보낼 답 미리 보기) 순서다. 검토한 사람은 `localStorage`의 `fd-reviewer`를 채운다. 파일 목록·기록 원문은 '기술 정보 · …'로 이름을 바꿨다. 스타일은 `gate.css`(공통)와 `gate-foundry.css`(시트)에 더했다.
+- `web/gate_items.py`: 얼굴 고르기 `helper` 문장을 바꾸고 `_plain_rationale`이 `listCount`·`memberCount`·`popularity`로 근거 문장을 만든다(값이 없으면 보고서 문장 그대로).
+- 시험: `tests/test_gate_copy.py`(관문 화면 문자열에 '-다'체·개발자 말이 없는지, 기술 정보가 결정 버튼 뒤에 있는지, 근거 문장).
+
+v1.19 변경(2026-11-08): 관문 화면 해요체·개발자 말 접기, G8 블라인드 비교 진행 막대·단축키·잠금·보존을 추가했다(D-0104).
+
+## 27. 얼굴 고르기 갤러리 구현(명세 §29, D-0105)
+
+- `stages/s1_reference/preview.py`: `face_counts(n_clusters, total, low, high)`, `VARIATION_HINTS`(n번째 얼굴 각도·표정 문장), `generate_previews(per_cluster: int | list[int])`. 미리보기 `settings.variation`에 n이 남는다.
+- `stages/s1_reference/run.py`: `DEFAULTS`에 `faces_total = 10`, `min_previews_per_cluster = 2`, `previews_per_cluster = 3`(외모군당 최대). `preview_counts(cfg, n)`이 배분한다(`faces_total = 0`이면 고정 장수). `plan_calls`는 최대 외모군 수 기준 합을 예산에 올린다. `faces.py`(다시 만들기)도 같은 배분을 쓴다. `ReportSettings.previewsPerCluster`는 외모군당 최대 장수다.
+- `web/gate_items.py`: 얼굴마다 `variation`, 추천은 추천 외모군의 첫 얼굴만. 도움말 문장 갱신.
+- `web/static/shared/gate.js`: `renderFaces`가 칩·그리드·비교·트레이 자리를 만들고 `paintFaces`가 상태(`state.face`, `faceLikes`(최대 3), `faceCompare`, `faceFilter`)로 그린다. `paintFaceSide`가 `gate.html`의 `[data-side-extra]`에 고른 얼굴·태그·각도·근거를 보이고 주 버튼 이름을 '얼굴 N로 확정'으로 바꾼다. 키: 1~0(보이는 순서), S(추리기), Esc(비교 닫기). 결정 기록이 있으면 `referencePreviews` 또는 `selections`의 얼굴을 고른 상태로 잠가 보인다. `buildFaces`는 `state.face`로 답을 만든다.
+- 스타일: `gate.css`(공통), `gate-foundry.css`(시트).
+- 시험: `tests/test_reference.py`(배분 규칙, 외모군 3개 × 3장, 각도 문장, 예산 14회), `test_face_once.py`·`test_codex_image.py`·`test_hero.py` 기대값 갱신.
+
+v1.20 변경(2026-11-08): 얼굴 장수 배분과 G1 갤러리 구현을 추가했다(D-0105).
+
+## 28. 기획안 가로 비교표 구현(명세 §30, D-0106)
+
+- `web/static/shared/gate.js`: `planRows(plans)`가 줄(묶음, 이름, 값 함수)을 만들고 값의 JSON 문자열로 `diff`를 정한다. `renderPlans`가 머리·막대·표 자리·접는 고치기 칸을 만들고 `paintPlans`가 `state.planPick`·`state.planOnlyDiff`로 표를 그린다(열 수 × 150px + 112px보다 좁으면 가로로 넘긴다). `paintPlanSide`가 결정 칸 요약과 주 버튼('안 N로 확정')을 맞춘다. 숫자 키 1~N은 `onPlanKey`. 결정 기록이 있으면 `selections`의 안을 고른 상태로 잠근다. `renderPlanFields`는 `FIELD_KO` 칸 이름을 쓰고 같은 안이면 다시 만들지 않는다(고치던 내용 보존). `buildPlans`는 `state.planPick`을 쓴다. 얼굴·기획안 버튼 문구는 `ro()`로 '로/으로'를 맞춘다.
+- `web/gate_items.py`: G3 도움말 문장 해요체.
+- 스타일: `gate.css`(공통), `gate-foundry.css`(시트, 고치기 칸 이름 열 110px).
+
+## 29. 챕터별 배경 줄 구현(명세 §31, D-0107)
+
+- `web/static/shared/gate.js`: 상태 `bgPicks`(챕터 → 후보 id 또는 `custom`)·`bgCustom`·`bgOpen`·`bgCurrent`. `bgRestore`가 결정 기록(`picks`·`custom`) 또는 `selection.json`에서 고른 값을 한 번 읽는다(기록 원문은 `selections`에 `custom:chN`만 남기므로 글은 선택 파일에서 읽는다). `renderBackgrounds`가 머리·고정 막대·줄 자리·접는 '다시 만들 때 고칠 점'을 만들고 `paintBackgrounds`가 줄을 그린다(줄 머리 `bgLabel`은 `ch1` → '1장'). 후보 칸은 `data-bg-pick="chN|후보 id"` 버튼이고 사진 비율은 `aspectRatio`(기본 9/16)다. `paintBgMeta`는 글을 적는 동안에도 줄 상태·막대·결정 칸 요약·주 버튼 잠금을 맞춘다(입력 칸은 다시 그리지 않는다). 고르면 `pickBackground`가 고르지 않은 다음 챕터로 옮기고, 직접 적기를 고르면 그 입력 칸으로 초점을 옮긴다. 숫자 키·N/P는 `onBackgroundKey`. 좁은 화면에서 줄이 넘치면 고른 후보 자리로 가로 위치를 옮긴다. `buildBackgrounds`는 `state`에서 `picks`·`custom`을 만들고, 다시 만들기 메모가 비면 접은 칸을 열고 첫 칸에 초점을 둔다. `customCard`·`collectPicks`는 G4b가 계속 쓴다.
+- 스타일: `gate.css`(공통, 820px 이하 없음·640px에서 흐름 줄바꿈·520px에서 칸 42%), `gate-foundry.css`(시트).
+
+v1.22 변경(2026-11-08): 챕터별 배경 줄 구현을 추가했다(D-0107).
+
+## 30. 나머지 관문 화면 구현(명세 §32, D-0108~D-0114)
+
+- 공통(`web/static/shared/gate.js`): 관문마다 상태를 `state`에 두고(`posePicks`·`frameVerdict`·`introPick`·`actionPick`·`sampleVerdict`·`pkgManual` 등) `render()` 끝에서 `paintPoses`·`paintFrames`·`paintIntro`·`paintActions`·`paintSamples`·`paintPackage`를 부른다. 결정 칸 요약·버튼 잠금은 각 `…Meta` 함수가 맡고 저장이 끝나면 다시 부른다. 결정 기록은 처음 한 번 `…Restore`로 읽는다. 크게 보기 창(`.frame-zoom`)은 G4·G5b가 같이 쓰고, Escape는 캡처 단계에서 받아 시트 닫기보다 먼저 닫는다(시트 닫기 처리는 `defaultPrevented`면 무시). 재생하지 못한 영상은 `watchClips`가 이유와 파일 링크로 바꾼다. 지난 판 수정 요청은 `lastAsk()`가 결정 기록에서 읽는다.
+- G4b: `renderPoses`·`paintPoses`·`paintPoseMeta`·`pickPose`·`onPoseKey`·`buildPoses`. 표는 `plan-table`을 다시 쓰고 최소 폭을 둬 좁은 화면에서 옆으로 넘긴다. 세부 고치기는 칸을 벗어날 때 표에 반영하고 초점을 되돌린다. 쓰지 않게 된 `customCard`·`collectPicks`·`poseCard`·`tweakFields`·`chapterChangeSection`은 지웠다.
+- G4: `renderFrames`·`paintFrames`·`paintFrameMeta`·`paintFrameZoom`·`setFrameVerdict`·`buildFrames`. 승인은 모두 괜찮을 때, 수정 요청은 고칠 챕터 메모가 다 있을 때 풀린다.
+- G5: `renderIntro`·`paintIntro`·`introPlay`·`onIntroKey`·`buildIntro`. G5b: `actionGrid`·`paintActions`·`actionCell`·`paintActionBox`·`pickAction`·`onActionKey`·`buildActions`. 기록 보기는 `selections`(`actionId:candidateId`)로 쓰기를, 나머지를 뺌으로 되살린다.
+- G7a·G7: `sampleClusters`(G7은 표본 한 묶음)·`paintSamples`·`paintSampleMeta`·`paintDatasetMeta`·`setSampleVerdict`·`onSampleKey`·`buildSamples`·`buildDataset`. 묶음을 보내면 `send` 뒤 아직 안 보낸 묶음 탭으로 옮긴다(진행 화면 시트는 `AWAITING_HUMAN`이면 닫지 않는다).
+- G9: `pkgChecks`(자동 점검 7개)·`renderPackage`·`paintPackage`·`buildPackage`. 점검 항목을 누르면 해당 `details`를 열고 옮긴다.
+- 서버(`web/gate_items.py`): `_sent_verdicts`가 `s9-data/<판>/qa/G7a-<묶음>.json`·`G7-<판>.json`의 판정·메모를 `sentVerdicts`·`sentNotes`로 준다.
+- 스타일: `gate.css`(공통·좁은 화면), `gate-foundry.css`(시트).
+- 시험: `tests/test_gate_copy.py`에 관문 종류마다 적힌 render·build 함수가 실제로 있는지 보는 시험을 더했다.
+
+v1.23 변경(2026-11-08): 나머지 관문 화면 구현을 추가했다(D-0108~D-0114).
+
+## 31. 동작 영상 판단 이월 구현(명세 §33, D-0115)
+
+- 계약(`contracts/video.py`): `action-choices-draft-v1`(`characterId`·`actionRev`·`picks`·`excluded`·`recordRef`·`createdAt`, 쓰기와 빼기는 겹치지 않음).
+- `stages/s6_actions/approve.py`: `REQUEST_CHANGES`에서 `_draft_choices`가 `picks`·`excluded`를 검사한다(이 판의 동작·후보만, 겹침·중복 없음, 일부만 있어도 됨). 관문 기록을 쓴 뒤 값이 있으면 `choices_path(char_dir, rev)` = `choices/G5b-<판>.json`에 한 번만 쓴다. 판 폴더와 그 manifest는 바꾸지 않는다. 틀린 값이면 관문 상태를 바꾸지 않고 파일도 만들지 않는다.
+- `web/gate_items.py`: `actions()`가 `_carried_choices`로 `carried = {fromRev, picks, excluded, regenerated}`를 준다. 새 판 `inputs.json`의 `previousRev`·`regenerate`를 쓰고, 쓰기는 같은 후보가 `reusedFrom = previousRev`일 때만 넘긴다.
+- `gate.js`: `buildActions`의 수정 요청에 `picks`·`excluded`를 담는다. `actionRestore`는 결정 기록이 없을 때 `carried`로 `state.actionPick`을 채우고 `state.actionCarried`에 수를 남긴다. 진행 막대에 'N칸 이어받음', 결정 칸에 남은 칸 안내, '남은 칸 열기'(`data-action-next`)를 둔다. 다 정하면 '남은 칸 열기'·'남은 칸 모두 첫 후보로'를 숨긴다.
+- 시험(`tests/test_actions.py`): 이월 저장·판 폴더 불변·다시 만든 칸 제외, 틀린 값 5가지로 관문이 그대로인지.
+
+v1.24 변경(2026-11-08): 동작 영상 판단 이월 구현을 추가했다(D-0115).
+
+## 32. 사용성 정리 구현(명세 §34, D-0129)
+
+- 서버: `GET /api/characters/{id}/stages/{stage}/plan`(S5·S6만). `Context(execute=False)`로 각 단계 `plan_calls`를 불러 `plans[{description, calls, estUsd}]`·`estUsd`(하나라도 모르면 null)·`adapter`·`model`·`unitPrices`·`reason`을 준다. 판 폴더를 만들지 않는다. `_StudioStaticFiles`에 `help.html`을 더했다. `gate_items.data_dataset`은 `plan.json`의 묶음 이름을 `clusterLabels`로 준다.
+- `studio/shared/flow.js`: `displayName`·`revLabel`·`providerKo`·`gateSub`. 유료 확인은 `loadPlan`·`planText`·`confirmHTML`·`confirmAllHTML`('함께 보기', `confirm-all-go`는 `runRequest(id, 목표, [단계들])`). 결정 알림은 '방금 한 일'(`.fl-recent`)에 두고 '다음 검토'는 그릴 때·누를 때 `nextReviewAfter`로 다시 고른다(같은 캐릭터 → 다른 캐릭터의 가장 오래된 검토). 실패 할 일에 `help` 동작('막혔을 때 안내'), 설정에 `target-first`. 숫자 단위, 시트 제목 중복 제거, 범례는 svg 선(`.e.stop` 점선 9-3-2-3).
+- `web/static/shared/gate.js`: `revLabel`·`GATE_KO`·`focusField`·`guardQuickApprove`(G3·G4a·G4b·G5b), `rejectQuestion`, `delayedSend`·`flushSend`·`cancelSend`·`releaseButtons`(5초), `postAnswer`, `onCommonKey`(⌘/Ctrl+Enter·?·Esc)·`toggleKeys`·`KEYS_BY_KIND`, `navStep`(J·K·N·P·→·←)과 `NAV_KEYS` 안내, `markScroll`(MutationObserver·resize·scroll로 `.scroll-hint`), G3 `renderPlanFields`·`collectEdits`의 `data-edit-kind`(text·number·lines·json), G7 `sampleSeen`, G9 `PKG_AFTER`, G8 `METRIC_HELP`, G5b `bulkActions`·`data-action-col`·`data-action-undo`. '내 차례예요'·'검토 모델 의견 없음' 배너는 머리줄 칩으로 옮겼다. 관문 이름 `name`은 진행 화면과 같은 규칙.
+- `gate.html`: 결정 칸 아래 단축키·사용 안내 줄, 기술 정보 문구 '이 버전의 파일'. CSS: 접는 칸 ▸ 표시, 단축키 표, 스크롤 안내, 대기 중 상태 줄.
+- 시험: `tests/test_web_gates.py`에 예상 비용 API(계획만, 가짜 공급자 0원, 잘못된 단계 404), `studio/tests/flow.test.cjs` 기대값('새 버전 만드는 중', '실행 N번 실패', '막혔을 때 안내', '운영 담당에게').
+
+v1.25 변경(2026-11-08): 사용성 정리 구현을 추가했다(D-0129).

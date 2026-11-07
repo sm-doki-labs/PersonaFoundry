@@ -445,3 +445,25 @@ def test_unknown_gate_and_missing_revision_are_reported(tmp_path):
     assert view["status"] == "PENDING"
     assert view["missing"]
     assert view["items"]["problems"]
+
+
+def test_paid_stage_plan_reports_calls_and_estimate(tmp_path):
+    """유료 단계 실행 전 예상 비용 API는 계획만 세우고 호출하지 않는다(D-0129)."""
+    ctx, cid = build(tmp_path, "G4")
+    with _client(tmp_path) as client:
+        for stage in ("s5", "s6"):
+            res = client.get(f"/api/characters/{cid}/stages/{stage}/plan")
+            assert res.status_code == 200, res.text
+            body = res.json()
+            assert body["stage"] == stage and body["reason"] == ""
+            assert body["plans"] and all(p["calls"] > 0 for p in body["plans"])
+            # 가짜 영상 공급자는 비용이 0이다.
+            assert body["estUsd"] == 0.0
+        assert client.get(f"/api/characters/{cid}/stages/s1/plan").status_code == 404
+        assert client.get("/api/characters/cf-20991231-none/stages/s5/plan").status_code in {
+            400,
+            404,
+        }
+    # 계획만 세웠으므로 영상 단계 폴더가 생기지 않는다.
+    char_dir = tmp_path / "runs" / "characters" / cid
+    assert not (char_dir / "s5-intro").exists() and not (char_dir / "s6-actions").exists()

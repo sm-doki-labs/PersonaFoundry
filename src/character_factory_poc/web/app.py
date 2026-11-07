@@ -27,6 +27,7 @@ from character_factory_poc.web.jobs import JobManager
 from character_factory_poc.web.settings import load_settings
 
 GATE_DECISIONS = {"APPROVE", "REJECT", "REQUEST_CHANGES", "SELECT"}
+PAID_PLAN_STAGES = {"s5", "s6"}
 _TEXT_TYPES = {"text/html", "text/css", "text/plain", "text/markdown", "application/json"}
 
 
@@ -48,10 +49,12 @@ class _StudioStaticFiles(_DevStaticFiles):
             "",
             ".",
             "index.html",
+            "factory.html",
             "d-ops.html",
             "c-glass.html",
             "a-studio.html",
             "b-editorial.html",
+            "help.html",
         }
         if name not in allowed_html and not name.startswith(
             ("shared/", "assets/", "previews/", "recordings/")
@@ -115,6 +118,8 @@ def create_app(
             character["job"] = jobs.active_for(character["id"])
             recent = jobs.list(character_id=character["id"], limit=1)
             character["lastJob"] = recent[0] if recent else None
+            # 개요·받은 일이 모든 캐릭터의 유료 확인 대기를 상세 화면과 같은 기준으로 센다.
+            character["held"] = _held(character["id"], character["lastJob"])
         data["totals"]["runningJobs"] = len(jobs.active_jobs())
         data["jobs"] = jobs.list(limit=20)
         return data
@@ -148,6 +153,44 @@ def create_app(
     @app.get("/api/characters/{character_id}/gates/{gate}")
     def gate(character_id: str, gate: str) -> dict[str, Any]:
         return reads.gate_view(root, character_id, gate)
+
+    @app.get("/api/characters/{character_id}/stages/{stage}/plan")
+    def stage_plan(character_id: str, stage: str) -> dict[str, Any]:
+        """유료 단계(S5·S6) 실행 전 호출 수와 예상 비용(D-0129). 계획만 세우고 부르지 않는다."""
+        if stage not in PAID_PLAN_STAGES:
+            raise WebError(404, f"예상 비용을 계산하는 단계가 아니다: {stage}")
+        reads.character_dir(root, character_id)
+        ctx = Context(config=load_config(root, conf.config_path), execute=False)
+        pcfg = ctx.config.provider("video")
+        out: dict[str, Any] = {
+            "stage": stage,
+            "plans": [],
+            "estUsd": None,
+            "adapter": pcfg.adapter,
+            "model": pcfg.model,
+            "unitPrices": dict(pcfg.extra.get("price_per_second") or {}),
+            "reason": "",
+        }
+        try:
+            if stage == "s5":
+                from character_factory_poc.stages.s5_intro import run as s5
+
+                plans = s5.plan_calls(ctx, s5.s5_config(ctx))
+            else:
+                from character_factory_poc.stages.s6_actions import run as s6
+
+                plans = s6.plan_calls(ctx, s6.s6_config(ctx), character_id)
+        except FactoryError as exc:
+            out["reason"] = str(exc)
+            return out
+        rows = [
+            {"description": p.description, "calls": p.calls, "estUsd": p.est_cost_usd}
+            for p in plans
+        ]
+        out["plans"] = rows
+        if all(r["estUsd"] is not None for r in rows):
+            out["estUsd"] = round(sum(float(r["estUsd"]) for r in rows), 4)
+        return out
 
     @app.get("/api/files/{character_id}/{path:path}")
     def file(character_id: str, path: str) -> FileResponse:

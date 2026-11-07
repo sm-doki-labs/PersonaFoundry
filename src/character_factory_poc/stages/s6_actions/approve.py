@@ -7,9 +7,14 @@ from pathlib import Path
 from character_factory_poc.common.errors import FactoryError, GateNotApprovedError
 from character_factory_poc.common.schema import dump, validate
 from character_factory_poc.common.store import read_json, write_manifest, write_once_json
-from character_factory_poc.contracts.video import ActionClip, ActionInputs, ApprovedActions
+from character_factory_poc.contracts.video import (
+    ActionChoicesDraft,
+    ActionClip,
+    ActionInputs,
+    ApprovedActions,
+)
 from character_factory_poc.pipeline.context import Context
-from character_factory_poc.pipeline.gates import write_gate_record
+from character_factory_poc.pipeline.gates import now_iso, write_gate_record
 from character_factory_poc.stages.s4a_backgrounds.approve import answer_details
 
 
@@ -33,6 +38,29 @@ def _choices(answer: dict, clips: list[ActionClip]) -> tuple[dict[str, str], lis
             raise FactoryError(f"G5b: {aid}에 속하지 않는 영상 후보를 골랐다")
     if {c.chapterId for c in clips if c.actionId in picks} != {"ch1", "ch2", "ch3"}:
         raise FactoryError("G5b: 챕터마다 하나 이상의 동작 영상을 남겨야 한다")
+    return dict(picks), list(excluded)
+
+
+def choices_path(char_dir: Path, rev: str) -> Path:
+    """다시 만들기 요청 때 정한 쓰기·빼기를 두는 곳. 판 폴더는 바꾸지 않는다(D-0115)."""
+    return Path(char_dir) / "choices" / f"G5b-{rev}.json"
+
+
+def _draft_choices(answer: dict, clips: list[ActionClip]) -> tuple[dict[str, str], list[str]]:
+    """수정 요청에 함께 온 쓰기·빼기. 다 정하지 않아도 되지만 있는 값은 맞아야 한다."""
+    options: dict[str, set[str]] = {}
+    for clip in clips:
+        options.setdefault(clip.actionId, set()).add(clip.asset.candidateId)
+    picks, excluded = answer.get("picks") or {}, answer.get("excluded") or []
+    if not isinstance(picks, dict) or not isinstance(excluded, list):
+        raise FactoryError("G5b: picks는 객체, excluded는 actionId 목록이어야 한다")
+    if any(not isinstance(a, str) or a not in options for a in excluded):
+        raise FactoryError("G5b: excluded에는 이 판의 actionId만 담는다")
+    if len(excluded) != len(set(excluded)) or set(picks) & set(excluded):
+        raise FactoryError("G5b: 한 동작은 picks와 excluded 중 하나에만 담는다")
+    for aid, candidate in picks.items():
+        if aid not in options or not isinstance(candidate, str) or candidate not in options[aid]:
+            raise FactoryError(f"G5b: {aid}에 속하지 않는 영상 후보를 골랐다")
     return dict(picks), list(excluded)
 
 
@@ -66,6 +94,7 @@ def approve_g5b(ctx: Context, cid: str, answer: dict) -> Path:
     clips = load_clips(rev_dir)
     decision = answer["decision"]
     picks, excluded, changes = {}, [], []
+    draft: tuple[dict[str, str], list[str]] | None = None
     approved = None
     if decision in {"APPROVE", "SELECT"}:
         choices = (
@@ -115,6 +144,7 @@ def approve_g5b(ctx: Context, cid: str, answer: dict) -> Path:
         )
     elif decision == "REQUEST_CHANGES":
         changes = _changes(answer, {c.actionId for c in clips})
+        draft = _draft_choices(answer, clips)
     elif decision != "REJECT":
         raise FactoryError("G5b 결정은 SELECT·APPROVE·REQUEST_CHANGES·REJECT 중 하나다")
     rec = write_gate_record(
@@ -132,6 +162,18 @@ def approve_g5b(ctx: Context, cid: str, answer: dict) -> Path:
     ctx.ledger(cid).record_human(gate="G5b", minutes=rec.minutes, ref=f"{cid}/{gate.rev}")
     if approved:
         write_once_json(rev_dir / "approved-actions.json", dump(approved))
+    if draft and (draft[0] or draft[1]):
+        char_dir = ctx.character_dir(cid)
+        record_ref = f"gates/G5b-{gate.rev}.json"
+        saved = ActionChoicesDraft(
+            characterId=cid,
+            actionRev=gate.rev,
+            picks=draft[0],
+            excluded=draft[1],
+            recordRef=record_ref,
+            createdAt=now_iso(),
+        )
+        write_once_json(choices_path(char_dir, gate.rev), dump(saved))
     write_manifest(rev_dir)
     return rev_dir
 
