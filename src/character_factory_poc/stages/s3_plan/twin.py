@@ -252,7 +252,10 @@ def _profile_section(profile: dict | None, summary: str) -> str:
             f"{ans['count']}개, 중앙값 {ans['medianChars']}자, "
             f"두 문장 이하 {ans['atMostTwoSentences']:.0%}, 80자 이하 {ans['atMost80Chars']:.0%}",
         ),
-        ("'~구나'로 받은 답", str(ans["gunaOpenings"])),
+        (
+            "'~구나'로 받은 답 · 끝난 문장",
+            f"{ans['gunaOpenings']} · {profile.get('gunaSentenceEndings', 0)}",
+        ),
         ("웃음 표기·이모티콘", f"{profile['laughShare']:.0%}"),
     ]
     top = sorted(profile["markersPer1000"].items(), key=lambda x: -x[1])[:8]

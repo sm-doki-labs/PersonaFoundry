@@ -157,6 +157,8 @@ def build_speech_profile(corpus: list[dict], kinds: dict[str, str]) -> dict:
             "firstWords": dict(first_words.most_common(12)),
             "gunaOpenings": guna_open,
         },
+        # '~구나'로 끝난 문장. 첫마디 다음 문장에서 상대 말을 되풀이하는 경우까지 센다.
+        "gunaSentenceEndings": sum(bool(re.search(r"구나$", _bare_end(x))) for x in sentences),
         "longShare": _rate(len(long_texts), len(texts)),
         "connectors": {c: sum(t.count(c) for t in long_texts) for c in CONNECTORS},
         "repeatShare": _rate(
@@ -311,9 +313,12 @@ def render_voice_definition(profile: dict, summary: str = "") -> list[str]:
     ans = profile["answers"]
     if ans["count"] >= MIN_ANSWERS:
         acks = [w for w in ans["firstWords"] if w in ACKS][:4]
-        if ans["gunaOpenings"] <= 0.01 * ans["count"]:
+        guna_rare = profile.get("gunaSentenceEndings", 0) <= 0.005 * profile["sentences"]
+        if ans["gunaOpenings"] <= 0.01 * ans["count"] and guna_rare:
             lines.append(
                 "받는 말: 상대 말을 '아, 그러셨구나', '~시구나'처럼 '~구나'로 받지 않는다. "
+                "첫마디 다음 문장에서도 상대가 한 말을 '~셨구나', '~시구나'로 "
+                "되풀이해 확인하지 않는다. "
                 + (f"받을 때는 {_quote_list(acks)}처럼 짧게 받거나 " if acks else "")
                 + "받는 말 없이 바로 답한다."
             )

@@ -55,12 +55,14 @@ def test_polite_spoken_source_becomes_a_definition_without_quotes():
     assert profile["politeShare"] == 1.0
     assert profile["answers"]["scope"] == "CONVERSATION"
     assert profile["answers"]["gunaOpenings"] == 0
+    assert profile["gunaSentenceEndings"] == 0
     lines = render_voice_definition(profile)
     text = "\n".join(lines)
     assert lines[0].startswith("말높임: 상대에게는 존댓말을 기본으로 쓴다.")
     assert "'~다'로 끝나는 글말 문장은 쓰지 않는다." in lines[0]
     assert "'~것 같아요'" in text and "담화 표지:" in text and "'좀'" in text
     assert "'~구나'로 받지 않는다" in text and "길이: 일상 대화에서는" in text
+    assert "첫마디 다음 문장에서도" in text
     assert "웃음 표기(ㅋㅋ)나 이모티콘은 거의 쓰지 않는다" in text
     # 원문 문장을 그대로 옮기지 않는다.
     assert all(a not in text for a in POLITE_ANSWERS)
@@ -126,3 +128,10 @@ def test_hedging_is_written_per_length_band():
     assert "길이에 따라 다르다" in text
     assert "짧은 답(40자 미만)에서는 열에 하나도 안 되게" in text
     assert "(150자 이상)에서는 거의 모두 정도다" in text
+
+
+def test_guna_rule_is_skipped_when_the_source_uses_it():
+    rows, kinds = _corpus(("아 그러셨구나.", "네, 저도 그래요."), n=40)
+    profile = build_speech_profile(rows, kinds)
+    assert profile["gunaSentenceEndings"] == 20
+    assert "'~구나'로 받지 않는다" not in "\n".join(render_voice_definition(profile))
