@@ -46,6 +46,11 @@ def overlap(a: set[str], b: set[str]) -> float:
 #: D-0145: 기본 대응에 두면 거의 모든 턴에서 되풀이되는 평가·격려 시작과 감사·다짐 맺음.
 DEFAULT_PRAISE = re.compile(r"잘하고 있|충분히 잘|편들|격려")
 DEFAULT_THANKS_CLOSE = re.compile(r"(?:감사|다짐)[^.]{0,12}(?:맺|마무리)")
+#: D-0146: 말하는 방식은 말투 칸이 소유한다(MD-1.4, D-0090). 평소 칸에서 분명한 말투 낱말만 잡는다.
+VOICE_TERMS = re.compile(
+    r"단정을|단정하지|누그러뜨|어미|말투|말버릇|말끝|존댓말|반말|높임"
+    r"|해요체|하십시오체|말을 맺|끝맺"
+)
 
 #: 같은 개념을 두 곳에 쓴 것으로 보는 겹침 비율(작은 쪽 기준).
 DUP_THRESHOLD = 0.6
@@ -73,6 +78,12 @@ def check_ledger(name: str):
             "reading": ledger.reading,
             "defaultResponse": ledger.defaultResponse,
         }
+        for key, btext in base.items():
+            if found := VOICE_TERMS.search(btext):
+                problems.append(
+                    f"{key}: 말하는 방식('{found.group(0)}')은 말투 칸이 소유한다. "
+                    "평소 칸에는 무엇을 하는지만 쓴다"
+                )
         traits = {t.id: f"{t.trigger} {t.behavior}" for t in ledger.traits}
         for tid, ttext in traits.items():
             tt = concept_tokens(ttext, exclude)
