@@ -105,3 +105,24 @@ def test_josa_follows_the_final_consonant():
     assert _josa("근데", "이", "가") == "가"
     assert _josa("일단은", "으로", "로") == "으로"
     assert _josa("마을", "으로", "로") == "로"
+
+
+def test_hedging_is_written_per_length_band():
+    short = "네, 괜찮아요."
+    medium = "저는 그냥 집에서 쉬는 편인데, 요즘은 날이 좋아서 좀 걷는 게 제일 좋은 것 같아요."
+    assert 40 <= len(medium) < 150 and len(short) < 40
+    long = (
+        "사실 경기 끝나고 나면 이제 몸이 진짜 무겁고 생각이 많아지는데, 그래도 또 다음 경기가 "
+        "있으니까 회복하는 데 제일 신경을 쓰고 있고, 그렇게 하루하루 버티다 보면 "
+        "결국에는 좋은 결과가 따라오는 것 같아요. 그래서 저는 요즘 잠도 일찍 자고 "
+        "먹는 것도 많이 신경을 쓰고 있어요."
+    )
+    assert len(long) >= 150
+    rows, kinds = _corpus((short, medium, long), n=90)
+    profile = build_speech_profile(rows, kinds)
+    bands = profile["hedgeByLength"]
+    assert bands["short"]["share"] == 0.0 and bands["long"]["share"] == 1.0
+    text = "\n".join(render_voice_definition(profile))
+    assert "길이에 따라 다르다" in text
+    assert "짧은 답(40자 미만)에서는 열에 하나도 안 되게" in text
+    assert "(150자 이상)에서는 거의 모두 정도다" in text

@@ -235,7 +235,18 @@ def _profile_section(profile: dict | None, summary: str) -> str:
     stats = [
         ("대상 발화(기사 제외)", f"{profile['subjectMessages']}개, 문장 {profile['sentences']}개"),
         ("존댓말 어미 비율", f"{profile['politeShare']:.0%}"),
-        ("'~것 같' 비율", f"{profile['hedgeShare']:.0%}"),
+        (
+            "'~것 같' 비율",
+            f"{profile['hedgeShare']:.0%}"
+            + "".join(
+                f" · {label} {b['share']:.0%}({b['count']})"
+                for label, b in zip(
+                    ("40자 미만", "40~150자", "150자 이상"),
+                    (profile.get("hedgeByLength") or {}).values(),
+                    strict=False,
+                )
+            ),
+        ),
         (
             "답 길이",
             f"{ans['count']}개, 중앙값 {ans['medianChars']}자, "

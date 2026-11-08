@@ -74,6 +74,14 @@ def _words(text: str) -> list[str]:
     return [re.sub(r"[,.?!~…]+$", "", w) for w in text.split()]
 
 
+#: (이름, 이상, 미만) 글자 수 구간. '~것 같' 비율을 나눠 센다.
+LENGTH_BANDS = (("short", 0, 40), ("medium", 40, 150), ("long", 150, 10**9))
+
+
+def _hedged(text: str) -> bool:
+    return bool(re.search(r"(?:것|거) 같", text))
+
+
 def _rate(count: int, total: int) -> float:
     return round(count / total, 3) if total else 0.0
 
@@ -125,7 +133,14 @@ def build_speech_profile(corpus: list[dict], kinds: dict[str, str]) -> dict:
         "eojeol": len(words),
         "endings": {n: ending_counts[n] for n, *_ in ENDINGS} | {"other": ending_counts["other"]},
         "politeShare": _rate(polite, polite + plain),
-        "hedgeShare": _rate(sum(bool(re.search(r"(?:것|거) 같", t)) for t in texts), len(texts)),
+        "hedgeShare": _rate(sum(map(_hedged, texts)), len(texts)),
+        # '~것 같'은 답이 길수록 많아진다. 길이를 빼고 한 비율만 주면 짧은 답에도 붙는다.
+        "hedgeByLength": {
+            name: {"count": len(group), "share": _rate(sum(map(_hedged, group)), len(group))}
+            for name, group in (
+                (name, [t for t in texts if lo <= len(t) < hi]) for name, lo, hi in LENGTH_BANDS
+            )
+        },
         "markersPer1000": {
             m: round(c * 1000 / len(words), 1) if words else 0.0 for m, c in marker_counts.items()
         },
@@ -149,6 +164,24 @@ def build_speech_profile(corpus: list[dict], kinds: dict[str, str]) -> dict:
         ),
         "laughShare": _rate(sum(bool(LAUGH.search(t)) for t in texts), len(texts)),
     }
+
+
+def _hedge_sentence(profile: dict) -> str:
+    """D-0145: '~것 같' 비율을 답 길이 구간별로 쓴다. 구간 근거가 모자라면 전체 비율 하나를 쓴다."""
+    if profile["hedgeShare"] < 0.1:
+        return ""
+    bands = profile.get("hedgeByLength") or {}
+    if bands and all(bands[name]["count"] >= MIN_ANSWERS for name, *_ in LENGTH_BANDS):
+        return (
+            " 자기 생각과 느낌을 '~것 같아요'로 누그러뜨려 맺는 정도는 길이에 따라 다르다."
+            f" 한두 마디 짧은 답(40자 미만)에서는 {_tenths(bands['short']['share'])},"
+            f" 두세 문장 답(40~150자)에서는 {_tenths(bands['medium']['share'])},"
+            f" 길게 생각을 말하는 답(150자 이상)에서는 {_tenths(bands['long']['share'])} 정도다."
+        )
+    return (
+        " 자기 생각과 느낌은 '~것 같아요'로 누그러뜨려 맺는다"
+        f"(발화 {_tenths(profile['hedgeShare'])})."
+    )
 
 
 def _tenths(share: float) -> str:
@@ -213,12 +246,7 @@ def render_voice_definition(profile: dict, summary: str = "") -> list[str]:
             "문장 끝: "
             + ", ".join(label for label, _ in top)
             + " 순으로 많다."
-            + (
-                " 자기 생각과 느낌은 '~것 같아요'로 누그러뜨려 맺는다"
-                f"(발화 {_tenths(profile['hedgeShare'])})."
-                if profile["hedgeShare"] >= 0.1
-                else ""
-            )
+            + _hedge_sentence(profile)
             + (
                 " 생각이 이어지는 중에는 '~는데', '~고' 같은 연결어미로"
                 " 끝을 열어 둔 채 말을 멈추기도 한다."
