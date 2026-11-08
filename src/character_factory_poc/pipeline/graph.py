@@ -93,13 +93,13 @@ GATES = ["G1", "G3", "G4a", "G4b", "G4", "G5", "G5b", "G6", "G7a", "G7", "G8", "
 RETIRED_GATES = {"G2": "G2는 결번이다(D-0042). 외모는 G1에서 한 번 고르고 S2가 자동으로 고정한다"}
 
 # --- 갈래(D-0116, D-0127, D-0128) ---------------------------------------------------------
-# 출신 코드 값. 표시 이름은 오리지널(CREATED)·트윈(SOURCE)이다.
+# 출신 코드 값. 표시 이름은 오리지널(CREATED)·모티브(SOURCE)이다.
 CREATED = "CREATED"
 SOURCE = "SOURCE"
 ORIGINS = (CREATED, SOURCE)
 
-# 트윈 갈래는 앞단만 다르다. s1은 없고, s0(출처 묶음)·s9h(비교 세트)가 더해지며, s2·s3는 같은
-# 단계 ID의 트윈 판이다. 뒤쪽 단계는 오리지널과 같은 정의를 쓰므로 의존과 산출물 계약이 같다.
+# 모티브 갈래는 앞단만 다르다. s1은 없고, s0(출처 묶음)·s9h(비교 세트)가 더해지며, s2·s3는 같은
+# 단계 ID의 모티브 판이다. 뒤쪽 단계는 오리지널과 같은 정의를 쓰므로 의존과 산출물 계약이 같다.
 # 구현 전 단계는 implemented=False로 두어 실행 목록에 들지 않는다(계획 §12 순서 2~6).
 _TWIN_FRONT = {
     "s0": Stage("s0", "출처 묶음", gate="G0", implemented=True),
@@ -123,7 +123,7 @@ def _twin_stages() -> dict[str, Stage]:
 TWIN_STAGES: dict[str, Stage] = _twin_stages()
 TWIN_GATES = ["G0", "G1s", *[g for g in GATES if g != "G1"]]
 
-# 모델 준비 방식(D-0118). 트윈이 학습하지 않는 방식이면 학습 데이터·학습 단계를 빼고, 평가(s10)는
+# 모델 준비 방식(D-0118). 모티브가 학습하지 않는 방식이면 학습 데이터·학습 단계를 빼고, 평가(s10)는
 # 대화 프롬프트 승인(G6)과 비교 세트(s9h)를 기다린다. TRAIN이면 학습 뒤에 비교 세트도 기다린다.
 TRAIN = "TRAIN"
 BIND_EXISTING = "BIND_EXISTING"

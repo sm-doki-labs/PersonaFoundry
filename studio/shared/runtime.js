@@ -398,7 +398,7 @@
     return apiPath(apiBase, '/api/characters/' + encodeURIComponent(text(id)));
   }
 
-  // 캐릭터마다 갈래(오리지널·트윈)와 모델 준비 방식이 달라 그래프도 다르다. id가 없으면 오리지널 기본 그래프다.
+  // 캐릭터마다 갈래(오리지널·모티브)와 모델 준비 방식이 달라 그래프도 다르다. id가 없으면 오리지널 기본 그래프다.
   function graphPath(characterId) {
     const id = text(characterId).trim();
     return '/api/runtime/graph' + (id ? '?character_id=' + encodeURIComponent(id) : '');

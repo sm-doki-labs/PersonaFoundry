@@ -1,4 +1,4 @@
-"""D-0126 발표 점검: 트윈 패키지의 자동 점검·G9 사람 확인·승인 잠금. 외부 호출 없음."""
+"""D-0126 발표 점검: 모티브 패키지의 자동 점검·G9 사람 확인·승인 잠금. 외부 호출 없음."""
 
 from pathlib import Path
 
@@ -18,7 +18,7 @@ from tests.support.export_flow import write_json
 
 
 def _twin(tmp: Path, monkeypatch, mode: str = "PROMPT_ONLY", **pack_changes):
-    """합성 트윈을 G9 대기까지. pack_changes는 출처 묶음 최상위 칸을 덮어쓴다."""
+    """합성 모티브를 G9 대기까지. pack_changes는 출처 묶음 최상위 칸을 덮어쓴다."""
     original = flow._pack
 
     def pack(where: Path) -> Path:

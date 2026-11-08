@@ -118,7 +118,7 @@ def build_tree(package: CharacterPackage, package_dir: Path) -> ChatTree:
     if package.twin:
         adopted, route = package.sft.adoptedBinding, package.twin.servingRoute
         if not adopted or (adopted == "LONG_BASE") != (route is None):
-            raise ValueError("트윈 G8 채택 대상과 패키지 서빙 경로가 일치하지 않는다")
+            raise ValueError("모티브 G8 채택 대상과 패키지 서빙 경로가 일치하지 않는다")
         if route:
             dialogue_model = f"{prefix}-dialogue-{version}"
             files[f"models/{dialogue_model}.json"] = {

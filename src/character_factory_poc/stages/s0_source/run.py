@@ -1,4 +1,4 @@
-"""트윈 s0: 출처 묶음 정리 → 출처 정리 에이전트 → G0 대기 (계획 §4, D-0120, D-0128).
+"""모티브 s0: 출처 묶음 정리 → 출처 정리 에이전트 → G0 대기 (계획 §4, D-0120, D-0128).
 
 결정적 정리(읽기·화자·가리기·대화 나누기·비교 세트 분리·사용 근거)는 코드가 하고, 판단이 필요한 일
 (화자 지정 확인, 놓친 개인정보 표시, 대표 메시지, 말투 관찰)은 에이전트가 한다. 에이전트 출력은
@@ -58,7 +58,7 @@ def _load_pack(ctx: Context, cid: str, pack_path: Path | None) -> tuple[SourcePa
         last = _latest_rev_dir(ctx, cid)
         if last is None or not (last / "source-pack.json").exists():
             raise NeedsInputError(
-                "트윈 s0: 출처 묶음이 필요하다(cfp run ... --source-pack pack.json)"
+                "모티브 s0: 출처 묶음이 필요하다(cfp run ... --source-pack pack.json)"
             )
         raw = read_json(last / "source-pack.json")
         return validate("source-pack-v1", raw), raw  # type: ignore[return-value]
@@ -282,7 +282,7 @@ def run_s0(ctx: Context, cid: str, pack_path: Path | None = None) -> Path:
     from character_factory_poc.pipeline.origin import read_origin
 
     if read_origin(ctx.character_dir(cid)) != SOURCE:
-        raise FactoryError(f"{cid}: s0은 트윈 캐릭터에만 있다")
+        raise FactoryError(f"{cid}: s0은 모티브 캐릭터에만 있다")
     state = ctx.state(cid)
     state.require_deps("s0")
     cfg = _settings(ctx)

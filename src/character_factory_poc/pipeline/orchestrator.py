@@ -39,7 +39,7 @@ APPEARANCE_STAGES = ("s2", "s4a", "s4b", "s4", "s5", "s6", "s11", "sx")
 HUMAN_ONLY_GATES = {
     "G7a": "클러스터마다 샘플을 판정해야 한다",
     "G8": "블라인드 20쌍을 사람이 골라야 한다",
-    # 트윈 갈래(D-0120, D-0128): 출처·사용 근거와 본인 닮음은 사람이 확인한다.
+    # 모티브 갈래(D-0120, D-0128): 출처·사용 근거와 본인 닮음은 사람이 확인한다.
     "G0": "출처 묶음과 사용 근거를 사람이 확인해야 한다",
     "G1s": "받은 사진이 본인과 닮았는지 사람이 확인해야 한다",
 }
@@ -59,7 +59,7 @@ class RunOptions:
     training_providers: list[str] | None = None  # s10t 학습 공급자. 없으면 [stages.s10t]
     submit_training: bool = False  # 학습 제출·회수까지 한다(유료). 기본은 계획(dry run)만
     verify_export: bool = False  # sx에서 일회용 DB 적재 확인까지 한다(LLD §8.11)
-    # 트윈 s0 출처 묶음(source-pack-v1, D-0120). 없으면 지난 판을 쓴다
+    # 모티브 s0 출처 묶음(source-pack-v1, D-0120). 없으면 지난 판을 쓴다
     source_pack: Path | None = None
     # D-0049(LLD §6.6·§6.7)
     max_parallel: int = 1  # 동시에 돌릴 단계 수. 1이면 순차 훑기
@@ -283,10 +283,10 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
     from character_factory_poc.pipeline.origin import read_origin
 
     if read_origin(ctx.character_dir(cid)) == SOURCE:
-        # D-0128: 트윈은 s1이 없고, s0·s2·s3·s9h는 트윈 판 실행 함수가 생길 때까지 돌지 않는다.
+        # D-0128: 모티브는 s1이 없고, s0·s2·s3·s9h는 모티브 판 실행 함수가 생길 때까지 돌지 않는다.
         # 장면·영상·패키지는 s2(받은 사진 기준) 승인을 기다리는 같은 실행 함수를 쓴다.
         if opt.ranking is not None:
-            raise FactoryError("트윈 캐릭터는 --ranking을 받지 않는다(얼굴은 받은 사진에서 온다)")
+            raise FactoryError("모티브 캐릭터는 --ranking을 받지 않는다(얼굴은 받은 사진에서 온다)")
         for sid in ("s1", "s2", "s3"):
             runners.pop(sid, None)
         from character_factory_poc.stages.s0_source.run import run_s0
@@ -311,7 +311,7 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
         from character_factory_poc.pipeline.origin import read_model_mode
 
         if read_model_mode(ctx.character_dir(cid)) == TRAIN:
-            # D-0118: 트윈 학습 데이터는 실제 발화에서 만든다(모델 호출 없음).
+            # D-0118: 모티브 학습 데이터는 실제 발화에서 만든다(모델 호출 없음).
             from character_factory_poc.stages.s9_data.twin import run_s9_twin, run_s9s_twin
 
             runners["s9s"] = lambda: run_s9s_twin(ctx, cid)
@@ -363,8 +363,8 @@ def _skip_note(ctx: Context, cid: str, sid: str, runners: dict) -> str | None:
         return None
     if ctx.state(cid).stage(sid).status == "PENDING":
         if read_origin(ctx.character_dir(cid)) == SOURCE:
-            # D-0128: 트윈 앞단(s0·s2·s3·s9h)은 계획 §12 순서 2~6에서 구현한다.
-            return f"{sid}: 트윈 {stage.name} — 아직 구현 전"
+            # D-0128: 모티브 앞단(s0·s2·s3·s9h)은 계획 §12 순서 2~6에서 구현한다.
+            return f"{sid}: 모티브 {stage.name} — 아직 구현 전"
         if sid == "s1":
             return "s1: --ranking 없음 — 건너뜀(페르소나 우선 경로)"
         if sid in APPEARANCE_STAGES:
@@ -392,7 +392,7 @@ def _step(
     """
     from character_factory_poc.pipeline.origin import stage_def
 
-    stage = stage_def(ctx.character_dir(cid), sid)  # D-0128: 트윈은 갈래 그래프의 관문을 쓴다
+    stage = stage_def(ctx.character_dir(cid), sid)  # D-0128: 모티브는 갈래 그래프의 관문을 쓴다
     state = ctx.state(cid)
     st = state.stage(sid)
     gate_ok = stage.gate is None or state.gate(stage.gate).status == "APPROVED"

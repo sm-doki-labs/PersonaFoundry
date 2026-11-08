@@ -1,4 +1,4 @@
-"""트윈 그래프의 팀 줄과 화면 시험 자료(studio/tests/fixtures)가 실제 응답과 같은지 확인한다."""
+"""모티브 그래프의 팀 줄과 화면 시험 자료(studio/tests/fixtures)가 실제 응답과 같은지 확인한다."""
 
 import json
 from pathlib import Path

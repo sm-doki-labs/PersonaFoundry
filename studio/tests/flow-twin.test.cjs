@@ -1,5 +1,5 @@
 'use strict';
-// 트윈 갈래 진행 화면 검사. 그래프는 서버 _graph 출력(fixtures, tests/test_web_twin_lanes.py가 같은지 확인)을 쓴다.
+// 모티브 갈래 진행 화면 검사. 그래프는 서버 _graph 출력(fixtures, tests/test_web_twin_lanes.py가 같은지 확인)을 쓴다.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -78,7 +78,7 @@ test('six-column twin graph fits laptop widths: columns follow name length, the 
   assert.ok(tr === Math.min(...fr), 'training has the shortest step names');
   assert.ok(so > 1, 'source fits its waiting status on one line');
   assert.ok(css.includes('.fl-grid{position:relative;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));column-gap:32px'), 'original graph keeps equal columns');
-  // 줄임 규칙은 트윈 칸에만 건다.
+  // 줄임 규칙은 모티브 칸에만 건다.
   assert.ok(css.includes('.fl-grid.tw .fl-row .gt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'));
   assert.ok(!/\.fl-grid \.fl-row \.(gt|sb)\{/.test(css));
   // 휴대폰 폭에서는 긴 프롬프트 그래프도 한 열이다(5열 상속으로 칸이 39px가 되던 문제).
@@ -117,8 +117,8 @@ test('G0 and G1s count as reviews with the same task function', () => {
 test('track badge text: original, or twin with how the model is prepared', () => {
   assert.equal(Flow.trackLabel({ origin: 'CREATED' }), '오리지널');
   assert.equal(Flow.trackLabel({}), '오리지널');
-  assert.equal(Flow.trackLabel({ origin: 'SOURCE', originLabel: '트윈', modelMode: 'TRAIN' }), '트윈 · 학습');
-  assert.equal(Flow.trackLabel({ origin: 'SOURCE', modelMode: 'BIND_EXISTING' }), '트윈 · 학습된 모델 연결');
-  assert.equal(Flow.trackLabel({ origin: 'SOURCE', modelMode: 'PROMPT_ONLY' }), '트윈 · 긴 프롬프트');
+  assert.equal(Flow.trackLabel({ origin: 'SOURCE', originLabel: '모티브', modelMode: 'TRAIN' }), '모티브 · 학습');
+  assert.equal(Flow.trackLabel({ origin: 'SOURCE', modelMode: 'BIND_EXISTING' }), '모티브 · 학습된 모델 연결');
+  assert.equal(Flow.trackLabel({ origin: 'SOURCE', modelMode: 'PROMPT_ONLY' }), '모티브 · 긴 프롬프트');
 });
 

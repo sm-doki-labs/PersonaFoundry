@@ -379,7 +379,7 @@
     },
     promptOnly: {
       hint: '학습 결과가 아직 없어요. 긴 프롬프트로 패키지까지 갈지, 학습을 기다릴지 정해 주세요.',
-      // 트윈(PROMPT_ONLY·BIND_EXISTING)은 학습을 기다리지 않는다. 버튼 문구는 서버의 items.adoptLabel을 따른다.
+      // 모티브(PROMPT_ONLY·BIND_EXISTING)은 학습을 기다리지 않는다. 버튼 문구는 서버의 items.adoptLabel을 따른다.
       hintFor: function (items) {
         if (!isTwinDecision(items)) return null;
         return (items.decision || {}).mode === 'BIND_EXISTING'
@@ -2710,7 +2710,7 @@
     return Object.assign(answer, details());
   }
 
-  // ---------------------------------------------------------------- 트윈 G8(실제 답 비교, twin-comparison-v1)
+  // ---------------------------------------------------------------- 모티브 G8(실제 답 비교, twin-comparison-v1)
   // 조건 이름이 붙은 구별률 표와 가족 블라인드 파일 목록을 나눈다. 블라인드 파일은 판 번호로만 알린다.
   // 실제 답과 생성 답을 나란히 보이는 시연 화면은 그 판의 가족 판정을 가져온 뒤에만 서버가 연다.
   var TWIN_ARM_KO = { LONG_BASE: '긴 프롬프트', BOUND_SFT: '연결한 모델' };
@@ -2812,7 +2812,7 @@
     );
   }
 
-  // ---------------------------------------------------------------- G0 출처 확인(트윈, 사람 전용)
+  // ---------------------------------------------------------------- G0 출처 확인(모티브, 사람 전용)
   // 비교 세트는 개수만 보여요. 원문은 서버가 화면 자료·파일 목록 어디에도 싣지 않는다(D-0120).
   var TEXT_KIND_KO = { KAKAO_EXPORT: '카톡 내보내기', INTERVIEW: '인터뷰', ARTICLE: '기사', TRANSCRIPT: '받아 적은 글' };
   var SUBJECT_KO = { PUBLIC_FIGURE: '공개 인물', PRIVATE_PERSON: '가까운 사람' };
@@ -2968,7 +2968,7 @@
     return Object.assign(answer, more);
   }
 
-  // ---------------------------------------------------------------- G1s 기준 사진(트윈, 사람 전용)
+  // ---------------------------------------------------------------- G1s 기준 사진(모티브, 사람 전용)
   // G1 얼굴 고르기 갤러리 부품(face-grid·face-tile·face-side)을 그대로 쓴다. 첫 사진이 기본이다.
   function photoList() {
     return list(state.items.photos);
@@ -3066,8 +3066,8 @@
     ['media', '대표 이미지와 영상을 열어 봤어요'],
     ['names', '실제 사람 이름이나 상호가 들어가지 않았어요']
   ];
-  // 트윈 발표 점검(D-0126): 서버가 만든 presentation-check.json의 자동 결과와 사람 확인 항목.
-  // 트윈은 본인 이름이 들어가는 게 맞으니 이름 항목을 '다른 사람'으로 바꾼다.
+  // 모티브 발표 점검(D-0126): 서버가 만든 presentation-check.json의 자동 결과와 사람 확인 항목.
+  // 모티브는 본인 이름이 들어가는 게 맞으니 이름 항목을 '다른 사람'으로 바꾼다.
   var PKG_TWIN_NAMES = '본인 말고 다른 실제 사람 이름이나 상호가 들어가지 않았어요';
   function pkgPresentation() {
     return (state.items && state.items.presentation) || null;

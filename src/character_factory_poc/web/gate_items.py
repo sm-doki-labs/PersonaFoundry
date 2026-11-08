@@ -850,7 +850,7 @@ def eval_report(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> 
 def twin_comparison(
     char_dir: Path, character_id: str, stage_dir: str, rev: str
 ) -> dict[str, Any] | None:
-    """트윈 G8의 실제 답 비교 요약(twin-comparison-v1). 없으면 None이다.
+    """모티브 G8의 실제 답 비교 요약(twin-comparison-v1). 없으면 None이다.
 
     장면별 정답 키(trials)와 원문은 넣지 않는다. 가족 블라인드 파일은 조건 이름 없이 판 번호로만
     알리고, 실제 답과 생성 답을 나란히 보이는 시연 화면은 그 판의 가족 판정을 가져온 뒤에만 연다.
@@ -927,7 +927,7 @@ def twin_comparison(
     }
 
 
-# ---------------------------------------------------------------- G0·G1s (트윈 갈래)
+# ---------------------------------------------------------------- G0·G1s (모티브 갈래)
 
 
 def _corpus_rows(path: Path, wanted: set[str]) -> dict[str, dict[str, Any]]:
@@ -1064,7 +1064,7 @@ def source_photos(char_dir: Path, character_id: str, stage_dir: str, rev: str) -
     folder = Path(char_dir) / stage_dir / rev
     doc = read_json(folder / "photo-options.json")
     if doc is None:
-        return _empty("sourcePhotos", ["photo-options.json이 없다. 트윈 s2를 먼저 돌린다"])
+        return _empty("sourcePhotos", ["photo-options.json이 없다. 모티브 s2를 먼저 돌린다"])
     photos = []
     for i, option in enumerate(doc.get("options", [])):
         if not isinstance(option, dict):
@@ -1119,7 +1119,7 @@ def release_package(char_dir: Path, character_id: str, stage_dir: str, rev: str)
         "verification": {"status": "NOT_RUN", "disposableDb": True, "steps": []},
         "page": asset(char_dir, character_id, stage_dir, rev, "gate-G9.html"),
     }
-    # D-0126: 트윈만 발표 점검(자동 결과·사람 확인 항목)을 붙인다. 오리지널 G9는 그대로다.
+    # D-0126: 모티브만 발표 점검(자동 결과·사람 확인 항목)을 붙인다. 오리지널 G9는 그대로다.
     from character_factory_poc.stages.s11_release.presentation import view
 
     check = view(rev_dir, package)

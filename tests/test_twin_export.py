@@ -130,7 +130,7 @@ def test_twin_export(tmp_path: Path, mode: str, monkeypatch):
     assert meta["sourcePackSha256"] == sha256_file(pack_path)
     assert (meta["origin"], meta["originLabel"], meta["subjectKind"]) == (
         "SOURCE",
-        "트윈",
+        "모티브",
         "PRIVATE_PERSON",
     )
     assert meta["usageScope"] == read_json(pack_path)["usageBasis"]["scope"]
@@ -230,7 +230,7 @@ def test_binding_changed_after_g8_blocks_package(tmp_path):
 )
 @pytest.mark.parametrize("mode", ["PROMPT_ONLY", "BIND_EXISTING", "TRAIN"])
 def test_twin_real_load_into_disposable_postgres(tmp_path: Path, mode: str):
-    """순서 10 완료 기준: 트윈 캐릭터가 일회용 PostgreSQL 두 개에 실제로 적재된다."""
+    """순서 10 완료 기준: 모티브 캐릭터가 일회용 PostgreSQL 두 개에 실제로 적재된다."""
     from character_factory_poc.stages.export.settings import load_export_settings
 
     ctx, cid, _, _ = _approved(tmp_path, mode)

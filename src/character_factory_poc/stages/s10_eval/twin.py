@@ -1,4 +1,4 @@
-"""트윈의 비학습 G8. 채택 대상과 같은 장면의 비교 근거를 함께 제시한다."""
+"""모티브의 비학습 G8. 채택 대상과 같은 장면의 비교 근거를 함께 제시한다."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _inputs(ctx: Context, cid: str) -> dict:
     char_dir = ctx.character_dir(cid)
     mode = read_model_mode(char_dir)
     if read_origin(char_dir) != SOURCE or mode not in (PROMPT_ONLY, BIND_EXISTING):
-        raise FactoryError("이 G8은 트윈의 PROMPT_ONLY·BIND_EXISTING 모드에서만 연다")
+        raise FactoryError("이 G8은 모티브의 PROMPT_ONLY·BIND_EXISTING 모드에서만 연다")
     state = ctx.state(cid)
     state.require_deps("s10")
     ho = state.stage("s9h")
@@ -66,7 +66,7 @@ def _inputs(ctx: Context, cid: str) -> dict:
             or not ref
             or ref.ref != expected.as_posix()
         ):
-            raise FactoryError("트윈 연결 기록이 올바른 채택 대상을 가리키지 않는다")
+            raise FactoryError("모티브 연결 기록이 올바른 채택 대상을 가리키지 않는다")
         adopted = ref.ref
         path = char_dir / expected
         check_path = path.with_name("preflight.json")
@@ -136,7 +136,7 @@ def run_s10_twin(ctx: Context, cid: str, *, models=None) -> Path:
     try:
         build_comparison(ctx, cid, folder, models=models)
     except Exception:
-        state.transition("s10", "CHECK_FAILED", rev=rev, error="트윈 비교 평가 실패")
+        state.transition("s10", "CHECK_FAILED", rev=rev, error="모티브 비교 평가 실패")
         raise
     # 기존 G8 읽기 화면은 prompt-only.json의 reason과 adoptOptions를 사용한다.
     write_once_json(folder / PROMPT_ONLY_FILE, doc)
@@ -159,7 +159,7 @@ def approve_twin(ctx: Context, cid: str, folder: Path, doc: dict, answer: dict) 
             raise FactoryError("G8에 표시한 채택 조건을 선택해야 한다")
         selected = [adopted]
     elif decision != "REJECT":
-        raise FactoryError("트윈 G8 결정은 SELECT 또는 REJECT다")
+        raise FactoryError("모티브 G8 결정은 SELECT 또는 REJECT다")
     rec = write_gate_record(
         ctx.character_dir(cid),
         ctx.state(cid),

@@ -1,4 +1,4 @@
-"""받은 사진으로 트윈 기준 얼굴을 정한다. G1s 전에는 외모 명세를 고정하지 않는다."""
+"""받은 사진으로 모티브 기준 얼굴을 정한다. G1s 전에는 외모 명세를 고정하지 않는다."""
 
 from __future__ import annotations
 
@@ -120,14 +120,14 @@ def _page(cid: str, rev: str, specs: list[AppearanceSpec]) -> str:
 def run_s2_twin(ctx: Context, cid: str) -> Path:
     char_dir = ctx.character_dir(cid)
     if read_origin(char_dir) != SOURCE:
-        raise FactoryError(f"{cid}: 트윈 캐릭터에만 G1s가 있다")
+        raise FactoryError(f"{cid}: 모티브 캐릭터에만 G1s가 있다")
     state = ctx.state(cid)
     state.require_deps("s2")
     pack, index, _ = load_approved_source(ctx, cid)
     if not pack.photos:
         raise NeedsInputError("기준 사진이 없다. 사진이 있는 출처 묶음으로 G0 승인을 받는다")
     if not ctx.execute:
-        raise FactoryError("트윈 기준 사진 설명에는 --execute가 필요하다")
+        raise FactoryError("모티브 기준 사진 설명에는 --execute가 필요하다")
     if [p.path for p in pack.photos] != [p.get("path") for p in index.photos]:
         raise CheckFailed("s2", ["출처 묶음과 G0 사진 목록이 다르다"])
     budget = ctx.budget()

@@ -102,7 +102,7 @@ def _plan(ctx, item: BatchCharacter, base: Path):
     if pack is not None and not pack.is_file():
         raise ValueError(f"{cid}: 출처 묶음 파일이 없다")
     if item.slug and origin != CREATED and pack is None:
-        raise ValueError(f"{cid}: 새 트윈은 source_pack이 필요하다")
+        raise ValueError(f"{cid}: 새 모티브는 source_pack이 필요하다")
     return item, CharacterReport(cid, origin, mode, item.until, item.max_parallel), pack
 
 

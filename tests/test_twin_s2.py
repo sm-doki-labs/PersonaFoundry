@@ -71,7 +71,7 @@ def test_requires_g0_before_any_photo_call(ctx, tmp_path):
 
 
 def test_original_rejected(ctx):
-    with pytest.raises(FactoryError, match="트윈"):
+    with pytest.raises(FactoryError, match="모티브"):
         run_s2_twin(ctx, "original")
 
 

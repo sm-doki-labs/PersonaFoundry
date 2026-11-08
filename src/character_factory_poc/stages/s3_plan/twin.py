@@ -111,7 +111,7 @@ def _speech_endings(rows: list[dict]) -> dict[str, int]:
 
 
 def _guard(char_dir: Path, rows: list[dict], display: str) -> list[dict]:
-    # 트윈은 S1이 없어도 실행한다. 다른 캐릭터의 순위·원문은 열지 않는다.
+    # 모티브는 S1이 없어도 실행한다. 다른 캐릭터의 순위·원문은 열지 않는다.
     role_names = {"user", "other", "나", "기자", "질문자", "사용자"}
     names = {
         r["name"]
@@ -215,7 +215,7 @@ def _check(source: dict, sample: list[dict], guard: list[dict]):
 
 def codex_checks(stage: str, workspace: Path) -> tuple[str, list]:
     if stage != "s3-twin":
-        raise ValueError(f"트윈 기획 검사가 없는 단계: {stage}")
+        raise ValueError(f"모티브 기획 검사가 없는 단계: {stage}")
     root = workspace / "inputs"
     return "character-plan-v2", [
         _check(*(read_json(root / f"{k}.json") for k in ("source", "corpus-sample", "name-guard")))
@@ -294,7 +294,7 @@ def plan_calls(ctx: Context) -> list[CallPlan]:
 def run_s3_twin(ctx: Context, cid: str) -> Path:
     char_dir = ctx.character_dir(cid)
     if read_origin(char_dir) != SOURCE:
-        raise FactoryError(f"{cid}: 원문 기반 기획은 트윈 캐릭터에만 있다")
+        raise FactoryError(f"{cid}: 원문 기반 기획은 모티브 캐릭터에만 있다")
     state = ctx.state(cid)
     state.require_deps("s3")
     if state.stage("s3").status == "AWAITING_HUMAN":

@@ -68,7 +68,7 @@ def api_seed_ids(character_id: str, peers: Iterable[str] = ()) -> Callable[[str,
 
 
 def revision_prefix(character_id: str, package_rev: str, *, twin: bool) -> str:
-    """콘텐츠 판 이름 앞부분. 트윈은 패키지 판마다 이름이 달라야 해서 판을 붙인다.
+    """콘텐츠 판 이름 앞부분. 모티브는 패키지 판마다 이름이 달라야 해서 판을 붙인다.
 
     내보내기(chat-svc·api-svc)와 적재 확인이 같은 이름을 쓰도록 여기서만 정한다.
     """

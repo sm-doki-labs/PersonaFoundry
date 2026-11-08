@@ -6,10 +6,10 @@
   const E = R.escapeHTML;
 
   // 팀 줄(서버 LANES id) → 그래프 칸. 위 줄은 외모 → 장면 → 영상, 아래 줄은 기획 → 페르소나 → 데이터 → 학습, 패키지는 오른쪽.
-  // 트윈은 맨 앞 열에 출처 팀(so)이 생긴다.
+  // 모티브는 맨 앞 열에 출처 팀(so)이 생긴다.
   const AREA = { source: 'so', appearance: 'ap', plan: 'pl', scene: 'sc', video: 'vd', persona: 'ps', data: 'dt', training: 'tr', release: 'pk' };
   const CELL = { ap: [0, 0], sc: [0, 1], vd: [0, 2], pl: [1, 0], ps: [1, 1], dt: [1, 2], tr: [1, 3], pk: [0.5, 4] };
-  // 그래프 칸 배치. 오리지널은 CELL 그대로다. 트윈은 출처 팀이 맨 앞 열(두 줄 가운데)에 서고 나머지는 한 열씩 밀린다.
+  // 그래프 칸 배치. 오리지널은 CELL 그대로다. 모티브는 출처 팀이 맨 앞 열(두 줄 가운데)에 서고 나머지는 한 열씩 밀린다.
   // 학습하지 않는 방식이면 데이터 팀이 그래프에서 빠지고 그 열도 없어져 학습(평가) 팀이 당겨진다.
   function layoutOf(graph) {
     const has = (id) => (graph && graph.lanes || []).some((l) => l.id === id && (l.stages || []).length);
@@ -28,9 +28,9 @@
   function trackLabel(c) {
     const x = c || {};
     if (x.origin !== 'SOURCE') return '오리지널';
-    return (x.originLabel || '트윈') + ' · ' + (MODE_LABEL[x.modelMode] || MODE_LABEL.TRAIN);
+    return (x.originLabel || '모티브') + ' · ' + (MODE_LABEL[x.modelMode] || MODE_LABEL.TRAIN);
   }
-  // 트윈 단계 줄에 붙이는 쉬운 설명. 단계 이름은 서버 그래프를 그대로 쓴다.
+  // 모티브 단계 줄에 붙이는 쉬운 설명. 단계 이름은 서버 그래프를 그대로 쓴다.
   const TWIN_HINT = { s2: '받은 사진에서 기준 사진 고르기' };
   // 단계 이름 뒤 표시(사람 검토·유료 아이콘)는 마지막 낱말에 붙인다. 칸이 좁아도 아이콘만 다음 줄로 떨어지지 않는다.
   function stageNameHTML(name, marks) {
@@ -1094,7 +1094,7 @@
       const head = g && g.title ? text(g.title).split(/[\s·]/)[0] : '';
       return head && text(def.name).indexOf(head) < 0 ? '검토: ' + g.title : '';
     }
-    // 트윈 그래프는 칸이 좁아 이 설명을 한 줄로 줄인다. 전체 글은 title과 인스펙터 '하는 일'에 있다.
+    // 모티브 그래프는 칸이 좁아 이 설명을 한 줄로 줄인다. 전체 글은 title과 인스펙터 '하는 일'에 있다.
     function gateSub(def) {
       const h = stageHint(def);
       return h ? '<span class="gt" title="' + E(h) + '">' + E(h) + '</span>' : '';

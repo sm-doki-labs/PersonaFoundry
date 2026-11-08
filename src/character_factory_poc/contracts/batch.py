@@ -11,7 +11,8 @@ from character_factory_poc.contracts.common import Strict
 class BatchCharacter(Strict):
     character_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
     slug: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{0,40}$")
-    origin: Literal["original", "twin"] | None = None
+    # twin은 D-0144 이전 이름이라 motif와 같은 뜻으로 받는다.
+    origin: Literal["original", "motif", "twin"] | None = None
     model_mode: Literal["train", "bind", "prompt"] | None = None
     source_pack: str | None = Field(default=None, min_length=1)
     until: str = "G6"

@@ -161,7 +161,7 @@ GATE_META: dict[str, dict[str, Any]] = {
 # 화면에 보이는 관문 순서. 그래프에 아직 없는 관문도 이 순서 안에서 보여 준다.
 GATE_ORDER = tuple(GATE_META)
 
-# 트윈 갈래에만 있는 사람 전용 관문(D-0128). 오리지널 관문 목록(known_gates)에는 넣지 않는다.
+# 모티브 갈래에만 있는 사람 전용 관문(D-0128). 오리지널 관문 목록(known_gates)에는 넣지 않는다.
 TWIN_GATE_META: dict[str, dict[str, Any]] = {
     "G0": {
         "kind": "sourcePack",
@@ -196,7 +196,7 @@ def known_gates() -> list[str]:
 
 
 def decision_gates() -> list[str]:
-    """결정을 받을 수 있는 관문 전체. 오리지널 관문 뒤에 트윈 전용 관문(G0·G1s)을 붙인다."""
+    """결정을 받을 수 있는 관문 전체. 오리지널 관문 뒤에 모티브 전용 관문(G0·G1s)을 붙인다."""
     return [*TWIN_GATE_META, *known_gates()]
 
 
@@ -414,7 +414,7 @@ SOURCE_LANE = {"id": "source", "label": "출처", "stages": ("s0",)}
 
 
 def graph_lanes(graph):
-    """팀 줄. 트윈은 맨 앞에 출처 팀(s0)을 두고 비교 세트(s9h)를 학습 팀에 넣는다.
+    """팀 줄. 모티브는 맨 앞에 출처 팀(s0)을 두고 비교 세트(s9h)를 학습 팀에 넣는다.
 
     캐릭터 상세의 lanes와 /api/runtime/graph가 같은 배치를 쓰도록 여기서만 정한다.
     그 캐릭터 그래프에 없는 단계는 빼고, 단계가 다 빠진 팀도 뺀다. 학습하지 않는 방식이면

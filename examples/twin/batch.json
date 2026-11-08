@@ -4,14 +4,14 @@
   "characters": [
     {
       "slug": "public-demo",
-      "origin": "twin",
+      "origin": "motif",
       "model_mode": "train",
       "source_pack": "public-pack.json",
       "until": "G8"
     },
     {
       "slug": "family-demo",
-      "origin": "twin",
+      "origin": "motif",
       "model_mode": "prompt",
       "source_pack": "family-pack.json",
       "until": "G8"

@@ -1,4 +1,4 @@
-# 트윈 두 명을 같은 공장에서 리허설하기
+# 모티브 두 명을 같은 공장에서 리허설하기
 
 목표는 SW마에스트로 최종 발표에서 손흥민 역은 학습 모델(TRAIN), 부모님 한 분의 역은 승인된 원문 말투를 담은 긴 프롬프트(PROMPT_ONLY)로 통화하는 것이에요. 아래에서 **계획 확인**까지는 공급자를 부르지 않아요. **승인 후**라고 표시한 명령은 실제 사진·대화 전송, 유료 생성, GPU 임대 또는 시연 DB 변경을 수반해요. 이번 준비에서 실제 호출이나 통화는 하지 않았어요.
 
@@ -12,7 +12,7 @@
 |---|---|
 | 사전 확인 한 번 | 설정이 없으면 이미지·영상 모두 fake, $0이에요. [예시 설정](../../factory.example.toml)의 Codex 구독 이미지는 API 추가비 추정 $0(구독 사용량은 소모), xAI lite 720p 6초는 코드 단가로 $0.19(6 × $0.03 + 입력 $0.01)예요. 실제 청구·시간은 미확인이에요. |
 | 2026-11-07 창작 캐릭터 한 명 | 후보 이미지 10장·장면 이미지 3장·영상 2편 등이 포함된 시험이에요. 기계 생성 약 20분, S3의 429 대기 1시간 27분, 시작부터 앱 대화 확인까지 2시간 56분이었어요. 영상 한 편은 720p 6초, 약 $0.84, 46초~3분 33초였어요. 이미지·영상 합계 약 $3.6은 요청에 적힌 참고값이에요. [계획 §1의 실측 표](../product/2026-11-08-real-person-track-plan.md)와 [설계 인계](../status/handoffs/handoff-2026-11-08-real-person-track.md)에서 실행 경로는 확인했지만, [검증 기록](../status/verification.md)에서 $3.6 합산 단가나 청구액은 미확인이에요. 원기록은 메인 작업 트리의 `runs/testpath/20261107-seeds-r3-signature` 아래 `seeds/images`, `scenes/s07`, `videos/s07-b3`에 있어요. |
-| 두 트윈의 제작 | [계획 §8·§13](../product/2026-11-08-real-person-track-plan.md)의 standard 2명은 S6 영상만 약 $50이라는 제안이에요. 실제 설정의 등급·해상도·모델·재시도에 따라 달라져요. S5 일반 기본은 2편 × 8초이지만 사전 확인은 1편 × 6초예요. 두 트윈의 총액·사람 대기·완주 시간은 미확인이에요. |
+| 두 모티브의 제작 | [계획 §8·§13](../product/2026-11-08-real-person-track-plan.md)의 standard 2명은 S6 영상만 약 $50이라는 제안이에요. 실제 설정의 등급·해상도·모델·재시도에 따라 달라져요. S5 일반 기본은 2편 × 8초이지만 사전 확인은 1편 × 6초예요. 두 모티브의 총액·사람 대기·완주 시간은 미확인이에요. |
 | 학습과 평가 | 예시 설정에서 학습·선별 상한은 $6, 평가 GPU 예산은 $5예요. 발표 중 모델을 띄워 두는 비용은 별도예요. 학습 시간·실제 청구는 데이터 확정 뒤 `train plan`에서 추정하고 회수 뒤 장부로 확인해요. 가족 역에는 학습 GPU를 빌리지 않아요. |
 
 명령별 기본 상한(200회·$20)은 두 캐릭터의 누적 예산이 아니에요. 한도를 넘으면 먼저 분량·등급·예산을 다시 결정해요. 호출 결과나 시간은 다른 인물이나 모델에 그대로 적용되지 않아요.
@@ -26,14 +26,14 @@ cd /Users/johnhuh619/projects/character-factory-poc-wt/twin-track
 export CFP_API_SVC_REPO=/Users/johnhuh619/projects/_wt/api-svc-twin-labels
 export CFP_CHAT_SVC_REPO=/Users/johnhuh619/projects/_wt/chat-svc-twin-models
 PHOTO='/승인받은/기준사진.png'
-uv run --locked cfp twin precheck --photo "$PHOTO"
+uv run --locked cfp motif precheck --photo "$PHOTO"
 ```
 
 출력에서 공급자·모델, 참조할 사진, 요청 수, 예상 비용과 저장 위치를 확인해요. 계획은 사진이 아직 없어도 볼 수 있어요. 실제 전송 전 해당 공급자의 실존 얼굴 이용 조건과 자료 사용 범위를 사람이 확인해요. 선택한 모델이 `fake`이면 실제 공급자의 허용 여부는 알 수 없어요.
 
 ```sh
 # 승인 후: 사진 한 장을 편집한 뒤, 그 결과로 영상 한 편을 만들어요.
-uv run --locked cfp twin precheck --photo "$PHOTO" --execute
+uv run --locked cfp motif precheck --photo "$PHOTO" --execute
 ```
 
 `--image-only`는 사진 편집만, `--video-only`는 입력 사진을 첫 프레임으로 영상만 요청해요. 두 옵션을 함께 쓸 수 없어요. 결과는 출력된 `runs/characters/precheck-…/precheck-result.json`에 남아요. `SUCCESS`는 파일 수신, `REFUSED`는 명시적 거절, `SAFETY_BLOCKED`는 정책 차단이에요. `ERROR`는 원인을 단정할 수 없는 오류이고 `SKIPPED`는 앞선 이미지가 없어 영상 제출을 건너뛴 경우예요. 정책 차단·거절이면 여기서 멈춰요. 영상 수집이 끊기면 기록의 `jobId`로 기존 작업과 청구 상태를 확인해요. 명령을 다시 실행하면 새 작업이에요. 성공해도 얼굴 유지·영상 재생·발표 사용 가능 여부는 따로 살펴봐요.

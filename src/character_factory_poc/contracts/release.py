@@ -167,7 +167,8 @@ class GateRef(Strict):
 
 class TwinRelease(Strict):
     origin: Literal["SOURCE"] = "SOURCE"
-    originLabel: Literal["트윈"] = "트윈"
+    # D-0144에서 표시 이름을 모티브로 바꿨다. 그 전에 만든 패키지의 "트윈"도 읽는다.
+    originLabel: Literal["모티브", "트윈"] = "모티브"
     sourcePackSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     subjectKind: SubjectKind
     usageScope: str

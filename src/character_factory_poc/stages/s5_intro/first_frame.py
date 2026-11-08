@@ -34,7 +34,7 @@ PROMPT = (
     "the eyes, photoreal, shot on a full-frame camera with a 50mm lens. An original person, not "
     "based on any real individual."
 )
-# 트윈(실존 인물)은 '가상 인물' 문구 대신 기준 사진의 얼굴을 그대로 지키라고만 한다.
+# 모티브(실존 인물)은 '가상 인물' 문구 대신 기준 사진의 얼굴을 그대로 지키라고만 한다.
 TWIN_TAIL = (
     "Keep the person's identity exactly as in the reference image; do not change their face "
     "or make them resemble anyone else."

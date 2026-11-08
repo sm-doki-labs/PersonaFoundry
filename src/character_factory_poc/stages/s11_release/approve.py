@@ -28,7 +28,7 @@ def approve_g9(ctx: Context, cid: str, answer: dict) -> Path:
     rev_dir = ctx.character_dir(cid) / "s11-release" / gate.rev
     if not (rev_dir / "package.json").is_file():
         raise FactoryError(f"{cid}: {gate.rev}/package.json이 없다")
-    # 순서 12(D-0126): 트윈 승인은 발표 점검 필수 항목과 사람 확인이 다 통과해야 받는다.
+    # 순서 12(D-0126): 모티브 승인은 발표 점검 필수 항목과 사람 확인이 다 통과해야 받는다.
     from character_factory_poc.stages.s11_release.presentation import guard_g9
 
     extra, note = guard_g9(ctx, cid, rev_dir, answer)

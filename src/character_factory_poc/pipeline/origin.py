@@ -26,9 +26,9 @@ SCHEMA = "character-origin-v1"
 MODE_FILE = "model-mode.json"
 MODE_SCHEMA = "model-mode-v1"
 MODE_EVENTS = "model-mode-events.jsonl"
-LABELS = {CREATED: "오리지널", SOURCE: "트윈"}
-# 명령 인자 이름 → 코드 값
-CLI_NAMES = {"original": CREATED, "twin": SOURCE}
+LABELS = {CREATED: "오리지널", SOURCE: "모티브"}
+# 명령 인자 이름 → 코드 값. twin은 D-0144 이전 이름이라 당분간 같은 뜻으로 받는다.
+CLI_NAMES = {"original": CREATED, "motif": SOURCE, "twin": SOURCE}
 MODE_CLI_NAMES = {"train": "TRAIN", "bind": "BIND_EXISTING", "prompt": "PROMPT_ONLY"}
 
 __all__ = [
@@ -60,7 +60,7 @@ def read_origin(char_dir: Path) -> str:
 
 
 def is_twin(char_dir: Path) -> bool:
-    """트윈(실존 인물 기반) 캐릭터인가. 이미지·영상 프롬프트가 '가상 인물' 문구를 뺄 때 쓴다."""
+    """모티브(실존 인물 기반) 캐릭터인가. 이미지·영상 프롬프트가 '가상 인물' 문구를 뺄 때 쓴다."""
     return read_origin(char_dir) == SOURCE
 
 

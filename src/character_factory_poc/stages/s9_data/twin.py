@@ -1,4 +1,4 @@
-"""트윈 TRAIN의 G7a·G7. 승인 원문에서 턴을 조립하며 모델을 호출하지 않는다."""
+"""모티브 TRAIN의 G7a·G7. 승인 원문에서 턴을 조립하며 모델을 호출하지 않는다."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ _OTHER_NOTE = (
 def _require(ctx: Context, cid: str, stage: str):
     char = ctx.character_dir(cid)
     if read_origin(char) != SOURCE or read_model_mode(char) != TRAIN:
-        raise FactoryError(f"{stage}: TRAIN 방식의 트윈만 원문 학습 데이터를 만든다")
+        raise FactoryError(f"{stage}: TRAIN 방식의 모티브만 원문 학습 데이터를 만든다")
     state = ctx.state(cid)
     state.require_deps(stage)
     return state
@@ -221,7 +221,7 @@ def run_s9s_twin(ctx: Context, cid: str) -> Path:
             targetTrainConversations=target,
             clusters=[cluster],
             validation=ValidationPlan(baseConversations=cfg.validation_base, augmentedShare=0),
-            guideRef="트윈 갈래 계획 §7 · G0 승인 원문",
+            guideRef="모티브 갈래 계획 §7 · G0 승인 원문",
             writerModel="",
         )
         write_once_json(folder / "plan.json", dump(plan))

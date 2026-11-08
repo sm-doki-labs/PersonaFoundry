@@ -834,7 +834,7 @@ def cmd_eval(args) -> int:
     ctx = _ctx(args)
     cid = args.character_id
     if args.sub == "import-blind":
-        # 순서 8: 가족이 블라인드 화면에서 저장한 답 파일을 열린 트윈 G8에 들여온다(호출 없음).
+        # 순서 8: 가족이 블라인드 화면에서 저장한 답 파일을 열린 모티브 G8에 들여온다(호출 없음).
         from character_factory_poc.stages.s10_eval.blind import import_blind_answers
 
         out = import_blind_answers(ctx, cid, Path(args.answers))
@@ -1316,14 +1316,17 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--new-slug", default=None, help="새 캐릭터를 만들어 시작한다")
     s.add_argument(
         "--origin",
-        choices=("original", "twin"),
+        choices=("original", "motif", "twin"),
         default=None,
-        help="갈래(D-0127). original=오리지널(창작), twin=트윈(실존). 새 캐릭터를 만들 때만 정한다",
+        help=(
+            "갈래(D-0144). original=오리지널(창작), motif=모티브(실존 인물 모티브). "
+            "twin은 예전 이름으로 motif와 같다. 새 캐릭터를 만들 때만 정한다"
+        ),
     )
     s.add_argument(
         "--source-pack",
         default=None,
-        help="트윈 출처 묶음 source-pack-v1 JSON(D-0120). 원문 경로는 이 파일 기준 상대 경로다",
+        help="모티브 출처 묶음 source-pack-v1 JSON(D-0120). 원문 경로는 이 파일 기준 상대 경로다",
     )
     s.add_argument("--until", default="G6")
     s.add_argument(
@@ -1361,7 +1364,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--model-mode",
         choices=("train", "bind", "prompt"),
         default=None,
-        help="트윈 모델 준비 방식(D-0118). train=학습, bind=학습된 모델 연결, prompt=학습 없음",
+        help="모티브 모델 준비 방식(D-0118). train=학습, bind=학습된 모델 연결, prompt=학습 없음",
     )
 
     model = sub.add_parser("model", help="모델 준비 방식·학습된 모델 연결(D-0118)").add_subparsers(
@@ -1429,7 +1432,7 @@ def _build_parser() -> argparse.ArgumentParser:
         s.add_argument("--execute", action="store_true")
         s.add_argument("--max-calls", type=int, default=None)
         s.set_defaults(fn=cmd_eval)
-    s = ev.add_parser("import-blind", help="트윈 G8: 가족 블라인드 답 파일 들여오기")
+    s = ev.add_parser("import-blind", help="모티브 G8: 가족 블라인드 답 파일 들여오기")
     s.add_argument("character_id")
     s.add_argument("answers", help="블라인드 화면에서 저장한 답 파일 경로")
     s.set_defaults(fn=cmd_eval)
@@ -1531,8 +1534,11 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("character_id")
     s.set_defaults(fn=cmd_verify)
 
-    twin = sub.add_parser("twin").add_subparsers(dest="sub", required=True)
-    s = twin.add_parser("precheck", help="기준 사진으로 이미지·영상 한 건씩 확인해요")
+    # D-0144: 모티브 갈래 명령. 예전 이름 twin도 같은 명령으로 받는다.
+    motif = sub.add_parser("motif", aliases=["twin"], help="모티브 갈래 도구").add_subparsers(
+        dest="sub", required=True
+    )
+    s = motif.add_parser("precheck", help="기준 사진으로 이미지·영상 한 건씩 확인해요")
     s.add_argument("--photo", type=Path, required=True, help="기준 사진 경로를 넣어 주세요")
     kinds = s.add_mutually_exclusive_group()
     kinds.add_argument("--image-only", action="store_true", help="이미지만 확인해요")

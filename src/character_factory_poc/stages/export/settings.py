@@ -14,7 +14,7 @@ from pathlib import Path
 from character_factory_poc.pipeline.context import Context
 
 # 대상 저장소의 적재 스키마. 실제 head와 다르면 적재 전에 멈춘다(LLD §8.11).
-# 트윈 표시 칸(disclosure_label·call_start_label)은 api-svc 194부터, 캐릭터별 대화 모델은
+# 모티브 표시 칸(disclosure_label·call_start_label)은 api-svc 194부터, 캐릭터별 대화 모델은
 # chat-svc codex/per-character-dialogue-model 브랜치(0030 위)부터 받는다(D-0142).
 API_SVC_HEAD = "194_twin_demo_labels"
 CHAT_SVC_HEAD = "0030_projection_gap_backoff"

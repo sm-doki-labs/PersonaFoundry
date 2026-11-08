@@ -1,4 +1,4 @@
-"""트윈 모델 연결·비교 세트·비학습 G8. 실제 자료나 네트워크를 사용하지 않는다."""
+"""모티브 모델 연결·비교 세트·비학습 G8. 실제 자료나 네트워크를 사용하지 않는다."""
 
 from __future__ import annotations
 
@@ -113,7 +113,7 @@ def test_mode_and_origin_checked_before_read(target, tmp_path):
     ctx, char = target
     write_model_mode(char, PROMPT_ONLY)
     for cid in ("t", "original"):
-        with pytest.raises(FactoryError, match="트윈.*BIND_EXISTING"):
+        with pytest.raises(FactoryError, match="모티브.*BIND_EXISTING"):
             import_binding(ctx, cid, tmp_path / "missing")
 
 

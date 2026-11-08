@@ -74,7 +74,7 @@ NEUTRAL_NEGATIVE = "smile, text, watermark, logo, hand on face"
 
 
 def neutral_prompt(*, twin: bool = False) -> str:
-    """무표정 첫 프레임 지시. 트윈(실존 인물)은 '가상 인물' 문장을 빼고 얼굴 유지만 말한다."""
+    """무표정 첫 프레임 지시. 모티브(실존 인물)은 '가상 인물' 문장을 빼고 얼굴 유지만 말한다."""
     if not twin:
         return NEUTRAL_PROMPT
     return NEUTRAL_PROMPT.replace(

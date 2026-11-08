@@ -36,7 +36,7 @@ STAGE_PROVIDERS: dict[str, frozenset[str]] = {
     "s10": frozenset({"text", "judge"}),
     "s11": frozenset(),
     "sx": frozenset(),
-    # 트윈 갈래(D-0128). s0은 출처 정리 에이전트가 텍스트 모델을 쓴다. s9h는 원문만 다룬다(제안).
+    # 모티브 갈래(D-0128). s0은 출처 정리 에이전트가 텍스트 모델을 쓴다. s9h는 원문만 다룬다(제안).
     "s0": frozenset({"text"}),
     "s9h": frozenset(),
 }
@@ -134,7 +134,7 @@ def run_waves(ctx: Context, cid: str, opt) -> object:
     origin = read_origin(ctx.character_dir(cid))
     mode = read_model_mode(ctx.character_dir(cid))
     runners = _stage_runners(ctx, cid, opt)
-    # 외모 축의 s3 ← s2 선행은 오리지널에만 있다. 트윈의 s3는 G0만 기다린다(D-0128).
+    # 외모 축의 s3 ← s2 선행은 오리지널에만 있다. 모티브의 s3는 G0만 기다린다(D-0128).
     extra = extra_needs_for(origin == CREATED and _appearance_axis(ctx, cid, opt))
     scope: list[str] = []
     for sid in until_scope(opt.until, origin, mode):

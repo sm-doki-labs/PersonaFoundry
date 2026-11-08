@@ -17,7 +17,7 @@ HANDS = (
 )
 
 
-# 트윈은 실존 인물이 기준 사진에 있다. '가상 인물'이라고 적으면 기준 사진과 어긋난 얼굴을 만든다.
+# 모티브는 실존 인물이 기준 사진에 있다. '가상 인물'이라고 적으면 기준 사진과 어긋난 얼굴을 만든다.
 TWIN_IDENTITY = (
     "Keep the person's identity exactly as in reference image 1; do not change their face "
     "or make them resemble anyone else."

@@ -1,4 +1,4 @@
-"""트윈 S3의 인용 검증과 기존 G3 선택 경로. 모든 발화는 합성 자료다."""
+"""모티브 S3의 인용 검증과 기존 G3 선택 경로. 모든 발화는 합성 자료다."""
 
 from __future__ import annotations
 
@@ -126,7 +126,7 @@ def _answer(req):
 
 def test_origin_and_g0_before_any_agent(tmp_path):
     ctx, model = _ctx(tmp_path)
-    with pytest.raises(FactoryError, match="트윈"):
+    with pytest.raises(FactoryError, match="모티브"):
         run_s3_twin(ctx, "original")
     cid = _twin(ctx)
     with pytest.raises(GateNotApprovedError, match="G0"):

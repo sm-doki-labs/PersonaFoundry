@@ -115,7 +115,7 @@ def import_binding(
 ) -> Path:
     char_dir = ctx.character_dir(cid)
     if read_origin(char_dir) != SOURCE or read_model_mode(char_dir) != BIND_EXISTING:
-        raise FactoryError("이미 학습된 모델은 트윈의 BIND_EXISTING 모드에서만 연결할 수 있다")
+        raise FactoryError("이미 학습된 모델은 모티브의 BIND_EXISTING 모드에서만 연결할 수 있다")
     try:
         raw = read_json(binding_path)
     except (OSError, ValueError):
