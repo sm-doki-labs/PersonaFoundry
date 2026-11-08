@@ -14,7 +14,13 @@ from typing import Any
 
 from character_factory_poc.common.config import load_config
 from character_factory_poc.common.ledger import Ledger
-from character_factory_poc.pipeline.graph import GATES, STAGES
+from character_factory_poc.pipeline.graph import CREATED, GATES, STAGES, gates_for
+from character_factory_poc.pipeline.origin import (
+    graph_for_dir,
+    origin_label,
+    read_model_mode,
+    read_origin,
+)
 from character_factory_poc.pipeline.queue import gate_queue
 from character_factory_poc.pipeline.review import load_review
 from character_factory_poc.pipeline.rework import rework_status
@@ -39,6 +45,7 @@ _TEXT_SUFFIXES = {".md", ".txt", ".log"}
 
 # 단계 폴더 이름 (각 단계 run.py가 쓰는 값). S9~S11은 LLD §5.14·§5.15·§5.17의 저장 위치다.
 STAGE_DIRS = {
+    "s0": "s0-source",
     "s1": "s1-reference",
     "s2": "s2-hero",
     "s3": "s3-plan",
@@ -59,6 +66,8 @@ STAGE_DIRS = {
 }
 
 GATE_TITLES = {
+    "G0": "출처 묶음 승인",
+    "G1s": "기준 사진 선택",
     "G1": "얼굴 고르기",
     "G2": "대표 이미지 선택(결번)",
     "G3": "기획안 고르기",
@@ -152,6 +161,22 @@ GATE_META: dict[str, dict[str, Any]] = {
 # 화면에 보이는 관문 순서. 그래프에 아직 없는 관문도 이 순서 안에서 보여 준다.
 GATE_ORDER = tuple(GATE_META)
 
+# 트윈 갈래에만 있는 사람 전용 관문(D-0128). 오리지널 관문 목록(known_gates)에는 넣지 않는다.
+TWIN_GATE_META: dict[str, dict[str, Any]] = {
+    "G0": {
+        "kind": "sourcePack",
+        "stage": "s0",
+        "connected": True,
+        "decisions": ("APPROVE", "REQUEST_CHANGES", "REJECT"),
+    },
+    "G1s": {
+        "kind": "sourcePhotos",
+        "stage": "s2",
+        "connected": True,
+        "decisions": ("SELECT", "APPROVE", "REQUEST_CHANGES", "REJECT"),
+    },
+}
+
 # 화면의 갈래(팀) 묶음. d-ops 시안의 병렬 작업 표시와 같은 나눔이다.
 LANES = [
     {"id": "appearance", "label": "외모", "stages": ("s1", "s2")},
@@ -170,11 +195,30 @@ def known_gates() -> list[str]:
     return [gate for gate in GATE_ORDER if gate in GATES or gate in GATE_META]
 
 
+def decision_gates() -> list[str]:
+    """결정을 받을 수 있는 관문 전체. 오리지널 관문 뒤에 트윈 전용 관문(G0·G1s)을 붙인다."""
+    return [*TWIN_GATE_META, *known_gates()]
+
+
 def gate_meta(gate: str) -> dict[str, Any]:
-    meta = GATE_META.get(gate)
+    meta = GATE_META.get(gate) or TWIN_GATE_META.get(gate)
     if meta is None:
         raise WebError(404, f"관문이 없다: {gate}({', '.join(known_gates())} 중 하나다)")
     return {"gate": gate, "title": GATE_TITLES.get(gate, gate), **meta}
+
+
+# 비교 세트 원문과 정답 키가 든 파일. 화면 파일 목록·파일 열기 어디에도 내보내지 않는다(D-0120).
+_TWIN_DEMO_RE = re.compile(r"^twin-demo-([a-f0-9]{32})\.html$")
+
+
+def private_file(path: Path) -> bool:
+    """비교 세트 원문(holdout.jsonl·s9h 장면), 가족 판정 전 시연 화면(실제 답이 드러난다)."""
+    if path.name == "holdout.jsonl":
+        return True
+    if path.name == "scenes.jsonl" and "s9h-holdout" in path.parts:
+        return True
+    demo = _TWIN_DEMO_RE.match(path.name)
+    return bool(demo) and not (path.parent / f"twin-votes-{demo.group(1)}.json").is_file()
 
 
 def now_iso() -> str:
@@ -353,11 +397,75 @@ def _add_times(char_dir: Path, stages: list[dict[str, Any]], gates: list[dict[st
         row["decidedAt"] = times.get("decidedAt")
 
 
-def _stage_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
+def graph_parts(char_dir):
+    graph = graph_for_dir(char_dir)
+    origin = read_origin(char_dir)
+    attached = {stage.gate for stage in graph.values()}
+    gates = [gid for gid in gates_for(origin) if gid in attached]
+    metadata = {
+        "origin": origin,
+        "originLabel": origin_label(origin),
+        "modelMode": read_model_mode(char_dir),
+    }
+    return graph, gates, metadata
+
+
+SOURCE_LANE = {"id": "source", "label": "출처", "stages": ("s0",)}
+
+
+def graph_lanes(graph):
+    """팀 줄. 트윈은 맨 앞에 출처 팀(s0)을 두고 비교 세트(s9h)를 학습 팀에 넣는다.
+
+    캐릭터 상세의 lanes와 /api/runtime/graph가 같은 배치를 쓰도록 여기서만 정한다.
+    그 캐릭터 그래프에 없는 단계는 빼고, 단계가 다 빠진 팀도 뺀다. 학습하지 않는 방식이면
+    학습 팀 이름은 '평가'다.
+    """
+    if "s0" not in graph:
+        return LANES
+    lanes = []
+    for lane in [SOURCE_LANE, *LANES]:
+        ids = ("s9h", *lane["stages"]) if lane["id"] == "training" else lane["stages"]
+        kept = [sid for sid in ids if sid in graph]
+        if kept:
+            label = "평가" if lane["id"] == "training" and "s10t" not in graph else lane["label"]
+            lanes.append({**lane, "label": label, "stages": kept})
+    return lanes
+
+
+def _twin_queue(graph, stages, pending):
+    # 큐의 unblocks는 승인 한 번으로 바로 실행 가능한 수가 아니라 하류 미완료 단계 수다.
+    done = {s["id"] for s in stages if s["status"] in DONE_STATUSES}
+    queue = []
+    for gate in pending:
+        reached = {gate["id"]}
+        while True:
+            before = len(reached)
+            for sid, stage in graph.items():
+                if (stage.deps | stage.needs | stage.after) & reached:
+                    reached.add(sid)
+                    if stage.gate:
+                        reached.add(stage.gate)
+            if len(reached) == before:
+                break
+        downstream = [sid for sid in graph if sid in reached and sid not in done]
+        queue.append(
+            {
+                "gate": gate["id"],
+                "stage": next(s for s in graph if graph[s].gate == gate["id"]),
+                "rev": gate["rev"],
+                "openedAt": gate["openedAt"],
+                "unblocks": len(downstream),
+                "unblockedStages": downstream,
+            }
+        )
+    return sorted(queue, key=lambda q: (-q["unblocks"], q["openedAt"] or "~"))
+
+
+def _stage_rows(state: dict[str, Any], graph=STAGES) -> list[dict[str, Any]]:
     raw_stages = state.get("stages") if isinstance(state.get("stages"), dict) else {}
     raw_gates = state.get("gates") if isinstance(state.get("gates"), dict) else {}
     rows: list[dict[str, Any]] = []
-    for stage_id, stage in STAGES.items():
+    for stage_id, stage in graph.items():
         raw = raw_stages.get(stage_id) if isinstance(raw_stages.get(stage_id), dict) else {}
         gate_raw = raw_gates.get(stage.gate) if isinstance(raw_gates.get(stage.gate), dict) else {}
         rows.append(
@@ -379,10 +487,10 @@ def _stage_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def _gate_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
+def _gate_rows(state: dict[str, Any], gates=GATES) -> list[dict[str, Any]]:
     raw_gates = state.get("gates") if isinstance(state.get("gates"), dict) else {}
     rows: list[dict[str, Any]] = []
-    for gate in GATES:
+    for gate in gates:
         raw = raw_gates.get(gate) if isinstance(raw_gates.get(gate), dict) else {}
         rows.append(
             {
@@ -439,23 +547,29 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
     char_dir = Path(char_dir)
     cid = char_dir.name
     state, error = read_state(char_dir)
-    stages = _stage_rows(state)
-    gates = _gate_rows(state)
+    graph, gate_ids, meta = graph_parts(char_dir)
+    stages = _stage_rows(state, graph)
+    gates = _gate_rows(state, gate_ids)
     _add_times(char_dir, stages, gates)
     persona = _persona(char_dir)
     pending = [g for g in gates if g["status"] == "AWAITING_HUMAN"]
     return {
         "id": cid,
         "kind": "character",
+        **meta,
         "name": (persona or {}).get("name") or cid,
         "persona": persona,
         "dir": f"{CHARACTERS_DIR}/{cid}",
         "stateError": error,
         "stages": stages,
         "gates": gates,
-        "lanes": _lanes(stages),
+        "lanes": _lanes(stages, graph_lanes(graph)),
         "pendingGates": pending,
-        "queue": [item.as_dict() for item in gate_queue(char_dir, state)],
+        "queue": (
+            [item.as_dict() for item in gate_queue(char_dir, state)]
+            if meta["origin"] == CREATED
+            else _twin_queue(graph, stages, pending)
+        ),
         "progress": _progress(stages),
         "awaitingHuman": bool(pending),
         "updatedAt": _mtime_iso(char_dir / "state.json"),
@@ -477,10 +591,10 @@ def _lane_status(items: list[dict[str, Any]]) -> str:
     return "pending"
 
 
-def _lanes(stages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _lanes(stages: list[dict[str, Any]], lanes=LANES) -> list[dict[str, Any]]:
     by_id = {s["id"]: s for s in stages}
     out: list[dict[str, Any]] = []
-    for lane in LANES:
+    for lane in lanes:
         items = [by_id[sid] for sid in lane["stages"] if sid in by_id]
         done = [s for s in items if s["status"] in DONE_STATUSES]
         out.append(
@@ -518,13 +632,14 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
     state, error = read_state(char_dir)
     summary = character_summary(char_dir)
     timeline = stage_timeline(char_dir)
-    history = {sid: timeline[sid]["attempts"] for sid in STAGES if sid in timeline}
+    history = {sid: timeline[sid]["attempts"] for sid in graph_for_dir(char_dir) if sid in timeline}
     return {
         "id": character_id,
         "dir": f"{CHARACTERS_DIR}/{character_id}",
         "state": state,
         "stateError": error,
         "summary": summary,
+        **{k: summary[k] for k in ("origin", "originLabel", "modelMode")},
         "persona": summary["persona"],
         "stages": summary["stages"],
         "gates": summary["gates"],
@@ -606,7 +721,10 @@ def gate_view(root: Path, character_id: str, gate: str) -> dict[str, Any]:
     state, error = read_state(char_dir)
     raw_gates = state.get("gates") if isinstance(state.get("gates"), dict) else {}
     raw_gate = raw_gates.get(gate) if isinstance(raw_gates.get(gate), dict) else {}
-    gate_row = next((g for g in _gate_rows(state) if g["id"] == gate), None)
+    graph, gates, metadata = graph_parts(char_dir)
+    if gate not in gates:
+        raise WebError(404, f"이 캐릭터에 없는 관문이다: {gate}")
+    gate_row = next((g for g in _gate_rows(state, gates) if g["id"] == gate), None)
     if gate_row is None:
         gate_row = {
             "id": gate,
@@ -617,14 +735,16 @@ def gate_view(root: Path, character_id: str, gate: str) -> dict[str, Any]:
         }
     stage_id = meta["stage"]
     stage_dir = STAGE_DIRS.get(stage_id, stage_id)
-    stage_row = next((s for s in _stage_rows(state) if s["id"] == stage_id), None)
+    stage_row = next((s for s in _stage_rows(state, graph) if s["id"] == stage_id), None)
     rev = gate_row["rev"]
     rev_dir: Path | None = None
     if rev:
         candidate = char_dir / stage_dir / rev
         if candidate.is_dir():
             rev_dir = candidate
-    files = [_file_entry(char_dir, p) for p in _iter_files(rev_dir, MAX_FILES)]
+    files = [
+        _file_entry(char_dir, p) for p in _iter_files(rev_dir, MAX_FILES) if not private_file(p)
+    ]
     records = gate_records(char_dir, gate)
     record_ref = gate_row["recordRef"] or raw_gate.get("recordRef")
     current = read_json_file(char_dir / str(record_ref)) if record_ref else None
@@ -638,6 +758,17 @@ def gate_view(root: Path, character_id: str, gate: str) -> dict[str, Any]:
         stage_dir=stage_dir,
         rev=rev,
     )
+    if (
+        gate == "G8"
+        and metadata["modelMode"] == "BIND_EXISTING"
+        and items.get("viewKind") == "promptOnly"
+    ):
+        # 값은 승인 기록의 실제 참조다. 화면용 문구와 분리해 결정 본문으로 그대로 보낸다.
+        options = items.get("adoptOptions", [])
+        if len(options) == 1:
+            items.update(
+                title="연결한 모델 채택", adoptLabel="연결한 모델로 진행", adoptTarget=options[0]
+            )
     missing = list(items.get("problems", []))
     if meta["connected"] and rev_dir is None:
         missing.append(
@@ -648,6 +779,7 @@ def gate_view(root: Path, character_id: str, gate: str) -> dict[str, Any]:
     review = load_review(char_dir, gate, rev) if rev else None
     return {
         "characterId": character_id,
+        **metadata,
         "gate": gate,
         "title": items.get("title") or meta["title"],
         "kind": items.get("viewKind") or meta["kind"],
@@ -685,6 +817,8 @@ def resolve_file(root: Path, character_id: str, rel: str) -> Path:
         raise WebError(400, "캐릭터 폴더 밖의 파일은 열 수 없다")
     if not target.is_file():
         raise WebError(404, f"파일이 없다: {rel}")
+    if private_file(target):
+        raise WebError(403, "비교 세트 원문이나 가족 판정 전 시연 화면은 화면에서 열 수 없다")
     return target
 
 
@@ -776,7 +910,11 @@ def health_snapshot(root: Path) -> dict[str, Any]:
                 continue
             characters += 1
             state, _ = read_state(folder)
-            pending += sum(1 for g in _gate_rows(state) if g["status"] == "AWAITING_HUMAN")
+            pending += sum(
+                1
+                for g in _gate_rows(state, graph_parts(folder)[1])
+                if g["status"] == "AWAITING_HUMAN"
+            )
     briefs = (
         sum(1 for p in briefs_dir.iterdir() if p.is_dir() and not p.name.startswith("."))
         if briefs_dir.is_dir()
@@ -791,6 +929,7 @@ def state_signature(root: Path, character_id: str) -> str:
     state, _ = read_state(char_dir)
     raw_stages = state.get("stages") if isinstance(state.get("stages"), dict) else {}
     raw_gates = state.get("gates") if isinstance(state.get("gates"), dict) else {}
+    graph, gates, _ = graph_parts(char_dir)
     payload = {
         # D-0101: 같은 RUNNING으로 다시 들어간 재시도와 새 revision도 화면에 알린다.
         "stages": {
@@ -799,11 +938,11 @@ def state_signature(root: Path, character_id: str) -> str:
                 _field(raw_stages.get(sid), "attempts"),
                 _field(raw_stages.get(sid), "currentRev"),
             ]
-            for sid in STAGES
+            for sid in graph
         },
         "gates": {
             gid: [_field(raw_gates.get(gid), "status"), _field(raw_gates.get(gid), "rev")]
-            for gid in GATES
+            for gid in gates
         },
     }
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)

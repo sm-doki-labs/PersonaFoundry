@@ -91,3 +91,96 @@ STAGES: dict[str, Stage] = {
 # G2는 결번이다(D-0042). 옛 state.json의 G2 칸은 읽기만 하고 쓰지 않는다.
 GATES = ["G1", "G3", "G4a", "G4b", "G4", "G5", "G5b", "G6", "G7a", "G7", "G8", "G9"]
 RETIRED_GATES = {"G2": "G2는 결번이다(D-0042). 외모는 G1에서 한 번 고르고 S2가 자동으로 고정한다"}
+
+# --- 갈래(D-0116, D-0127, D-0128) ---------------------------------------------------------
+# 출신 코드 값. 표시 이름은 오리지널(CREATED)·트윈(SOURCE)이다.
+CREATED = "CREATED"
+SOURCE = "SOURCE"
+ORIGINS = (CREATED, SOURCE)
+
+# 트윈 갈래는 앞단만 다르다. s1은 없고, s0(출처 묶음)·s9h(비교 세트)가 더해지며, s2·s3는 같은
+# 단계 ID의 트윈 판이다. 뒤쪽 단계는 오리지널과 같은 정의를 쓰므로 의존과 산출물 계약이 같다.
+# 구현 전 단계는 implemented=False로 두어 실행 목록에 들지 않는다(계획 §12 순서 2~6).
+_TWIN_FRONT = {
+    "s0": Stage("s0", "출처 묶음", gate="G0", implemented=True),
+    "s2": Stage("s2", "기준 사진", deps=frozenset({"G0"}), gate="G1s", implemented=True),
+    "s3": Stage("s3", "캐릭터 기획", deps=frozenset({"G0"}), gate="G3", implemented=True),
+    "s9h": Stage("s9h", "비교 세트", deps=frozenset({"G0"}), implemented=True),
+}
+
+
+def _twin_stages() -> dict[str, Stage]:
+    out: dict[str, Stage] = {"s0": _TWIN_FRONT["s0"]}
+    for sid, stage in STAGES.items():
+        if sid == "s1":
+            continue
+        out[sid] = _TWIN_FRONT.get(sid, stage)
+        if sid == "s9":
+            out["s9h"] = _TWIN_FRONT["s9h"]
+    return out
+
+
+TWIN_STAGES: dict[str, Stage] = _twin_stages()
+TWIN_GATES = ["G0", "G1s", *[g for g in GATES if g != "G1"]]
+
+# 모델 준비 방식(D-0118). 트윈이 학습하지 않는 방식이면 학습 데이터·학습 단계를 빼고, 평가(s10)는
+# 대화 프롬프트 승인(G6)과 비교 세트(s9h)를 기다린다. TRAIN이면 학습 뒤에 비교 세트도 기다린다.
+TRAIN = "TRAIN"
+BIND_EXISTING = "BIND_EXISTING"
+PROMPT_ONLY = "PROMPT_ONLY"
+MODES = (TRAIN, BIND_EXISTING, PROMPT_ONLY)
+_NO_TRAIN_STAGES = frozenset({"s9s", "s9", "s10t"})
+
+
+def _twin_mode_stages(mode: str) -> dict[str, Stage]:
+    out: dict[str, Stage] = {}
+    for sid, stage in TWIN_STAGES.items():
+        if mode != TRAIN and sid in _NO_TRAIN_STAGES:
+            continue
+        if sid == "s10":
+            if mode == TRAIN:
+                stage = Stage(
+                    "s10",
+                    stage.name,
+                    deps=stage.deps,
+                    after=frozenset({"s10t", "s9h"}),
+                    gate=stage.gate,
+                    implemented=stage.implemented,
+                )
+            else:
+                stage = Stage(
+                    "s10",
+                    stage.name,
+                    deps=frozenset({"G6"}),
+                    after=frozenset({"s9h"}),
+                    gate=stage.gate,
+                    implemented=stage.implemented,
+                )
+        out[sid] = stage
+    return out
+
+
+TWIN_MODE_STAGES: dict[str, dict[str, Stage]] = {m: _twin_mode_stages(m) for m in MODES}
+# 어느 갈래에든 있는 단계·관문 이름(--until 검사용)
+ALL_STAGE_IDS = frozenset(STAGES) | frozenset(TWIN_STAGES)
+ALL_GATES = frozenset(GATES) | frozenset(TWIN_GATES)
+
+
+def stages_for(origin: str, mode: str = TRAIN) -> dict[str, Stage]:
+    """그 갈래·모델 준비 방식의 단계 그래프(STAGES 순서). 오리지널은 STAGES 그 자체다."""
+    if mode not in MODES:
+        raise ValueError(f"알 수 없는 모델 준비 방식: {mode}")
+    if origin == SOURCE:
+        return TWIN_MODE_STAGES[mode]
+    if origin != CREATED:
+        raise ValueError(f"알 수 없는 출신: {origin}")
+    return STAGES
+
+
+def gates_for(origin: str) -> list[str]:
+    """그 갈래의 관문 순서. 오리지널은 GATES 그 자체다."""
+    if origin == SOURCE:
+        return TWIN_GATES
+    if origin != CREATED:
+        raise ValueError(f"알 수 없는 출신: {origin}")
+    return GATES

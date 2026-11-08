@@ -24,6 +24,7 @@ from character_factory_poc.providers.base import (
     VisionRequest,
     VisionResult,
 )
+from character_factory_poc.providers.tracked import native_retry_sleep
 
 OPENAI_HOST = "api.openai.com"
 GEMINI_HOST = "generativelanguage.googleapis.com"
@@ -159,7 +160,9 @@ def _send(
                 return data, int((time.monotonic() - t0) * 1000)
         if attempt >= max_retries:
             break
-        sleep(delay)
+        native_retry_sleep(
+            sleep, delay, getattr(getattr(last_exc, "response", None), "status_code", None)
+        )
         delay *= 2
     raise _transport_error(last_exc, failure) from last_exc
 
@@ -266,7 +269,9 @@ def _send_stream(
             last_exc = e
         if attempt >= max_retries:
             break
-        sleep(delay)
+        native_retry_sleep(
+            sleep, delay, getattr(getattr(last_exc, "response", None), "status_code", None)
+        )
         delay *= 2
     raise _transport_error(last_exc, failure) from last_exc
 

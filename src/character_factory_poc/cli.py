@@ -538,6 +538,23 @@ def cmd_plan_draft(args) -> int:
     return 0
 
 
+def cmd_batch_run(args) -> int:
+    from character_factory_poc.pipeline.batch import run_batch
+
+    ctx = Context.load(_root(args), execute=args.execute)
+    try:
+        report = run_batch(ctx, Path(args.spec))
+    except (ValueError, OSError) as exc:
+        print(f"배치 입력 오류: {exc}", file=sys.stderr)
+        return 1
+    if report.batchId is None:
+        print("dry run: --execute가 있어야 실행한다")
+    print(report.table())
+    if report.batchId:
+        print(ctx.config.runs_dir / "batches" / report.batchId / "batch-report.json")
+    return int(any(row.status == "failed" for row in report.characters))
+
+
 def cmd_run(args) -> int:
     from character_factory_poc.pipeline.orchestrator import (
         RunOptions,
@@ -563,6 +580,7 @@ def cmd_run(args) -> int:
         ),
         verify_export=args.verify_export,
         submit_training=args.submit_training,
+        source_pack=Path(args.source_pack) if getattr(args, "source_pack", None) else None,
         max_parallel=(
             args.parallel
             if args.parallel is not None
@@ -582,11 +600,57 @@ def cmd_run(args) -> int:
             print("  s1 순위 목록: --ranking 지정됨. 호출 계획은 cfp ref run의 dry run 참조")
         return 0
     cid = args.character_id
+    from character_factory_poc.pipeline.origin import (
+        CLI_NAMES,
+        origin_label,
+        read_origin,
+        write_origin,
+    )
+
+    origin_arg = getattr(args, "origin", None)
     if args.new_slug:
         cid = new_character(ctx, args.new_slug)
-        print(f"새 캐릭터: {cid}")
+        origin = CLI_NAMES[origin_arg or "original"]
+        write_origin(ctx.character_dir(cid), origin)
+        print(f"새 캐릭터: {cid} ({origin_label(origin)})")
+        mode_arg = getattr(args, "model_mode", None)
+        if mode_arg:
+            from character_factory_poc.pipeline.origin import MODE_CLI_NAMES, write_model_mode
+
+            write_model_mode(ctx.character_dir(cid), MODE_CLI_NAMES[mode_arg], reason="cfp run")
+            print(f"모델 준비 방식: {MODE_CLI_NAMES[mode_arg]}")
+    elif origin_arg and read_origin(ctx.character_dir(cid)) != CLI_NAMES[origin_arg]:
+        raise SystemExit("출신은 새 캐릭터를 만들 때만 정한다(--new-slug와 함께)")
     log = run_until(ctx, cid, opt)
     print(f"멈춘 곳: {log.stopped_at}")
+    return 0
+
+
+def cmd_model(args) -> int:
+    """모델 준비 방식(D-0118). mode: 방식 정하기, bind: 이미 학습된 모델 연결 기록 들여오기."""
+    from character_factory_poc.pipeline.origin import (
+        MODE_CLI_NAMES,
+        read_model_mode,
+        write_model_mode,
+    )
+
+    ctx = Context.load(_root(args), execute=getattr(args, "execute", False))
+    char_dir = ctx.character_dir(args.character_id)
+    if not char_dir.exists():
+        raise SystemExit(f"캐릭터가 없다: {args.character_id}")
+    if args.model_action == "mode":
+        if args.mode is None:
+            print(read_model_mode(char_dir))
+            return 0
+        if ctx.state(args.character_id).stage("s10").status == "APPROVED":
+            raise SystemExit("평가(G8)가 이미 승인돼 방식을 바꿀 수 없다. 새 판으로 다시 돈다")
+        write_model_mode(char_dir, MODE_CLI_NAMES[args.mode], reason=args.reason or "")
+        print(f"{args.character_id}: {read_model_mode(char_dir)}")
+        return 0
+    from character_factory_poc.stages.model_prep.bind import import_binding
+
+    out = import_binding(ctx, args.character_id, Path(args.binding))
+    print(f"모델 연결 기록: {out}")
     return 0
 
 
@@ -769,6 +833,13 @@ def cmd_eval(args) -> int:
 
     ctx = _ctx(args)
     cid = args.character_id
+    if args.sub == "import-blind":
+        # 순서 8: 가족이 블라인드 화면에서 저장한 답 파일을 열린 트윈 G8에 들여온다(호출 없음).
+        from character_factory_poc.stages.s10_eval.blind import import_blind_answers
+
+        out = import_blind_answers(ctx, cid, Path(args.answers))
+        print(f"가족 판정 들여옴: {out}")
+        return 0
     if args.sub == "prereg":
         built = prereg.build_prereg(ctx, cid)
         print(f"사전 등록: {built.rev_dir} (sha256 {built.sha256[:12]}…)")
@@ -818,9 +889,193 @@ def cmd_web(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    return _build_parser()
+
+
+def cmd_testpath_seeds(args) -> int:
+    """시험 경로 2번. --execute 없이는 무엇을 부를지만 출력한다."""
+    from character_factory_poc.common.api_routes import FAMILY_DEFAULTS
+    from character_factory_poc.common.config import load_env_file
+    from character_factory_poc.providers.openai_compat import OpenAICompatTextModel
+    from character_factory_poc.testpath import seeds as sd
+    from character_factory_poc.testpath.image_api import OpenAIImagesClient
+
+    root = _root(args)
+    load_env_file(root / ".env")
+    run_dir = Path(args.run)
+    if not run_dir.is_absolute():
+        run_dir = root / run_dir
+    cfg = sd.SeedRunConfig(
+        run_dir=run_dir,
+        total=args.total,
+        image_quality=args.quality,
+        look=args.look,
+        signatures=not args.no_signatures,
+    )
+    if args.gemini_route == "relay":
+        cfg.tag_models["gemini"] = ("relay", "google-antigravity/gemini-4-argon")
+    order = sd.STEPS[: sd.STEPS.index(args.until) + 1]
+    if not args.execute:
+        print("dry run. 실행할 단계:", ", ".join(order))
+        print("태깅 모델:", ", ".join(f"{k}={m}" for k, (_, m) in cfg.tag_models.items()))
+        print(f"이미지: gpt-image-2.6-sunburst {cfg.image_size} {cfg.image_quality} × {cfg.total}")
+        return 0
+    routes = {**FAMILY_DEFAULTS, "relay": sd.RELAY}
+    models = {
+        key: OpenAICompatTextModel(
+            base_url=routes[family]["base_url"],
+            model=model,
+            api_key_env=routes[family]["api_key_env"],
+            timeout=600,
+            max_retries=2,
+            stream=family != "relay",
+        )
+        for key, (family, model) in cfg.tag_models.items()
+    }
+    if "people" in order:
+        sd.step_people(cfg)
+    if "tags" in order:
+        sd.step_tags(cfg, models)
+    if "clusters" in order:
+        sd.step_clusters(cfg)
+    if "prompts" in order:
+        sd.step_prompts(cfg)
+    if "images" in order:
+        sd.step_images(cfg, OpenAIImagesClient())
+        sd.contact_sheet(cfg)
+    print(json.dumps(sd.summary(cfg), ensure_ascii=False, indent=2))
+    return 0
+
+
+def _testpath_run(args) -> Path:
+    from character_factory_poc.common.config import load_env_file
+
+    root = _root(args)
+    load_env_file(root / ".env")
+    run_dir = Path(args.run)
+    return run_dir if run_dir.is_absolute() else root / run_dir
+
+
+def _seed_entry(run_dir: Path, seed: str) -> dict:
+    plan = json.loads((run_dir / "seeds" / "plan.json").read_text("utf-8"))
+    return next(s for s in plan["seeds"] if s["seedId"] == seed)
+
+
+def _signature_en(tags: dict) -> str | None:
+    from character_factory_poc.testpath.vocab2 import load_vocab2
+
+    values = load_vocab2().get("signatureFeatures", {}).get("values", [])
+    return next((v["en"] for v in values if v["key"] == tags.get("signature")), None)
+
+
+def cmd_testpath_bundles(args) -> int:
+    """3번: 고른 시드 얼굴을 보고 배경·의상 묶음을 추천받는다."""
+    from character_factory_poc.common.api_routes import FAMILY_DEFAULTS
+    from character_factory_poc.providers.openai_compat import OpenAICompatVisionModel
+    from character_factory_poc.testpath import scenes
+
+    run_dir = _testpath_run(args)
+    seed = _seed_entry(run_dir, args.seed)
+    image = run_dir / "seeds" / "images" / f"{args.seed}.png"
+    out = run_dir / "bundles" / args.seed / "bundles.json"
+    if not args.execute:
+        print(f"dry run: {args.model}에 {image.name}와 묶음 {args.count}개 요청")
+        return 0
+    fam = FAMILY_DEFAULTS["openai"]
+    model = OpenAICompatVisionModel(
+        fam["base_url"], args.model, fam["api_key_env"], timeout=600, max_retries=2
+    )
+    res = model.judge(scenes.bundle_request(seed["tags"], image, args.count))
+    bundles = scenes.parse_bundles(res.text, args.count)
+    scenes._write(
+        out, {"seedId": args.seed, "model": res.model, "usage": res.usage, "bundles": bundles}
+    )
+    for b in bundles:
+        print(f"{b['id']} [{b['chapter']}/{b['contextKind']}/{b['timeOfDay']}] {b['title']}")
+        print(f"    배경: {b['background']['ko']}")
+        print(f"    의상: {b['outfit']['ko']}")
+    return 0
+
+
+def cmd_testpath_scenes(args) -> int:
+    """4번: 고른 묶음으로 같은 얼굴의 영상용 시드 이미지(9:16)를 만든다."""
+    from character_factory_poc.testpath import scenes
+    from character_factory_poc.testpath.image_api import OpenAIImagesClient
+
+    run_dir = _testpath_run(args)
+    seed = _seed_entry(run_dir, args.seed)
+    data = json.loads((run_dir / "bundles" / args.seed / "bundles.json").read_text("utf-8"))
+    picks = [p.strip() for p in args.pick.split(",") if p.strip()]
+    chosen = [b for b in data["bundles"] if b["id"] in picks]
+    out_dir = run_dir / "scenes" / args.seed
+    scenes._write(
+        out_dir / "selection.json", {"seedId": args.seed, "picks": picks, "reason": args.reason}
+    )
+    if not args.execute:
+        print("dry run:", ", ".join(b["id"] for b in chosen))
+        return 0
+    results = scenes.render_scenes(
+        out_dir,
+        run_dir / "seeds" / "images" / f"{args.seed}.png",
+        chosen,
+        _signature_en(seed["tags"]),
+        OpenAIImagesClient(),
+        quality=args.quality,
+    )
+    for r in results:
+        print(r["id"], "ok" if r.get("ok") else f"실패: {r.get('error')}")
+    return 0
+
+
+def cmd_testpath_videos(args) -> int:
+    """5·6번: 영상용 시드 한 장으로 idle과 반응(애교) 영상을 시작·끝 프레임 고정으로 만든다."""
+    from character_factory_poc.stages.s6_actions.catalog import build_prompt
+    from character_factory_poc.testpath.videos import VideoApiError, XaiFramesClient
+
+    run_dir = _testpath_run(args)
+    scene = run_dir / "scenes" / args.seed / f"{args.scene}.png"
+    out_dir = run_dir / "videos" / f"{args.seed}-{args.scene}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    client = XaiFramesClient()
+    for kind, key in (("idle", "idle_good"), ("reaction", args.action)):
+        mp4 = out_dir / f"{kind}-{key}.mp4"
+        if mp4.exists():
+            print(kind, "있음:", mp4.name)
+            continue
+        prompt = build_prompt(key, args.chapter)
+        if not args.execute:
+            print(f"dry run: {kind} {key} {args.resolution} {args.duration}s")
+            continue
+        meta = None
+        for res in dict.fromkeys([args.resolution, "720p"]):
+            try:
+                data, meta = client.generate(
+                    prompt, scene, scene, duration=args.duration, resolution=res
+                )
+                break
+            except VideoApiError as e:
+                print(f"{kind} {res} 실패: {e}")
+        if meta is None:
+            return 1
+        mp4.write_bytes(data)
+        record = {**meta, "clipKey": key, "chapter": args.chapter, "prompt": prompt}
+        (out_dir / f"{kind}-{key}.json").write_text(
+            json.dumps(record, ensure_ascii=False, indent=2), "utf-8"
+        )
+        print(kind, key, json.dumps(meta, ensure_ascii=False))
+    return 0
+
+
+def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="cfp", description="character factory poc")
     p.add_argument("--root", default=".", help="프로젝트 루트(factory.toml, runs/)")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    batch = sub.add_parser("batch").add_subparsers(dest="sub", required=True)
+    s = batch.add_parser("run", help="캐릭터별 병렬 실행")
+    s.add_argument("--spec", required=True)
+    s.add_argument("--execute", action="store_true")
+    s.set_defaults(fn=cmd_batch_run)
 
     s = sub.add_parser("status")
     s.add_argument("character_id")
@@ -1059,6 +1314,17 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("run", help="그래프를 따라 관문까지 자동 진행한다")
     s.add_argument("character_id", help="기존 character_id, 또는 --new-slug와 함께 임의 값")
     s.add_argument("--new-slug", default=None, help="새 캐릭터를 만들어 시작한다")
+    s.add_argument(
+        "--origin",
+        choices=("original", "twin"),
+        default=None,
+        help="갈래(D-0127). original=오리지널(창작), twin=트윈(실존). 새 캐릭터를 만들 때만 정한다",
+    )
+    s.add_argument(
+        "--source-pack",
+        default=None,
+        help="트윈 출처 묶음 source-pack-v1 JSON(D-0120). 원문 경로는 이 파일 기준 상대 경로다",
+    )
     s.add_argument("--until", default="G6")
     s.add_argument(
         "--auto-approve",
@@ -1091,6 +1357,28 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--execute", action="store_true")
     s.add_argument("--max-calls", type=int, default=None)
     s.set_defaults(fn=cmd_run)
+    s.add_argument(
+        "--model-mode",
+        choices=("train", "bind", "prompt"),
+        default=None,
+        help="트윈 모델 준비 방식(D-0118). train=학습, bind=학습된 모델 연결, prompt=학습 없음",
+    )
+
+    model = sub.add_parser("model", help="모델 준비 방식·학습된 모델 연결(D-0118)").add_subparsers(
+        dest="model_action", required=True
+    )
+    s = model.add_parser("mode", help="방식을 보거나 정한다(train·bind·prompt)")
+    s.add_argument("character_id")
+    s.add_argument("mode", nargs="?", choices=("train", "bind", "prompt"), default=None)
+    s.add_argument("--reason", default=None)
+    s.set_defaults(fn=cmd_model)
+    s = model.add_parser(
+        "bind", help="이미 학습된 모델 연결 기록(model-binding-import-v1)을 들여온다"
+    )
+    s.add_argument("character_id")
+    s.add_argument("--binding", required=True)
+    s.add_argument("--execute", action="store_true")
+    s.set_defaults(fn=cmd_model)
 
     data = sub.add_parser("data", help="S9 학습 데이터셋(D-0044)").add_subparsers(
         dest="sub", required=True
@@ -1141,6 +1429,10 @@ def build_parser() -> argparse.ArgumentParser:
         s.add_argument("--execute", action="store_true")
         s.add_argument("--max-calls", type=int, default=None)
         s.set_defaults(fn=cmd_eval)
+    s = ev.add_parser("import-blind", help="트윈 G8: 가족 블라인드 답 파일 들여오기")
+    s.add_argument("character_id")
+    s.add_argument("answers", help="블라인드 화면에서 저장한 답 파일 경로")
+    s.set_defaults(fn=cmd_eval)
 
     release = sub.add_parser("release").add_subparsers(dest="sub", required=True)
     s = release.add_parser("build", help="S11 릴리즈 패키지 → G9 대기")
@@ -1164,6 +1456,53 @@ def build_parser() -> argparse.ArgumentParser:
     models = sub.add_parser("models", help="텍스트 모델 덱·호출 경로 설정").add_subparsers(
         dest="models_action", required=True
     )
+    testpath = sub.add_parser("testpath", help="시험 경로(2026-11-07)").add_subparsers(
+        dest="sub", required=True
+    )
+    s = testpath.add_parser("seeds", help="2번: 교차 태깅·외모군·베이스 시드 후보")
+    s.add_argument(
+        "--run", required=True, help="runs/testpath/<run> 폴더(ranking/ranking.json 필요)"
+    )
+    s.add_argument(
+        "--until", choices=["people", "tags", "clusters", "prompts", "images"], default="images"
+    )
+    s.add_argument("--total", type=int, default=10)
+    s.add_argument("--quality", default="high")
+    s.add_argument("--look", choices=["candid", "beauty"], default="beauty")
+    s.add_argument("--no-signatures", action="store_true", help="후보별 구별 특징을 넣지 않는다")
+    s.add_argument(
+        "--gemini-route",
+        choices=["api", "relay"],
+        default="api",
+        help="relay = opencodex 중계(google-antigravity/gemini-4-argon)",
+    )
+    s.add_argument("--execute", action="store_true")
+    s.set_defaults(fn=cmd_testpath_seeds)
+    s = testpath.add_parser("bundles", help="3번: 시드 얼굴로 배경·의상 묶음 추천")
+    s.add_argument("--run", required=True)
+    s.add_argument("--seed", required=True)
+    s.add_argument("--count", type=int, default=6)
+    s.add_argument("--model", default="gpt-6.1-sol")
+    s.add_argument("--execute", action="store_true")
+    s.set_defaults(fn=cmd_testpath_bundles)
+    s = testpath.add_parser("scenes", help="4번: 고른 묶음으로 영상용 시드 이미지")
+    s.add_argument("--run", required=True)
+    s.add_argument("--seed", required=True)
+    s.add_argument("--pick", required=True, help="쉼표 목록, 예: b1,b3,b5")
+    s.add_argument("--reason", default="")
+    s.add_argument("--quality", default="high")
+    s.add_argument("--execute", action="store_true")
+    s.set_defaults(fn=cmd_testpath_scenes)
+    s = testpath.add_parser("videos", help="5·6번: idle과 애교(반응) 영상")
+    s.add_argument("--run", required=True)
+    s.add_argument("--seed", required=True)
+    s.add_argument("--scene", required=True)
+    s.add_argument("--chapter", default="ch2")
+    s.add_argument("--action", default="pouty_good")
+    s.add_argument("--duration", type=int, default=6)
+    s.add_argument("--resolution", default="720p")
+    s.add_argument("--execute", action="store_true")
+    s.set_defaults(fn=cmd_testpath_videos)
     s = models.add_parser("show", help="유효 모델·프로필·호출 경로를 확인한다(호출 없음)")
     s.set_defaults(fn=cmd_models)
     s = models.add_parser("select", help="프로필/경로 선택을 work에 저장한다(호출 없음)")

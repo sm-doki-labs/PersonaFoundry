@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ from character_factory_poc.stages.export.doki_app.naming import (
     chapter_uid,
     character_uid,
     relative_file,
+    revision_prefix,
     slug_for,
 )
 
@@ -95,8 +97,11 @@ class ChatTree:
 def build_tree(package: CharacterPackage, package_dir: Path) -> ChatTree:
     slug = slug_for(package.characterId)
     uid = str(character_uid(package.characterId))
-    persona_rev = f"{slug}-r1"
-    quest_rev = f"{slug}-quest-v1"
+    prefix = revision_prefix(package.characterId, package.packageRev, twin=bool(package.twin))
+    persona_rev = f"{prefix}-r1"
+    # 이름 있는 대화 경로를 담는 번들과 그 상위 참조만 새 revision으로 발행한다.
+    version = "v2" if package.twin and package.twin.servingRoute else "v1"
+    quest_rev = f"{prefix}-quest-{version}"
     sheet = _read_json(relative_file(package_dir, package.persona.traitSheet))
     scene = _scene_facts(package, package_dir)
     persona = _persona(package, slug, persona_rev, sheet)
@@ -109,6 +114,39 @@ def build_tree(package: CharacterPackage, package_dir: Path) -> ChatTree:
             "긴 프롬프트를 여덟 섹션으로 나눠 적는다",
         )
     ]
+    dialogue_model = DIALOGUE_MODEL
+    if package.twin:
+        adopted, route = package.sft.adoptedBinding, package.twin.servingRoute
+        if not adopted or (adopted == "LONG_BASE") != (route is None):
+            raise ValueError("트윈 G8 채택 대상과 패키지 서빙 경로가 일치하지 않는다")
+        if route:
+            dialogue_model = f"{prefix}-dialogue-{version}"
+            files[f"models/{dialogue_model}.json"] = {
+                "configVersion": dialogue_model,
+                "servingRoute": route,
+                "provider": "openai",
+                "endpoint": "openai-chat-completions",
+                "baseUrl": None,
+                "apiKeyEnv": package.twin.apiKeyEnv or "TWIN_SERVING_API_KEY",
+                "model": package.twin.servingModel or route,
+                "reasoningEffort": "none",
+                "temperature": None,
+                "maxOutputTokens": 600,
+                "timeoutSeconds": 60,
+                "maxRetries": 0,
+                "store": False,
+            }
+        mapping.append(
+            (
+                "sft.adoptedBinding",
+                "chat-svc dialogue.modelConfigRevision",
+                f"{dialogue_model} (배포에 등록한 {route} 경로로 연결해요)"
+                if route
+                else dialogue_model,
+            )
+        )
+    prompt = relative_file(package_dir, package.persona.longPrompt).read_text("utf-8")
+    speech_level = _persona_speech_level(prompt, sheet)
     bindings: list[dict[str, str]] = []
     chapter_uids: dict[str, str] = {}
     for chapter in sorted(package.chapters, key=lambda c: c.chapterNo):
@@ -116,20 +154,20 @@ def build_tree(package: CharacterPackage, package_dir: Path) -> ChatTree:
         key = f"ACF-{slug.upper()}-{chapter.chapterId.upper()}"
         uid_text = str(chapter_uid(package.characterId, chapter.chapterId))
         chapter_uids[chapter.chapterId] = uid_text
-        asset_rev = f"{slug}-{chapter.chapterId}-context-v1"
-        bundle_rev = f"{slug}-{chapter.chapterId}-bundle-v1"
-        definition_rev = f"{slug}-{chapter.chapterId}-v1"
-        profile_rev = f"{slug}-{chapter.chapterId}-r1"
+        asset_rev = f"{prefix}-{chapter.chapterId}-context-v1"
+        bundle_rev = f"{prefix}-{chapter.chapterId}-bundle-{version}"
+        definition_rev = f"{prefix}-{chapter.chapterId}-{version}"
+        profile_rev = f"{prefix}-{chapter.chapterId}-r1"
         facts = scene[chapter.chapterId]
         files[f"chapters/{asset_rev}.json"] = _chapter_asset(asset_rev, key, chapter, facts)
         files[f"split_prompt_bundles/{bundle_rev}.json"] = _bundle(
-            slug, chapter, facts, sheet, bundle_rev
+            prefix, chapter, facts, sheet, bundle_rev, dialogue_model
         )
         files[f"chapter_definitions/{definition_rev}.json"] = _definition(
             definition_rev, key, chapter, slot, asset_rev, bundle_rev
         )
         files[f"relationship_profiles/{profile_rev}.json"] = _profile(
-            slug, chapter, key, profile_rev, slot, facts, sheet, package.profile.name
+            slug, chapter, key, profile_rev, slot, facts, sheet, package.profile.name, speech_level
         )
         bindings.append(
             {
@@ -188,7 +226,9 @@ def build_tree(package: CharacterPackage, package_dir: Path) -> ChatTree:
     )
     unmapped = [
         "persona.shortPrompt (chat-svc 콘텐츠 트리에 짧은 system 칸이 없다: SFT 입력 몫)",
-        "sft.* (chat-svc 콘텐츠 트리에 학습 결과 칸이 없다)",
+        "sft.trainingRuns (학습 실행 기록은 패키지에서 참조한다)"
+        if package.twin
+        else "sft.* (chat-svc 콘텐츠 트리에 학습 결과 칸이 없다)",
         "videos.* (chat-svc 콘텐츠는 대사·장면만 갖는다: api-svc 몫)",
         "chapters[].background (chat-svc CHAPTER 모드 배경 칸은 FREE_CHAT 전용)",
         "gates[] (대상 시스템에 관문 기록 표가 없다)",
@@ -454,6 +494,56 @@ def _definition(
     }
 
 
+def _persona_speech_level(prompt: str, sheet: dict) -> str:
+    from character_factory_poc.stages.s7_traits.check import _plan_speech_level
+
+    # S11 패키지는 기획서를 복사하지 않는다. S8이 보존한 말투 요약만 읽고 예시는 제외한다.
+    in_voice = False
+    descriptions = []
+    for line in prompt.splitlines():
+        if line in {"[PERSONA / VOICE]", "## PERSONA / VOICE"}:
+            in_voice = True
+        elif in_voice:
+            if line.startswith(("[", "## ", "말투 예시:")):
+                break
+            descriptions.append(line)
+    habits = (sheet.get("card") or {}).get("dialogueHabits") or {}
+    for description in [
+        *descriptions,
+        *habits.values(),
+        (sheet.get("choice") or {}).get("expressionIntensity", ""),
+    ]:
+        # "존댓말 대신 반말", "반말은 쓰지 않는다"에서 배제된 등급을 채택하지 않는다.
+        described = re.sub(
+            r"(?:존댓말|존대|해요체|합쇼체|하십시오체|합니다체|반말|해체)"
+            r"(?:[을를은는]?\s*(?:대신|말고|아니라|쓰지 않|사용하지 않)|이? 아닌)",
+            "",
+            description,
+        )
+        level = _plan_speech_level(described)
+        if level:
+            return "CASUAL" if level == "casual" else "POLITE"
+    return "POLITE"
+
+
+def _chapter_speech(goal: str, default: str) -> tuple[str, str]:
+    # 목표에 말 놓기를 제안하거나 친해진다는 표현만으로 전환을 확정하지 않는다.
+    switch = r"(?:말을? 놓(?:는다|기로 한다)|반말(?:을 쓴다|로 (?:말한다|바꾼다|전환한다)))"
+    for sentence in re.split(r"[.!?\n]", goal):
+        clause = sentence.strip()
+        if default == "POLITE" and re.fullmatch(
+            r".+(?:면|때만|경우에만)\s*,?\s*(?:서로 )?" + switch, clause
+        ):
+            return "FLEXIBLE", clause + "."
+        if re.fullmatch(
+            r"(?:(?:두 사람은|둘은|서로|이제|편하게|처음부터|이 장면부터|이번 통화부터) )*"
+            + switch,
+            clause,
+        ):
+            return "CASUAL", "반말을 유지한다."
+    return default, "반말을 유지한다." if default == "CASUAL" else "존댓말을 유지한다."
+
+
 def _profile(
     slug: str,
     chapter: Chapter,
@@ -463,6 +553,7 @@ def _profile(
     facts: dict[str, Any],
     sheet: dict[str, Any],
     name: str,
+    persona_level: str | None = None,
 ) -> dict[str, Any]:
     choice = sheet.get("choice") or {}
     card = sheet.get("card") or {}
@@ -494,10 +585,13 @@ def _profile(
     meeting = str(facts.get("meetingContext") or chapter.intro or chapter.title)
     scene_facts = _clean(facts.get("sceneFacts") or [])
     speaking = str(habits.get("directness") or choice.get("expressionIntensity") or "짧게 말한다")
+    level, register = _chapter_speech(
+        chapter.goal, persona_level or _persona_speech_level("", sheet)
+    )
     stance = (
-        "이미 아는 사이로 편하게 반말을 유지한다."
+        "지금까지 나눈 대화에 맞춰 호칭과 거리를 정한다."
         if slot["entry"] != "STRANGER"
-        else "처음 만난 사이로, 말의 속도와 거리를 조금씩 맞춰 간다."
+        else "첫 통화에서는 말의 속도와 거리를 조금씩 맞춰 간다."
     )
     trusted = None
     if experiences:
@@ -511,8 +605,8 @@ def _profile(
         "chapterId": chapter_key,
         "appliesToStage": slot["entry"],
         "entryPosture": _clean([f"현재 장면: {meeting}", *(scene_facts[:1])]),
-        "addresseeStance": f"{name}과 사용자는 {stance}",
-        "speechLevel": "CASUAL",
+        "addresseeStance": f"{stance} {name}의 말투: {register}",
+        "speechLevel": level,
         "initiativePolicy": (
             f"{str(choice.get('primaryResponse') or '먼저 할 말을 하나 고른다')}. "
             "상대가 거절하면 같은 요청을 반복하지 않고, 관계를 끝내겠다는 말로 압박하지 않는다."
@@ -542,6 +636,7 @@ def _bundle(
     facts: dict[str, Any],
     sheet: dict[str, Any],
     revision: str,
+    dialogue_model: str = DIALOGUE_MODEL,
 ) -> dict[str, Any]:
     habits = (sheet.get("card") or {}).get("dialogueHabits") or {}
     scene_facts = " / ".join(_clean(facts.get("sceneFacts") or []))
@@ -565,6 +660,22 @@ def _bundle(
             "- 이미 확정된 현재 한 턴의 의미만 분류한다. 다음 전개를 쓰지 않는다.",
             "- reasons는 최대 3개, topicEventCandidates는 최대 3개까지만 적는다.",
             "- 누적 점수·챕터 결과·관계 확정 여부를 만들지 않는다.",
+            "",
+            # chat-svc split-frame-r5 계열은 frame의 reasonSemantics를 이 머리말 아래에 넣는다
+            # (2026-11-07 원격 최신 기준, 없으면 평가 작업이 거절한다).
+            f"[OUTPUT: {ASSESSMENT_SCHEMA}]",
+            "schemaVersion, reasons(최대 3개), flagCandidates, blockerCandidates, "
+            "topicEventCandidates(최대 3개), meaningful만 반환한다.",
+            "",
+            "[RELATIONSHIP_EVIDENCE]",
+            "- 자리·시간 확인 같은 장면 운영 질문과 의례적 안부는 무변화다.",
+            "- 같은 계열의 감탄이나 칭찬이 반복되면 첫 한 건만 reason으로 평가한다.",
+            "- 상대를 알아가려는 질문이나 자기 공개로 확장될 때만 새 긍정 reason이다.",
+            "- 반복해서 인격을 깎아내리거나 몰아붙이는 발화는 PRESSURE_OR_HOSTILITY다.",
+            "",
+            "[TOPIC_EVIDENCE]",
+            "- 이 챕터는 topic 사건을 만들지 않는다.",
+            "- topicEventCandidates는 비운다.",
         ]
     )
     final = (
@@ -579,7 +690,7 @@ def _bundle(
         "dialogue": {
             "promptVersion": f"{slug}-{chapter.chapterId}-dialogue-writer-v1",
             "responseSchemaVersion": "character-dialogue-text-v1",
-            "modelConfigRevision": DIALOGUE_MODEL,
+            "modelConfigRevision": dialogue_model,
             "contract": dialogue,
         },
         "assessment": {
@@ -613,6 +724,7 @@ def validate_content_tree(files: dict[str, dict[str, Any]]) -> list[str]:
         stem = Path(rel).stem
         kind = rel.split("/", 1)[0]
         revision_field = {
+            "models": "configVersion",
             "personas": "revision",
             "relationship_profiles": "revision",
             "quests": "questRevision",
@@ -769,6 +881,9 @@ def _bundle_problems(files, revisions) -> list[str]:
                 problems.append(f"{rel}: {role} 칸이 모자란다")
             elif not str(block.get("contract") or "").strip():
                 problems.append(f"{rel}: {role}.contract가 비었다")
+        model = (payload.get("dialogue") or {}).get("modelConfigRevision")
+        if model and model != DIALOGUE_MODEL and f"models/{model}.json" not in files:
+            problems.append(f"{rel}: 캐릭터별 대화 모델 설정 파일이 없다")
         if "turnBlock" in (payload.get("dialogue") or {}):
             problems.append(f"{rel}: CHAPTER 번들에 turnBlock이 있다")
         assessment = payload.get("assessment") or {}

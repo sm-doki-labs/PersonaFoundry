@@ -2,6 +2,7 @@
 
 from character_factory_poc.contracts import (  # noqa: F401
     actor_persona,
+    batch,
     chapter_start,
     choice_design,
     common,
@@ -10,6 +11,7 @@ from character_factory_poc.contracts import (  # noqa: F401
     formation,
     frames,
     hero,
+    model_binding,
     persona,
     plan,
     planning,
@@ -22,8 +24,10 @@ from character_factory_poc.contracts import (  # noqa: F401
     review,
     rework,
     scene,
+    source,
     training,
     trait_ledger,
+    twin_comparison,
     video,
     voice,
     voice_bundle,

@@ -32,8 +32,14 @@ def install_runtime_routes(app: FastAPI, root: Path, conf: Any, jobs: Any) -> No
     factory = Path(root).expanduser().resolve()
 
     @app.get("/api/runtime/graph")
-    def runtime_graph() -> dict[str, Any]:
-        graph = _graph(_paid_stages(factory, conf))
+    def runtime_graph(character_id: str | None = None) -> dict[str, Any]:
+        stages, gates, metadata = (
+            (STAGES, GATES, {})
+            if character_id is None
+            else reads.graph_parts(reads.character_dir(factory, character_id))
+        )
+        graph = _graph(_paid_stages(factory, conf, stages), stages, gates)
+        graph.update(metadata)
         graph["orchestrator"] = _resume_settings(factory, conf)
         return graph
 
@@ -45,11 +51,11 @@ def install_runtime_routes(app: FastAPI, root: Path, conf: Any, jobs: Any) -> No
         return {"characterId": _create_character(factory, conf, slug, brief)}
 
 
-def _paid_stages(root: Path, conf: Any) -> dict[str, list[str]]:
+def _paid_stages(root: Path, conf: Any, stages=STAGES) -> dict[str, list[str]]:
     """설정에서 paid=true인 공급자를 쓰는 단계(D-0101). 설정을 못 읽으면 빈 표다."""
     try:
         ctx = Context(config=load_config(root, conf.config_path), execute=False)
-        return {sid: paid_providers(ctx, sid) for sid in STAGES if paid_providers(ctx, sid)}
+        return {sid: paid_providers(ctx, sid) for sid in stages if paid_providers(ctx, sid)}
     except (OSError, ValueError, KeyError):
         return {}
 
@@ -67,9 +73,9 @@ def _resume_settings(root: Path, conf: Any) -> dict[str, Any]:
     }
 
 
-def _graph(paid: dict[str, list[str]] | None = None) -> dict[str, Any]:
+def _graph(paid: dict[str, list[str]] | None = None, stages=STAGES, gates=GATES) -> dict[str, Any]:
     paid = paid or {}
-    gate_stage = {stage.gate: sid for sid, stage in STAGES.items() if stage.gate}
+    gate_stage = {stage.gate: sid for sid, stage in stages.items() if stage.gate}
     return {
         "stages": [
             {
@@ -82,7 +88,7 @@ def _graph(paid: dict[str, list[str]] | None = None) -> dict[str, Any]:
                 "implemented": stage.implemented,
                 "paid": paid.get(sid, []),
             }
-            for sid, stage in STAGES.items()
+            for sid, stage in stages.items()
         ],
         "gates": [
             {
@@ -90,14 +96,22 @@ def _graph(paid: dict[str, list[str]] | None = None) -> dict[str, Any]:
                 "title": reads.GATE_TITLES.get(gid, gid),
                 "stage": gate_stage.get(gid),
             }
-            for gid in GATES
+            for gid in gates
         ],
         "mode": "live",
         "lanes": [
             {"id": lane["id"], "label": lane["label"], "stages": list(lane["stages"])}
-            for lane in reads.LANES
+            for lane in _graph_lanes(stages)
         ],
     }
+
+
+# 트윈 그래프의 팀 줄. 맨 앞에 출처 팀(s0)이 생기고, 비교 세트(s9h)는 평가와 같은 학습 팀에 든다.
+# 갈래·모델 준비 방식에 없는 단계는 빼고, 단계가 하나도 안 남은 팀(학습하지 않는 방식의
+# 데이터 팀)도 뺀다.
+# 학습하지 않는 방식이면 학습 팀에는 비교 세트와 평가만 남으므로 이름을 '평가'로 부른다.
+def _graph_lanes(stages) -> list[dict[str, Any]]:
+    return reads.graph_lanes(stages)
 
 
 def _creator_input(body: Any) -> tuple[str, str]:

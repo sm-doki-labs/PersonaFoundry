@@ -25,6 +25,7 @@ from character_factory_poc.contracts.persona import PromptPair, PromptProbe, Tra
 from character_factory_poc.pipeline.agent import AgentSpec, run_agent
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.gates import render_gate_page
+from character_factory_poc.pipeline.origin import SOURCE, read_origin
 from character_factory_poc.pipeline.rework import load_rework
 from character_factory_poc.providers.base import ChatRequest, Message, extract_json_object
 from character_factory_poc.stages.s3_plan.importer import load_approved_plan
@@ -33,6 +34,7 @@ from character_factory_poc.stages.s8_prompts.source import (
     project_plan,
     with_creator_traits,
 )
+from character_factory_poc.stages.s8_prompts.twin import approved_voice, voice_lines
 
 FILLED_BY_FACTORY = ("SYSTEM_RULES", "OUTPUT")
 OUTPUT_RULE = "캐릭터가 실제로 할 말만 출력한다. JSON·라벨·해설·행동 지문은 쓰지 않는다. 보통 짧은 1~3문장으로 답하고 필요하면 말풍선처럼 줄을 나눈다. 답변 틀을 채우려고 이유·대안·질문을 덧붙이지 않는다."
@@ -159,7 +161,8 @@ def _resumable_rev(char_dir: Path, state) -> str | None:
 def run_s8(
     ctx: Context, cid: str, voice_probes: list[str], allow_same_family: bool = False
 ) -> Path:
-    if ctx.config.stage("s7").get("formation_profile"):
+    twin = read_origin(ctx.character_dir(cid)) == SOURCE
+    if not twin and ctx.config.stage("s7").get("formation_profile"):
         from character_factory_poc.stages.s8_prompts.formation import run_formation_s8
 
         return run_formation_s8(ctx, cid, voice_probes)
@@ -190,6 +193,11 @@ def run_s8(
     rules_text, rules_ref = load_system_rules(ctx)
     source = project_plan(plan, sha256_file(plan_path))
     canonical = canonical_sections(source, sheet)
+    if twin:
+        source["sourceVoice"] = approved_voice(ctx, cid, plan)
+        canonical["PERSONA / VOICE"] = "\n".join(
+            voice_lines(plan.voiceSummary, source["sourceVoice"])
+        )
     empty_body = {s: "" for s in sections}
     base_chars = len(
         assemble(sections, empty_body, plan.name, rules_text, canonical, creator_plan=plan)
@@ -446,15 +454,20 @@ def run_deck_s8(ctx: Context, cid: str, voice_probes: list[str]) -> Path:
     plan, plan_path = load_approved_plan(ctx, cid)
     sheet, sheet_path = load_latest_trait_sheet(ctx, cid)
     rules, rules_ref = load_actor_rules(ctx)
+    source = project_plan(plan, sha256_file(plan_path))
+    voice = None
+    if read_origin(ctx.character_dir(cid)) == SOURCE:
+        source["sourceVoice"] = approved_voice(ctx, cid, plan)
+        voice = voice_lines(plan.voiceSummary, source["sourceVoice"])
     ledger_path = sheet_path.parent / "trait-ledger.json"
     if ledger_path.exists():
         from character_factory_poc.stages.s8_prompts.actor_persona import compose_from_ledger
 
         ledger = validate("trait-ledger-v1", json.loads(ledger_path.read_text("utf-8")))
-        text, sections = compose_from_ledger(plan, ledger, rules_text=rules)
+        text, sections = compose_from_ledger(plan, ledger, rules_text=rules, voice=voice)
         compiler = "actor-trait-ledger-v1"
     else:
-        text, sections = compose_approved_sheet(plan, sheet, rules_text=rules)
+        text, sections = compose_approved_sheet(plan, sheet, rules_text=rules, voice=voice)
         compiler = "actor-approved-sheet-v1"
     from character_factory_poc.common.errors import NeedsInputError
 
@@ -496,7 +509,7 @@ def run_deck_s8(ctx: Context, cid: str, voice_probes: list[str]) -> Path:
         systemRulesSha256=sha256_text(rules),
         shortAdopted=False,
     )
-    write_once_json(folder / "source-plan.json", project_plan(plan, sha256_file(plan_path)))
+    write_once_json(folder / "source-plan.json", source)
     write_once_json(
         folder / "text-deck-binding.json",
         dict(

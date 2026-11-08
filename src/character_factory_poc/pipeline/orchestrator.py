@@ -24,7 +24,14 @@ from character_factory_poc.common.errors import (
 )
 from character_factory_poc.pipeline.approve import approve_gate
 from character_factory_poc.pipeline.context import Context
-from character_factory_poc.pipeline.graph import GATES, RETIRED_GATES, STAGES
+from character_factory_poc.pipeline.graph import (
+    ALL_GATES,
+    ALL_STAGE_IDS,
+    GATES,
+    RETIRED_GATES,
+    SOURCE,
+    STAGES,
+)
 
 # 외모 축(S1·S2)을 탄 캐릭터만 도는 단계
 APPEARANCE_STAGES = ("s2", "s4a", "s4b", "s4", "s5", "s6", "s11", "sx")
@@ -32,6 +39,9 @@ APPEARANCE_STAGES = ("s2", "s4a", "s4b", "s4", "s5", "s6", "s11", "sx")
 HUMAN_ONLY_GATES = {
     "G7a": "클러스터마다 샘플을 판정해야 한다",
     "G8": "블라인드 20쌍을 사람이 골라야 한다",
+    # 트윈 갈래(D-0120, D-0128): 출처·사용 근거와 본인 닮음은 사람이 확인한다.
+    "G0": "출처 묶음과 사용 근거를 사람이 확인해야 한다",
+    "G1s": "받은 사진이 본인과 닮았는지 사람이 확인해야 한다",
 }
 
 
@@ -49,6 +59,8 @@ class RunOptions:
     training_providers: list[str] | None = None  # s10t 학습 공급자. 없으면 [stages.s10t]
     submit_training: bool = False  # 학습 제출·회수까지 한다(유료). 기본은 계획(dry run)만
     verify_export: bool = False  # sx에서 일회용 DB 적재 확인까지 한다(LLD §8.11)
+    # 트윈 s0 출처 묶음(source-pack-v1, D-0120). 없으면 지난 판을 쓴다
+    source_pack: Path | None = None
     # D-0049(LLD §6.6·§6.7)
     max_parallel: int = 1  # 동시에 돌릴 단계 수. 1이면 순차 훑기
     web: bool = False  # 워크숍이 시작한 실행. 유료 공급자 단계는 확인을 받는다
@@ -84,7 +96,7 @@ def validate_until(until: str) -> None:
     """--until 값이 단계 또는 현행 관문인지 본다. G2는 결번이다(D-0042)."""
     if until in RETIRED_GATES:
         raise FactoryError(RETIRED_GATES[until] + ". --until로 받지 않는다")
-    if until not in STAGES and until not in GATES:
+    if until not in ALL_STAGE_IDS and until not in ALL_GATES:
         raise FactoryError(
             f"--until {until}: 없는 단계·관문이다({', '.join(STAGES)} / {', '.join(GATES)})"
         )
@@ -247,6 +259,64 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
         # 패키지는 외모·장면·영상 산출물이 있어야 만든다(LLD §8.10)
         runners["s11"] = lambda: build_package(ctx, cid)
         runners["sx"] = sx
+    from character_factory_poc.pipeline.origin import read_origin
+
+    if read_origin(ctx.character_dir(cid)) == SOURCE:
+        # D-0128: 트윈은 s1이 없고, s0·s2·s3·s9h는 트윈 판 실행 함수가 생길 때까지 돌지 않는다.
+        # 장면·영상·패키지는 s2(받은 사진 기준) 승인을 기다리는 같은 실행 함수를 쓴다.
+        if opt.ranking is not None:
+            raise FactoryError("트윈 캐릭터는 --ranking을 받지 않는다(얼굴은 받은 사진에서 온다)")
+        for sid in ("s1", "s2", "s3"):
+            runners.pop(sid, None)
+        from character_factory_poc.stages.s0_source.run import run_s0
+        from character_factory_poc.stages.s2_hero.twin import run_s2_twin
+        from character_factory_poc.stages.s3_plan.twin import run_s3_twin
+
+        runners.update(
+            {
+                "s0": lambda: run_s0(ctx, cid, opt.source_pack),
+                "s2": lambda: run_s2_twin(ctx, cid),
+                "s3": lambda: run_s3_twin(ctx, cid),
+                "s5": lambda: run_s5(ctx, cid),
+                "s4a": lambda: run_s4a(ctx, cid),
+                "s4b": lambda: run_s4b(ctx, cid),
+                "s4": lambda: run_s4(ctx, cid),
+                "s6": lambda: run_s6(ctx, cid),
+                "s11": lambda: build_package(ctx, cid),
+                "sx": sx,
+            }
+        )
+        from character_factory_poc.pipeline.graph import TRAIN
+        from character_factory_poc.pipeline.origin import read_model_mode
+
+        if read_model_mode(ctx.character_dir(cid)) == TRAIN:
+            # D-0118: 트윈 학습 데이터는 실제 발화에서 만든다(모델 호출 없음).
+            from character_factory_poc.stages.s9_data.twin import run_s9_twin, run_s9s_twin
+
+            runners["s9s"] = lambda: run_s9s_twin(ctx, cid)
+            runners["s9"] = lambda: run_s9_twin(ctx, cid)
+
+            def s10_twin_train() -> Path | None:
+                # 순서 8: 기존 평가 보고서가 G8을 연 뒤 실제 답 비교를 같은 G8에 붙인다.
+                from character_factory_poc.stages.s10_eval import prompt_only
+                from character_factory_poc.stages.s10_eval.compare import append_twin_comparison
+
+                out = s10()
+                if out is None or prompt_only.is_prompt_only(out):
+                    return out
+                if not (out / "report.json").is_file():
+                    return out
+                return append_twin_comparison(ctx, cid)
+
+            runners["s10"] = s10_twin_train
+        else:
+            # D-0118: 학습하지 않는 방식은 G8에서 긴 프롬프트 또는 연결한 모델을 채택한다.
+            from character_factory_poc.stages.s10_eval.twin import run_s10_twin
+
+            runners["s10"] = lambda: run_s10_twin(ctx, cid)
+        from character_factory_poc.stages.s9h_holdout.run import run_s9h
+
+        runners["s9h"] = lambda: run_s9h(ctx, cid)
     return runners
 
 
@@ -265,10 +335,15 @@ def _auto_approve(ctx: Context, cid: str, gate: str) -> None:
 
 def _skip_note(ctx: Context, cid: str, sid: str, runners: dict) -> str | None:
     """실행 함수가 없는 단계의 건너뜀 문장. 기록할 것이 없으면 None."""
-    stage = STAGES[sid]
+    from character_factory_poc.pipeline.origin import read_origin, stage_def
+
+    stage = stage_def(ctx.character_dir(cid), sid)
     if stage.implemented and sid in runners:
         return None
     if ctx.state(cid).stage(sid).status == "PENDING":
+        if read_origin(ctx.character_dir(cid)) == SOURCE:
+            # D-0128: 트윈 앞단(s0·s2·s3·s9h)은 계획 §12 순서 2~6에서 구현한다.
+            return f"{sid}: 트윈 {stage.name} — 아직 구현 전"
         if sid == "s1":
             return "s1: --ranking 없음 — 건너뜀(페르소나 우선 경로)"
         if sid in APPEARANCE_STAGES:
@@ -294,7 +369,9 @@ def _step(
 
     순차 훑기와 물결 실행(LLD §6.6)이 함께 쓴다.
     """
-    stage = STAGES[sid]
+    from character_factory_poc.pipeline.origin import stage_def
+
+    stage = stage_def(ctx.character_dir(cid), sid)  # D-0128: 트윈은 갈래 그래프의 관문을 쓴다
     state = ctx.state(cid)
     st = state.stage(sid)
     gate_ok = stage.gate is None or state.gate(stage.gate).status == "APPROVED"
@@ -414,7 +491,9 @@ def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
         return run_waves(ctx, cid, opt)
     log = RunLog()
     runners = _stage_runners(ctx, cid, opt)
-    for sid in STAGES:
+    from character_factory_poc.pipeline.origin import graph_for_dir
+
+    for sid in graph_for_dir(ctx.character_dir(cid)):
         note = _skip_note(ctx, cid, sid, runners)
         if note is not None:
             if note:

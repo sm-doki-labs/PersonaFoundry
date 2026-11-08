@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import re
+import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import replace
 from datetime import UTC, datetime
+from functools import wraps
+from inspect import signature
 
 from character_factory_poc.common.budget import Budget
-from character_factory_poc.common.ledger import Ledger
+from character_factory_poc.common.ledger import Ledger, append_jsonl
 from character_factory_poc.providers.base import (
     ChatRequest,
     ChatResponse,
@@ -20,6 +27,138 @@ from character_factory_poc.providers.base import (
     VisionRequest,
     VisionResult,
 )
+
+DEFAULT_LIMITS = {"text": 4, "judge": 2, "image": 2, "vision": 2, "video": 2, "tuning": 1}
+WAIT_FILE = "provider-waits.jsonl"
+_pool_lock = threading.Lock()
+_pools = {}
+_native_observer = ContextVar("provider_retry_wait", default=None)
+
+
+def native_retry_sleep(sleep, delay, status):
+    """기존 어댑터가 직접 재시도할 때 그 대기만 관찰한다."""
+    observer = _native_observer.get()
+    if status == 429 and observer is not None:
+        observer(sleep, delay)
+    else:
+        sleep(delay)
+
+
+def _rate_limited(exc):
+    for status in (
+        getattr(exc, "status", None),
+        getattr(exc, "status_code", None),
+        getattr(getattr(exc, "response", None), "status_code", None),
+    ):
+        if status is not None:
+            return status == 429
+    # 학습 어댑터의 기존 오류는 응답 코드가 메시지 접두부에만 들어 있다.
+    return getattr(exc, "kind", None) == "rate_limit" or (
+        type(exc).__module__.startswith("character_factory_poc.providers.training.")
+        and re.match(r"^(?:Vertex [^:]+|Vast 인스턴스 (?:생성|삭제)) 실패: HTTP 429\b", str(exc))
+        is not None
+    )
+
+
+class ProviderLimits:
+    def __init__(self, orchestrator, kind, ledger):
+        self.kind = kind
+        self.ledger = ledger
+        self.limit = orchestrator.get("provider_limits", {}).get(kind, DEFAULT_LIMITS[kind])
+        if type(self.limit) is not int or self.limit < 1:
+            raise ValueError(f"provider_limits.{kind}: 양의 정수가 필요하다")
+
+    def record(self, stage, reason, started, delay=None):
+        append_jsonl(
+            self.ledger.folder / WAIT_FILE,
+            {
+                "at": _utc_now().isoformat(),
+                "stage": stage,
+                "kind": self.kind,
+                "reason": reason,
+                "seconds": time.monotonic() - started,
+                "delay": delay,
+            },
+        )
+
+    @contextmanager
+    def slot(self, stage):
+        # 설정을 다시 읽어도 사용 중인 풀은 분리하지 않는다.
+        with _pool_lock:
+            size, sem, users = _pools.get(self.kind) or (
+                self.limit,
+                threading.BoundedSemaphore(self.limit),
+                0,
+            )
+            if size != self.limit:
+                raise ValueError(f"실행 중에는 provider_limits.{self.kind}를 바꿀 수 없다")
+            _pools[self.kind] = (size, sem, users + 1)
+        try:
+            waited = not sem.acquire(blocking=False)
+            if waited:
+                start = time.monotonic()
+                sem.acquire()
+            try:
+                if waited:
+                    self.record(stage, "capacity", start)
+                yield
+            finally:
+                sem.release()
+        finally:
+            with _pool_lock:
+                _, _, users = _pools[self.kind]
+                if users == 1:
+                    del _pools[self.kind]
+                else:
+                    _pools[self.kind] = (size, sem, users - 1)
+
+    def call(self, stage, inner, invoke):
+        def wait(sleep, delay):
+            start = time.monotonic()
+            try:
+                sleep(delay)
+            finally:
+                self.record(stage, "rate_limit", start, delay)
+
+        for attempt in range(6):
+            try:
+                with self.slot(stage):
+                    token = _native_observer.set(wait)
+                    try:
+                        return invoke(attempt)
+                    finally:
+                        _native_observer.reset(token)
+            except Exception as exc:
+                native = getattr(inner, "max_retries", 0) > 0 or inner.name == "xai_video"
+                if not _rate_limited(exc) or native or attempt == 5:
+                    raise
+            wait(time.sleep, min(120, 2**attempt))
+
+
+def _limited_call(fn):
+    params = signature(fn)
+
+    @wraps(fn)
+    def wrapped(self, *args, **kwargs):
+        limits = getattr(self, "limits", None)
+        if limits is None:
+            return fn(self, *args, **kwargs)
+        bound = params.bind(self, *args, **kwargs)
+        original_ref = bound.arguments.get("ref")
+        req = bound.arguments.get("request")
+        stage = req.stage if req is not None else self.stage
+
+        def invoke(attempt):
+            # 각 재전송은 기존 원장·호출 예산을 거친다. 형성 예산 예약 키도 나눈다.
+            if attempt and isinstance(req, ChatRequest):
+                bound.arguments["request"] = replace(req, ref=f"{req.ref}~429-{attempt}")
+            elif attempt and "ref" in bound.arguments:
+                bound.arguments["ref"] = f"{original_ref}~429-{attempt}"
+            return fn(*bound.args, **bound.kwargs)
+
+        return limits.call(stage, self.inner, invoke)
+
+    return wrapped
 
 
 def _utc_now() -> datetime:
@@ -146,7 +285,9 @@ class TrackedTextModel:
         while True:
             try:
                 return self._complete_once(request)
-            except ProviderTransportError:
+            except ProviderTransportError as exc:
+                if getattr(self, "limits", None) and _rate_limited(exc):
+                    raise  # 429는 공급자 또는 공유 상한 래퍼 한 곳에서만 재시도한다.
                 if attempt >= self.transport_retries:
                     raise
                 attempt += 1
@@ -154,6 +295,7 @@ class TrackedTextModel:
                 (self._sleep or time.sleep)(2.0 * attempt)
                 request = replace(request, ref=f"{request.ref}~transport{attempt}")
 
+    @_limited_call
     def _complete_once(self, request: ChatRequest) -> ChatResponse:
         from character_factory_poc.common.budget import RunBudget
         from character_factory_poc.common.canonical import sha256_text
@@ -240,6 +382,7 @@ class TrackedCodexAgent:
     def model(self) -> str:
         return self.inner.model
 
+    @_limited_call
     def run(self, workspace, prompt: str, ref: str, allow_paths=None):
         from character_factory_poc.common.budget import RunBudget
 
@@ -296,6 +439,7 @@ class TrackedImageModel:
     def model(self) -> str:
         return self.inner.model
 
+    @_limited_call
     def generate(self, request: ImageRequest) -> ImageResult:
         self.budget.consume(1)
         try:
@@ -355,6 +499,7 @@ class TrackedVisionModel:
     def model(self) -> str:
         return self.inner.model
 
+    @_limited_call
     def judge(self, request: VisionRequest) -> VisionResult:
         self.budget.consume(1)
         try:
@@ -418,10 +563,12 @@ class TrackedVideoModel:
         if fn is not None:
             fn(duration, resolution)
 
+    @_limited_call
     def submit(self, request: VideoRequest) -> str:
         self.budget.consume(1)
         return self.inner.submit(request)
 
+    @_limited_call
     def collect(self, job_id: str, request: VideoRequest) -> VideoResult:
         try:
             res = self.inner.collect(job_id, request)

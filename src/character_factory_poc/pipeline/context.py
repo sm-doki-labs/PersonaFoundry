@@ -18,6 +18,7 @@ from character_factory_poc.providers.factory import (
     make_video_model,
 )
 from character_factory_poc.providers.tracked import (
+    ProviderLimits,
     TrackedImageModel,
     TrackedTextModel,
     TrackedVideoModel,
@@ -45,6 +46,27 @@ class Context:
     _run_budget: object | None = None
     # D-0049(LLD §6.6): 물결 실행에서 여러 단계가 동시에 공급자를 처음 만들 수 있다.
     _lazy: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
+
+    _budget_character: str | None = None
+    _injected: dict = field(default_factory=dict, repr=False, compare=False)
+
+    def for_character(self, cid: str) -> Context:
+        if self._run_budget is not None:
+            raise ValueError("기존 형성 예산을 캐릭터 배치에 재사용할 수 없다")
+        from copy import deepcopy
+
+        # 주입한 가짜 공급자의 응답 큐·요청 이력은 복제하고, 일반 클라이언트는 새로 만든다.
+        return Context(
+            config=self.config,
+            execute=self.execute,
+            max_calls=self.max_calls,
+            _budget_character=cid,
+            **deepcopy(self._injected),
+        )
+
+    def _limited(self, tracked, kind: str):
+        tracked.limits = ProviderLimits(self.config.orchestrator, kind, tracked.ledger)
+        return tracked
 
     @classmethod
     def load(cls, root: Path, execute: bool, max_calls: int | None = None) -> Context:
@@ -80,7 +102,10 @@ class Context:
             for c in scope
         ):
             raise ValueError("budget_run_id must contain letters, numbers, hyphens or underscores")
-        path = self.config.runs_dir / "budgets" / f"{scope}.json"
+        folder = self.config.runs_dir / "budgets"
+        if self._budget_character:
+            folder = self.character_dir(self._budget_character) / "budgets"
+        path = folder / f"{scope}.json"
         input_rate = cfg.get("input_rate_upper_per_million", 0 if synthetic else None)
         output_rate = cfg.get("output_rate_upper_per_million", 0 if synthetic else None)
         if not synthetic and self.text_deck_enabled and (input_rate is None or output_rate is None):
@@ -153,9 +178,9 @@ class Context:
         return bool(self.config.text_pipeline.get("enabled", False))
 
     def task_model(self, character_id: str, budget: Budget, task: str) -> TextModel:
-        if not self.text_deck_enabled:
-            from character_factory_poc.common.text_deck import JUDGE_TASKS
+        from character_factory_poc.common.text_deck import JUDGE_TASKS
 
+        if not self.text_deck_enabled:
             if task in JUDGE_TASKS:
                 return self.judge_model(character_id, budget)
             return self.text_model(character_id, budget)
@@ -170,15 +195,18 @@ class Context:
             family = binding.get("family") or family_of(cfg.model) or "미상"
             raise ValueError(f"{task} task({family} 계열)의 인증 키가 설정되지 않았다")
         inner = make_text_model(cfg)
-        return TrackedTextModel(
-            inner,
-            self.ledger(character_id),
-            budget,
-            binding=binding,
-            billing=self._billing(cfg, inner, route=binding["route"]),
-            price_overrides=self.price_overrides(),
-            # D-0084: 덱 경로는 어댑터 재시도를 끄므로 전송 실패만 예산 안에서 다시 보낸다.
-            transport_retries=int(self.config.text_pipeline.get("transport_retries", 1)),
+        return self._limited(
+            TrackedTextModel(
+                inner,
+                self.ledger(character_id),
+                budget,
+                binding=binding,
+                billing=self._billing(cfg, inner, route=binding["route"]),
+                price_overrides=self.price_overrides(),
+                # D-0084: 덱 경로는 어댑터 재시도를 끄므로 전송 실패만 예산 안에서 다시 보낸다.
+                transport_retries=int(self.config.text_pipeline.get("transport_retries", 1)),
+            ),
+            "judge" if task in JUDGE_TASKS else "text",
         )
 
     def role_model(self, character_id: str, budget: Budget, role: str) -> TextModel:
@@ -190,12 +218,15 @@ class Context:
         with self._lazy:
             if self._text is None:
                 self._text = make_text_model(self.config.provider("text"))
-        return TrackedTextModel(
-            self._text,
-            self.ledger(character_id),
-            budget,
-            billing=self._billing(self.config.provider("text"), self._text),
-            price_overrides=self.price_overrides(),
+        return self._limited(
+            TrackedTextModel(
+                self._text,
+                self.ledger(character_id),
+                budget,
+                billing=self._billing(self.config.provider("text"), self._text),
+                price_overrides=self.price_overrides(),
+            ),
+            "text",
         )
 
     def judge_model(self, character_id: str, budget: Budget, allow_same_family=False) -> TextModel:
@@ -208,36 +239,46 @@ class Context:
             print(msg, file=sys.stderr)
             if not allow_same_family:
                 raise ValueError(msg + ". --allow-same-family로 명시해야 한다")
-        return TrackedTextModel(
-            self._judge,
-            self.ledger(character_id),
-            budget,
-            billing=self._billing(j, self._judge),
-            price_overrides=self.price_overrides(),
+        return self._limited(
+            TrackedTextModel(
+                self._judge,
+                self.ledger(character_id),
+                budget,
+                billing=self._billing(j, self._judge),
+                price_overrides=self.price_overrides(),
+            ),
+            "judge",
         )
 
     # 테스트에서 가짜 모델을 주입할 때 쓴다.
     def use_models(self, text: TextModel, judge: TextModel | None = None) -> None:
         self._text = text
         self._judge = judge or text
+        self._injected.update(_text=self._text, _judge=self._judge)
 
     def image_model(self, character_id: str, budget: Budget) -> TrackedImageModel:
         with self._lazy:
             if self._image is None:
                 self._image = make_image_model(self.config.provider("image"))
-        return TrackedImageModel(self._image, self.ledger(character_id), budget)
+        return self._limited(
+            TrackedImageModel(self._image, self.ledger(character_id), budget), "image"
+        )
 
     def use_image(self, image: ImageModel) -> None:
         self._image = image
+        self._injected["_image"] = image
 
     def video_model(self, character_id: str, budget: Budget) -> TrackedVideoModel:
         with self._lazy:
             if self._video is None:
                 self._video = make_video_model(self.config.provider("video"))
-        return TrackedVideoModel(self._video, self.ledger(character_id), budget)
+        return self._limited(
+            TrackedVideoModel(self._video, self.ledger(character_id), budget), "video"
+        )
 
     def use_video(self, video: VideoModel) -> None:
         self._video = video
+        self._injected["_video"] = video
 
     def vision_family_warning(self) -> str:
         """이미지 생성과 비전 판정 모델 계열이 같으면 경고 문장(D-0010, D-0036)."""
@@ -257,19 +298,24 @@ class Context:
         with self._lazy:
             if self._vision is None:
                 self._vision = make_vision_model(self.config.provider("vision"))
-        return TrackedVisionModel(
-            self._vision,
-            self.ledger(character_id),
-            budget,
-            billing=self._billing(self.config.provider("vision"), self._vision),
-            price_overrides=self.price_overrides(),
+        return self._limited(
+            TrackedVisionModel(
+                self._vision,
+                self.ledger(character_id),
+                budget,
+                billing=self._billing(self.config.provider("vision"), self._vision),
+                price_overrides=self.price_overrides(),
+            ),
+            "vision",
         )
 
     def use_vision(self, vision) -> None:
         self._vision = vision
+        self._injected["_vision"] = vision
 
     def use_codex(self, backend) -> None:
         self._codex = backend
+        self._injected["_codex"] = backend
 
     def agent_backend(self, character_id: str, budget: Budget, stage: str):
         """[agent] backend = "codex_exec"이면 추적 래퍼를 돌려주고, 아니면 None(API 백엔드)."""
@@ -293,4 +339,6 @@ class Context:
                     timeout_s=int(a.get("timeout_s", 1800)),
                     extra_config=list(a.get("extra_config", [])),
                 )
-        return TrackedCodexAgent(self._codex, self.ledger(character_id), budget, stage)
+        return self._limited(
+            TrackedCodexAgent(self._codex, self.ledger(character_id), budget, stage), "text"
+        )

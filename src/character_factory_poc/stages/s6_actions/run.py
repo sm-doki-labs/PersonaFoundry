@@ -24,19 +24,23 @@ from character_factory_poc.common.store import (
 )
 from character_factory_poc.contracts.video import ActionClip, ActionInputs
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.origin import is_twin
 from character_factory_poc.providers.base import ImageRequest, VideoRequest
 from character_factory_poc.providers.xai_video import estimate_cost
 from character_factory_poc.stages.s4_frames.approve import load_approved_frames
 from character_factory_poc.stages.s5_intro.probe import probe_video
 from character_factory_poc.stages.s5_intro.run import NOTES, _write_json
 from character_factory_poc.stages.s6_actions.catalog import (
+    ALL_CHAPTERS,
     CATALOG,
     NEUTRAL_NEGATIVE,
-    NEUTRAL_PROMPT,
     PRESETS,
     STAGE_NOTES,
+    VIDEO_TIERS,
     build_prompt,
+    neutral_prompt,
 )
+from character_factory_poc.stages.s6_actions.light import LIGHT_INPUTS, read_inputs
 from character_factory_poc.stages.s6_actions.page import render_g5b_page
 
 DEFAULTS: dict[str, Any] = {
@@ -54,17 +58,33 @@ def _resolve_config(settings: dict[str, Any]) -> dict[str, Any]:
     cfg = DEFAULTS | settings
     problems = []
     preset, actions = cfg["preset"], cfg["actions"]
-    if not isinstance(preset, str) or preset not in (*PRESETS, "custom"):
-        problems.append("preset은 l2 또는 standard다")
-    if (
-        not isinstance(actions, list)
-        or any(not isinstance(key, str) or key not in CATALOG for key in actions)
-        or (
-            isinstance(actions, list)
-            and len(actions) != len(set(key for key in actions if isinstance(key, str)))
-        )
-    ):
-        problems.append("actions는 중복 없는 카탈로그 키 목록이어야 한다")
+    if "video_tier" in cfg:
+        tier = cfg["video_tier"]
+        if not isinstance(tier, str) or tier not in VIDEO_TIERS:
+            raise CheckFailed("s6", ["video_tier는 light·standard·pro·max 중 하나다"])
+        cfg["chapters"] = VIDEO_TIERS[tier].chapters
+        cfg["actions"] = list(VIDEO_TIERS[tier].actions)
+        cfg["preset"] = f"tier:{tier}"
+    else:
+        if preset == "standard":
+            preset = "full37"
+        if not isinstance(preset, str) or preset not in (*PRESETS, "custom"):
+            problems.append("preset은 l2·full37(옛 이름 standard)·custom 중 하나다")
+        if (
+            not isinstance(actions, list)
+            or any(not isinstance(key, str) or key not in CATALOG for key in actions)
+            or (
+                isinstance(actions, list)
+                and len(actions) != len(set(key for key in actions if isinstance(key, str)))
+            )
+        ):
+            problems.append("actions는 중복 없는 카탈로그 키 목록이어야 한다")
+        if preset == "custom" and not actions:
+            problems.append("custom에는 actions가 필요하다")
+        if not problems:
+            cfg["chapters"] = ALL_CHAPTERS
+            cfg["actions"] = list(actions or PRESETS[preset])
+            cfg["preset"] = "custom" if actions else preset
     durations = cfg["durations"]
     if not isinstance(durations, dict):
         problems.append("durations는 idle·emotion·special 길이를 담은 객체다")
@@ -85,12 +105,8 @@ def _resolve_config(settings: dict[str, Any]) -> dict[str, Any]:
         problems.append(str(e))
     if type(cfg["generate_audio"]) is not bool:
         problems.append("generate_audio는 boolean이다")
-    if preset == "custom" and not actions:
-        problems.append("custom에는 actions가 필요하다")
     if problems:
         raise CheckFailed("s6", problems)
-    cfg["actions"] = list(actions or PRESETS[preset])
-    cfg["preset"] = "custom" if actions else preset
     cfg["durations"] = durations
     return cfg
 
@@ -134,7 +150,7 @@ def _partial(ctx: Context, cid: str, cfg: dict) -> tuple[str | None, dict[str, s
     record = read_json(record_path)
     if record.get("decision") != "REQUEST_CHANGES":
         return None, {}
-    previous: ActionInputs = validate("action-inputs-v2", read_json(inputs_path))
+    previous: ActionInputs = read_inputs(inputs_path)
     settings = {
         "resolution": previous.resolution,
         "aspect_ratio": previous.aspectRatio,
@@ -142,6 +158,8 @@ def _partial(ctx: Context, cid: str, cfg: dict) -> tuple[str | None, dict[str, s
         "candidates": previous.candidates,
     }
     if previous.frameRev != frame_gate.rev or any(cfg[k] != v for k, v in settings.items()):
+        return None, {}
+    if tuple(ch.chapterId for ch in previous.chapters) != cfg["chapters"]:
         return None, {}
     for chapter in previous.chapters:
         if [a.actionKey for a in chapter.actions] != cfg["actions"] or any(
@@ -161,7 +179,7 @@ def plan_calls(ctx: Context, cfg: dict[str, Any], cid: str | None = None) -> lis
     bad_frames = 0
     if pending:
         rev_dir = ctx.character_dir(cid) / "s6-actions" / pending
-        inputs: ActionInputs = validate("action-inputs-v2", read_json(rev_dir / "inputs.json"))
+        inputs: ActionInputs = read_inputs(rev_dir / "inputs.json")
         for chapter in inputs.chapters:
             for action in chapter.actions:
                 if inputs.previousRev and action.actionId not in inputs.regenerate:
@@ -169,14 +187,22 @@ def plan_calls(ctx: Context, cfg: dict[str, Any], cid: str | None = None) -> lis
                 for n in range(1, inputs.candidates + 1):
                     if not (rev_dir / "assets" / f"{action.actionId}-v{n}.json").exists():
                         durations.append(action.duration)
+        chapter_count = len(inputs.chapters)
+        action_count = len(inputs.chapters[0].actions)
+        candidates = inputs.candidates
+        aspect_ratio = inputs.aspectRatio
         resolution = inputs.resolution
     else:
-        for ch in ("ch1", "ch2", "ch3"):
+        chapter_count = len(cfg["chapters"])
+        action_count = len(cfg["actions"])
+        candidates = cfg["candidates"]
+        aspect_ratio = cfg["aspect_ratio"]
+        for ch in cfg["chapters"]:
             for key in cfg["actions"]:
                 if not previous or f"{ch}-{key}" in changes:
                     durations.extend([_duration(cfg, key)] * cfg["candidates"])
         if not previous and any(CATALOG[key]["mood"] == "bad" for key in cfg["actions"]):
-            bad_frames = 3
+            bad_frames = chapter_count
         resolution = cfg["resolution"]
     pcfg = ctx.config.provider("video")
     note = NOTES.get(pcfg.adapter, pcfg.adapter)
@@ -184,9 +210,9 @@ def plan_calls(ctx: Context, cfg: dict[str, Any], cid: str | None = None) -> lis
         note += f", {previous} 수정 요청 {len(changes)}개 동작만 재생성"
     n = len(durations)
     desc = (
-        f"동작 영상 {n}편 (3챕터 × 동작 {len(cfg['actions'])}개 × 후보 {cfg['candidates']}, "
+        f"동작 영상 {n}편 ({chapter_count}챕터 × 동작 {action_count}개 × 후보 {candidates}, "
         f"{pcfg.model or pcfg.adapter}, {resolution}, 동작별 길이, "
-        f"{cfg['aspect_ratio']}, {note})"
+        f"{aspect_ratio}, {note})"
     )
     plans = []
     if bad_frames:
@@ -224,7 +250,7 @@ def run_s6(ctx: Context, cid: str) -> Path:
         video = ctx.video_model(cid, budget)
         inputs_path = rev_dir / "inputs.json"
         if inputs_path.exists():
-            inputs: ActionInputs = validate("action-inputs-v2", read_json(inputs_path))
+            inputs: ActionInputs = read_inputs(inputs_path)
             durations = {a.duration for ch in inputs.chapters for a in ch.actions}
             resolution = inputs.resolution
         else:
@@ -283,10 +309,11 @@ def _first_frames(ctx, cid, rev, rev_dir, frame, frame_dir, needs_bad, cfg, budg
     if not needs_bad:
         return good, None, None
     ratio = parse_ratio(cfg["aspect_ratio"])
+    neutral = neutral_prompt(twin=is_twin(ctx.character_dir(cid)))
     result = ctx.image_model(cid, budget).generate(
         ImageRequest(
             stage="s6",
-            prompt=NEUTRAL_PROMPT,
+            prompt=neutral,
             ref=f"{cid}/{rev}/{frame.chapterId}-bad-frame",
             negative_prompt=NEUTRAL_NEGATIVE,
             size=request_size(ratio),
@@ -307,7 +334,7 @@ def _first_frames(ctx, cid, rev, rev_dir, frame, frame_dir, needs_bad, cfg, budg
     }
     source = {
         "source": good,
-        "prompt": NEUTRAL_PROMPT,
+        "prompt": neutral,
         "negativePrompt": NEUTRAL_NEGATIVE,
         "provider": result.provider,
         "model": result.model,
@@ -320,12 +347,12 @@ def _first_frames(ctx, cid, rev, rev_dir, frame, frame_dir, needs_bad, cfg, budg
 def _make_inputs(ctx, cid, rev, rev_dir, frames, frame_dir, cfg, video, budget, previous, changes):
     old_chapters = {}
     if previous:
-        old: ActionInputs = validate(
-            "action-inputs-v2", read_json(rev_dir.parent / previous / "inputs.json")
-        )
+        old: ActionInputs = read_inputs(rev_dir.parent / previous / "inputs.json")
         old_chapters = {ch.chapterId: ch for ch in old.chapters}
     chapters = []
     for frame in sorted(frames.frames, key=lambda f: f.chapterId):
+        if frame.chapterId not in cfg["chapters"]:
+            continue
         old_ch = old_chapters.get(frame.chapterId)
         carried = {a.actionId: a for a in old_ch.actions} if old_ch else {}
         actions = []
@@ -376,7 +403,7 @@ def _make_inputs(ctx, cid, rev, rev_dir, frames, frame_dir, cfg, video, budget, 
             }
         )
     return validate(
-        "action-inputs-v2",
+        LIGHT_INPUTS if cfg.get("video_tier") == "light" else "action-inputs-v2",
         {
             "frameRev": frames.frameRev,
             "appearanceRev": frames.appearanceRev,

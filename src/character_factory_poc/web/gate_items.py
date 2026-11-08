@@ -794,13 +794,19 @@ def eval_report(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> 
     prompt_only = read_json(rev_dir / "prompt-only.json")
     if prompt_only is not None:
         # K-0038: 학습 결과 없이 연 G8. 블라인드 비교 대신 '긴 프롬프트로 진행' 결정을 받는다.
+        options = prompt_only.get("adoptOptions", ["LONG_BASE"])
+        twin_doc = prompt_only.get("schemaVersion") == "eval-twin-decision-v1"
         return {
             "kind": "eval",
             "viewKind": "promptOnly",
-            "title": "학습 없이 진행",
+            "title": "긴 프롬프트 채택" if twin_doc else "학습 없이 진행",
             "source": "artifacts",
             "decision": prompt_only,
-            "adoptOptions": prompt_only.get("adoptOptions", ["LONG_BASE"]),
+            "adoptOptions": options,
+            # 화면 버튼 문구와 결정 본문에 실을 값. BIND_EXISTING은 reads.gate_view가 덮어쓴다.
+            "adoptLabel": "긴 프롬프트로 진행",
+            "adoptTarget": options[0] if options else "LONG_BASE",
+            "twin": twin_comparison(char_dir, character_id, stage_dir, rev),
             "page": asset(char_dir, character_id, stage_dir, rev, "gate-G8.html"),
         }
     report = read_json(rev_dir / "report-final.json") or read_json(rev_dir / "report.json")
@@ -836,7 +842,259 @@ def eval_report(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> 
         "criteria": criteria,
         "pairs": pairs,
         "adoptOptions": options,
+        "twin": twin_comparison(char_dir, character_id, stage_dir, rev),
         "page": asset(char_dir, character_id, stage_dir, rev, "gate-G8.html"),
+    }
+
+
+def twin_comparison(
+    char_dir: Path, character_id: str, stage_dir: str, rev: str
+) -> dict[str, Any] | None:
+    """트윈 G8의 실제 답 비교 요약(twin-comparison-v1). 없으면 None이다.
+
+    장면별 정답 키(trials)와 원문은 넣지 않는다. 가족 블라인드 파일은 조건 이름 없이 판 번호로만
+    알리고, 실제 답과 생성 답을 나란히 보이는 시연 화면은 그 판의 가족 판정을 가져온 뒤에만 연다.
+    """
+    from character_factory_poc.stages.s10_eval import blind
+
+    rev_dir = Path(char_dir) / stage_dir / rev
+    path = blind.latest(rev_dir)
+    doc = read_json(path) if path is not None else None
+    if path is None or doc is None or doc.get("schemaVersion") != "twin-comparison-v1":
+        return None
+    phase = {blind.REVIEWED: "REVIEWED", blind.BASE: "RUN", blind.PLAN: "PLANNED"}[path.name]
+    conditions: list[dict[str, Any]] = []
+    ballots: list[dict[str, Any]] = []
+    for c in doc.get("conditions", []):
+        if not isinstance(c, dict):
+            continue
+        trials = [t for t in c.get("trials", []) if isinstance(t, dict)]
+        ballot = c.get("ballot") if isinstance(c.get("ballot"), str) else None
+        voted = bool(ballot) and (rev_dir / f"twin-votes-{ballot}.json").is_file()
+        kinds: dict[str, int] = {}
+        for t in trials:
+            for k in t.get("overlap") or []:
+                kinds[str(k)] = kinds.get(str(k), 0) + 1
+        conditions.append(
+            {
+                "armId": c.get("armId"),
+                "model": c.get("model"),
+                "servingModel": c.get("servingModel"),
+                "status": c.get("status"),
+                "modelScore": c.get("modelScore"),
+                "humanScore": c.get("humanScore"),
+                "trials": len(trials),
+                "exact": sum(bool(t.get("exact")) for t in trials),
+                "overlap": sum(bool(t.get("overlap")) for t in trials),
+                "overlapKinds": kinds,
+                "voted": voted,
+                "blind": bool(ballot),
+                "demo": (
+                    asset(char_dir, character_id, stage_dir, rev, f"twin-demo-{ballot}.html")
+                    if voted
+                    else None
+                ),
+            }
+        )
+        if ballot:
+            ballots.append(
+                {
+                    "ballot": ballot,
+                    "file": asset(
+                        char_dir, character_id, stage_dir, rev, f"twin-blind-{ballot}.html"
+                    ),
+                    "answerFile": f"answers-{ballot}.json",
+                    "voted": voted,
+                }
+            )
+    # 판 번호 순으로 늘어놓아 조건 표의 순서로 어느 판이 어느 조건인지 짐작하지 못하게 한다.
+    ballots.sort(key=lambda b: b["ballot"])
+    return {
+        "phase": phase,
+        "mode": doc.get("mode"),
+        "sceneCount": doc.get("sceneCount"),
+        "plannedCalls": doc.get("plannedCalls"),
+        "costUpperUsd": doc.get("costUpperUsd"),
+        "judgeModel": doc.get("judgeModel"),
+        "overlapChars": doc.get("overlapChars"),
+        "conditions": conditions,
+        "ballots": ballots,
+        "importHint": (
+            "가족이 블라인드 화면에서 '답 파일 저장'을 누르면 answers-<판 번호>.json이 저장돼요. "
+            "그 파일을 받아 공장에서 가져오면 사람 구별률이 채워지고 시연 화면이 열려요."
+        ),
+        "importCall": "stages.s10_eval.blind.import_blind_answers(ctx, characterId, 답 파일 경로)",
+    }
+
+
+# ---------------------------------------------------------------- G0·G1s (트윈 갈래)
+
+
+def _corpus_rows(path: Path, wanted: set[str]) -> dict[str, dict[str, Any]]:
+    """corpus.jsonl에서 화면에 필요한 메시지만 고른다. 비교 세트(holdout.jsonl)는 열지 않는다."""
+    out: dict[str, dict[str, Any]] = {}
+    if not wanted or not path.is_file():
+        return out
+    for line in path.read_text("utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and str(row.get("msgId")) in wanted:
+            out[str(row["msgId"])] = row
+    return out
+
+
+def source_pack(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[str, Any]:
+    """G0: s0이 정리한 출처 목록·화자·가린 개인정보·대화 수·사용 근거·출처 정리 에이전트 의견.
+
+    비교 세트는 개수만 보인다. 원문(holdout.jsonl)은 load_holdout만 읽는다(D-0120).
+    사진은 원본 경로(파일 이름에 개인정보가 있을 수 있다) 대신 장수와 받은 곳만 보인다.
+    """
+    folder = Path(char_dir) / stage_dir / rev
+    index = read_json(folder / "source-index.json")
+    if index is None:
+        return _empty("sourcePack", ["source-index.json이 없다. s0을 먼저 돌린다"])
+    pack = read_json(folder / "source-pack.json") or {}
+    digest = read_json(folder / "digest.json")
+    problems = (
+        [] if digest is not None else ["digest.json이 없다. 출처 정리 에이전트 결과를 확인한다"]
+    )
+    digest = digest or {}
+    specs = {str(t.get("textId")): t for t in pack.get("texts", []) if isinstance(t, dict)}
+    texts = []
+    for t in index.get("texts", []):
+        if not isinstance(t, dict):
+            continue
+        spec = specs.get(str(t.get("textId")), {})
+        texts.append(
+            {
+                **{
+                    k: t.get(k)
+                    for k in (
+                        "textId",
+                        "kind",
+                        "messages",
+                        "subjectMessages",
+                        "conversations",
+                        "first",
+                        "last",
+                    )
+                },
+                "subjectSpeaker": spec.get("subjectSpeaker"),
+                "userSpeaker": spec.get("userSpeaker"),
+                "date": spec.get("date"),
+            }
+        )
+    reps = [r for r in digest.get("representative", []) if isinstance(r, dict)]
+    flags = [f for f in digest.get("piiFlags", []) if isinstance(f, dict)]
+    rows = _corpus_rows(folder / "corpus.jsonl", {str(x.get("msgId")) for x in reps + flags})
+
+    def text_of(msg_id: Any) -> str:
+        return str(rows.get(str(msg_id), {}).get("text", ""))
+
+    basis = pack.get("usageBasis") if isinstance(pack.get("usageBasis"), dict) else {}
+    subject = pack.get("subject") if isinstance(pack.get("subject"), dict) else {}
+    photos = [p for p in pack.get("photos", []) if isinstance(p, dict)]
+    masked = index.get("masked") if isinstance(index.get("masked"), dict) else {}
+    check = digest.get("speakerCheck") if isinstance(digest.get("speakerCheck"), dict) else {}
+    return {
+        "kind": "sourcePack",
+        "source": "artifacts",
+        "problems": problems,
+        "sourceRev": index.get("sourceRev"),
+        "subject": {
+            "displayName": subject.get("displayName", ""),
+            "kind": index.get("subjectKind") or subject.get("kind"),
+        },
+        "usage": {
+            "scope": basis.get("scope") or "",
+            "consentBy": basis.get("consentBy"),
+            "consentDate": basis.get("consentDate"),
+            "notes": basis.get("notes") or "",
+        },
+        "usageProblems": [str(p) for p in index.get("usageProblems", [])],
+        "texts": texts,
+        "photos": {
+            "count": len(index.get("photos", [])),
+            "origins": [str(p.get("origin") or "") for p in photos],
+        },
+        "counts": {
+            "conversations": sum(int(t.get("conversations") or 0) for t in texts),
+            "corpusMessages": index.get("corpusMessages", 0),
+            "corpusSubjectMessages": index.get("corpusSubjectMessages", 0),
+            "holdoutConversations": index.get("holdoutConversations", 0),
+            "holdoutMessages": index.get("holdoutMessages", 0),
+            "otherParticipants": index.get("otherParticipants", 0),
+        },
+        "masked": {str(k): int(v) for k, v in masked.items() if isinstance(v, int)},
+        "agent": {
+            "speakerCheck": {
+                "confirmed": bool(check.get("confirmed")),
+                "note": str(check.get("note") or ""),
+            },
+            "representative": [
+                {
+                    "msgId": r.get("msgId"),
+                    "category": r.get("category"),
+                    "why": r.get("why", ""),
+                    "text": text_of(r.get("msgId")),
+                }
+                for r in reps
+            ],
+            "observations": [str(o) for o in digest.get("observations", [])],
+            "piiFlags": [
+                {
+                    "msgId": f.get("msgId"),
+                    "reason": f.get("reason", ""),
+                    "text": text_of(f.get("msgId")),
+                }
+                for f in flags
+            ],
+            "qualityNotes": [str(n) for n in digest.get("qualityNotes", [])],
+        },
+        "page": asset(char_dir, character_id, stage_dir, rev, "gate-G0.html"),
+    }
+
+
+def source_photos(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[str, Any]:
+    """G1s: G0에서 승인한 사진 후보와 비전 태그. 첫 후보가 기본이다(approve_g1s)."""
+    folder = Path(char_dir) / stage_dir / rev
+    doc = read_json(folder / "photo-options.json")
+    if doc is None:
+        return _empty("sourcePhotos", ["photo-options.json이 없다. 트윈 s2를 먼저 돌린다"])
+    photos = []
+    for i, option in enumerate(doc.get("options", [])):
+        if not isinstance(option, dict):
+            continue
+        ref = option.get("referenceImage") if isinstance(option.get("referenceImage"), dict) else {}
+        photos.append(
+            {
+                "photoId": ref.get("id"),
+                "n": i + 1,
+                "default": i == 0,
+                "file": asset(char_dir, character_id, stage_dir, rev, ref.get("path")),
+                "tags": _tags(option.get("tags")),
+                "descriptionKo": option.get("descriptionKo", ""),
+                "descriptionEn": option.get("descriptionEn", ""),
+                "notes": option.get("notes", ""),
+            }
+        )
+    return {
+        "kind": "sourcePhotos",
+        "source": "artifacts",
+        "problems": []
+        if photos
+        else ["사진 후보가 없다. 사진이 있는 출처 묶음으로 G0을 다시 받는다"],
+        "sourceRev": doc.get("sourceRev"),
+        "photos": photos,
+        "helper": (
+            "G0에서 승인한 사진이에요. 본인과 가장 닮고 얼굴이 잘 보이는 한 장을 고르면, 그 사진이 "
+            "이후 모든 장면과 영상의 얼굴 기준이 돼요."
+        ),
+        "page": asset(char_dir, character_id, stage_dir, rev, "gate-G1s.html"),
     }
 
 
@@ -876,6 +1134,8 @@ BUILDERS = {
     "dataset": data_dataset,
     "eval": eval_report,
     "package": release_package,
+    "sourcePack": source_pack,
+    "sourcePhotos": source_photos,
 }
 
 

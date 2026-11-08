@@ -24,7 +24,6 @@ from typing import Any
 from character_factory_poc.common.config import load_config
 from character_factory_poc.contracts.common import State
 from character_factory_poc.pipeline.context import Context
-from character_factory_poc.pipeline.graph import GATES, STAGES
 from character_factory_poc.pipeline.orchestrator import RunLog, RunOptions, run_until
 from character_factory_poc.web import reads
 from character_factory_poc.web.errors import WebError
@@ -244,13 +243,14 @@ class JobManager:
         if action not in ACTIONS:
             raise WebError(400, f"action은 {', '.join(sorted(ACTIONS))}만 받는다: {action!r}")
         gate_or_stage = (until or self.settings.default_until or "G6").strip()
-        if gate_or_stage not in STAGES and gate_or_stage not in GATES:
+        stages, gates, _ = reads.graph_parts(char_dir)
+        if gate_or_stage not in stages and gate_or_stage not in gates:
             raise WebError(
                 400,
-                f"until은 단계(s1~s11)나 관문(G1~G9) 중 하나다: {gate_or_stage!r}",
+                f"until은 이 캐릭터의 단계나 관문 중 하나다: {gate_or_stage!r}",
             )
         confirmed = list(confirm or [])
-        bad = [s for s in confirmed if not isinstance(s, str) or s not in STAGES]
+        bad = [s for s in confirmed if not isinstance(s, str) or s not in stages]
         if bad:
             raise WebError(400, f"confirm은 단계 ID 목록이다: {bad!r}")
         with self._lock:

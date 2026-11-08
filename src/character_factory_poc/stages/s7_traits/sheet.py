@@ -12,6 +12,7 @@ from character_factory_poc.common.schema import dump
 from character_factory_poc.common.store import next_rev, write_manifest, write_once_json
 from character_factory_poc.pipeline.agent import AgentSpec, run_agent
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.origin import SOURCE, read_origin
 from character_factory_poc.stages.s3_plan.importer import load_approved_plan
 from character_factory_poc.stages.s7_traits.check import (
     check_matches_plan,
@@ -105,7 +106,9 @@ def run_s7(
     reference_docs: dict[str, Any] | None = None,
 ) -> Path:
     """reference_docs: 참조 유형·프리셋 카드의 본문({파일명: JSON 또는 텍스트}). 에이전트 입력에 그대로 넣는다."""
-    if "formation_profile" in ctx.config.stage("s7"):
+    twin = read_origin(ctx.character_dir(cid)) == SOURCE
+    # 외부 화자 자료로 가상 대화를 쓰는 형성 프로필은 창작 갈래에서만 쓴다.
+    if not twin and "formation_profile" in ctx.config.stage("s7"):
         if ctx.config.stage("s7")["formation_profile"] == "ko-text-choice-voice-long-v2":
             from character_factory_poc.stages.s7_traits.choice_voice import run_choice_voice_s7
 
@@ -130,14 +133,17 @@ def run_s7(
 
     model = ctx.role_model(cid, budget, "profiler")
     spec = AgentSpec(
-        role="profiler", output_contract="trait-sheet-v1", stage="s7", max_check_retries=retries
+        role="source_profiler" if twin else "profiler",
+        output_contract="trait-sheet-v1",
+        stage="s7",
+        max_check_retries=retries,
     )
     inputs: dict[str, Any] = {
         # D-0088: 대표 대사(voiceExamples)는 사람 검토용이다. 다음 단계에 넣으면 그대로 복제되므로
         # 성격 시트 입력에서 뺀다. 말투는 voiceSummary의 언어학적 기술로만 전달한다.
         "character-plan": {k: v for k, v in dump(plan).items() if k != "voiceExamples"},
         "choice-guide.md": CHOICE_GUIDE,
-        "card-guide.md": CARD_GUIDE,
+        "card-guide.md": CARD_GUIDE.replace("(허구)", "(승인 원문에 근거)") if twin else CARD_GUIDE,
         "references": references or [],
     }
     for name, doc in (reference_docs or {}).items():

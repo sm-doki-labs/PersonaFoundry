@@ -118,16 +118,32 @@ def approve_g8(ctx: Context, cid: str, answer: dict[str, Any]) -> Path:
     if gate.status != "AWAITING_HUMAN" or not gate.rev:
         raise FactoryError(f"{cid}: G8이 대기 상태가 아니다({gate.status})")
     from character_factory_poc.stages.s10_eval.prompt_only import (
+        PROMPT_ONLY_FILE,
         approve_prompt_only,
         is_prompt_only,
     )
 
     if is_prompt_only(char_dir / "s10-eval" / gate.rev):
+        from character_factory_poc.stages.s10_eval.twin import SCHEMA, approve_twin
+
+        folder = char_dir / "s10-eval" / gate.rev
+        doc = json.loads((folder / PROMPT_ONLY_FILE).read_text("utf-8"))
+        if doc.get("schemaVersion") == SCHEMA:
+            return approve_twin(ctx, cid, folder, doc, answer)
         # K-0038: 학습 결과 없이 연 G8. 평가 보고서 대신 '긴 프롬프트로 진행' 결정을 받는다.
         return approve_prompt_only(ctx, cid, char_dir / "s10-eval" / gate.rev, answer)
     if answer.get("decision") != "SELECT":
         raise FactoryError("G8 결정은 SELECT다(채택 조건을 고른다)")
     rev_dir = char_dir / "s10-eval" / gate.rev
+    from character_factory_poc.pipeline.graph import SOURCE
+    from character_factory_poc.pipeline.origin import read_origin
+    from character_factory_poc.stages.s10_eval import blind
+
+    is_twin = read_origin(char_dir) == SOURCE
+    if is_twin and not (rev_dir / blind.BASE).is_file():
+        raise FactoryError("트윈 TRAIN G8에는 비교 실행 보고가 필요하다")
+    if is_twin:
+        blind.verify_evidence(rev_dir)
     prereg, digest = read_prereg(rev_dir)
     report = load_report(rev_dir)
     pairs, pairs_raw = load_pairs(rev_dir)
@@ -164,6 +180,8 @@ def approve_g8(ctx: Context, cid: str, answer: dict[str, Any]) -> Path:
         adopted=adopted,
         improvement_tasks=tasks,
     )
+    if is_twin:
+        page = blind.decorate(page, rev_dir)
     (rev_dir / "gate-G8.html").write_text(page, encoding="utf-8")
     report_ref = ArtifactRef(
         ref=(rev_dir / "report-final.json").relative_to(char_dir).as_posix(),
@@ -194,7 +212,12 @@ def approve_g8(ctx: Context, cid: str, answer: dict[str, Any]) -> Path:
         gate="G8",
         rev=gate.rev,
         stage_id="s10",
-        shown=[rev_dir / "prereg.json", rev_dir / "report-final.json", rev_dir / "gate-G8.html"],
+        shown=[
+            rev_dir / "prereg.json",
+            rev_dir / "report-final.json",
+            rev_dir / "gate-G8.html",
+            *(blind.evidence(rev_dir) if is_twin else []),
+        ],
         decision="SELECT",
         reviewer=str(answer.get("reviewer", "user")),
         reasons=str(answer.get("reasons", "")),

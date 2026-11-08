@@ -14,8 +14,10 @@ from pathlib import Path
 from character_factory_poc.pipeline.context import Context
 
 # 대상 저장소의 적재 스키마. 실제 head와 다르면 적재 전에 멈춘다(LLD §8.11).
-API_SVC_HEAD = "149_android_content_switches"
-CHAT_SVC_HEAD = "0028_authoring_project_locale"
+# 트윈 표시 칸(disclosure_label·call_start_label)은 api-svc 194부터, 캐릭터별 대화 모델은
+# chat-svc codex/per-character-dialogue-model 브랜치(0030 위)부터 받는다(D-0139).
+API_SVC_HEAD = "194_twin_demo_labels"
+CHAT_SVC_HEAD = "0030_projection_gap_backoff"
 
 DEFAULT_ADMIN_URL_ENV = "CFP_PG_ADMIN_URL"
 
@@ -27,6 +29,7 @@ class ExportSettings:
     admin_url_env: str = DEFAULT_ADMIN_URL_ENV
     sql_python: str = ""
     timeout_s: float = 900.0
+    default_voice_id: str | None = None
 
 
 def _table(payload: dict, name: str) -> dict:
@@ -56,6 +59,7 @@ def load_export_settings(ctx: Context) -> ExportSettings:
         chat_svc_repo=_path(doki.get("chat_svc_repo"), chat_default.expanduser()),
         admin_url_env=str(verify.get("admin_url_env") or DEFAULT_ADMIN_URL_ENV),
         sql_python=str(verify.get("sql_python") or ""),
+        default_voice_id=doki.get("default_voice_id") or os.environ.get("CFP_DEFAULT_VOICE_ID"),
         timeout_s=float(verify.get("timeout_s", 900.0)),
     )
 

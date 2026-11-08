@@ -25,9 +25,11 @@ from character_factory_poc.common.store import (
 from character_factory_poc.contracts.rework import ReworkBrief
 from character_factory_poc.contracts.video import IntroInputs, VideoAsset
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.origin import is_twin
 from character_factory_poc.pipeline.rework import load_rework
 from character_factory_poc.providers.base import ImageRequest, VideoRequest
 from character_factory_poc.providers.xai_video import estimate_cost
+from character_factory_poc.stages.s1_reference.preview import subject_phrase
 from character_factory_poc.stages.s2_hero.approve import load_appearance_spec
 from character_factory_poc.stages.s5_intro import first_frame as ff
 from character_factory_poc.stages.s5_intro.page import render_g5_page
@@ -180,7 +182,9 @@ def _first_frame(ctx, cid, rev, rev_dir, spec, hero, cfg, budget) -> tuple[dict,
     else:
         ratio_text = str(cfg["aspect_ratio"])
         ratio = ff.parse_ratio(ratio_text)
-        prompt = ff.build_prompt(ratio_text)
+        prompt = ff.build_prompt(
+            ratio_text, subject_phrase(spec.scope), twin=is_twin(ctx.character_dir(cid))
+        )
         res = ctx.image_model(cid, budget).generate(
             ImageRequest(
                 stage="s5",

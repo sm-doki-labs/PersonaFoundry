@@ -22,7 +22,6 @@ from character_factory_poc.common.errors import GateNotApprovedError, StateTrans
 from character_factory_poc.common.ledger import append_jsonl
 from character_factory_poc.common.schema import dump, validate
 from character_factory_poc.contracts.common import GateState, StageState, State
-from character_factory_poc.pipeline.graph import STAGES
 
 _ALLOWED = {
     "PENDING": {"RUNNING", "SKIPPED"},
@@ -135,7 +134,10 @@ class StateFile:
 
     def require_deps(self, sid: str) -> None:
         """의존 관문·단계가 승인됐고 선행 단계가 끝났는지 (FR-02, D-0042)."""
-        s = STAGES[sid]
+        from character_factory_poc.pipeline.origin import stage_def
+
+        # D-0128: 트윈 캐릭터는 갈래 그래프의 의존을 본다. 오리지널은 STAGES 그대로다.
+        s = stage_def(self.path.parent, sid)
         for g in sorted(s.deps):
             if self.gate(g).status != "APPROVED":
                 raise GateNotApprovedError(

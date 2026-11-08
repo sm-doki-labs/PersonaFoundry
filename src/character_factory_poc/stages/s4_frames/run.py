@@ -20,6 +20,7 @@ from character_factory_poc.common.store import (
 )
 from character_factory_poc.contracts.scene import CHAPTERS
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.origin import is_twin
 from character_factory_poc.providers.base import ImageRequest
 from character_factory_poc.stages.image_qa import (
     RUBRICS,
@@ -193,6 +194,7 @@ def run_s4(ctx: Context, cid: str) -> Path:
                     by_pose[chapter.chapterId],
                     plan.job,
                     notes.get(chapter.chapterId, ""),
+                    twin=is_twin(ctx.character_dir(cid)),
                 )
                 assert_no_names(prompt + NEGATIVE, guard)
                 jobs.append(

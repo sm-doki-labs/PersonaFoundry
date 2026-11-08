@@ -17,7 +17,7 @@ from character_factory_poc.contracts.common import Strict
 from character_factory_poc.contracts.creator_traits import CreatorTrait
 
 Gender = Literal["female", "male", "other"]
-EvidenceKindV2 = Literal["SEED", "USER", "AGENT", "PRESET", "REFERENCE", "APPEARANCE"]
+EvidenceKindV2 = Literal["SEED", "USER", "AGENT", "PRESET", "REFERENCE", "APPEARANCE", "SOURCE"]
 RelationStage = Literal["STRANGER", "ACQUAINTANCE", "FLIRTING", "DATING"]
 Slot = Literal["GET_TO_KNOW", "FLIRT", "CONFESS"]
 ChapterId = Literal["ch1", "ch2", "ch3"]

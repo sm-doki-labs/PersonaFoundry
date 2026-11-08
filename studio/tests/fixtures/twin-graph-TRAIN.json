@@ -1,0 +1,376 @@
+{
+ "stages": [
+  {
+   "id": "s0",
+   "name": "출처 묶음",
+   "deps": [],
+   "needs": [],
+   "after": [],
+   "gate": "G0",
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s2",
+   "name": "기준 사진",
+   "deps": [
+    "G0"
+   ],
+   "needs": [],
+   "after": [],
+   "gate": "G1s",
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s3",
+   "name": "캐릭터 기획",
+   "deps": [
+    "G0"
+   ],
+   "needs": [],
+   "after": [],
+   "gate": "G3",
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s5",
+   "name": "소개 영상",
+   "deps": [],
+   "needs": [
+    "s2"
+   ],
+   "after": [],
+   "gate": "G5",
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s3r",
+   "name": "참고 자료 선별",
+   "deps": [
+    "G3"
+   ],
+   "needs": [],
+   "after": [],
+   "gate": null,
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s4a",
+   "name": "챕터 배경 후보",
+   "deps": [
+    "G3"
+   ],
+   "needs": [
+    "s2"
+   ],
+   "after": [],
+   "gate": "G4a",
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s4b",
+   "name": "장면 사실·자세 후보",
+   "deps": [
+    "G4a"
+   ],
+   "needs": [],
+   "after": [],
+   "gate": "G4b",
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s4",
+   "name": "챕터 완성 이미지",
+   "deps": [
+    "G4b"
+   ],
+   "needs": [
+    "s2"
+   ],
+   "after": [],
+   "gate": "G4",
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s6",
+   "name": "동작 영상",
+   "deps": [
+    "G4"
+   ],
+   "needs": [],
+   "after": [],
+   "gate": "G5b",
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s7",
+   "name": "상세 특질",
+   "deps": [
+    "G3"
+   ],
+   "needs": [],
+   "after": [],
+   "gate": null,
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s8",
+   "name": "프롬프트",
+   "deps": [
+    "G3"
+   ],
+   "needs": [],
+   "after": [
+    "s7"
+   ],
+   "gate": "G6",
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s9s",
+   "name": "데이터 샘플",
+   "deps": [
+    "G6"
+   ],
+   "needs": [],
+   "after": [],
+   "gate": "G7a",
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s9",
+   "name": "학습 데이터",
+   "deps": [
+    "G7a"
+   ],
+   "needs": [],
+   "after": [],
+   "gate": "G7",
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s9h",
+   "name": "비교 세트",
+   "deps": [
+    "G0"
+   ],
+   "needs": [],
+   "after": [],
+   "gate": null,
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s10t",
+   "name": "SFT 학습",
+   "deps": [
+    "G7"
+   ],
+   "needs": [],
+   "after": [],
+   "gate": null,
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s10",
+   "name": "평가",
+   "deps": [
+    "G7"
+   ],
+   "needs": [],
+   "after": [
+    "s10t",
+    "s9h"
+   ],
+   "gate": "G8",
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "s11",
+   "name": "릴리즈 패키지",
+   "deps": [
+    "G4",
+    "G5",
+    "G5b",
+    "G6",
+    "G8"
+   ],
+   "needs": [],
+   "after": [],
+   "gate": "G9",
+   "implemented": true,
+   "paid": []
+  },
+  {
+   "id": "sx",
+   "name": "우리 앱 내보내기",
+   "deps": [
+    "G9"
+   ],
+   "needs": [],
+   "after": [],
+   "gate": null,
+   "implemented": true,
+   "paid": []
+  }
+ ],
+ "gates": [
+  {
+   "id": "G0",
+   "title": "출처 묶음 승인",
+   "stage": "s0"
+  },
+  {
+   "id": "G1s",
+   "title": "기준 사진 선택",
+   "stage": "s2"
+  },
+  {
+   "id": "G3",
+   "title": "기획안 고르기",
+   "stage": "s3"
+  },
+  {
+   "id": "G4a",
+   "title": "챕터 배경 고르기",
+   "stage": "s4a"
+  },
+  {
+   "id": "G4b",
+   "title": "장면·자세 고르기",
+   "stage": "s4b"
+  },
+  {
+   "id": "G4",
+   "title": "완성 이미지 승인",
+   "stage": "s4"
+  },
+  {
+   "id": "G5",
+   "title": "소개 영상 고르기",
+   "stage": "s5"
+  },
+  {
+   "id": "G5b",
+   "title": "동작 영상 고르기",
+   "stage": "s6"
+  },
+  {
+   "id": "G6",
+   "title": "프롬프트 승인",
+   "stage": "s8"
+  },
+  {
+   "id": "G7a",
+   "title": "데이터 샘플 검토",
+   "stage": "s9s"
+  },
+  {
+   "id": "G7",
+   "title": "데이터셋 승인",
+   "stage": "s9"
+  },
+  {
+   "id": "G8",
+   "title": "평가·블라인드 20쌍",
+   "stage": "s10"
+  },
+  {
+   "id": "G9",
+   "title": "패키지 승인",
+   "stage": "s11"
+  }
+ ],
+ "mode": "live",
+ "lanes": [
+  {
+   "id": "source",
+   "label": "출처",
+   "stages": [
+    "s0"
+   ]
+  },
+  {
+   "id": "appearance",
+   "label": "외모",
+   "stages": [
+    "s2"
+   ]
+  },
+  {
+   "id": "plan",
+   "label": "기획",
+   "stages": [
+    "s3",
+    "s3r"
+   ]
+  },
+  {
+   "id": "scene",
+   "label": "장면",
+   "stages": [
+    "s4a",
+    "s4b",
+    "s4"
+   ]
+  },
+  {
+   "id": "video",
+   "label": "영상",
+   "stages": [
+    "s5",
+    "s6"
+   ]
+  },
+  {
+   "id": "persona",
+   "label": "페르소나",
+   "stages": [
+    "s7",
+    "s8"
+   ]
+  },
+  {
+   "id": "data",
+   "label": "데이터",
+   "stages": [
+    "s9s",
+    "s9"
+   ]
+  },
+  {
+   "id": "training",
+   "label": "학습",
+   "stages": [
+    "s9h",
+    "s10t",
+    "s10"
+   ]
+  },
+  {
+   "id": "release",
+   "label": "패키지",
+   "stages": [
+    "s11",
+    "sx"
+   ]
+  }
+ ],
+ "origin": "SOURCE",
+ "originLabel": "트윈",
+ "modelMode": "TRAIN"
+}

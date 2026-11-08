@@ -17,7 +17,7 @@ from character_factory_poc.common.schema import register
 from character_factory_poc.contracts.common import ArtifactRef, Strict
 
 ClusterId = Literal["base", "situation", "history", "ownership", "conflict", "long"]
-Material = Literal["SNS_REWRITE", "SYNTH", "NIKL"]
+Material = Literal["SNS_REWRITE", "SYNTH", "NIKL", "SOURCE"]
 Split = Literal["train", "validation_base", "validation_augmented", "eval"]
 Verdict = Literal["ADOPT", "FIX", "REJECT"]
 TargetVerdict = Literal["PASS", "OUT_OF_RANGE", "UNKNOWN"]

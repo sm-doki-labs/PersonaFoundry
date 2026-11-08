@@ -53,6 +53,7 @@ from character_factory_poc.contracts.scene import CHAPTERS, ScenePlan
 from character_factory_poc.contracts.training import TrainingRun
 from character_factory_poc.contracts.video import ApprovedActions, VideoAsset
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.origin import SOURCE, read_origin
 from character_factory_poc.stages.s2_hero.approve import load_appearance_spec
 from character_factory_poc.stages.s3_plan.importer import load_approved_plan_v2
 from character_factory_poc.stages.s4_frames.approve import load_approved_frames
@@ -169,7 +170,9 @@ def load_persona(
     return persona, sources, pair, sheet, problems
 
 
-def collect_sft(ctx: Context, cid: str) -> tuple[Sft, list[SourceFile], list[str]]:
+def collect_sft(
+    ctx: Context, cid: str, *, adopted_only: bool = False
+) -> tuple[Sft, list[SourceFile], list[str]]:
     """S9·S10 산출물을 찾아 패키지 sft/로 모은다. 없으면 null로 둔다(D-0044)."""
     char_dir = ctx.character_dir(cid)
     problems: list[str] = []
@@ -190,12 +193,15 @@ def collect_sft(ctx: Context, cid: str) -> tuple[Sft, list[SourceFile], list[str
                 SourceFile("dataset", dataset_path, "sft/dataset.json", sha256_file(dataset_path))
             )
 
+    adopted = _adopted_binding(ctx, cid)
     runs: list[SourceFile] = []
     for run_path in sorted((char_dir / "s10-train").glob("tr*/**/training-run.json")):
         try:
             run: TrainingRun = validate("training-run-v2", read_json(run_path))  # type: ignore[assignment]
         except Exception as exc:  # noqa: BLE001
             problems.append(f"sft.trainingRuns: {run_path.parent.name} 형식 오류({exc})")
+            continue
+        if adopted_only and (not run.modelBinding or run.modelBinding.ref != adopted):
             continue
         rel = f"sft/training-{run.provider}.json"
         if any(item.rel == rel for item in runs):
@@ -204,7 +210,6 @@ def collect_sft(ctx: Context, cid: str) -> tuple[Sft, list[SourceFile], list[str
         runs.append(SourceFile("training-run", run_path, rel, sha256_file(run_path)))
     sources.extend(runs)
     sft = sft.model_copy(update={"trainingRuns": [item.rel for item in runs]})
-    adopted = _adopted_binding(ctx, cid)
     if adopted:
         # 학습 없이 긴 프롬프트로 간 경우(K-0038)에도 G8 채택이 남는다. evalReport는 비어 있다.
         sft = sft.model_copy(update={"adoptedBinding": adopted})
@@ -534,7 +539,50 @@ def build_package(ctx: Context, cid: str) -> Path:
     intro, intro_dir = load_approved_intro(ctx, cid)
     actions, actions_dir = load_approved_actions(ctx, cid)
     persona, persona_sources, pair, _sheet, persona_problems = load_persona(ctx, cid)
-    sft, sft_sources, sft_problems = collect_sft(ctx, cid)
+    is_twin = read_origin(char_dir) == SOURCE
+    sft, sft_sources, sft_problems = collect_sft(ctx, cid, adopted_only=is_twin)
+    twin = None
+    long_text = pair.long.text
+    short_text = pair.short.text if pair.short else None
+    public_run = None
+    quotes = None
+    if is_twin:
+        from character_factory_poc.stages.s11_release.twin import release_info
+
+        _require_gate(ctx, cid, "G8")
+        twin, quotes = release_info(
+            ctx,
+            cid,
+            plan,
+            sft.adoptedBinding,
+            [item.src for item in sft_sources if item.label == "training-run"],
+        )
+        long_text = quotes.public_prompt(long_text)
+        short_text = quotes.public_prompt(short_text) if short_text else None
+        # prompt-pair와 형성 자료에는 승인 원문이 있다. 앱이 쓰는 특질과 대사 지침만 전달한다.
+        persona_sources = [item for item in persona_sources if item.label == "trait-sheet"]
+        # 가져온 모델의 원본 기록은 자유 입력 출처·접근 정보를 포함한다.
+        # 외부 참조와 확정한 서빙 별칭만 내보낸다.
+        if twin.modelMode == "TRAIN" and twin.trainingRecord:
+            # 학습 설정은 임대 서버 주소·원격 명령·자유 입력을 포함할 수 있다.
+            # 재현용 원본은 해시로만 참조하고 패키지에는 학습 식별자만 담는다.
+            run = TrainingRun.model_validate(read_json(char_dir / twin.trainingRecord.ref))
+            public_run = run.model_copy(
+                update={
+                    "requestedConfig": {},
+                    "appliedConfig": {},
+                    "jobId": None,
+                    "transfers": [],
+                    "checkpoints": [],
+                }
+            )
+        else:
+            sft = sft.model_copy(update={"trainingRuns": []})
+        # 평가 자유 서술에는 비교 답이 나올 수 있다. 비교 보고 위치만 메타에 남긴다.
+        sft = sft.model_copy(update={"evalReport": None})
+        sft_sources = [
+            item for item in sft_sources if item.label not in {"training-run", "eval-report"}
+        ]
     serving, serving_problems = collect_serving(ctx, cid, sft.adoptedBinding)
     if serving is not None:
         sft = sft.model_copy(update={"serving": SERVING_REL})
@@ -642,6 +690,29 @@ def build_package(ctx: Context, cid: str) -> Path:
             )
         )
 
+    public_gates = {}
+    if quotes:
+        # 발표용 관문 기록에 검토자가 붙여 넣은 대화·동의자 이름을 옮기지 않는다.
+        for item in gate_sources:
+            record = read_json(item.src)
+            public_gates[item.rel] = {
+                **record,
+                "reviewer": "비공개",
+                "reasons": "",
+                "requestedChanges": [],
+            }
+            quotes.check(public_gates[item.rel], item.label)
+        for item in (*persona_sources, *sft_sources):
+            quotes.check(read_json(item.src), item.label)
+        quotes.check(dump(_profile(plan)), "profile")
+        quotes.check([dump(chapter) for chapter in chapters], "chapters")
+        quotes.check([dump(video) for video in videos], "videos")
+        quotes.check(dump(appearance), "appearance")
+        quotes.check(dump(twin), "twin")
+        if public_run:
+            quotes.check(dump(public_run), "sft.trainingRuns")
+        if serving:
+            quotes.check(dump(serving), "sft.serving")
     for item in [*sources, *persona_sources, *sft_sources, *gate_sources]:
         _check_source(item, problems)
     rev = next_rev(char_dir / "s11-release", "pk")
@@ -651,8 +722,10 @@ def build_package(ctx: Context, cid: str) -> Path:
     rev_dir = char_dir / "s11-release" / rev
     state.transition("s11", "RUNNING", rev=rev)
     try:
-        for group in (sources, persona_sources, sft_sources, gate_sources):
+        for group in (sources, persona_sources, sft_sources, [] if is_twin else gate_sources):
             _copy_checked(rev_dir, group)
+        for rel, record in public_gates.items():
+            write_once_json(rev_dir / rel, record)
         spec = dump(appearance)
         spec["referenceImage"] = {**spec["referenceImage"], "path": "appearance/hero.png"}
         write_once_json(rev_dir / "appearance/appearance.json", spec)
@@ -668,10 +741,23 @@ def build_package(ctx: Context, cid: str) -> Path:
                 facts["chapterStart"] = next(
                     c for c in chapter_start["chapters"] if c["chapterId"] == chapter_id
                 )
+            if quotes:
+                quotes.check(facts, f"chapters/{chapter_id}/facts.json")
             write_once_json(rev_dir / f"chapters/{chapter_id}/facts.json", facts)
-        write_once_text(rev_dir / persona.longPrompt, pair.long.text)
-        if persona.shortPrompt is not None and pair.short is not None:
-            write_once_text(rev_dir / persona.shortPrompt, pair.short.text)
+        write_once_text(rev_dir / persona.longPrompt, long_text)
+        if persona.shortPrompt is not None and short_text is not None:
+            write_once_text(rev_dir / persona.shortPrompt, short_text)
+        if public_run is not None:
+            path = rev_dir / sft.trainingRuns[0]
+            write_once_json(path, dump(public_run))
+            if serving:
+                serving = serving.model_copy(
+                    update={
+                        "trainingRun": ArtifactRef(
+                            ref=sft.trainingRuns[0], sha256=sha256_file(path)
+                        )
+                    }
+                )
         if serving is not None:
             write_once_json(rev_dir / SERVING_REL, dump(serving))
         package = validate(
@@ -680,6 +766,7 @@ def build_package(ctx: Context, cid: str) -> Path:
                 CharacterPackage(
                     characterId=cid,
                     packageRev=rev,
+                    twin=twin,
                     builtAt=now_iso(),
                     profile=_profile(plan),
                     appearance=Appearance(
