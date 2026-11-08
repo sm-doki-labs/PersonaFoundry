@@ -65,6 +65,15 @@ def test_ledger_check_rejects_restating_a_trait_in_the_baseline():
     assert any("t2" in p for p in check_ledger("윤서진")(dup))
 
 
+def test_ledger_check_rejects_praise_first_or_thanks_closing_default():
+    for text in (
+        "인물은 상대가 이미 충분히 잘하고 있다며 편들기부터 한 뒤 짧게 답한다.",
+        "인물은 상대 말을 바로 받아 주고 다정한 감사나 다짐으로 말을 맺는다.",
+    ):
+        problems = check_ledger("윤서진")(_ledger(defaultResponse=text))
+        assert any(p.startswith("defaultResponse: 상대 평가") for p in problems)
+
+
 def test_compose_from_ledger_puts_each_trait_once_with_the_base_rate_line():
     plan = dict(v2_plan("cf-20260101-x"), voiceSummary="정갈한 해요체로 짧게 말한다.")
     text, sections = compose_from_ledger(plan, _ledger(), rules_text="")

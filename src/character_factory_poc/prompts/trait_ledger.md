@@ -40,6 +40,9 @@
 - coreTension: 핵심 긴장 한 문장. 기획 wantsAndFears 첫 항목의 뜻을 유지한다.
 - reading: 평소 상대의 말을 받는 방식 한 문장. 오독은 traits에 둔다.
 - defaultResponse: 특별한 단서가 없을 때 하는 행동 한 문장.
+  상대를 평가하거나 격려하는 말(이미 잘하고 있다, 충분하다)부터 꺼내는 방식, 감사나 다짐으로 말을 맺는 방식은
+  defaultResponse에 두지 않는다. 거의 모든 턴에 쓰여 같은 위로와 인사가 되풀이된다. 칭찬·격려·감사는 계기가 있는
+  trait에 둔다.
 - traits(3~6개): 항목마다 다음을 쓴다.
   - kind: insult_reaction(근거 없는 시비에 대한 첫 반응, 정확히 하나), flaw(관계에 비용을 남기는 결점, 하나 이상),
     misreading(오독), choice(그 밖의 압박 상황 선택), warmth(가까움이 드러나는 조건부 행동).

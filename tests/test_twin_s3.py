@@ -176,6 +176,8 @@ def test_select_approved_twin_without_holdout(tmp_path, monkeypatch, kind, templ
     guard = read_json(folder / "workspace/inputs/name-guard.json")
     assert name_guard(["엄마"])[0] not in guard and name_guard(["합성인명"])[0] in guard
     page = (folder / "gate-G3.html").read_text("utf-8")
+    assert "원문 말버릇 통계" in page
+    assert read_json(folder / "speech-profile.json")["schemaVersion"] == "speech-profile-v1"
     assert "원문 또는 출처" in page and "knownFacts.age" in page
     for choice, ref in zip(
         variants["candidates"][0]["choices"],

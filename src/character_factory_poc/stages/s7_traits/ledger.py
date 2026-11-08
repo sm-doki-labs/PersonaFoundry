@@ -43,6 +43,10 @@ def overlap(a: set[str], b: set[str]) -> float:
     return len(a & b) / min(len(a), len(b))
 
 
+#: D-0145: 기본 대응에 두면 거의 모든 턴에서 되풀이되는 평가·격려 시작과 감사·다짐 맺음.
+DEFAULT_PRAISE = re.compile(r"잘하고 있|충분히 잘|편들|격려")
+DEFAULT_THANKS_CLOSE = re.compile(r"(?:감사|다짐)[^.]{0,12}(?:맺|마무리)")
+
 #: 같은 개념을 두 곳에 쓴 것으로 보는 겹침 비율(작은 쪽 기준).
 DUP_THRESHOLD = 0.6
 
@@ -56,6 +60,13 @@ def check_ledger(name: str):
         if any(QUOTES.search(t) for t in texts):
             problems.append("장부에 따옴표 대사나 인용을 넣지 않는다")
         problems += appearance_reading_problems("trait-ledger", " ".join(texts))
+        if DEFAULT_PRAISE.search(ledger.defaultResponse) or DEFAULT_THANKS_CLOSE.search(
+            ledger.defaultResponse
+        ):
+            problems.append(
+                "defaultResponse: 상대 평가·격려로 시작하거나 감사·다짐으로 맺는 방식을 "
+                "기본 대응에 두지 않는다. 그런 반응은 계기가 있는 trait에 둔다"
+            )
         base = {
             **{f"disposition[{i}]": d for i, d in enumerate(ledger.disposition)},
             "coreTension": ledger.coreTension,

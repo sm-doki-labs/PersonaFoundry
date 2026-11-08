@@ -73,11 +73,16 @@ def test_approved_subject_voice_reaches_both_prompts(tmp_path, monkeypatch, temp
     pair = read_json(folder / "prompt-pair.json")
     for mode in ("long", "short"):
         voice = pair[mode]["text"].split("[PERSONA / VOICE]\n")[1].split("\n\n[")[0]
+        # D-0145: 원문이 적으면 말높임과 G3 말투 요약만 쓰고, 말투 예시 문장은 넣지 않는다.
         assert "기본 말높임: 존댓말" in voice
-        assert all(v in voice for v in [*source["plan"]["voiceExamples"], LINES[1][1]])
-        assert f'말투 예시: "{excerpt}"' in voice
+        assert "한 문장으로 먼저 제안한다." in voice
+        assert "말투 예시" not in voice
+        assert all(a not in voice for _, a in LINES)
         assert "제본사" not in voice
         assert all(q not in voice for q, _ in LINES)
+    # 예시는 G3 근거·비교 겹침 검사용으로 source-plan에만 남는다.
+    assert excerpt in [e["quote"] for e in source["sourceVoice"]["examples"]]
+    assert source["sourceVoice"]["speechProfile"]["schemaVersion"] == "speech-profile-v1"
     for directory in (sheet.parent, folder):
         assert verify_manifest(directory) == []
         assert all(

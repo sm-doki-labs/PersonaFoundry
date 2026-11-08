@@ -26,6 +26,11 @@ from character_factory_poc.pipeline.origin import SOURCE, read_origin
 from character_factory_poc.stages.s0_source.run import STAGE_DIR, load_approved_source
 from character_factory_poc.stages.s1_reference.ranking import all_names, load_ranking
 from character_factory_poc.stages.s3_plan.check_v2 import check_plan_v2, name_guard
+from character_factory_poc.stages.s3_plan.speech_profile import (
+    MIN_SENTENCES,
+    build_speech_profile,
+    render_voice_definition,
+)
 
 _ARCS = {
     "FAN_CALL": (
@@ -222,7 +227,43 @@ def codex_checks(stage: str, workspace: Path) -> tuple[str, list]:
     ]
 
 
-def _page(plan: CharacterPlanV2, source: dict) -> str:
+def _profile_section(profile: dict | None, summary: str) -> str:
+    """D-0145: G3에서 말투 칸이 어떤 원문 통계로 만들어지는지 함께 본다."""
+    if profile is None:
+        return ""
+    ans = profile["answers"]
+    stats = [
+        ("대상 발화(기사 제외)", f"{profile['subjectMessages']}개, 문장 {profile['sentences']}개"),
+        ("존댓말 어미 비율", f"{profile['politeShare']:.0%}"),
+        ("'~것 같' 비율", f"{profile['hedgeShare']:.0%}"),
+        (
+            "답 길이",
+            f"{ans['count']}개, 중앙값 {ans['medianChars']}자, "
+            f"두 문장 이하 {ans['atMostTwoSentences']:.0%}, 80자 이하 {ans['atMost80Chars']:.0%}",
+        ),
+        ("'~구나'로 받은 답", str(ans["gunaOpenings"])),
+        ("웃음 표기·이모티콘", f"{profile['laughShare']:.0%}"),
+    ]
+    top = sorted(profile["markersPer1000"].items(), key=lambda x: -x[1])[:8]
+    stats.append(("담화 표지(어절 천 개당)", ", ".join(f"{m} {v}" for m, v in top)))
+    rows = "".join(
+        f"<tr><th scope='row'>{escape(k)}</th><td colspan='2'>{escape(v)}</td></tr>"
+        for k, v in stats
+    )
+    note = (
+        "원문 문장이 적어 말투 칸은 아래 말투 요약을 쓴다."
+        if profile["sentences"] < MIN_SENTENCES
+        else "말투 칸은 아래 문장으로 들어간다. 말투 예시 문장은 대화 프롬프트에 넣지 않는다."
+    )
+    preview = "\n".join(render_voice_definition(profile, summary))
+    return (
+        "<h2>원문 말버릇 통계</h2>"
+        f"<table><tbody>{rows}</tbody></table><p>{escape(note)}</p>"
+        f"<pre>{escape(preview)}</pre>"
+    )
+
+
+def _page(plan: CharacterPlanV2, source: dict, profile: dict | None = None) -> str:
     rows = []
 
     def row(label, value, evidence):
@@ -261,6 +302,7 @@ pre{{white-space:pre-wrap;overflow-wrap:anywhere}}</style>
 <p>각 설명을 오른쪽 인용과 비교하세요. 인용이 실제로 그 판단을 뒷받침하는지도 확인하세요.</p>
 <table><thead><tr><th>항목</th><th>기획 내용</th><th>원문 또는 출처</th></tr></thead>
 <tbody>{"".join(rows)}</tbody></table>
+{_profile_section(profile, plan.voiceSummary)}
 <h2>검토 결과 기록</h2>
 <p>이 후보를 선택하려면 다음 내용을 answer.json에 저장하고 검토자 이름을 적으세요.
 수정이 필요하면 decision을 REQUEST_CHANGES로 바꾸고 reasons에 이유를 적으세요.</p>
@@ -365,7 +407,10 @@ def run_s3_twin(ctx: Context, cid: str) -> Path:
             candidates=[plan],
         )
         write_once_json(folder / "variants.json", dump(variants))
-        write_once_text(folder / "gate-G3.html", _page(plan, source))
+        # D-0145: S8 말투 칸과 같은 함수로 계산한다. 비교 세트는 corpus에 없다.
+        profile = build_speech_profile(corpus, {t.textId: t.kind for t in index.texts})
+        write_once_json(folder / "speech-profile.json", profile)
+        write_once_text(folder / "gate-G3.html", _page(plan, source, profile))
         write_manifest(folder)
     except (AgentFormatError, CheckFailed) as exc:
         failure = (
