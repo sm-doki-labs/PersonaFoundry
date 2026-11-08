@@ -9,17 +9,22 @@ from __future__ import annotations
 
 import json
 import struct
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from character_factory_poc.contracts.release import CharacterPackage, Video
 from character_factory_poc.stages.export.doki_app.naming import (
+    api_seed_ids,
     chapter_uid,
     character_uid,
     relative_file,
+    revision_prefix,
     slug_for,
 )
+from character_factory_poc.stages.s6_actions.app_clips import APP_CLIPS
 
 FORMAT = "dokilabs-seed/1"
 
@@ -32,6 +37,7 @@ SEED_TABLES = [
     "file_store",
     "character_media",
     "character_clip",
+    "character_clip_slot",
     "character_video",
 ]
 #: 옛 스키마 표. 들어 있으면 적재가 거절한다(api-svc `validate_stage_bundle`).
@@ -39,16 +45,6 @@ LEGACY_TABLES = frozenset({"character_chapter", "character_stage_intro"})
 
 _GENDER_KO = {"female": "여성", "male": "남성", "other": "기타"}
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-
-# 시드 ID는 우리 캐릭터 전용 번호대를 쓴다. 빈 DB에 넣는 묶음이라 다른 행과 겹치지 않는다.
-_CHARACTER_ID = 900001
-_CARD_ID = 900002
-_STAGE_BASE = 900101
-_MEDIA_BASE = 901001
-_FILE_BASE = 902001
-_LINK_BASE = 903001
-_CLIP_BASE = 904001
-_VIDEO_BASE = 905001
 
 
 @dataclass(frozen=True)
@@ -78,6 +74,7 @@ class _Builder:
 
 
 def _stage_row(
+    character_id: int,
     stage_id: int,
     stage_uid: str,
     stage_no: int,
@@ -88,7 +85,7 @@ def _stage_row(
 ) -> list[Any]:
     return [
         stage_id,
-        _CHARACTER_ID,
+        character_id,
         stage_no,
         chapter.title,  # display_name
         None,  # appearance_note
@@ -109,8 +106,21 @@ def _stage_row(
 
 
 def build_seed(
-    package: CharacterPackage, package_dir: Path, *, exported_at: str, alembic_revision: str
+    package: CharacterPackage,
+    package_dir: Path,
+    *,
+    exported_at: str,
+    alembic_revision: str,
+    default_voice_id: str | None = None,
 ) -> ApiSeed:
+    # 정식 패키지는 characters/<cid>/s11-release/pkN 아래 있다. 동시에 내보내도
+    # 이미 생성된 캐릭터 폴더 이름만 대조하면 된다(다른 캐릭터의 출처는 읽지 않는다).
+    release = package_dir.parent
+    peers = ()
+    if release.name == "s11-release" and release.parent.name == package.characterId:
+        peers = (p.name for p in release.parent.parent.iterdir() if p.is_dir())
+    row_id = api_seed_ids(package.characterId, peers)
+    character_id = row_id("character", 0)
     slug = slug_for(package.characterId)
     uid = str(character_uid(package.characterId))
     profile = package.profile
@@ -126,6 +136,36 @@ def build_seed(
             "tables": {},
         }
     )
+
+    twin = package.twin
+    voice_bundle_id = None
+    if twin:
+        unmapped.append(f"twin.chapterTemplate={twin.chapterTemplate} (api-svc 관계 틀 칸이 없다)")
+        mapping.extend(
+            [
+                ("twin.disclosure", "api-svc character.disclosure_label", ""),
+                ("twin.startButtonLabel", "api-svc character.call_start_label", ""),
+            ]
+        )
+        voice_id = twin.voiceId or (UUID(default_voice_id) if default_voice_id else None)
+        if voice_id is None:
+            unmapped.append("twin.voiceId (기본 한국어 음성이 없다. default_voice_id가 필요하다)")
+        else:
+            voice_bundle_id = character_id
+            builder.bundle["table_order"][:0] = ["character_voice", "character_voice_language"]
+            builder.add("character_voice", ["id", "name"], [voice_bundle_id, slug])
+            builder.add(
+                "character_voice_language",
+                ["id", "character_voice_id", "language", "voice_id"],
+                [voice_bundle_id, voice_bundle_id, package.locale, str(voice_id)],
+            )
+            mapping.append(
+                (
+                    "twin.voiceId" if twin.voiceId else "export.doki_app.default_voice_id",
+                    "api-svc character_voice_language.voice_id",
+                    "ko",
+                )
+            )
 
     builder.add(
         "character",
@@ -148,9 +188,11 @@ def build_seed(
             "audience_rating",
             "tagline",
             "voice_id",
+            "disclosure_label",
+            "call_start_label",
         ],
         [
-            _CHARACTER_ID,
+            character_id,
             profile.name,
             slug,
             _GENDER_KO[profile.gender],
@@ -167,7 +209,9 @@ def build_seed(
             True,
             "ALL",
             profile.tagline,
-            None,
+            voice_bundle_id,
+            twin.disclosure if twin else None,
+            twin.startButtonLabel if twin else None,
         ],
     )
     for source in (
@@ -208,8 +252,8 @@ def build_seed(
             "tags",
         ],
         [
-            _CARD_ID,
-            _CHARACTER_ID,
+            row_id("character_profile_card", 0),
+            character_id,
             "ko",
             None,
             None,
@@ -247,7 +291,8 @@ def build_seed(
         ]
     )
 
-    quest_revision = f"{slug}-quest-v1"
+    prefix = revision_prefix(package.characterId, package.packageRev, twin=bool(twin))
+    quest_revision = f"{prefix}-quest-v1"
     for index, chapter in enumerate(sorted(package.chapters, key=lambda c: c.chapterNo), start=1):
         builder.add(
             "character_stage",
@@ -272,7 +317,8 @@ def build_seed(
                 "updated_at",
             ],
             _stage_row(
-                _STAGE_BASE + index,
+                character_id,
+                row_id("character_stage", index),
                 str(chapter_uid(package.characterId, chapter.chapterId)),
                 index,
                 chapter,
@@ -291,15 +337,16 @@ def build_seed(
         ("chapters[].relationshipStage", "api-svc character_stage.entry_relationship_stage", "")
     )
 
-    next_media = _MEDIA_BASE
+    media_no = 0
 
     def add_media(path: Path, media_type: str, rel: str) -> int:
-        nonlocal next_media
-        media_id = next_media
-        next_media += 1
+        nonlocal media_no
+        index = media_no
+        media_no += 1
+        media_id = row_id("media", index)
         data = path.read_bytes()
         size = _png_size(data) if media_type == "image" else None
-        key = f"api-svc/protected/characters/{_CHARACTER_ID}/{slug}/{rel}"
+        key = f"api-svc/protected/characters/{character_id}/{slug}/{rel}"
         builder.add("media", ["id", "media_type", "status"], [media_id, media_type, "ready"])
         builder.add(
             "file_store",
@@ -316,7 +363,7 @@ def build_seed(
                 "source_ref",
             ],
             [
-                _FILE_BASE + media_id,
+                row_id("file_store", index),
                 media_id,
                 "original",
                 key,
@@ -343,7 +390,7 @@ def build_seed(
     builder.add(
         "character_media",
         ["id", "character_id", "media_id", "usage_type", "content_order", "character_stage_id"],
-        [_LINK_BASE + link_no, _CHARACTER_ID, hero_id, "profile_photo", 0, None],
+        [row_id("character_media", link_no), character_id, hero_id, "profile_photo", 0, None],
     )
 
     frame_ids: dict[str, int] = {}
@@ -358,12 +405,12 @@ def build_seed(
             "character_media",
             ["id", "character_id", "media_id", "usage_type", "content_order", "character_stage_id"],
             [
-                _LINK_BASE + link_no,
-                _CHARACTER_ID,
+                row_id("character_media", link_no),
+                character_id,
                 frame_ids[chapter.chapterId],
                 "stage_photo",
                 chapter.chapterNo,
-                _STAGE_BASE + chapter.chapterNo,
+                row_id("character_stage", chapter.chapterNo),
             ],
         )
     mapping.append(
@@ -394,8 +441,8 @@ def build_seed(
                 "mood_from",
             ],
             [
-                _VIDEO_BASE,
-                _CHARACTER_ID,
+                row_id("character_video", 0),
+                character_id,
                 media_id,
                 "calls",
                 video.title or "소개 영상",
@@ -411,7 +458,7 @@ def build_seed(
         builder.add(
             "character_media",
             ["id", "character_id", "media_id", "usage_type", "content_order", "character_stage_id"],
-            [_LINK_BASE + link_no, _CHARACTER_ID, media_id, "explore_video", 0, None],
+            [row_id("character_media", link_no), character_id, media_id, "explore_video", 0, None],
         )
         mapping.append(("videos[INTRO]", "api-svc character_video(context=calls, idle)", ""))
         mapping.append(
@@ -449,7 +496,7 @@ def build_seed(
                 "pick_role",
             ],
             [
-                _CLIP_BASE + clip_no,
+                row_id("character_clip", clip_no),
                 media_id,
                 video.clipKey,
                 "v1",
@@ -466,12 +513,29 @@ def build_seed(
                     "polarity": "positive" if _mood(video) == "good" else "negative",
                 },
                 exported_at,
-                _STAGE_BASE + chapter_no,
+                row_id("character_stage", chapter_no),
                 "free",
                 "ALL",
                 None,
                 video.useWhen or None,
                 _pick_role(video),
+            ],
+        )
+        # 재생 위치. 앱은 슬롯이 있어야 통화 화면(call-clips)에 클립을 싣는다.
+        # 운영 데이터와 같은 규칙: idle_* → idle, 나머지 → reaction(시작 무드 = 클립 무드).
+        is_idle = video.clipKey.startswith("idle")
+        builder.add(
+            "character_clip_slot",
+            ["id", "clip_id", "play_type", "mood_from", "label", "icon", "sort_order", "is_active"],
+            [
+                row_id("character_clip_slot", clip_no),
+                row_id("character_clip", clip_no),
+                "idle" if is_idle else "reaction",
+                None if is_idle else _mood(video),
+                None,
+                None,
+                None,
+                True,
             ],
         )
     mapping.append(
@@ -497,7 +561,7 @@ def build_seed(
             (
                 row
                 for row in builder.tables["character_clip"]["rows"]
-                if row[2] == video.clipKey and row[11] == _STAGE_BASE + chapter_no
+                if row[2] == video.clipKey and row[11] == row_id("character_stage", chapter_no)
             ),
             None,
         )
@@ -507,12 +571,12 @@ def build_seed(
             "character_media",
             ["id", "character_id", "media_id", "usage_type", "content_order", "character_stage_id"],
             [
-                _LINK_BASE + link_no,
-                _CHARACTER_ID,
+                row_id("character_media", link_no),
+                character_id,
                 media[1],
                 "stage_preview",
                 chapter_no,
-                _STAGE_BASE + chapter_no,
+                row_id("character_stage", chapter_no),
             ],
         )
     mapping.append(
@@ -532,6 +596,7 @@ def build_seed(
             "videos[].synthetic (앱 표에 칸이 없어 character_clip.meta에만 남긴다)",
         ]
     )
+    unmapped.extend(clip_count_warnings(builder.bundle))
     return ApiSeed(bundle=builder.bundle, mapping=mapping, unmapped=unmapped)
 
 
@@ -546,7 +611,9 @@ def _pick_role(video: Video) -> str | None:
 
 
 #: §D-0040의 감정 세트 이름(대기·감정 반응). 그 밖의 이름은 특별 행동으로 본다.
-_EMOTION_KEYS = frozenset(
+#: S6 앱 카탈로그(APP_CLIPS)는 api-svc 감정 세트 사본이라 전부 감정이다. 여기서 빠지면
+#: pick_role=special로 나가 서버의 답변 뒤 몸짓 후보(followup-clip)에서 사라진다.
+_EMOTION_KEYS = frozenset({clip["key"] for clip in APP_CLIPS}) | frozenset(
     {
         "idle_good",
         "idle_bad",
@@ -569,6 +636,27 @@ _EMOTION_KEYS = frozenset(
 )
 
 
+def clip_count_warnings(bundle: dict, min_clips: int = 10) -> list[str]:
+    """시드에 실제로 담긴 character_clip 행만 세고, 영상이 없는 단계도 보고한다."""
+    tables = bundle["tables"]
+    counts: Counter[int] = Counter()
+    if clips := tables.get("character_clip"):
+        stage_id = clips["columns"].index("character_stage_id")
+        counts.update(row[stage_id] for row in clips["rows"])
+    warnings = []
+    if stages := tables.get("character_stage"):
+        stage_id = stages["columns"].index("id")
+        stage_no = stages["columns"].index("stage_no")
+        for row in stages["rows"]:
+            count = counts[row[stage_id]]
+            if count < min_clips:
+                warnings.append(
+                    f"경고: ch{row[stage_no]} 영상 {count}편. 앱의 단계 개방 기준"
+                    f"(stage.min_clips={min_clips})에 미달한다."
+                )
+    return warnings
+
+
 def validate_seed_bundle(bundle: dict) -> list[str]:
     """api-svc `validate_stage_bundle` 규칙과 우리 묶음 규칙을 이 코드로 다시 검사한다."""
     problems: list[str] = []
@@ -580,7 +668,7 @@ def validate_seed_bundle(bundle: dict) -> list[str]:
     legacy = LEGACY_TABLES & set(tables)
     if legacy:
         problems.append(f"옛 표가 들어 있다: {sorted(legacy)}")
-    unknown = set(tables) - set(SEED_TABLES)
+    unknown = set(tables) - set(SEED_TABLES) - {"character_voice", "character_voice_language"}
     if unknown:
         problems.append(f"SEED_TABLES 밖의 표: {sorted(unknown)}")
     order = bundle.get("table_order") or []
@@ -671,6 +759,7 @@ __all__ = [
     "SEED_TABLES",
     "ApiSeed",
     "build_seed",
+    "clip_count_warnings",
     "validate_seed_bundle",
     "write_seed",
 ]

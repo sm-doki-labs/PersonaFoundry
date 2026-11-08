@@ -10,19 +10,26 @@ from character_factory_poc.common.store import read_json, write_manifest, write_
 from character_factory_poc.contracts.video import (
     ActionChoicesDraft,
     ActionClip,
-    ActionInputs,
     ApprovedActions,
 )
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.gates import now_iso, write_gate_record
 from character_factory_poc.stages.s4a_backgrounds.approve import answer_details
+from character_factory_poc.stages.s6_actions.light import (
+    LIGHT_APPROVED,
+    LightInputs,
+    read_approved,
+    read_inputs,
+)
 
 
 def load_clips(rev_dir: Path) -> list[ActionClip]:
     return [validate("action-clip-v2", obj) for obj in read_json(rev_dir / "clips.json")]
 
 
-def _choices(answer: dict, clips: list[ActionClip]) -> tuple[dict[str, str], list[str]]:
+def _choices(
+    answer: dict, clips: list[ActionClip], chapters: set[str]
+) -> tuple[dict[str, str], list[str]]:
     options: dict[str, set[str]] = {}
     for clip in clips:
         options.setdefault(clip.actionId, set()).add(clip.asset.candidateId)
@@ -36,7 +43,7 @@ def _choices(answer: dict, clips: list[ActionClip]) -> tuple[dict[str, str], lis
     for aid, candidate in picks.items():
         if not isinstance(candidate, str) or candidate not in options[aid]:
             raise FactoryError(f"G5b: {aid}에 속하지 않는 영상 후보를 골랐다")
-    if {c.chapterId for c in clips if c.actionId in picks} != {"ch1", "ch2", "ch3"}:
+    if {c.chapterId for c in clips if c.actionId in picks} != chapters:
         raise FactoryError("G5b: 챕터마다 하나 이상의 동작 영상을 남겨야 한다")
     return dict(picks), list(excluded)
 
@@ -102,12 +109,12 @@ def approve_g5b(ctx: Context, cid: str, answer: dict) -> Path:
             if decision == "APPROVE"
             else answer
         )
-        picks, excluded = _choices(choices, clips)
+        inputs = read_inputs(rev_dir / "inputs.json")
+        picks, excluded = _choices(choices, clips, {ch.chapterId for ch in inputs.chapters})
         decision = "SELECT"
-        inputs: ActionInputs = validate("action-inputs-v2", read_json(rev_dir / "inputs.json"))
         specs = {a.actionId: a for ch in inputs.chapters for a in ch.actions}
         approved = validate(
-            "action-videos-approved-v2",
+            LIGHT_APPROVED if isinstance(inputs, LightInputs) else "action-videos-approved-v2",
             {
                 "characterId": cid,
                 "actionRev": gate.rev,
@@ -187,4 +194,4 @@ def load_approved_actions(ctx: Context, cid: str) -> tuple[ApprovedActions, Path
     path = rev_dir / "approved-actions.json"
     if not path.exists():
         raise GateNotApprovedError(f"{cid}: G5b가 동작 영상을 고르지 않았다")
-    return validate("action-videos-approved-v2", read_json(path)), rev_dir
+    return read_approved(path), rev_dir

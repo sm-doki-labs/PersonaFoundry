@@ -542,7 +542,7 @@ def test_catalog_prompts_and_cost_plans(flow):
 
     ctx, _, _ = flow
     assert list(CATALOG) == [c["key"] for c in APP_CLIPS]
-    assert len(CATALOG) == 37 and PRESETS["standard"] == list(CATALOG)
+    assert len(CATALOG) == 37 and PRESETS["full37"] == list(CATALOG)
     for clip in APP_CLIPS:
         key = clip["key"]
         assert CATALOG[key]["pickRole"] == (None if clip["playType"] == "idle" else "emotion")

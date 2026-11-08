@@ -11,6 +11,14 @@ from character_factory_poc.pipeline.graph import RETIRED_GATES
 
 
 def approve_gate(ctx: Context, cid: str, gate: str, answer: dict) -> Path:
+    if gate == "G0":
+        from character_factory_poc.stages.s0_source.approve import approve_g0
+
+        return approve_g0(ctx, cid, answer)
+    if gate == "G1s":
+        from character_factory_poc.stages.s2_hero.twin import approve_g1s
+
+        return approve_g1s(ctx, cid, answer)
     if gate == "G1":
         from character_factory_poc.stages.s1_reference.approve import approve_g1
 

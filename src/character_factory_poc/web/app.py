@@ -296,8 +296,10 @@ def create_app(
         gate: str,
         body: Annotated[dict[str, Any], Body()],
     ) -> dict[str, Any]:
-        if gate not in reads.known_gates():
-            raise WebError(404, f"관문이 없다: {gate}({', '.join(reads.known_gates())} 중 하나다)")
+        if gate not in reads.decision_gates():
+            raise WebError(
+                404, f"관문이 없다: {gate}({', '.join(reads.decision_gates())} 중 하나다)"
+            )
         answer = _clean_answer(body)
         expected_rev = answer.pop("expectedRev", None)
         if expected_rev is not None and not isinstance(expected_rev, str):

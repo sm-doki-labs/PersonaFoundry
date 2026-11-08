@@ -501,3 +501,42 @@ img.intro-hero{max-width:200px;border-radius:8px}
 .action-col-acts .btn{height:24px;padding:0 8px;font-size:11.5px}
 .action-undo{font-size:12px;color:var(--muted)}
 .action-undo .btn{height:26px;padding:0 8px;font-size:12px}
+
+/* 트윈 관문: G0 출처 확인·G1s 기준 사진·G8 실제 답 비교(2026-11-08). 기존 부품(점검표·KPI·얼굴 갤러리·지표 표)을 쓰고 빈 곳만 채운다. */
+.pkg-check.src-check{cursor:default}
+.pkg-check.src-check:hover{background:transparent}
+.twin-h{margin:14px 0 6px;font-size:13px;font-weight:600}
+.twin-sub{display:block;font-size:11.5px;color:var(--faint)}
+.twin-scroll{overflow-x:auto}
+.twin-table td,.twin-table th{white-space:nowrap}
+.twin-table td:nth-child(6){white-space:normal;min-width:120px}
+.twin-ballots{list-style:none;margin:8px 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.twin-ballot{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-inner,8px);font-size:12.5px}
+.twin-ballot .twin-sub{display:inline}
+.twin-path{flex:1 1 220px;min-width:0;overflow-wrap:anywhere;font-size:11.5px;color:var(--muted)}
+.twin-steps{margin:8px 0;padding-left:20px;font-size:12.5px;line-height:1.6;color:var(--muted)}
+.src-msgs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.src-msgs li{display:flex;flex-direction:column;gap:2px}
+.src-msgs .bubble{max-width:100%}
+.src-why{margin:0;font-size:11.5px;color:var(--faint)}
+.src-list{margin:0;padding-left:18px;font-size:12.5px;line-height:1.6}
+.src-flags li b{font-weight:600}
+.src-flags .src-why{display:block}
+.photo-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+.photo-desc{font-size:11.5px;line-height:1.45;color:var(--muted)}
+@media (max-width:640px){.photo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.src-table td,.src-table th{white-space:nowrap}
+/* 트윈 발표 점검(D-0126): 표시 문구 띠, 사람 확인의 필수·권장 표시, 걸린 표현 표 */
+.pres-label{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:0;padding:10px 14px;border:1px solid var(--line-2);border-radius:14px;background:var(--warn-soft);font-size:13px}
+.pres-label span{font-size:11.5px;font-weight:600;color:var(--muted)}
+.pres-label b{font-weight:700;letter-spacing:-.01em}
+.pres-text{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;min-width:0}
+.pres-text .pkg-detail-text{flex-basis:100%}
+.pres-tag{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:999px;border:1px solid var(--line-2);font-size:11px;font-weight:600;color:var(--muted);white-space:nowrap}
+.pres-tag.is-required{border-color:rgba(201,147,141,.5);color:var(--bad)}
+.pres-row.is-ok .pres-tag.is-required{border-color:rgba(147,181,161,.5);color:var(--ok)}
+.pres-row{align-items:start}
+.pres-row input{margin-top:2px}
+.pres-hits td{vertical-align:top;overflow-wrap:anywhere}
+.pres-hits td:first-child{white-space:nowrap}
+@media (max-width:640px){.pres-hits td:first-child{white-space:normal}}

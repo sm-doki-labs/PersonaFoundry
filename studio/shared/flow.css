@@ -375,6 +375,37 @@ body.fl{font-family:var(--fd-font);font-size:var(--fd-fs-3);line-height:1.5;lett
 @media (max-width:1439px){.fd-side-foot .fd-help{display:inline-grid}}
 .fd-nav .num{white-space:nowrap}
 
+/* 트윈 갈래(D-0128): 맨 앞 열에 출처 팀이 두 줄 가운데 선다. 학습하지 않는 방식이면 데이터 열이 빠진다.
+   6열은 칸이 좁아서 열 너비를 단계 이름 길이에 맞춰 나눈다: 출처(상태 글 'N분째 검토 대기')·장면(긴 이름)은 조금 넓게, 학습(짧은 이름)은 조금 좁게. */
+.fl-grid.tw{grid-template-columns:minmax(0,1.08fr) minmax(0,1.04fr) minmax(0,1.12fr) minmax(0,1fr) minmax(0,.8fr) minmax(0,1.1fr);column-gap:24px;grid-template-areas:"so ap sc vd . pk" "so pl ps dt tr pk"}
+.fl-grid.tw.nt{grid-template-columns:repeat(5,minmax(0,1fr));column-gap:32px;grid-template-areas:"so ap sc vd pk" "so pl ps tr pk"}
+.fl-card[data-lane="source"]{align-self:center}
+/* 노트북 폭(1280~1512, 캔버스 761~1100px)의 6열 그래프: 열 사이·칸 안 여백을 줄여 이름 자리를 넓힌다. 열 순서와 팀 위치는 그대로다 */
+@container canvas (min-width:761px) and (max-width:1100px){
+  .fl-graph:has(.fl-grid.tw:not(.nt)){padding-left:10px;padding-right:10px}
+  .fl-grid.tw:not(.nt){column-gap:16px}
+  .fl-grid.tw:not(.nt) .fl-ch{padding:8px}
+  .fl-grid.tw:not(.nt) .fl-row{padding:6px 8px;gap:6px}
+  .fl-grid.tw:not(.nt) .fl-row .nm svg{margin-left:3px}
+}
+/* 단계 이름 뒤 아이콘은 마지막 낱말과 함께 줄을 바꾼다. 트윈 칸의 상태 글은 낱말 단위로 최대 두 줄,
+   설명(받은 사진에서…·검토: …)은 한 줄 말줄임이다. 전체 글은 title과 인스펙터에서 본다 */
+.fl-row .nm .nb{white-space:nowrap}
+.fl-grid.tw .fl-row .sb{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
+.fl-grid.tw .fl-row .gt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@container canvas (max-width:760px){
+  .fl-grid.tw{grid-template-columns:minmax(0,1fr);grid-template-areas:"so" "ap" "pl" "sc" "ps" "vd" "dt" "tr" "pk"}
+  .fl-grid.tw.nt{grid-template-columns:minmax(0,1fr);grid-template-areas:"so" "ap" "pl" "sc" "ps" "vd" "tr" "pk"}
+}
+/* 갈래 배지: 상태 표기처럼 점 + 글자, 색은 중립(브랜드 보라·상태색을 쓰지 않는다) */
+.fd-track{display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 8px;border:1px solid var(--fd-line);border-radius:999px;background:var(--fd-bg-surface);color:var(--fd-fg-muted);font-size:var(--fd-fs-2);font-weight:500;line-height:1;white-space:nowrap;vertical-align:2px}
+.fd-track .d{width:6px;height:6px;border-radius:50%;flex:none;background:var(--fd-slate-8)}
+.fd-track.tw{color:var(--fd-fg)}
+.fd-track.tw .d{background:var(--fd-fg)}
+.fd-title .fd-track{align-self:center}
+.ov-name .fd-track{margin-left:6px}
+.fd-demo{font-size:var(--fd-fs-2);color:var(--fd-fg-subtle)}
+
 /* 모델 만들기 보기(D-0130): 보기 탭 · 지금 할 일 띠 · 네 단계 · 읽기 전용 */
 .md-tabs{display:inline-flex;gap:2px;padding:2px;border-radius:var(--fd-r-3);background:var(--fd-bg-inset);border:1px solid var(--fd-line);align-self:flex-start}
 .md-tabs a{padding:4px 12px;border-radius:var(--fd-r-2);font-size:var(--fd-fs-3);color:var(--fd-fg-muted);text-decoration:none}

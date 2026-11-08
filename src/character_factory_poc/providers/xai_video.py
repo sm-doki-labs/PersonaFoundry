@@ -20,6 +20,7 @@ import httpx
 
 from character_factory_poc.common.errors import VideoGenerationError, VideoTimeoutError
 from character_factory_poc.providers.base import VideoRequest, VideoResult
+from character_factory_poc.providers.tracked import native_retry_sleep
 
 # 출력 영상 1초당 USD (docs.x.ai/developers/pricing, 2026-10-21). 설정으로 덮어쓴다.
 DEFAULT_PRICES: dict[str, dict[str, float]] = {
@@ -88,7 +89,7 @@ class XaiVideoModel:
             if last.status_code != 429 and last.status_code < 500:
                 return last
             if attempt < 3:
-                self.sleep(2**attempt)
+                native_retry_sleep(self.sleep, 2**attempt, last.status_code)
         assert last is not None
         return last
 

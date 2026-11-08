@@ -240,3 +240,8 @@ body.fd .side-keys kbd,body.fd .keys-list kbd{border-color:var(--fd-line-strong)
 body.fd .scroll-hint{color:var(--fd-fg-subtle)}
 body.fd .side-status.is-wait{color:var(--fd-attention-fg)}
 body.fd .metric-help,body.fd .action-undo{color:var(--fd-fg-muted)}
+/* 트윈 관문(2026-11-08) */
+body.fd .pkg-check.src-check:hover{background:transparent}
+body.fd .twin-ballot{border-color:var(--fd-line);border-radius:var(--fd-r-2);background:var(--fd-bg-surface)}
+body.fd .twin-path{font-family:var(--fd-mono);color:var(--fd-fg-muted)}
+body.fd .twin-sub,body.fd .src-why{color:var(--fd-fg-subtle)}

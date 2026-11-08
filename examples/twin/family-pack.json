@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "source-pack-v1",
+  "subject": {
+    "displayName": "가족역",
+    "kind": "PRIVATE_PERSON"
+  },
+  "usageBasis": {
+    "scope": "합성 자료로 비영업 발표 흐름만 연습해요. 실제 발표 동의를 대신하지 않아요.",
+    "notes": "실제 묶음에는 출처와 허용된 자료 처리·공개 범위를 확인해 적어요.",
+    "consentBy": "가족역(합성 예시)",
+    "consentDate": "2000-01-01"
+  },
+  "photos": [
+    {
+      "path": "<family-photo>.png",
+      "origin": "실제 사용 시 촬영자·입수 경위와 사용 근거를 확인해 적어요."
+    }
+  ],
+  "chapterTemplate": "FAMILY_CALL",
+  "texts": [
+    {
+      "textId": "family-chat",
+      "kind": "KAKAO_EXPORT",
+      "path": "kakao.csv",
+      "subjectSpeaker": "가족역",
+      "userSpeaker": "자녀역"
+    }
+  ]
+}

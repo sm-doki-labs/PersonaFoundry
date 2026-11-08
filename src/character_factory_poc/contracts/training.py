@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field
 
@@ -14,6 +14,8 @@ from character_factory_poc.common.schema import register
 from character_factory_poc.contracts.common import ArtifactRef, Strict
 
 TrainingProvider = Literal["gemma_qlora", "vertex_gemini", "fake"]
+# s11 names each packaged record by provider. Keep successive imports distinguishable.
+RecordedProvider = TrainingProvider | Annotated[str, Field(pattern=r"^IMPORTED-mb[1-9]\d*$")]
 RunStatus = Literal["PLANNED", "SUBMITTED", "RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"]
 ArmId = Literal["LONG_BASE", "SHORT_GEMMA_SFT", "SHORT_GEMINI_SFT"]
 SetId = Literal["OE", "SE", "APOLOGY", "LONG200"]
@@ -48,7 +50,7 @@ class Checkpoint(Strict):
 
 
 class ModelBinding(Strict):
-    provider: TrainingProvider
+    provider: RecordedProvider
     ref: str
     checkpointId: str
 
@@ -59,7 +61,7 @@ class TrainingRun(Strict):
     characterId: str
     datasetRev: str
     datasetDigest: str
-    provider: TrainingProvider
+    provider: RecordedProvider
     baseModel: str
     baseModelRevision: str = ""
     requestedConfig: dict[str, Any]

@@ -25,8 +25,8 @@ __all__ = [
 ]
 
 PROMPT = (
-    "Vertical {ratio} smartphone short-form video opening frame of the same fictional Korean "
-    "woman as the attached reference image. Keep the same face shape, eyes, nose, lips, skin "
+    "Vertical {ratio} smartphone short-form video opening frame of the same {subject} "
+    "as the attached reference image. Keep the same face shape, eyes, nose, lips, skin "
     "tone, hair color and hairstyle, the same outfit and the same backdrop and light. Recompose "
     "as a tall portrait frame: waist-up medium shot, subject centered, eye line in the upper "
     "third, natural headroom, backdrop extended above and below. Relaxed neutral pose facing the "
@@ -34,8 +34,19 @@ PROMPT = (
     "the eyes, photoreal, shot on a full-frame camera with a 50mm lens. An original person, not "
     "based on any real individual."
 )
+# 트윈(실존 인물)은 '가상 인물' 문구 대신 기준 사진의 얼굴을 그대로 지키라고만 한다.
+TWIN_TAIL = (
+    "Keep the person's identity exactly as in the reference image; do not change their face "
+    "or make them resemble anyone else."
+)
 NEGATIVE = "text, watermark, logo, hand on face, chin resting on hand"
 
 
-def build_prompt(ratio_text: str) -> str:
-    return PROMPT.format(ratio=ratio_text)
+def build_prompt(ratio_text: str, subject: str = "Korean woman", *, twin: bool = False) -> str:
+    """subject는 외모 명세의 인물 인상·성별(예: "Korean man"). 예전에는 여성으로 고정돼 있었다."""
+    prompt = PROMPT.format(ratio=ratio_text, subject=subject if twin else f"fictional {subject}")
+    if twin:
+        prompt = prompt.replace(
+            " An original person, not based on any real individual.", " " + TWIN_TAIL
+        )
+    return prompt

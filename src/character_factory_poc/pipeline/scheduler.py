@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from character_factory_poc.common.errors import GateNotApprovedError
 from character_factory_poc.pipeline.context import Context
-from character_factory_poc.pipeline.graph import STAGES
+from character_factory_poc.pipeline.graph import CREATED, stages_for
 from character_factory_poc.pipeline.state import StateFile
 
 RUNNABLE = frozenset({"PENDING", "RUNNING", "CHECK_FAILED", "REJECTED"})
@@ -36,6 +36,9 @@ STAGE_PROVIDERS: dict[str, frozenset[str]] = {
     "s10": frozenset({"text", "judge"}),
     "s11": frozenset(),
     "sx": frozenset(),
+    # 트윈 갈래(D-0128). s0은 출처 정리 에이전트가 텍스트 모델을 쓴다. s9h는 원문만 다룬다(제안).
+    "s0": frozenset({"text"}),
+    "s9h": frozenset(),
 }
 
 
@@ -67,7 +70,10 @@ def ready_stages(
     """
     extra = extra_needs or {}
     out: list[str] = []
-    for sid, stage in STAGES.items():
+    from character_factory_poc.pipeline.origin import graph_for_dir
+
+    graph = graph_for_dir(state.path.parent)
+    for sid, stage in graph.items():
         if sid in attempted or sid not in runners or not stage.implemented:
             continue
         if state.stage(sid).status not in RUNNABLE:
@@ -87,19 +93,20 @@ def extra_needs_for(appearance_axis: bool) -> dict[str, frozenset[str]]:
     return {"s3": frozenset({"s2"})} if appearance_axis else {}
 
 
-def until_scope(until: str) -> list[str]:
-    """--until까지의 단계(STAGES 순서). 순차 훑기가 until에서 멈추는 것과 같은 범위다."""
-    order = list(STAGES)
-    if until in STAGES:
+def until_scope(until: str, origin: str = CREATED, mode: str = "TRAIN") -> list[str]:
+    """--until까지의 단계(갈래 그래프 순서). 순차 훑기가 until에서 멈추는 것과 같은 범위다."""
+    graph = stages_for(origin, mode)
+    order = list(graph)
+    if until in graph:
         return order[: order.index(until) + 1]
     for i, sid in enumerate(order):
-        if STAGES[sid].gate == until:
+        if graph[sid].gate == until:
             return order[: i + 1]
     return order
 
 
-def _sort(ids: list[str], key_of: Callable[[str], str]) -> list[str]:
-    order = {sid: i for i, sid in enumerate(STAGES)}
+def _sort(ids: list[str], key_of: Callable[[str], str], origin: str = CREATED) -> list[str]:
+    order = {sid: i for i, sid in enumerate(stages_for(origin))}
     seen: list[str] = []
     for x in ids:
         if x not in seen:
@@ -107,8 +114,8 @@ def _sort(ids: list[str], key_of: Callable[[str], str]) -> list[str]:
     return sorted(seen, key=lambda x: order.get(key_of(x), len(order)))
 
 
-def _gate_stage(gate: str) -> str:
-    return next((sid for sid, s in STAGES.items() if s.gate == gate), gate)
+def _gate_stage(gate: str, origin: str = CREATED) -> str:
+    return next((sid for sid, s in stages_for(origin).items() if s.gate == gate), gate)
 
 
 def run_waves(ctx: Context, cid: str, opt) -> object:
@@ -121,12 +128,16 @@ def run_waves(ctx: Context, cid: str, opt) -> object:
         _stage_runners,
         _step,
     )
+    from character_factory_poc.pipeline.origin import read_model_mode, read_origin
 
     log = RunLog()
+    origin = read_origin(ctx.character_dir(cid))
+    mode = read_model_mode(ctx.character_dir(cid))
     runners = _stage_runners(ctx, cid, opt)
-    extra = extra_needs_for(_appearance_axis(ctx, cid, opt))
+    # 외모 축의 s3 ← s2 선행은 오리지널에만 있다. 트윈의 s3는 G0만 기다린다(D-0128).
+    extra = extra_needs_for(origin == CREATED and _appearance_axis(ctx, cid, opt))
     scope: list[str] = []
-    for sid in until_scope(opt.until):
+    for sid in until_scope(opt.until, origin, mode):
         note = _skip_note(ctx, cid, sid, runners)
         if note is not None:
             if note:
@@ -176,9 +187,9 @@ def run_waves(ctx: Context, cid: str, opt) -> object:
         if action == "return":
             stopped = True
             break
-    log.waiting = _sort(log.waiting, _gate_stage)
-    log.blocked = _sort(log.blocked, lambda s: s)
-    log.held = _sort(log.held, lambda s: s)
+    log.waiting = _sort(log.waiting, lambda g: _gate_stage(g, origin), origin)
+    log.blocked = _sort(log.blocked, lambda s: s, origin)
+    log.held = _sort(log.held, lambda s: s, origin)
     if stopped:
         return log
     return _finish(log)

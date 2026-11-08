@@ -114,7 +114,7 @@
     return m ? '버전 ' + m[1] : String(rev || '-');
   }
   var GATE_KO = {
-    G1: '얼굴 고르기', G3: '기획안 고르기', G4a: '챕터 배경', G4b: '장면·자세', G4: '완성 이미지',
+    G0: '출처 확인', G1s: '기준 사진', G1: '얼굴 고르기', G3: '기획안 고르기', G4a: '챕터 배경', G4b: '장면·자세', G4: '완성 이미지',
     G5: '소개 영상', G5b: '동작 영상', G6: '프롬프트', G7a: '데이터 샘플', G7: '학습 데이터', G8: '평가', G9: '패키지'
   };
 
@@ -379,12 +379,45 @@
     },
     promptOnly: {
       hint: '학습 결과가 아직 없어요. 긴 프롬프트로 패키지까지 갈지, 학습을 기다릴지 정해 주세요.',
+      // 트윈(PROMPT_ONLY·BIND_EXISTING)은 학습을 기다리지 않는다. 버튼 문구는 서버의 items.adoptLabel을 따른다.
+      hintFor: function (items) {
+        if (!isTwinDecision(items)) return null;
+        return (items.decision || {}).mode === 'BIND_EXISTING'
+          ? '같은 장면에서 실제 답과 생성 답을 비교한 결과를 보고, 연결한 모델로 이 캐릭터를 진행할지 정해요.'
+          : '같은 장면에서 실제 답과 생성 답을 비교한 결과를 보고, 긴 프롬프트로 이 캐릭터를 진행할지 정해요.';
+      },
+      actionsFor: function (items) {
+        var label = items.adoptLabel || '긴 프롬프트로 진행';
+        return isTwinDecision(items)
+          ? [['SELECT', label, 'primary'], ['REJECT', '반려(다시 만들기)', 'danger']]
+          : [['SELECT', label, 'primary'], ['REJECT', '학습을 기다릴게요', 'ghost']];
+      },
       actions: [
         ['SELECT', '긴 프롬프트로 진행', 'primary'],
         ['REJECT', '학습을 기다릴게요', 'ghost']
       ],
       render: renderPromptOnly,
       build: buildPromptOnly
+    },
+    sourcePack: {
+      hint: '출처가 맞게 정리됐는지 확인해요. 승인하면 이 묶음으로 얼굴·기획·말투를 만들어요. 이 관문은 사람만 결정해요.',
+      actions: [
+        ['APPROVE', '출처 승인', 'primary'],
+        ['REQUEST_CHANGES', '수정 요청', 'ghost'],
+        ['REJECT', '반려(처음부터)', 'danger']
+      ],
+      render: renderSourcePack,
+      build: buildSourcePack
+    },
+    sourcePhotos: {
+      hint: '본인과 닮고 얼굴이 잘 보이는 사진을 하나 골라 주세요. 고른 사진이 이후 모든 장면과 영상의 얼굴 기준이 돼요.',
+      actions: [
+        ['SELECT', '이 사진으로 확정', 'primary'],
+        ['REQUEST_CHANGES', '수정 요청', 'ghost'],
+        ['REJECT', '반려(처음부터)', 'danger']
+      ],
+      render: renderPhotos,
+      build: buildPhotos
     },
     package: {
       hint: '패키지 요약을 확인하고 승인해요. 승인한 뒤 우리 앱으로 내보내는 일은 다음 단계에서 해요.',
@@ -2452,7 +2485,8 @@
     return (
       '<section class="gate-section" data-blind-wait' + (blindOpen ? ' hidden' : '') + '>' +
       '<h2>지표</h2><p class="section-sub">조건 이름과 지표 값은 블라인드 ' +
-      list(items.pairs).length + '쌍을 모두 고르면 열려요.</p></section>' +
+      list(items.pairs).length + '쌍을 모두 고르면 열려요.' +
+      (items.twin ? ' 실제 답 비교의 조건별 구별률도 그때 함께 열려요.' : '') + '</p></section>' +
       '<section class="gate-section" data-after-blind' + (blindOpen ? '' : ' hidden') + '>' +
       '<h2>지표</h2>' +
       '<p class="section-sub">블라인드 판정을 마친 뒤에 보는 조건별 지표예요.</p>' +
@@ -2461,7 +2495,8 @@
       '<details class="gate-more"><summary>기준 결과</summary>' +
       '<table class="metric-table"><thead><tr><th>기준</th><th>조건</th><th>값</th><th>결과</th>' +
       '</tr></thead><tbody>' + criteria + '</tbody></table>' +
-      '<p class="section-sub">' + esc(report.recommendation || '') + '</p></details></section>' +
+      '<p class="section-sub">' + esc(report.recommendation || '') + '</p></details>' +
+      twinTable(items.twin) + '</section>' +
       '<section class="gate-section"><h2>블라인드 비교</h2>' +
       '<p class="section-sub">어느 응답이 어떤 조건인지 숨겨요. 사용자 말에 더 자연스럽게 답한 쪽을 고르고, ' +
       '차이가 없으면 비슷해요를 골라 주세요. 고르면 다음 쌍으로 넘어가요.</p>' +
@@ -2473,6 +2508,7 @@
       '<p class="blind-keys">단축키 <kbd>1</kbd> A가 나아요 · <kbd>2</kbd> B가 나아요 · <kbd>3</kbd> 비슷해요 · ' +
       NAV_KEYS + ' 쌍</p></div>' +
       '<div class="pair-list">' + pairs + '</div></section>' +
+      twinBallots(items.twin) +
       '<section class="gate-section" data-adopt-section><h2>채택 기준</h2>' +
       '<p class="section-sub">블라인드 결과와 지표를 본 뒤 어떤 조건을 채택할지 정해요.</p>' +
       '<label class="field"><span>채택</span><select data-adopt>' + adopt +
@@ -2498,6 +2534,7 @@
 
   var ARM_KO = {
     LONG_BASE: '긴 프롬프트 (학습 없이)',
+    BOUND_SFT: '연결한 모델',
     SHORT_GEMMA_SFT: '짧은 프롬프트 + Gemma 학습',
     SHORT_GEMINI_SFT: '짧은 프롬프트 + Gemini 학습'
   };
@@ -2644,6 +2681,7 @@
   // ---------------------------------------------------------------- G8(학습 없이 진행, K-0038)
   function renderPromptOnly(items) {
     var doc = items.decision || {};
+    if (isTwinDecision(items)) return renderTwinAdopt(items);
     var runs = list(doc.trainingRuns)
       .map(function (run) {
         var usd = run.estimateUsd == null ? '-' : '$' + Number(run.estimateUsd).toFixed(2);
@@ -2659,7 +2697,7 @@
       '<th>추정 비용</th></tr></thead><tbody>' +
       (runs || '<tr><td colspan="4">학습 계획 없음</td></tr>') + '</tbody></table></section>' +
       '<section class="gate-section"><h2>이렇게 진행돼요</h2>' +
-      '<p class="section-sub"><b>긴 프롬프트로 진행</b>을 누르면 학습 모델 평가 없이 패키지를 만들고, ' +
+      '<p class="section-sub"><b>' + esc(items.adoptLabel || '긴 프롬프트로 진행') + '</b>을 누르면 학습 모델 평가 없이 패키지를 만들고, ' +
       '패키지에는 긴 프롬프트·짧은 프롬프트·데이터셋(' + esc(doc.datasetRev || '없음') +
       ')과 학습 계획이 들어가요. <b>학습을 기다릴게요</b>를 누르면 학습 결과가 생길 때까지 ' +
       '평가 단계가 멈춰요.</p></section>'
@@ -2668,8 +2706,356 @@
 
   function buildPromptOnly(decision) {
     var answer = { decision: decision };
-    if (decision === 'SELECT') answer.adopted = list(state.items.adoptOptions)[0] || 'LONG_BASE';
+    if (decision === 'SELECT') answer.adopted = state.items.adoptTarget || list(state.items.adoptOptions)[0] || 'LONG_BASE';
     return Object.assign(answer, details());
+  }
+
+  // ---------------------------------------------------------------- 트윈 G8(실제 답 비교, twin-comparison-v1)
+  // 조건 이름이 붙은 구별률 표와 가족 블라인드 파일 목록을 나눈다. 블라인드 파일은 판 번호로만 알린다.
+  // 실제 답과 생성 답을 나란히 보이는 시연 화면은 그 판의 가족 판정을 가져온 뒤에만 서버가 연다.
+  var TWIN_ARM_KO = { LONG_BASE: '긴 프롬프트', BOUND_SFT: '연결한 모델' };
+  var TWIN_STATUS_KO = {
+    COMPLETE: ['심사 완료', 'is-good'],
+    NO_SERVING: ['서빙 없음', ''],
+    PLANNED: ['실행 전', ''],
+    NO_JUDGE: ['심사 모델 미설정', 'is-warn']
+  };
+  var OVERLAP_KO = { TRAIN: '학습 대화', PROMPT: '대화 프롬프트', VOICE: '말투 예시' };
+  function isTwinDecision(items) {
+    return Boolean(items && items.decision && items.decision.schemaVersion === 'eval-twin-decision-v1');
+  }
+  function twinArm(armId) {
+    return TWIN_ARM_KO[armId] || adoptLabel(armId);
+  }
+  function twinRate(score) {
+    if (!score || !score.total) return '—';
+    return score.correct + '/' + score.total + ' · ' + Math.round(Number(score.rate) * 100) + '%';
+  }
+  function twinTable(twin) {
+    if (!twin) return '';
+    var rows = list(twin.conditions).map(function (c) {
+      var st = TWIN_STATUS_KO[c.status] || [c.status, ''];
+      var kinds = Object.keys(c.overlapKinds || {}).map(function (k) { return (OVERLAP_KO[k] || k) + ' ' + c.overlapKinds[k]; }).join(' · ');
+      return '<tr><td>' + esc(twinArm(c.armId)) + '</td><td><span class="badge-chip ' + st[1] + '">' + esc(st[0]) + '</span></td>' +
+        '<td class="num">' + esc(twinRate(c.modelScore)) + '</td><td class="num">' + esc(!c.blind ? '—' : c.voted ? twinRate(c.humanScore) : '판정 전') + '</td>' +
+        '<td class="num">' + (c.trials ? esc(c.exact) + '건' : '—') + '</td>' +
+        '<td>' + (c.trials ? '<span class="num">' + esc(c.overlap) + '건</span>' + (kinds ? '<span class="twin-sub">' + esc(kinds) + '</span>' : '') : '—') + '</td>' +
+        '<td>' + (c.demo && c.demo.url ? '<a href="' + esc(c.demo.url) + '" target="_blank" rel="noopener">열기</a>' : c.blind ? '<span class="twin-sub">가족 판정 뒤</span>' : '—') + '</td></tr>';
+    }).join('');
+    var planned = twin.phase === 'PLANNED';
+    return (
+      '<h3 class="twin-h">조건별 구별률</h3>' +
+      '<p class="section-sub">비교 세트 ' + esc(twin.sceneCount) + '장면에서 실제로 보낸 답과 생성 답을 나란히 두고, 어느 쪽이 실제인지 골랐어요. ' +
+      '구별률이 50%에 가까울수록 둘을 가려내기 어렵다는 뜻이에요. 장면 수가 적으면 차이를 일반화하기 어려워요.' +
+      (planned ? ' 아직 실행 전이라 판정이 없어요(예상 호출 ' + esc(twin.plannedCalls) + '회).' : '') + '</p>' +
+      '<div class="twin-scroll"><table class="metric-table twin-table"><thead><tr><th>조건</th><th>상태</th><th class="num">심사 모델</th><th class="num">가족</th>' +
+      '<th class="num">정답과 같음</th><th>외운 답 의심</th><th>시연</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<p class="metric-help">정답과 같음은 생성 답이 실제 답과 글자까지 같아 문장만으로는 가릴 수 없는 장면이에요(분모에 들어가요). ' +
+      '외운 답 의심은 생성 답이 학습 대화·프롬프트·말투 예시와 ' + esc(twin.overlapChars) + '자 이상 겹친 장면이에요. ' +
+      '시연 화면에는 정답이 나오고 "AI 생성 · 본인과 무관한 기술 시연" 표시가 붙어요.</p>' +
+      '<details class="card-tech"><summary>상세 · 모델 ID</summary>' +
+      '심사 모델: ' + esc(twin.judgeModel || '-') + '\n' +
+      list(twin.conditions).map(function (c) { return esc(twinArm(c.armId)) + ': ' + esc(c.model || '-') + (c.servingModel ? ' · 서빙 ' + esc(c.servingModel) : ''); }).join('\n') +
+      '\n예상 호출 ' + esc(twin.plannedCalls) + '회 · 비용 상한 ' + (twin.costUpperUsd == null ? '견적 없음' : '$' + Number(twin.costUpperUsd).toFixed(2)) + '</details>'
+    );
+  }
+  function twinBallots(twin) {
+    if (!twin) return '';
+    var dir = (state.view && state.view.stageDir) || '';
+    var ballots = list(twin.ballots);
+    var rows = ballots.map(function (b, i) {
+      var file = b.file || {};
+      return '<li class="twin-ballot"><b>판 ' + (i + 1) + '</b><span class="twin-sub">번호 ' + esc(String(b.ballot).slice(0, 8)) + '</span>' +
+        '<span class="badge-chip' + (b.voted ? ' is-good' : '') + '">' + (b.voted ? '답 가져옴' : '답 기다리는 중') + '</span>' +
+        '<code class="twin-path">' + esc((dir ? dir + '/' : '') + (file.name || '')) + '</code>' +
+        (file.url ? '<a href="' + esc(file.url) + '" target="_blank" rel="noopener">블라인드 화면 열기</a>' : '') + '</li>';
+    }).join('');
+    return (
+      '<section class="gate-section"><h2>가족 블라인드 판정</h2>' +
+      (ballots.length
+        ? '<p class="section-sub">가족 한 사람에게 블라인드 파일 하나만 전달해 주세요. 파일에는 조건 이름과 정답이 없어요. ' +
+          '시연 화면에는 정답이 나오니 판정 전에는 보여 주지 마세요.</p><ul class="twin-ballots">' + rows + '</ul>' +
+          '<ol class="twin-steps"><li>블라인드 파일을 가족에게 전달해요.</li>' +
+          '<li>가족이 장면마다 실제로 보낸 답을 고르고 <b>답 파일 저장</b>을 눌러요. answers-번호.json 파일이 저장돼요.</li>' +
+          '<li>받은 답 파일을 공장에서 가져오면 가족 구별률이 채워지고 그 판의 시연 화면이 열려요. 이 화면에는 아직 가져오기 버튼이 없어 담당자가 가져와요.</li></ol>' +
+          '<details class="card-tech"><summary>상세 · 가져오기</summary>' + esc(twin.importHint || '') + '\n' + esc(twin.importCall || '') + '</details>'
+        : '<p class="section-sub">판정까지 마친 조건이 없어 블라인드 파일이 없어요. 심사 모델과 서빙이 설정된 뒤 다시 만들어요.</p>') +
+      '</section>'
+    );
+  }
+  function renderTwinAdopt(items) {
+    var doc = items.decision || {};
+    var bind = doc.mode === 'BIND_EXISTING';
+    var binding = doc.binding || {};
+    var check = doc.preflight || {};
+    var twin = items.twin;
+    var label = items.adoptLabel || '긴 프롬프트로 진행';
+    return (
+      '<section class="gate-section"><h2>채택할 대상</h2>' +
+      facts([
+        ['진행 방식', bind ? '연결한 모델 · 이미 학습된 모델을 이 캐릭터에 연결해요' : '긴 프롬프트 · 학습 없이 긴 프롬프트로 대화해요'],
+        ['비교 세트', doc.sceneCount + '장면'],
+        bind ? ['연결 사전 확인', ({ PASSED: '통과', PASS: '통과', OK: '통과', FAILED: '실패', SKIPPED: '건너뜀' })[check.status] || check.status || '기록 없음'] : null
+      ].filter(Boolean)) +
+      '<details class="card-tech"><summary>상세 · 채택 값</summary>' +
+      '결정에 실을 값: ' + esc(items.adoptTarget || '') + '\n' +
+      (bind ? '모델: ' + esc(binding.ref || '-') + '@' + esc(binding.revision || '-') + '\n서빙 경로: ' + esc(binding.servingRoute || '-') + '\n' +
+        (check.reason ? '사전 확인: ' + esc(check.reason) + '\n' : '') : '') +
+      esc(doc.reason || '') + '</details></section>' +
+      (twin
+        ? '<section class="gate-section"><h2>실제 답 비교</h2>' + twinTable(twin) + '</section>' + twinBallots(twin)
+        : '<section class="gate-section"><h2>실제 답 비교</h2><p class="section-sub">비교 보고가 아직 없어요.</p></section>') +
+      '<section class="gate-section"><h2>이렇게 진행돼요</h2>' +
+      '<p class="section-sub"><b>' + esc(label) + '</b>을 누르면 ' + (bind ? '연결한 모델을' : '긴 프롬프트를') +
+      ' 이 캐릭터의 대화 방식으로 정하고 패키지를 만들어요. 가족 판정은 결정 전에 가져오면 기록에 함께 남아요. ' +
+      '<b>반려</b>하면 이 판을 버리고 다시 만들어요.</p></section>'
+    );
+  }
+
+  // ---------------------------------------------------------------- G0 출처 확인(트윈, 사람 전용)
+  // 비교 세트는 개수만 보여요. 원문은 서버가 화면 자료·파일 목록 어디에도 싣지 않는다(D-0120).
+  var TEXT_KIND_KO = { KAKAO_EXPORT: '카톡 내보내기', INTERVIEW: '인터뷰', ARTICLE: '기사', TRANSCRIPT: '받아 적은 글' };
+  var SUBJECT_KO = { PUBLIC_FIGURE: '공개 인물', PRIVATE_PERSON: '가까운 사람' };
+  var MASK_KO = { phone: '전화번호', email: '이메일', account: '계좌·번호', participant: '다른 참여자 이름' };
+  var DIGEST_KO = { DAILY: '일상', AFFECTION: '애정', CONFLICT: '갈등', ADVICE: '조언', HUMOR: '농담', WORK: '일', OTHER: '기타' };
+  function num(value) {
+    return Number(value || 0).toLocaleString('ko-KR');
+  }
+  function maskedTotal(items) {
+    var m = items.masked || {};
+    return Object.keys(m).reduce(function (sum, k) { return sum + Number(m[k] || 0); }, 0);
+  }
+  function sourceChecks(items) {
+    var usage = items.usage || {};
+    var counts = items.counts || {};
+    var agent = items.agent || {};
+    var speaker = agent.speakerCheck || {};
+    var privatePerson = (items.subject || {}).kind === 'PRIVATE_PERSON';
+    var consent = usage.consentBy && usage.consentDate;
+    var flags = list(agent.piiFlags).length;
+    var m = items.masked || {};
+    var maskText = Object.keys(MASK_KO).filter(function (k) { return m[k]; }).map(function (k) { return MASK_KO[k] + ' ' + m[k]; }).join(' · ');
+    return [
+      { title: '사용 범위', tone: usage.scope ? 'ok' : 'bad', detail: usage.scope || '비어 있어요. 어디에 쓰는지 적어야 승인할 수 있어요.' },
+      {
+        title: '동의 기록',
+        tone: consent ? 'ok' : privatePerson ? 'bad' : 'info',
+        detail: consent ? usage.consentBy + ' · ' + usage.consentDate
+          : privatePerson ? '가까운 사람은 동의한 사람과 날짜가 있어야 승인할 수 있어요.' : '공개 인물이라 동의 기록 없이도 승인할 수 있어요.'
+      },
+      {
+        title: '화자 지정',
+        tone: speaker.confirmed ? 'ok' : 'warn',
+        detail: (speaker.confirmed ? '출처 정리 에이전트가 화자를 확인했어요' : '출처 정리 에이전트가 화자를 확인하지 못했어요') + (speaker.note ? ' · ' + speaker.note : '')
+      },
+      {
+        title: '개인정보 가림',
+        tone: flags ? 'warn' : 'ok',
+        detail: (maskText ? maskText + '를 가렸어요' : '가린 항목이 없어요') + (flags ? ' · 더 가릴 것 ' + flags + '건이 있어요' : '')
+      },
+      {
+        title: '비교 세트',
+        tone: counts.holdoutConversations ? 'ok' : 'warn',
+        detail: counts.holdoutConversations
+          ? '대화 ' + num(counts.holdoutConversations) + '개(메시지 ' + num(counts.holdoutMessages) + '개)를 떼어 뒀어요. 원문은 이 화면에 보이지 않아요.'
+          : '떼어 둔 대화가 없어요. 실제 답 비교를 할 수 없어요.'
+      }
+    ];
+  }
+  function checkRow(c) {
+    var mark = { ok: '✓', bad: '✕', warn: '!', info: 'i' }[c.tone];
+    return '<li><div class="pkg-check src-check is-' + c.tone + '"><span class="pkg-mark" aria-hidden="true">' + mark + '</span>' +
+      '<b>' + esc(c.title) + '</b><span class="pkg-detail-text">' + esc(c.detail) + '</span><span class="sr-only">' +
+      ({ ok: ' 통과', bad: ' 막힘', warn: ' 확인 필요', info: ' 안내' }[c.tone]) + '</span></div></li>';
+  }
+  function renderSourcePack(items) {
+    var counts = items.counts || {};
+    var usage = items.usage || {};
+    var subject = items.subject || {};
+    var agent = items.agent || {};
+    var kpi = function (label, value, tone) {
+      return '<div class="kpi' + (tone ? ' is-' + tone : '') + '"><span>' + esc(label) + '</span><b>' + esc(value) + '</b></div>';
+    };
+    var photos = items.photos || {};
+    var origins = list(photos.origins).filter(Boolean);
+    var texts = list(items.texts).map(function (t) {
+      var who = [t.subjectSpeaker ? '대상 인물 ' + t.subjectSpeaker : '', t.userSpeaker ? '사용자 ' + t.userSpeaker : ''].filter(Boolean).join(' · ');
+      var period = t.first || t.last ? String(t.first || '').slice(0, 10) + ' ~ ' + String(t.last || '').slice(0, 10) : (t.date || '-');
+      return '<tr><td>' + esc(t.textId) + '</td><td>' + esc(TEXT_KIND_KO[t.kind] || t.kind) + '</td><td>' + esc(who || '-') + '</td>' +
+        '<td class="num">' + num(t.subjectMessages) + ' / ' + num(t.messages) + '</td><td class="num">' + num(t.conversations) + '</td><td class="num">' + esc(period) + '</td></tr>';
+    }).join('');
+    var reps = list(agent.representative).map(function (r) {
+      return '<li><p class="bubble is-char"><span>' + esc(DIGEST_KO[r.category] || r.category) + '</span>' + esc(r.text || '(메시지를 찾지 못했어요)') + '</p>' +
+        '<p class="src-why">' + esc(r.why) + '</p></li>';
+    }).join('');
+    var flags = list(agent.piiFlags).map(function (p) {
+      return '<li><b>' + esc(p.reason) + '</b>' + (p.text ? '<span class="src-why">' + esc(p.text) + '</span>' : '') + '</li>';
+    }).join('');
+    var bullets = function (values) {
+      return list(values).length ? '<ul class="src-list">' + list(values).map(function (v) { return '<li>' + esc(v) + '</li>'; }).join('') + '</ul>' : '<p class="section-sub">없어요</p>';
+    };
+    return (
+      '<section class="gate-section"><h2>승인 전 확인</h2>' +
+      '<p class="section-sub">빨간 항목이 있으면 승인할 수 없어요. 출처 묶음을 채워 다시 돌린 뒤 승인해 주세요.</p>' +
+      '<ul class="pkg-checks">' + sourceChecks(items).map(checkRow).join('') + '</ul></section>' +
+      '<section class="gate-section"><h2>정리한 자료</h2>' +
+      '<div class="kpis">' + kpi('대화', num(counts.conversations) + '개') + kpi('쓸 대상 인물 메시지', num(counts.corpusSubjectMessages) + '개') +
+      kpi('가린 개인정보', num(maskedTotal(items)) + '건') +
+      kpi('비교 세트로 뗀 대화', num(counts.holdoutConversations) + '개') + kpi('사진', num(photos.count) + '장') + '</div>' +
+      '<p class="section-sub">비교 세트로 뗀 대화는 학습과 프롬프트에 넣지 않고, 나중에 실제 답과 생성 답을 비교할 때만 써요.' +
+      (counts.otherParticipants ? ' 다른 참여자 ' + num(counts.otherParticipants) + '명의 이름은 참여자 번호로 바꿨어요.' : '') + '</p>' +
+      '<div class="twin-scroll"><table class="metric-table src-table"><thead><tr><th>출처</th><th>종류</th><th>화자</th><th class="num">대상 인물 / 전체 메시지</th><th class="num">대화</th><th class="num">기간</th></tr></thead>' +
+      '<tbody>' + texts + '</tbody></table></div>' +
+      '<p class="section-sub">표의 숫자는 비교 세트를 떼기 전 전체예요. 위의 쓸 메시지 수는 비교 세트를 뺀 수예요.</p>' +
+      '<p class="section-sub">사진 ' + num(photos.count) + '장' + (origins.length ? ' · 받은 곳: ' + esc(origins.join(', ')) : '') + '. 사진은 다음 관문(기준 사진)에서 크게 보고 골라요.</p></section>' +
+      '<section class="gate-section"><h2>대상과 사용 근거</h2>' +
+      facts([
+        ['대상', (subject.displayName || '-') + ' · ' + (SUBJECT_KO[subject.kind] || subject.kind || '-')],
+        ['사용 범위', usage.scope || '비어 있어요'],
+        ['동의한 사람', usage.consentBy || '없음'],
+        ['동의 날짜', usage.consentDate || '없음'],
+        ['메모', usage.notes || '-']
+      ]) + '</section>' +
+      '<section class="gate-section"><h2>출처 정리 에이전트 의견</h2>' +
+      '<p class="section-sub">에이전트가 정리한 원문 일부를 읽고 남긴 의견이에요. 참고만 하고 결정은 직접 해 주세요.</p>' +
+      '<h3 class="twin-h">대표 메시지 ' + list(agent.representative).length + '개</h3>' +
+      (reps ? '<ul class="src-msgs">' + reps + '</ul>' : '<p class="section-sub">없어요</p>') +
+      '<h3 class="twin-h">말투 관찰</h3>' + bullets(agent.observations) +
+      '<h3 class="twin-h">더 가릴 것</h3>' + (flags ? '<ul class="src-list src-flags">' + flags + '</ul>' : '<p class="section-sub">없어요</p>') +
+      '<h3 class="twin-h">자료 품질</h3>' + bullets(agent.qualityNotes) + '</section>' +
+      '<section class="gate-section"><h2>수정 요청할 점</h2>' +
+      '<p class="section-sub">출처를 고쳐 다시 정리해야 할 때만 적어 주세요. 예: 화자가 바뀌었어요, 이 대화는 빼 주세요.</p>' +
+      '<textarea data-source-note placeholder="예: 두 번째 카톡 파일의 화자가 바뀌었어요"></textarea>' +
+      '<details class="card-tech"><summary>상세 · 출처 판</summary>출처 판: ' + esc(items.sourceRev || '-') +
+      (list(items.usageProblems).length ? '\n승인 잠김 사유:\n- ' + list(items.usageProblems).map(esc).join('\n- ') : '') + '</details></section>'
+    );
+  }
+  function sourceLocked() {
+    return state.kind === 'sourcePack' && list(state.items.usageProblems).length > 0;
+  }
+  function paintSourceSide() {
+    if (state.kind !== 'sourcePack') return;
+    var items = state.items;
+    var checks = sourceChecks(items);
+    var bad = checks.filter(function (c) { return c.tone === 'bad'; });
+    var warn = checks.filter(function (c) { return c.tone === 'warn'; });
+    var counts = items.counts || {};
+    var side = q('[data-side-extra]');
+    if (side) side.innerHTML = '<div class="bg-side"><p class="bg-side-title"><b>출처 확인</b><span>' +
+      (checks.length - bad.length - warn.length) + ' / ' + checks.length + ' 통과</span></p>' +
+      '<dl class="facts"><dt>대상</dt><dd>' + esc((items.subject || {}).displayName || '-') + '</dd><dt>대화</dt><dd>' + num(counts.conversations) + '개</dd>' +
+      '<dt>비교 세트</dt><dd>' + num(counts.holdoutConversations) + '개</dd><dt>확인 필요</dt><dd>' + warn.length + '</dd><dt>막는 문제</dt><dd>' + bad.length + '</dd></dl></div>';
+    if (faceLocked()) return;
+    var approve = q('[data-decide="APPROVE"]');
+    if (approve) approve.disabled = Boolean(state.busy || sourceLocked());
+    var hint = q('[data-side-hint]');
+    if (hint) hint.textContent = sourceLocked()
+      ? bad.map(function (c) { return c.title; }).join(', ') + '이 비어 승인할 수 없어요. 수정 요청을 보내거나 출처 묶음을 채워 다시 돌려 주세요.'
+      : warn.length ? '확인할 항목 ' + warn.length + '개가 있지만 승인할 수 있어요. 승인하면 기준 사진과 기획이 이어서 만들어져요.'
+      : '모두 갖췄어요. 승인하면 기준 사진과 기획이 이어서 만들어져요.';
+  }
+  function buildSourcePack(decision) {
+    var answer = { decision: decision };
+    if (decision === 'APPROVE' && sourceLocked()) throw Error('사용 근거가 비어 승인할 수 없어요. 출처 묶음을 채워 다시 돌려 주세요.');
+    if (decision === 'REQUEST_CHANGES') {
+      var box = q('[data-source-note]');
+      var note = box ? box.value.trim() : '';
+      if (!note) { focusField(box); throw Error('수정 요청할 점을 적어 주세요.'); }
+      answer.requestedChanges = [{ field: 'source', note: note }];
+    }
+    var more = details();
+    if (answer.requestedChanges && !more.reasons) more.reasons = answer.requestedChanges[0].note;
+    return Object.assign(answer, more);
+  }
+
+  // ---------------------------------------------------------------- G1s 기준 사진(트윈, 사람 전용)
+  // G1 얼굴 고르기 갤러리 부품(face-grid·face-tile·face-side)을 그대로 쓴다. 첫 사진이 기본이다.
+  function photoList() {
+    return list(state.items.photos);
+  }
+  function photoById(id) {
+    return photoList().filter(function (p) { return p.photoId === id; })[0] || null;
+  }
+  function photoThumb(p, cls) {
+    return p.file && p.file.url
+      ? '<img class="' + (cls || '') + '" src="' + esc(p.file.url) + '" alt="' + esc('기준 사진 후보 ' + p.n) + '" loading="lazy">'
+      : '<span class="face-missing">파일 없음</span>';
+  }
+  function renderPhotos(items) {
+    var photos = photoList();
+    if (!state.photo) {
+      var rec = state.view && state.view.record;
+      var chosen = rec ? list(rec.selections).filter(function (id) { return photoById(id); })[0] : '';
+      state.photo = chosen || ((photos.filter(function (p) { return p.default; })[0] || photos[0] || {}).photoId || '');
+    }
+    return (
+      '<section class="gate-section face-gallery"><h2>기준 사진 후보 ' + photos.length + '장</h2>' +
+      '<p class="section-sub">' + esc(items.helper || '') + ' 숫자 키 1~9로 골라요.</p>' +
+      '<div class="face-grid photo-grid" data-photo-grid></div></section>' +
+      '<section class="gate-section"><h2>다시 받을 때 고칠 점</h2>' +
+      '<p class="section-sub">마음에 드는 사진이 없을 때만 적어 주세요. 출처 묶음에 사진을 더 넣어 다시 돌려요.</p>' +
+      '<textarea data-photo-note placeholder="예: 정면 사진이 없어요. 최근 사진으로 더 넣어 주세요"></textarea></section>'
+    );
+  }
+  function paintPhotos() {
+    if (state.kind !== 'sourcePhotos') return;
+    var grid = q('[data-photo-grid]');
+    if (!grid) return;
+    var locked = faceLocked();
+    grid.innerHTML = photoList().map(function (p, i) {
+      var on = state.photo === p.photoId;
+      return '<div class="face-tile' + (on ? ' is-picked' : '') + '">' +
+        '<button type="button" class="face-pick" data-photo-pick="' + esc(p.photoId) + '" aria-pressed="' + on + '"' + (locked ? ' disabled' : '') + '>' +
+        photoThumb(p) + '<span class="face-cap"><b>' + p.n + '</b>' + (p.default ? '<span class="badge-chip">기본</span>' : '') +
+        (i < 9 ? '<kbd>' + (i + 1) + '</kbd>' : '') + '</span>' +
+        '<span class="card-sub photo-desc">' + esc(p.descriptionKo || '') + '</span></button></div>';
+    }).join('');
+    var host = q('[data-side-extra]');
+    var p = photoById(state.photo);
+    if (host) {
+      host.innerHTML = p
+        ? '<div class="face-side">' + photoThumb(p, 'big') +
+          '<p class="face-side-title"><b>사진 ' + p.n + '</b>' + (p.default ? '<span class="badge-chip">기본</span>' : '') + '</p>' +
+          '<dl class="facts">' + list(p.tags).slice(0, 6).map(function (tag) { return '<dt>' + esc(tag.label) + '</dt><dd>' + esc(tag.text) + '</dd>'; }).join('') + '</dl>' +
+          (list(p.tags).length ? '' : '<p class="section-sub">' + esc(p.descriptionKo || '') + '</p>') +
+          '<details class="card-tech"><summary>상세</summary>사진 ID: ' + esc(p.photoId) + '\n' + esc(p.descriptionEn || '') + (p.notes ? '\n' + esc(p.notes) : '') + '</details></div>'
+        : '<p class="face-side-empty">사진을 고르면 여기에 크게 보여요.</p>';
+    }
+    var primary = q('[data-decide="SELECT"]');
+    if (primary && !locked) {
+      primary.textContent = p ? ro('사진 ' + p.n) + ' 확정' : '이 사진으로 확정';
+      primary.disabled = Boolean(state.busy || !p);
+    }
+  }
+  function pickPhoto(id) {
+    if (faceLocked() || !photoById(id)) return;
+    state.photo = id;
+    paintPhotos();
+  }
+  function onPhotoKey(event) {
+    if (state.kind !== 'sourcePhotos' || event.altKey || event.ctrlKey || event.metaKey) return;
+    var tag = event.target && event.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (/^[1-9]$/.test(String(event.key))) {
+      var p = photoList()[Number(event.key) - 1];
+      if (p) { event.preventDefault(); pickPhoto(p.photoId); }
+    }
+  }
+  function buildPhotos(decision) {
+    var answer = { decision: decision };
+    if (decision === 'SELECT') {
+      if (!photoById(state.photo)) throw Error('사진 하나를 골라 주세요.');
+      answer.selections = [state.photo];
+    }
+    if (decision === 'REQUEST_CHANGES') {
+      var box = q('[data-photo-note]');
+      var note = box ? box.value.trim() : '';
+      if (!note) { focusField(box); throw Error('아래 칸에 다시 받을 때 고칠 점을 적어 주세요.'); }
+      answer.requestedChanges = [{ field: 'photos', note: note }];
+    }
+    var more = details();
+    if (answer.requestedChanges && !more.reasons) more.reasons = answer.requestedChanges[0].note;
+    return Object.assign(answer, more);
   }
 
   // 출시 전 점검표(D-0114): 자동 점검과 사람이 볼 항목을 위에 두고, 세부 내용은 항목을 눌러 연다.
@@ -2680,6 +3066,30 @@
     ['media', '대표 이미지와 영상을 열어 봤어요'],
     ['names', '실제 사람 이름이나 상호가 들어가지 않았어요']
   ];
+  // 트윈 발표 점검(D-0126): 서버가 만든 presentation-check.json의 자동 결과와 사람 확인 항목.
+  // 트윈은 본인 이름이 들어가는 게 맞으니 이름 항목을 '다른 사람'으로 바꾼다.
+  var PKG_TWIN_NAMES = '본인 말고 다른 실제 사람 이름이나 상호가 들어가지 않았어요';
+  function pkgPresentation() {
+    return (state.items && state.items.presentation) || null;
+  }
+  function pkgManual() {
+    var pres = pkgPresentation();
+    var out = PKG_MANUAL.map(function (m) {
+      return { id: m[0], title: pres && m[0] === 'names' ? PKG_TWIN_NAMES : m[1], required: true };
+    });
+    if (pres) list(pres.humanChecks).forEach(function (h) {
+      out.push({ id: 'pres:' + h.id, presId: h.id, title: h.title, detail: h.detail, required: Boolean(h.required), presentation: true });
+    });
+    return out;
+  }
+  function pkgRestoreManual() {
+    var rec = (state.view && state.view.record) || {};
+    var reasons = String(rec.reasons || '');
+    pkgManual().forEach(function (m) {
+      // 승인 기록의 사람 확인 요약("[예] 항목")에서 권장 항목의 답을 되살린다.
+      state.pkgManual[m.id] = m.presentation && !m.required ? reasons.indexOf('[예] ' + m.title) >= 0 : rec.decision === 'APPROVE' || !m.presentation;
+    });
+  }
   function pkgChecks() {
     var items = state.items;
     var pkg = items.package || {};
@@ -2708,14 +3118,39 @@
     out.push({ id: 'files', title: '파일', ok: !missing.length, block: missing.length > 0, detail: missing.length ? '빠진 파일 ' + missing.length + '개' : '파일 ' + (counts.files || 0) + '개, 빠진 파일 없음' });
     var ver = items.verification || {};
     out.push({ id: 'verify', title: '앱 적재 확인', ok: ver.status === 'PASSED' || ver.status === 'OK', info: ver.status === 'NOT_RUN' || !ver.status, detail: ver.status === 'NOT_RUN' || !ver.status ? '승인한 뒤 내보내기 단계에서 시험용 DB로 확인해요' : '상태: ' + ver.status });
+    var pres = pkgPresentation();
+    if (pres) list(pres.checks).forEach(function (c) {
+      out.push({ id: 'presentation', title: '발표 · ' + c.title, ok: Boolean(c.ok), block: c.required !== false, detail: c.detail });
+    });
     return out;
+  }
+  function pkgPresentationBlock(pres) {
+    var hits = [];
+    list(pres.checks).forEach(function (c) { list(c.hits).forEach(function (h) { hits.push(h); }); });
+    var endorsement = list(pres.checks).filter(function (c) { return c.id === 'endorsement'; })[0] || {};
+    var disclosure = list(pres.checks).filter(function (c) { return c.id === 'disclosure'; })[0] || {};
+    var consent = list(pres.checks).filter(function (c) { return c.id === 'consent'; })[0] || {};
+    var places = disclosure.places || {};
+    return facts([
+      ['표시 문구', pres.disclosure],
+      ['표시 위치', [['package', '패키지'], ['appSeed', '앱 시드'], ['chat', '대화 프롬프트']].map(function (p) { return p[1] + (places[p[0]] ? ' ✓' : ' ✕'); }).join(' · ')],
+      ['대상', pres.subjectKind === 'PUBLIC_FIGURE' ? '공인' : pres.subjectKind === 'PRIVATE_PERSON' ? '사인(가족·지인)' : '-'],
+      ['공개 동의', consent.detail],
+      ['찾는 표현', joinList(endorsement.terms, ', ')]
+    ]) +
+      (hits.length
+        ? '<table class="gate-table pres-hits"><thead><tr><th>위치</th><th>표현</th><th>앞뒤 문장</th></tr></thead><tbody>' +
+          hits.map(function (h) { return '<tr><td>' + esc(h.where) + '</td><td><b>' + esc(h.term) + '</b></td><td>' + esc(h.excerpt) + '</td></tr>'; }).join('') + '</tbody></table>' +
+          '<p class="qa-note">문구를 고친 뒤 패키지를 다시 만들면 다시 점검해요. 다른 뜻으로 쓴 말이면 설정의 찾는 표현 목록을 바꿀 수 있어요.</p>'
+        : '<p class="qa-note">추천·협력·공식처럼 보이는 표현을 찾지 못했어요.</p>');
   }
   function renderPackage(items) {
     if (!state.pkgRestored) {
       state.pkgRestored = true;
-      if (faceLocked()) PKG_MANUAL.forEach(function (m) { state.pkgManual[m[0]] = true; });
+      if (faceLocked()) pkgRestoreManual();
     }
     var pkg = items.package || {};
+    var pres = items.presentation || null;
     var profile = pkg.profile || {};
     var profileRows = [
       ['이름', profile.name],
@@ -2731,6 +3166,7 @@
       return '<details class="gate-more pkg-detail" data-pkg-detail="' + id + '"' + (state.pkgOpen[id] ? ' open' : '') + '><summary>' + esc(title) + '</summary>' + body + '</details>';
     };
     return (
+      (pres ? '<p class="pres-label" role="note"><span>발표 표시</span><b>' + esc(pres.disclosure) + '</b></p>' : '') +
       '<section class="gate-section pkg-board"><h2>출시 전 점검</h2>' +
       '<p class="section-sub">' + (faceLocked() ? '승인할 때 확인한 점검표예요.' : '자동 점검을 확인하고, 사람이 볼 항목에 표시한 뒤 승인해 주세요. 항목을 누르면 아래에서 자세히 볼 수 있어요.') + '</p>' +
       '<ul class="pkg-checks" data-pkg-checks></ul>' +
@@ -2757,6 +3193,7 @@
       block('files', '파일', facts([['파일 수', (items.counts || {}).files], ['빠진 파일', joinList((items.counts || {}).missing, ', ') || '없음']])) +
       block('verify', '앱 적재 확인', facts([['상태', verification.status === 'NOT_RUN' ? '아직 안 함' : verification.status], ['시험용 DB에서 확인', verification.disposableDb ? '예' : '아니오']]) +
         list(verification.steps).map(function (step) { return '<p class="qa-note">' + (step.ok ? '✓ ' : '· ') + esc(step.name) + ' — ' + esc(step.detail) + '</p>'; }).join('')) +
+      (pres ? block('presentation', '발표 점검', pkgPresentationBlock(pres)) : '') +
       '</section>'
     );
   }
@@ -2772,33 +3209,44 @@
       return '<li><button type="button" class="pkg-check is-' + tone + '" data-pkg-jump="' + c.id + '"><span class="pkg-mark" aria-hidden="true">' + mark + '</span>' +
         '<b>' + esc(c.title) + '</b><span class="pkg-detail-text">' + esc(c.detail) + '</span><span class="sr-only">' + ({ ok: ' 통과', bad: ' 막힘', warn: ' 확인 필요', info: ' 안내' }[tone]) + '</span></button></li>';
     }).join('');
-    q('[data-pkg-manual]').innerHTML = PKG_MANUAL.map(function (m) {
-      return '<li><label class="pkg-check pkg-manual-row' + (state.pkgManual[m[0]] ? ' is-ok' : '') + '"><input type="checkbox" data-pkg-manual-box="' + m[0] + '"' + (state.pkgManual[m[0]] ? ' checked' : '') + (locked ? ' disabled' : '') + '><b>' + esc(m[1]) + '</b></label></li>';
+    var manual = pkgManual();
+    q('[data-pkg-manual]').innerHTML = manual.map(function (m) {
+      var on = Boolean(state.pkgManual[m.id]);
+      var tag = m.presentation ? '<span class="pres-tag' + (m.required ? ' is-required' : '') + '">' + (m.required ? '발표 · 필수' : '발표 · 권장') + '</span>' : '';
+      return '<li><label class="pkg-check pkg-manual-row' + (m.presentation ? ' pres-row' : '') + (on ? ' is-ok' : '') + '"><input type="checkbox" data-pkg-manual-box="' + esc(m.id) + '"' + (on ? ' checked' : '') + (locked ? ' disabled' : '') + '>' +
+        '<span class="pres-text"><b>' + esc(m.title) + '</b>' + tag + (m.detail ? '<span class="pkg-detail-text">' + esc(m.detail) + '</span>' : '') + '</span></label></li>';
     }).join('');
     var ok = checks.filter(function (c) { return c.ok && !c.warn; }).length;
     var warn = checks.filter(function (c) { return c.warn || (!c.ok && !c.block && !c.info); }).length;
     var blocks = checks.filter(function (c) { return c.block && !c.ok; });
-    var manualLeft = PKG_MANUAL.filter(function (m) { return !state.pkgManual[m[0]]; }).length;
+    var manualLeft = manual.filter(function (m) { return m.required && !state.pkgManual[m.id]; }).length;
+    var manualDone = manual.filter(function (m) { return state.pkgManual[m.id]; }).length;
     var side = q('[data-side-extra]');
     if (side) side.innerHTML = '<div class="bg-side"><p class="bg-side-title"><b>점검</b><span>' + ok + ' / ' + checks.length + ' 통과</span></p>' +
-      '<dl class="facts"><dt>확인 필요</dt><dd>' + warn + '</dd><dt>막는 문제</dt><dd>' + blocks.length + '</dd><dt>사람 확인</dt><dd>' + (PKG_MANUAL.length - manualLeft) + ' / ' + PKG_MANUAL.length + '</dd></dl></div>';
+      '<dl class="facts"><dt>확인 필요</dt><dd>' + warn + '</dd><dt>막는 문제</dt><dd>' + blocks.length + '</dd><dt>사람 확인</dt><dd>' + manualDone + ' / ' + manual.length + '</dd></dl></div>';
     if (locked) return;
     var approve = q('[data-decide="APPROVE"]');
     if (approve) approve.disabled = Boolean(state.busy || blocks.length || manualLeft);
     var hint = q('[data-side-hint]');
     if (hint) hint.textContent = blocks.length ? blocks.map(function (c) { return c.title; }).join(', ') + '에 막는 문제가 있어요. 고친 뒤 승인할 수 있어요.'
-      : manualLeft ? '사람이 볼 항목 ' + manualLeft + '개가 남았어요. 확인하고 표시해 주세요.'
+      : manualLeft ? '꼭 확인할 항목 ' + manualLeft + '개가 남았어요. 확인하고 표시해 주세요.'
       : warn ? '확인할 항목 ' + warn + '개가 있지만 승인할 수 있어요. ' + PKG_AFTER
       : '모두 통과했어요. ' + PKG_AFTER;
   }
 
   function buildPackage(decision) {
+    var answer = { decision: decision };
     if (decision === 'APPROVE') {
       var blocks = pkgChecks().filter(function (c) { return c.block && !c.ok; });
       if (blocks.length) throw Error(blocks.map(function (c) { return c.title; }).join(', ') + '에 막는 문제가 있어요.');
-      if (PKG_MANUAL.some(function (m) { return !state.pkgManual[m[0]]; })) throw Error('사람이 볼 항목을 모두 확인해 주세요.');
+      if (pkgManual().some(function (m) { return m.required && !state.pkgManual[m.id]; })) throw Error('꼭 확인할 항목을 모두 표시해 주세요.');
     }
-    return Object.assign({ decision: decision }, details());
+    if (pkgPresentation()) {
+      // 서버(presentation.guard_g9)가 필수 항목을 다시 확인하고 결정 기록에 요약을 남긴다.
+      answer.presentationChecks = {};
+      pkgManual().forEach(function (m) { if (m.presentation) answer.presentationChecks[m.presId] = Boolean(state.pkgManual[m.id]); });
+    }
+    return Object.assign(answer, details());
   }
 
   // ---------------------------------------------------------------- 렌더
@@ -2883,7 +3331,8 @@
   function renderActionsBar(view, meta) {
     var host = q('[data-actions]');
     var locked = view.status === 'APPROVED' || view.status === 'REJECTED';
-    host.innerHTML = meta.actions
+    var actions = (meta.actionsFor && meta.actionsFor(state.items)) || meta.actions;
+    host.innerHTML = actions
       .filter(function (action) {
         return !(state.kind === 'planVariants' && state.items.requireExplicitSelection && action[0] === 'APPROVE');
       })
@@ -2948,7 +3397,8 @@
       (view.status === 'REJECTED' ? ' is-rejected' : '');
     q('[data-kicker]').textContent = name;
     q('[data-title]').textContent = view.title || state.gate;
-    q('[data-desc]').textContent = (meta && meta.hint) || '';
+    var hint = (meta && ((meta.hintFor && meta.hintFor(items)) || meta.hint)) || '';
+    q('[data-desc]').textContent = hint;
     q('[data-meta]').innerHTML =
       '<span>' + esc(revLabel(view.rev)) + '</span>' +
       '<span>' + esc(STATUS_KO[view.status] || view.status || '-') + '</span>' +
@@ -2962,7 +3412,7 @@
     q('[data-body]').innerHTML = meta
       ? meta.render(items)
       : '<p class="empty">이 관문 화면을 아직 지원하지 않아요: ' + esc(state.kind) + '</p>';
-    q('[data-side-hint]').textContent = (meta && meta.hint) || '';
+    q('[data-side-hint]').textContent = hint;
     if (meta) renderActionsBar(view, meta);
     renderRaw(view);
     setStatus('');
@@ -2977,7 +3427,9 @@
     paintActions();
     paintSamples();
     paintPackage();
-    if (['faces', 'planVariants', 'backgrounds', 'poses', 'frames', 'intro', 'actions', 'samples', 'dataset', 'package'].indexOf(state.kind) < 0) paintFaceSide();
+    paintSourceSide();
+    paintPhotos();
+    if (['faces', 'planVariants', 'backgrounds', 'poses', 'frames', 'intro', 'actions', 'samples', 'dataset', 'package', 'sourcePack', 'sourcePhotos'].indexOf(state.kind) < 0) paintFaceSide();
   }
 
   function bindBody() {
@@ -3087,7 +3539,8 @@
     actions: [['1 ~ 9', '칸 크게 보기에서 쓰기'], ['X', '칸 크게 보기에서 빼기'], ['J / →', '다음 칸'], ['K / ←', '이전 칸']],
     samples: [['1 · 2 · 3', '쓰기 · 고쳐 쓰기 · 버리기'], ['J / →', '다음 대화'], ['K / ←', '이전 대화']],
     dataset: [['1 · 2 · 3', '쓰기 · 고쳐 쓰기 · 버리기'], ['J / →', '다음 대화'], ['K / ←', '이전 대화']],
-    eval: [['1 / A', '앞 응답이 나음'], ['2 / B', '뒤 응답이 나음'], ['3', '비슷함'], ['J / →', '다음 쌍'], ['K / ←', '이전 쌍']]
+    eval: [['1 / A', '앞 응답이 나음'], ['2 / B', '뒤 응답이 나음'], ['3', '비슷함'], ['J / →', '다음 쌍'], ['K / ←', '이전 쌍']],
+    sourcePhotos: [['1 ~ 9', '사진 고르기']]
   };
   function toggleKeys(open) {
     var box = q('[data-keys-box]');
@@ -3123,7 +3576,7 @@
   }
   // 옆으로 넘겨야 다 보이는 표·줄 아래에 안내를 붙인다(좁은 화면, D-0129).
   function markScroll() {
-    qa('.plan-scroll, .bg-strip, .sample-list').forEach(function (el) {
+    qa('.plan-scroll, .bg-strip, .sample-list, .twin-scroll').forEach(function (el) {
       var more = el.scrollWidth > el.clientWidth + 4;
       var hint = el.nextElementSibling;
       if (!hint || !hint.classList || !hint.classList.contains('scroll-hint')) {
@@ -3242,6 +3695,8 @@
         paintActionMeta();
         paintSampleMeta();
         paintPackage();
+        paintSourceSide();
+        paintPhotos();
       });
   }
 
@@ -3420,6 +3875,8 @@
     if (faceLike) { toggleLike(faceLike.getAttribute('data-like')); return; }
     var facePick = event.target.closest('[data-face]');
     if (facePick) { pickFace(facePick.getAttribute('data-face')); return; }
+    var photoPick = event.target.closest('[data-photo-pick]');
+    if (photoPick) { pickPhoto(photoPick.getAttribute('data-photo-pick')); return; }
     var faceFilter = event.target.closest('[data-face-filter]');
     if (faceFilter) { state.faceFilter = faceFilter.getAttribute('data-face-filter'); paintFaces(); return; }
     if (event.target.closest('[data-face-compare-open]')) { state.faceCompare = true; paintFaces(); return; }
@@ -3436,6 +3893,7 @@
   });
   document.addEventListener('keydown', onEvalKey);
   document.addEventListener('keydown', onFaceKey);
+  document.addEventListener('keydown', onPhotoKey);
   document.addEventListener('keydown', onPlanKey);
   document.addEventListener('keydown', onBackgroundKey);
   document.addEventListener('keydown', onPoseKey);

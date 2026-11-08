@@ -57,8 +57,10 @@ def stage_checks(stage: str, workspace: Path) -> tuple[str, list]:
     # D-0033 흐름의 에이전트 단계 표지. 각 단계 모듈의 codex_checks가 같은 검사를 돌려준다.
     modules = {
         "s3-variants": "character_factory_poc.stages.s3_plan.variants",
+        "s3-twin": "character_factory_poc.stages.s3_plan.twin",
         "s3-own": "character_factory_poc.stages.s3_plan.own",
         "s3r": "character_factory_poc.stages.s3r_refs.select",
+        "s0": "character_factory_poc.stages.s0_source.run",
         "s4a": "character_factory_poc.stages.s4a_backgrounds.run",
         "s4b-scene": "character_factory_poc.stages.s4b_poses.run",
         "s4b-pose": "character_factory_poc.stages.s4b_poses.run",

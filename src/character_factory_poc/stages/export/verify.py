@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from character_factory_poc.contracts.release import CharacterPackage, Verification, VerifyStep
-from character_factory_poc.stages.export.doki_app.naming import character_uid, slug_for
+from character_factory_poc.stages.export.doki_app.naming import character_uid, revision_prefix
 from character_factory_poc.stages.export.pg_admin import (
     CommandResult,
     PostgresAdmin,
@@ -194,7 +194,8 @@ def verify_databases(
     created: list[str] = []
     work = Path(tempfile.mkdtemp(prefix="cfp-verify-"))
     uid = str(character_uid(package.characterId))
-    persona_rev = f"{slug_for(package.characterId)}-r1"
+    prefix = revision_prefix(package.characterId, package.packageRev, twin=bool(package.twin))
+    persona_rev = f"{prefix}-r1"
     clips = sum(1 for video in package.videos if video.kind == "ACTION")
     try:
         rec.run("chat-svc.create-db", lambda: _create(client, chat_db, created))

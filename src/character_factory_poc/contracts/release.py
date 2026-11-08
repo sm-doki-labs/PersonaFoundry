@@ -8,11 +8,13 @@ export-result-v1은 패키지 → 대상 시스템 적재물의 기록이다
 from __future__ import annotations
 
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import Field
 
 from character_factory_poc.common.schema import register
 from character_factory_poc.contracts.common import ArtifactRef, Strict
+from character_factory_poc.contracts.source import SubjectKind
 
 
 class PackageFile(Strict):
@@ -163,10 +165,35 @@ class GateRef(Strict):
     recordRef: str
 
 
+class TwinRelease(Strict):
+    origin: Literal["SOURCE"] = "SOURCE"
+    originLabel: Literal["트윈"] = "트윈"
+    sourcePackSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    subjectKind: SubjectKind
+    usageScope: str
+    consentRecorded: bool
+    modelMode: Literal["TRAIN", "BIND_EXISTING", "PROMPT_ONLY"]
+    chapterTemplate: Literal["FAN_CALL", "FAMILY_CALL"]
+    startButtonLabel: str
+    voiceId: UUID | None = None
+    # OpenAI 호환 서빙에서 요청 model로 쓰는 공개 별칭. 주소나 키를 받지 않는다.
+    servingRoute: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+    servingModel: str | None = Field(
+        default=None, pattern=r"^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$"
+    )
+    apiKeyEnv: str | None = Field(default=None, pattern=r"^[A-Z][A-Z0-9_]*$")
+    trainingRecord: ArtifactRef | None = Field(
+        default=None, description="캐릭터 폴더 기준 원본 학습·연결 기록"
+    )
+    comparisonReport: str | None = Field(default=None, description="캐릭터 폴더 기준 외부 참조")
+    disclosure: Literal["AI 생성 · 본인과 무관한 기술 시연"] = "AI 생성 · 본인과 무관한 기술 시연"
+
+
 @register("character-package-v1")
 class CharacterPackage(Strict):
     schemaVersion: Literal["character-package-v1"] = "character-package-v1"
     characterId: str
+    twin: TwinRelease | None = Field(default=None, exclude_if=lambda v: v is None)
     packageRev: str = Field(pattern=r"^pk\d+$")
     locale: Literal["ko"] = "ko"
     builtAt: str

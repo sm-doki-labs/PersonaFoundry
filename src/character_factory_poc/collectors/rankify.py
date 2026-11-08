@@ -40,6 +40,35 @@ CATEGORIES: dict[str, CategorySpec] = {
         gender="male",
         url="https://rankify.site/idolMale",
     ),
+    # 연간 순위(2026-11-07 확인). 월간 목록이 10명뿐이라 외모군을 만들 인원을 늘리는 데 쓴다.
+    "idolFemale2026": CategorySpec(
+        key="idolFemale2026",
+        slug="idol-female-2026",
+        label="여자 아이돌(2026 연간)",
+        gender="female",
+        url="https://rankify.site/idolFemale2026",
+    ),
+    "idolFemale2025": CategorySpec(
+        key="idolFemale2025",
+        slug="idol-female-2025",
+        label="여자 아이돌(2025 연간)",
+        gender="female",
+        url="https://rankify.site/idolFemale2025",
+    ),
+    "idolMale2026": CategorySpec(
+        key="idolMale2026",
+        slug="idol-male-2026",
+        label="남자 아이돌(2026 연간)",
+        gender="male",
+        url="https://rankify.site/idolMale2026",
+    ),
+    "idolMale2025": CategorySpec(
+        key="idolMale2025",
+        slug="idol-male-2025",
+        label="남자 아이돌(2025 연간)",
+        gender="male",
+        url="https://rankify.site/idolMale2025",
+    ),
     "actor": CategorySpec(
         key="actor",
         # 배우 순위는 성별을 나누지 않는다. `any`로 두어 성별 범위가 섞이지 않게 한다.

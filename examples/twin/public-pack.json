@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "source-pack-v1",
+  "subject": {
+    "displayName": "공인역",
+    "kind": "PUBLIC_FIGURE"
+  },
+  "usageBasis": {
+    "scope": "합성 자료로 비영업 발표 흐름만 연습해요. 실제 발표 동의를 대신하지 않아요.",
+    "notes": "실제 묶음에는 출처와 허용된 자료 처리·공개 범위를 확인해 적어요."
+  },
+  "photos": [
+    {
+      "path": "<public-photo>.png",
+      "origin": "실제 사용 시 촬영자·입수 경위와 사용 근거를 확인해 적어요."
+    }
+  ],
+  "chapterTemplate": "FAN_CALL",
+  "texts": [
+    {
+      "textId": "talk",
+      "kind": "INTERVIEW",
+      "path": "interview.txt",
+      "subjectSpeaker": "공인역",
+      "userSpeaker": "질문자",
+      "date": "2000-01-01"
+    },
+    {
+      "textId": "quote",
+      "kind": "ARTICLE",
+      "path": "article.txt",
+      "date": "2000-01-02"
+    }
+  ]
+}

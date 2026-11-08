@@ -17,10 +17,25 @@ HANDS = (
 )
 
 
-def build_composite_prompt(appearance, scene, pose, job: str = "", revision_note: str = "") -> str:
+# 트윈은 실존 인물이 기준 사진에 있다. '가상 인물'이라고 적으면 기준 사진과 어긋난 얼굴을 만든다.
+TWIN_IDENTITY = (
+    "Keep the person's identity exactly as in reference image 1; do not change their face "
+    "or make them resemble anyone else."
+)
+ORIGINAL_IDENTITY = "An original person, not based on any real individual."
+
+
+def build_composite_prompt(
+    appearance, scene, pose, job: str = "", revision_note: str = "", *, twin: bool = False
+) -> str:
     scope = appearance.scope
+    subject = (
+        f"the {subject_phrase(scope)} shown in reference image 1"
+        if twin
+        else f"a fictional {subject_phrase(scope)}"
+    )
     parts = [
-        f"Cinematic still photograph of a fictional {subject_phrase(scope)} "
+        f"Cinematic still photograph of {subject} "
         f"in their {scope.ageRange}, {scope.artStyle} style.",
         "Reference image 1 is the identity reference: use its face for identity only.",
         POSE,
@@ -47,7 +62,7 @@ def build_composite_prompt(appearance, scene, pose, job: str = "", revision_note
             HANDS,
             "Vertical 9:16 framing, suitable as the first frame of an animated video.",
             "Natural skin texture, sharp focus on the face, realistic photographic light.",
-            "An original person, not based on any real individual.",
+            TWIN_IDENTITY if twin else ORIGINAL_IDENTITY,
         ]
     )
     if revision_note:

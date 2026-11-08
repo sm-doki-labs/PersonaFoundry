@@ -6,8 +6,40 @@
   const E = R.escapeHTML;
 
   // 팀 줄(서버 LANES id) → 그래프 칸. 위 줄은 외모 → 장면 → 영상, 아래 줄은 기획 → 페르소나 → 데이터 → 학습, 패키지는 오른쪽.
-  const AREA = { appearance: 'ap', plan: 'pl', scene: 'sc', video: 'vd', persona: 'ps', data: 'dt', training: 'tr', release: 'pk' };
+  // 트윈은 맨 앞 열에 출처 팀(so)이 생긴다.
+  const AREA = { source: 'so', appearance: 'ap', plan: 'pl', scene: 'sc', video: 'vd', persona: 'ps', data: 'dt', training: 'tr', release: 'pk' };
   const CELL = { ap: [0, 0], sc: [0, 1], vd: [0, 2], pl: [1, 0], ps: [1, 1], dt: [1, 2], tr: [1, 3], pk: [0.5, 4] };
+  // 그래프 칸 배치. 오리지널은 CELL 그대로다. 트윈은 출처 팀이 맨 앞 열(두 줄 가운데)에 서고 나머지는 한 열씩 밀린다.
+  // 학습하지 않는 방식이면 데이터 팀이 그래프에서 빠지고 그 열도 없어져 학습(평가) 팀이 당겨진다.
+  function layoutOf(graph) {
+    const has = (id) => (graph && graph.lanes || []).some((l) => l.id === id && (l.stages || []).length);
+    if (!has('source')) return { cls: '', cell: CELL };
+    const noData = !has('data');
+    const cell = { so: [0.5, 0] };
+    Object.keys(CELL).forEach((a) => {
+      if (noData && a === 'dt') return;
+      const c = CELL[a];
+      cell[a] = [c[0], c[1] + 1 - (noData && c[1] >= 3 ? 1 : 0)];
+    });
+    return { cls: noData ? 'tw nt' : 'tw', cell };
+  }
+  // 갈래·모델 준비 방식 표시(D-0128, D-0118). 코드 값은 화면에 보이지 않는다.
+  const MODE_LABEL = { TRAIN: '학습', BIND_EXISTING: '학습된 모델 연결', PROMPT_ONLY: '긴 프롬프트' };
+  function trackLabel(c) {
+    const x = c || {};
+    if (x.origin !== 'SOURCE') return '오리지널';
+    return (x.originLabel || '트윈') + ' · ' + (MODE_LABEL[x.modelMode] || MODE_LABEL.TRAIN);
+  }
+  // 트윈 단계 줄에 붙이는 쉬운 설명. 단계 이름은 서버 그래프를 그대로 쓴다.
+  const TWIN_HINT = { s2: '받은 사진에서 기준 사진 고르기' };
+  // 단계 이름 뒤 표시(사람 검토·유료 아이콘)는 마지막 낱말에 붙인다. 칸이 좁아도 아이콘만 다음 줄로 떨어지지 않는다.
+  function stageNameHTML(name, marks) {
+    const s = String(name == null ? '' : name);
+    if (!marks) return E(s);
+    const i = s.lastIndexOf(' ');
+    return E(s.slice(0, i + 1)) + '<span class="nb">' + E(s.slice(i + 1)) + marks + '</span>';
+  }
+  const DEMO_NOTE = 'AI 생성 · 본인과 무관한 기술 시연';
   const KIND_LABEL = { done: '완료', run: '진행 중', retry: '다시 시도 중', wait: '검토 대기', confirm: '실행 확인 대기', fail: '멈춤', todo: '예정', out: '이번 실행 범위 밖', skip: '건너뜀' };
   const ICON = {
     check: '<polyline points="20 6 9 17 4 12"/>',
@@ -465,6 +497,8 @@
       conn: 'connecting', lastSync: null, busy: false, form: { open: false, slug: '', brief: '', error: '' },
       target: null, sheetKey: '', opener: null, openerGate: '', destroyed: false,
       overview: false, ov: { q: '', gate: '' }, batch: null, pendingReview: null, confirming: null, plans: {}, nextTarget: null, focus: false,
+      // 갈래·모델 준비 방식마다 그래프가 다르다. 'CREATED|TRAIN' 같은 열쇠로 받아 둔 그래프(개요·받은 일이 캐릭터마다 자기 그래프로 센다).
+      graphs: new Map(), graphSeq: 0, graphAsk: new Set(),
       theme: (store && ['light', 'dark'].includes(store.getItem('fd-theme'))) ? store.getItem('fd-theme') : 'system'
     };
     let refreshTimer = null;
@@ -518,13 +552,30 @@
       return m ? { overview: true, filter: ['mine', 'run', 'fail', 'done'].includes(m[1]) ? m[1] : 'all' } : { overview: false, filter: '' };
     }
     function characters() { return (state.projects && state.projects.characters) || []; }
+    function graphKey(x) { return text((x && x.origin) || 'CREATED') + '|' + text((x && x.modelMode) || 'TRAIN'); }
+    // 그 캐릭터의 그래프. 지금 연 캐릭터는 그 캐릭터로 받은 그래프, 나머지는 같은 갈래·방식으로 받아 둔 그래프다.
+    function graphOf(c) {
+      if (c && c.id === state.characterId && state.graph) return state.graph;
+      return state.graphs.get(graphKey(c)) || state.graphs.get('CREATED|TRAIN') || state.graph;
+    }
+    function gateTitle(id) {
+      const own = state.graph && state.graph.byGate.get(id);
+      if (own) return own.title;
+      for (const g of state.graphs.values()) { const x = g.byGate.get(id); if (x) return x.title; }
+      return id;
+    }
+    function trackHTML(c) {
+      const tw = c && c.origin === 'SOURCE';
+      return '<span class="fd-track' + (tw ? ' tw' : '') + '"><span class="d" aria-hidden="true"></span>' + E(trackLabel(c)) + '</span>';
+    }
 
     // ---- 캐릭터 요약(개요·사이드바·받은 일이 같은 기준으로 센다) ----
     function summaryOf(c) {
       const det = c.id === state.characterId && state.detail ? state.detail : c;
       const now = Date.now();
-      const v = viewsFor(state.graph, det, { now });
-      const tasks = buildTasks(state.graph, det, v, { now });
+      const graph = graphOf(c);
+      const v = viewsFor(graph, det, { now });
+      const tasks = buildTasks(graph, det, v, { now });
       const n = (k) => tasks.filter((x) => x.kind === k).length;
       const kinds = Object.keys(v).map((id) => v[id].kind);
       const done = kinds.filter((k) => k === 'done' || k === 'skip').length;
@@ -532,15 +583,15 @@
       const fresh = !det.job && !det.lastJob && (det.stages || []).every((s) => upper(s.status) === 'PENDING');
       const running = Boolean(det.job) || kinds.some((k) => k === 'run' || k === 'retry');
       const waits = tasks.map((x) => parseTime(x.openedAt)).filter((x) => x != null);
-      const lanes = state.graph.lanes.map((lane) => {
-        const ids = (lane.stages || []).map((s) => (typeof s === 'string' ? s : s.id)).filter((id) => state.graph.byStage.has(id));
+      const lanes = graph.lanes.map((lane) => {
+        const ids = (lane.stages || []).map((s) => (typeof s === 'string' ? s : s.id)).filter((id) => graph.byStage.has(id));
         return { id: lane.id, label: lane.label, kind: laneKind(ids, v), done: ids.filter((id) => ['done', 'skip'].includes(v[id].kind)).length, total: ids.length };
       });
       const fail = n('fail');
       const review = n('wait');
       const paid = n('confirm');
       const rank = fail ? 0 : review ? 1 : paid ? 2 : running ? 3 : isComplete ? 6 : fresh ? 5 : 4;
-      return { c, tasks, fail, review, paid, todo: fail + review + paid, done, total: state.graph.stages.length, complete: isComplete, fresh, running, oldest: waits.length ? Math.min.apply(null, waits) : null, lanes, rank, top: tasks[0] || null, updated: parseTime(det.updatedAt || c.updatedAt) };
+      return { c, tasks, fail, review, paid, todo: fail + review + paid, done, total: graph.stages.length, complete: isComplete, fresh, running, oldest: waits.length ? Math.min.apply(null, waits) : null, lanes, rank, top: tasks[0] || null, updated: parseTime(det.updatedAt || c.updatedAt) };
     }
     function statusDot(s) { return s.fail ? 'fail' : s.todo ? 'wait' : s.running ? 'run' : s.complete ? 'ok' : ''; }
     function nextInBatch() {
@@ -558,18 +609,54 @@
       return (waiting || running || list.slice().sort((a, b) => text(b.updatedAt).localeCompare(text(a.updatedAt)))[0]).id;
     }
 
+    function adoptGraph(raw) {
+      const g = R.buildGraph(raw);
+      g.paid = new Map((raw.stages || []).map((s) => [s.id, s.paid || []]));
+      // 갈래에 없는 단계만 있던 팀은 그리지 않는다(그래프는 실제 순서를 뜻한다).
+      g.lanes = g.lanes.filter((l) => (l.stages || []).some((s) => g.byStage.has(typeof s === 'string' ? s : s.id)));
+      g.key = graphKey(raw);
+      g.layout = layoutOf(g);
+      g.origin = raw.origin || 'CREATED';
+      g.modelMode = raw.modelMode || 'TRAIN';
+      state.graphs.set(g.key, g);
+      return g;
+    }
+    // 인자 없는 그래프는 오리지널 기본이다. 캐릭터가 아직 없거나 개요만 볼 때 쓴다.
     async function loadGraph() {
-      const [graph, health] = await Promise.all([request('GET', '/api/runtime/graph'), request('GET', '/api/health').catch(() => null)]);
-      state.rawGraph = graph;
-      state.graph = R.buildGraph(graph);
-      state.graph.paid = new Map((graph.stages || []).map((s) => [s.id, s.paid || []]));
+      const [raw, health] = await Promise.all([request('GET', R.graphPath()), request('GET', '/api/health').catch(() => null)]);
+      const g = adoptGraph(raw);
+      if (!state.graph || !state.characterId) { state.graph = g; state.rawGraph = raw; }
       state.health = health;
+    }
+    // 연 캐릭터의 그래프. 캐릭터를 바꾸는 사이 이전 요청이 늦게 오면 받아 두기만 하고 화면 그래프로 쓰지 않는다.
+    async function loadCharacterGraph(id) {
+      const seq = ++state.graphSeq;
+      const raw = await request('GET', R.graphPath(id));
+      const g = adoptGraph(raw);
+      if (seq !== state.graphSeq || state.characterId !== id) return false;
+      state.graph = g;
+      state.rawGraph = raw;
+      return true;
+    }
+    // 개요·받은 일은 캐릭터마다 자기 그래프로 센다. 아직 없는 갈래·방식의 그래프는 그 캐릭터 하나로 받아 둔다.
+    function ensureGraphs() {
+      characters().forEach((c) => {
+        const key = graphKey(c);
+        if (state.graphs.has(key) || state.graphAsk.has(key)) return;
+        state.graphAsk.add(key);
+        request('GET', R.graphPath(c.id)).then((raw) => { adoptGraph(raw); render(); })
+          .catch(() => {})
+          .then(() => state.graphAsk.delete(key));
+      });
     }
     async function loadProjects() { state.projects = await request('GET', '/api/projects'); }
     async function loadDetail() {
       if (!state.characterId) { state.detail = null; return; }
+      const id = state.characterId;
       const prev = state.detail;
-      const next = await request('GET', '/api/characters/' + encodeURIComponent(state.characterId));
+      const next = await request('GET', '/api/characters/' + encodeURIComponent(id));
+      // 그사이 다른 캐릭터로 바꿨으면 늦게 온 결과로 덮어쓰지 않는다.
+      if (state.characterId !== id) return;
       // 시트에서 막 알린 결정은 상태 비교 알림과 겹치지 않게 뺀다.
       const recent = Object.keys(state.decided).filter((g) => Date.now() - state.decided[g] < 60000).map((g) => ((state.graph.byGate.get(g) || {}).title || g) + ':');
       const fresh = diffNotes(state.graph, prev, next, Date.now()).filter((n) => !recent.some((prefix) => n.t.indexOf(prefix) === 0));
@@ -603,8 +690,20 @@
       try {
         if (!state.graph || full) await loadGraph();
         await loadProjects();
+        ensureGraphs();
         const wanted = routeId() || state.characterId || pickDefault();
-        if (wanted !== state.characterId) { state.characterId = wanted; state.detail = null; state.sel = null; closeSheet(false); state.notes = []; state.open = new Set(); state.target = null; state.mstep = null; state.mconfirm = null; }
+        const changed = wanted !== state.characterId;
+        if (changed) {
+          state.characterId = wanted; state.detail = null; state.sel = null; closeSheet(false); state.notes = []; state.open = new Set(); state.target = null; state.mstep = null; state.mconfirm = null;
+          // 새 그래프가 오기 전에는 받아 둔 같은 갈래 그래프로 그린다(이전 캐릭터의 그래프를 남기지 않는다).
+          const entry = characters().find((c) => c.id === wanted);
+          state.graph = state.graphs.get(graphKey(entry)) || state.graphs.get('CREATED|TRAIN') || state.graph;
+        }
+        const listed = characters().find((c) => c.id === wanted);
+        // 캐릭터를 열거나 바꿀 때, 모델 준비 방식이 바뀌었을 때 그 캐릭터의 그래프를 다시 받는다.
+        if (wanted && (changed || full || (listed && graphKey(listed) !== state.graph.key))) {
+          if (!(await loadCharacterGraph(wanted))) return;
+        }
         await loadDetail();
         // 학습이 도는 동안은 진행(스텝·쓴 돈)을 3초마다 다시 읽는다(D-0130). 상태 사건이 없어도 바뀐다.
         clearTimeout(trainTimer);
@@ -798,7 +897,8 @@
         const pct = Math.round(s.done / s.total * 100);
         prog = '<span class="fd-prog-wrap"><span class="fd-prog" role="img" aria-label="' + E('전체 ' + s.total + '단계 중 ' + s.done + '단계 완료, ' + pct + '%') + '">' + s.lanes.map((l) => '<span class="seg ' + l.kind + '" title="' + E(l.label + ' ' + l.done + '/' + l.total) + '"></span>').join('') + '</span>' + s.done + '/' + s.total + '단계 · ' + pct + '%</span>';
       }
-      return '<div class="fd-title"><h1 tabindex="-1">' + E(nameOf(d)) + '</h1>' + (sub ? '<p>' + E(sub) + '</p>' : '') + prog + (nameOf(d) !== d.id ? '<code>' + E(d.id) + '</code>' : '') + '</div>';
+      const demo = d.origin === 'SOURCE' ? '<span class="fd-demo">' + E(DEMO_NOTE) + '</span>' : '';
+      return '<div class="fd-title"><h1 tabindex="-1">' + E(nameOf(d)) + '</h1>' + trackHTML(d) + (sub ? '<p>' + E(sub) + '</p>' : '') + prog + (nameOf(d) !== d.id ? '<code>' + E(d.id) + '</code>' : '') + demo + '</div>';
     }
     function formHTML() {
       const f = state.form;
@@ -823,7 +923,7 @@
       rows.sort((a, b) => a.rank - b.rank || (a.oldest || Infinity) - (b.oldest || Infinity) || (b.updated || 0) - (a.updated || 0));
       const tabs = [['all', '전체'], ['mine', '내 차례'], ['run', '진행 중'], ['fail', '멈춤'], ['done', '완료']]
         .map((x) => '<a class="ov-tab" href="#all' + (x[0] === 'all' ? '' : '/' + x[0]) + '"' + (x[0] === filter ? ' aria-current="page"' : '') + '>' + x[1] + '<span class="n">' + counts[x[0]] + '명</span></a>').join('');
-      const gateSel = gates.size ? '<label class="sr" for="ov-gate">검토 종류</label><select id="ov-gate" data-ov-gate><option value="">검토 종류 전체</option>' + Array.from(gates).map((x) => '<option value="' + E(x[0]) + '"' + (state.ov.gate === x[0] ? ' selected' : '') + '>' + E((state.graph.byGate.get(x[0]) || {}).title || x[0]) + ' · ' + x[1] + '건</option>').join('') + '</select>' : '';
+      const gateSel = gates.size ? '<label class="sr" for="ov-gate">검토 종류</label><select id="ov-gate" data-ov-gate><option value="">검토 종류 전체</option>' + Array.from(gates).map((x) => '<option value="' + E(x[0]) + '"' + (state.ov.gate === x[0] ? ' selected' : '') + '>' + E(gateTitle(x[0])) + ' · ' + x[1] + '건</option>').join('') + '</select>' : '';
       const search = '<label class="sr" for="ov-q">이름으로 찾기</label><input id="ov-q" data-ov-q type="search" placeholder="이름으로 찾기" value="' + E(state.ov.q) + '" autocomplete="off">';
       const head = '<div class="fd-title"><h1 tabindex="-1">' + (filter === 'mine' ? '받은 일' : '전체 캐릭터') + '</h1><p>' + (filter === 'mine' ? '모든 캐릭터에서 사람이 할 일(멈춤 · 검토 · 유료 확인)이 있는 캐릭터예요. 검토 종류로 거르면 같은 검토를 이어서 할 수 있어요.' : '캐릭터마다 어디까지 왔고 무엇을 기다리는지 봐요. 내 차례인 캐릭터가 위에 와요.') + '</p></div>';
       const bar = '<div class="ov-bar"><nav class="ov-tabs" aria-label="상태로 거르기">' + tabs + '</nav><div class="ov-tools">' + gateSel + search + '</div></div>';
@@ -845,7 +945,7 @@
       const act = top && top.kind === 'wait'
         ? '<button type="button" class="btn' + (i === 0 && s.rank <= 1 ? ' pri' : '') + '" data-act="ov-review" data-id="' + E(c.id) + '" data-gate="' + E(top.gate) + '" data-stage="' + E(top.stage || '') + '">검토하기</button>'
         : '<a class="btn" href="' + E(href) + '">열기</a>';
-      return '<tr class="' + st + '"><th scope="row"><a class="ov-name" href="' + E(href) + '"><span class="fd-av" aria-hidden="true">' + E(Array.from(name)[0] || '?') + '<span class="st ' + st + '"></span></span><span><b>' + E(name) + '</b><small>' + E([p.job, p.age ? p.age + '세' : ''].filter(Boolean).join(' · ') || '아직 기획 전이에요') + '</small></span></a></th>' +
+      return '<tr class="' + st + '"><th scope="row"><a class="ov-name" href="' + E(href) + '"><span class="fd-av" aria-hidden="true">' + E(Array.from(name)[0] || '?') + '<span class="st ' + st + '"></span></span><span><b>' + E(name) + trackHTML(c) + '</b><small>' + E([p.job, p.age ? p.age + '세' : ''].filter(Boolean).join(' · ') || '아직 기획 전이에요') + '</small></span></a></th>' +
         '<td><div class="ov-badges">' + badges + '</div></td><td class="ov-now">' + now + '</td>' +
         '<td><div class="ov-prog"><span class="segs" role="img" aria-label="' + E('전체 ' + s.total + '단계 중 ' + s.done + '단계 완료, ' + pct + '%') + '">' + segs + '</span><span class="n">' + s.done + '/' + s.total + '단계</span></div></td>' +
         '<td class="ov-upd">' + (s.updated ? E(clock(new Date(s.updated).toISOString())) : '—') + '</td><td class="ov-act">' + act + '</td></tr>';
@@ -867,6 +967,7 @@
       return '<section class="fl-setup" aria-label="실행 설정"><div class="fld"><label for="fl-target">어디까지 실행할까요</label><select id="fl-target" data-target>' +
         opts.map((o) => '<option value="' + E(o[0]) + '"' + (o[0] === target ? ' selected' : '') + '>' + E(o[1]) + '</option>').join('') + '</select></div>' +
         (target !== 'G1' && g.byGate.has('G1') ? '<p class="hint fl-first">처음이라면 <button type="button" class="link" data-act="target-first">얼굴 고르기까지</button>만 실행해 보세요. 비용이 드는 영상 단계 전에 멈추고, 첫 결과로 얼굴 후보 10장을 고르게 돼요.</p>' : '') +
+        (target !== 'G0' && g.byGate.has('G0') ? '<p class="hint fl-first">처음이라면 <button type="button" class="link" data-act="target-first" data-gate="G0">' + E(g.byGate.get('G0').title) + '까지</button>만 실행해 보세요. 받은 자료를 정리한 출처 묶음을 먼저 확인하게 돼요.</p>' : '') +
         '<div class="sum">전체 ' + g.stages.length + '단계 중 이번 실행 <b>' + scope.size + '단계</b> · 사람 검토 <b>' + gates + '번</b>' + (paid ? ' · 유료 실행 확인 <b>' + paid + '번</b>' : '') + '<br>' + after + '</div>' +
         '<div class="acts"><button type="button" class="btn pri" data-act="start"' + (state.busy ? ' disabled' : '') + '>실행 시작</button></div></section>';
     }
@@ -975,25 +1076,34 @@
           const x = v[id];
           const paid = (state.graph.paid.get(id) || []).length;
           const marks = (def.gate ? icon('user', '사람 검토 있음') : '') + (paid && (x.kind === 'todo' || x.kind === 'confirm') ? icon('coins', '유료 단계') : '');
-          const sub = x.sub ? '<span class="sb">' + (x.retry ? icon('retry') + ' ' : '') + E(x.sub) + '</span>' : '';
+          const sub = x.sub ? '<span class="sb" title="' + E(x.sub) + '">' + (x.retry ? icon('retry') + ' ' : '') + E(x.sub) + '</span>' : '';
           const glyph = x.kind === 'done' ? icon('check') : x.kind === 'fail' ? icon('x') : x.kind === 'confirm' ? icon('coins') : x.kind === 'skip' ? icon('minus') : '';
           html += '<button type="button" class="fl-row ' + x.kind + '" data-act="select" data-stage="' + E(id) + '" aria-pressed="' + (state.sel === id) + '" aria-label="' + E(def.name + ', ' + KIND_LABEL[x.kind] + (x.sub ? ', ' + x.sub : '') + (def.gate ? ', 사람 검토 있음' : '') + (paid ? ', 유료 단계' : '')) + '">' +
-            '<span class="si ' + x.kind + '">' + glyph + '</span><span class="nw"><span class="nm">' + E(def.name) + marks + '</span>' + sub + gateSub(def) + '</span></button>';
+            '<span class="si ' + x.kind + '">' + glyph + '</span><span class="nw"><span class="nm">' + stageNameHTML(def.name, marks) + '</span>' + sub + gateSub(def) + '</span></button>';
         });
       }
       return html + '</div>';
     }
     // 할 일 목록은 관문 이름(예: 얼굴 고르기)을 쓰고 그래프는 단계 이름(레퍼런스 선별)을 쓴다. 둘을 잇는다(D-0129).
-    function gateSub(def) {
+    function stageHint(def) {
+      const hint = state.graph.origin === 'SOURCE' ? TWIN_HINT[def.id] : '';
+      if (hint) return hint;
       if (!def.gate) return '';
       const g = state.graph.byGate.get(def.gate);
       // 검토 이름의 첫 낱말이 단계 이름에 이미 있으면(소개 영상 ↔ 소개 영상 고르기) 덧붙이지 않는다.
       const head = g && g.title ? text(g.title).split(/[\s·]/)[0] : '';
-      return head && text(def.name).indexOf(head) < 0 ? '<span class="gt">검토: ' + E(g.title) + '</span>' : '';
+      return head && text(def.name).indexOf(head) < 0 ? '검토: ' + g.title : '';
+    }
+    // 트윈 그래프는 칸이 좁아 이 설명을 한 줄로 줄인다. 전체 글은 title과 인스펙터 '하는 일'에 있다.
+    function gateSub(def) {
+      const h = stageHint(def);
+      return h ? '<span class="gt" title="' + E(h) + '">' + E(h) + '</span>' : '';
     }
     function renderGraph(v, scope) {
       if (!state.detail) { region.graph.hidden = true; return; }
       region.graph.hidden = false;
+      const cls = (state.graph.layout || layoutOf(state.graph)).cls;
+      region.grid.className = 'fl-grid' + (cls ? ' ' + cls : '');
       const laneKinds = {};
       state.graph.lanes.forEach((lane) => { laneKinds[lane.id] = laneKind((lane.stages || []).map((s) => (typeof s === 'string' ? s : s.id)), v); });
       region.grid.innerHTML = state.graph.lanes.map((lane) => cardHTML(lane, v, laneKinds)).join('');
@@ -1130,18 +1240,23 @@
       svg.setAttribute('width', box.width);
       svg.setAttribute('height', box.height);
       const colour = { flow: 'var(--fd-run-solid)', block: 'var(--fd-attention-solid)', stop: 'var(--fd-danger-solid)', done: 'var(--fd-slate-8)', todo: 'var(--fd-slate-7)', out: 'var(--fd-slate-6)' };
+      const cell = (state.graph.layout || layoutOf(state.graph)).cell;
+      const cardTop = (lane) => { const el = region.grid.querySelector('.fl-card[data-lane="' + lane + '"]'); return el ? el.getBoundingClientRect().top - box.top : null; };
       let out = '';
       crossLaneEdges(state.graph).forEach(([a, b]) => {
         const A = anchor(a, 'r', box);
         const B = anchor(b, 'l', box);
         if (!A || !B) return;
         const cls = edgeClass(state.graph, v, a, b);
-        const ca = CELL[AREA[A.lane]];
-        const cb = CELL[AREA[B.lane]];
+        const ca = cell[AREA[A.lane]];
+        const cb = cell[AREA[B.lane]];
         let d;
-        const between = ca && cb && ca[0] === cb[0] && cb[1] - ca[1] > 1 ? Object.keys(AREA).filter((lane) => { const c = CELL[AREA[lane]]; return c && c[0] === ca[0] && c[1] > ca[1] && c[1] < cb[1]; }) : [];
-        if (between.length) {
-          const tops = between.map((lane) => { const el = region.grid.querySelector('.fl-card[data-lane="' + lane + '"]'); return el ? el.getBoundingClientRect().top - box.top : Infinity; });
+        // 사이에 다른 팀이 있으면 그 팀들 위 틈으로 돌아간다. 두 줄 가운데 선 팀(출처·패키지)은 상대 팀의 줄을 따른다.
+        const row = !ca || !cb ? null : ca[0] === cb[0] ? ca[0] : ca[0] === 0.5 ? cb[0] : cb[0] === 0.5 ? ca[0] : null;
+        const tops = row != null && row !== 0.5 && cb[1] - ca[1] > 1
+          ? state.graph.lanes.filter((lane) => { const c = cell[AREA[lane.id]]; return c && c[0] === row && c[1] > ca[1] && c[1] < cb[1]; }).map((lane) => cardTop(lane.id)).filter((t) => t != null)
+          : [];
+        if (tops.length) {
           const yt = Math.min.apply(null, tops) - 14;
           const g1 = A.x + 16;
           const g2 = B.x - 16;
@@ -1180,6 +1295,7 @@
       const lane = state.graph.lanes.find((l) => (l.stages || []).some((s) => (typeof s === 'string' ? s : s.id) === id));
       const props = [];
       const prop = (k, val, cls) => { if (val) props.push('<dt>' + E(k) + '</dt><dd' + (cls ? ' class="' + cls + '"' : '') + '>' + val + '</dd>'); };
+      if (state.graph.origin === 'SOURCE') prop('하는 일', E(stageHint(def)));
       prop('상태', E(x.sub || KIND_LABEL[x.kind]));
       prop('버전', row.rev ? E(revLabel(row.rev)) : '');
       prop('시작', row.startedAt ? E(clock(row.startedAt)) : '');
@@ -1754,7 +1870,7 @@
       else if (act === 'confirm-all') { state.confirming = '__all'; R.extractHeld(state.detail || {}).forEach((h) => loadPlan(h.stage)); render(); const go = doc.querySelector('[data-act="confirm-all-go"]'); if (go) go.focus(); }
       else if (act === 'confirm-all-go') { const stages = R.extractHeld(state.detail || {}).map((h) => h.stage); state.confirming = null; run(R.runRequest(id, currentUntil() || orchestrator().resumeUntil || 'sx', stages), '유료 단계 ' + stages.length + '개 실행을 요청했어요.'); }
       else if (act === 'help') { if (global.open) global.open('help.html' + (el.dataset.anchor ? '#' + el.dataset.anchor : ''), '_blank', 'noopener'); }
-      else if (act === 'target-first') { state.target = 'G1'; render(); }
+      else if (act === 'target-first') { state.target = el.dataset.gate || 'G1'; render(); }
       else if (act === 'next-review') { state.nextTarget = nextReviewAfter(el.dataset.gate); openNextTarget(); }
       else if (act === 'confirm-cancel') { state.confirming = null; render(); }
       else if (act === 'confirm-go') { const held = R.extractHeld(state.detail).find((h) => h.stage === el.dataset.stage) || { stage: el.dataset.stage }; state.confirming = null; run(R.confirmHeldRequest(id, held), '유료 실행을 요청했어요. 이 단계만 시작해요.'); }
@@ -1918,7 +2034,7 @@
     };
   }
 
-  const pure = { since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, MARK, mount };
+  const pure = { since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, MARK, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = pure;
   if (global) global.FactoryFlow = pure;
 })(typeof window !== 'undefined' ? window : null);

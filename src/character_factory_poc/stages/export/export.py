@@ -137,6 +137,7 @@ def export_doki_app(
         package_dir,
         exported_at=now_iso(),
         alembic_revision=API_SVC_HEAD,
+        default_voice_id=settings.default_voice_id,
     )
     tree = chat_svc.build_tree(package, package_dir)
     problems = [

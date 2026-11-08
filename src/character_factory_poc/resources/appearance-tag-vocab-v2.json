@@ -1,0 +1,757 @@
+{
+  "schemaVersion": "appearance-tag-vocab-v2",
+  "note": "시험 경로 2번(베이스 시드) 어휘. cluster 칸은 외모군을 나누는 굵은 칸, detail 칸은 외모군 안 다수결 값을 이미지 프롬프트에 넣는 상세 칸이다. ko는 검토 화면 표기, en은 프롬프트 구절이다. 단일값은 어휘 값 또는 unknown, 복수값은 어휘 값 1~maxMulti개다.",
+  "maxMulti": 2,
+  "cluster": {
+    "single": {
+      "faceShape": {
+        "label": "얼굴형",
+        "values": {
+          "oval": {
+            "ko": "계란형",
+            "en": "oval face"
+          },
+          "round": {
+            "ko": "둥근형",
+            "en": "round face"
+          },
+          "heart": {
+            "ko": "하트형",
+            "en": "heart-shaped face"
+          },
+          "long": {
+            "ko": "긴 얼굴형",
+            "en": "long face"
+          },
+          "square": {
+            "ko": "각진 턱선",
+            "en": "defined square jawline"
+          },
+          "small-v": {
+            "ko": "작은 V라인",
+            "en": "small face with a slim V-line jaw"
+          }
+        }
+      },
+      "eyeShape": {
+        "label": "눈매",
+        "values": {
+          "large-double": {
+            "ko": "큰 쌍꺼풀 눈",
+            "en": "large double-lidded eyes"
+          },
+          "round": {
+            "ko": "동그란 눈",
+            "en": "round eyes"
+          },
+          "almond": {
+            "ko": "아몬드형 눈",
+            "en": "almond-shaped eyes"
+          },
+          "monolid": {
+            "ko": "무쌍 눈",
+            "en": "monolid eyes"
+          },
+          "upturned": {
+            "ko": "올라간 눈꼬리",
+            "en": "upturned cat-like eyes"
+          },
+          "downturned": {
+            "ko": "처진 눈꼬리",
+            "en": "gently downturned eyes"
+          }
+        }
+      },
+      "hairLength": {
+        "label": "머리 길이",
+        "values": {
+          "pixie": {
+            "ko": "숏컷",
+            "en": "pixie cut"
+          },
+          "short": {
+            "ko": "짧은 머리",
+            "en": "short hair"
+          },
+          "bob": {
+            "ko": "단발",
+            "en": "bob-length hair"
+          },
+          "medium": {
+            "ko": "중단발",
+            "en": "shoulder-length hair"
+          },
+          "long": {
+            "ko": "긴 머리",
+            "en": "long hair"
+          }
+        }
+      },
+      "hairColor": {
+        "label": "머리색",
+        "values": {
+          "black": {
+            "ko": "흑발",
+            "en": "black hair"
+          },
+          "dark-brown": {
+            "ko": "진갈색",
+            "en": "dark brown hair"
+          },
+          "light-brown": {
+            "ko": "밝은 갈색",
+            "en": "light brown hair"
+          },
+          "blonde": {
+            "ko": "금발",
+            "en": "blonde hair"
+          },
+          "ash": {
+            "ko": "애쉬 계열",
+            "en": "ash-toned hair"
+          },
+          "vivid": {
+            "ko": "원색 염색",
+            "en": "vividly dyed hair"
+          }
+        }
+      },
+      "skinTone": {
+        "label": "피부 톤",
+        "values": {
+          "fair": {
+            "ko": "밝은 피부",
+            "en": "fair skin"
+          },
+          "light": {
+            "ko": "밝은 중간 톤",
+            "en": "light skin"
+          },
+          "medium": {
+            "ko": "중간 톤",
+            "en": "medium skin tone"
+          },
+          "tan": {
+            "ko": "구릿빛",
+            "en": "tanned skin"
+          }
+        }
+      },
+      "featureIntensity": {
+        "label": "이목구비 인상",
+        "values": {
+          "soft": {
+            "ko": "부드러운 이목구비",
+            "en": "soft, gentle facial features"
+          },
+          "balanced": {
+            "ko": "균형 잡힌 이목구비",
+            "en": "balanced, harmonious facial features"
+          },
+          "striking": {
+            "ko": "선명하고 또렷한 이목구비",
+            "en": "striking, sharply defined facial features"
+          }
+        }
+      }
+    },
+    "multi": {
+      "vibe": {
+        "label": "분위기",
+        "values": {
+          "innocent": {
+            "ko": "청순",
+            "en": "innocent, pure"
+          },
+          "lovely": {
+            "ko": "러블리",
+            "en": "lovely and sweet"
+          },
+          "chic": {
+            "ko": "시크",
+            "en": "chic and cool"
+          },
+          "girl-crush": {
+            "ko": "걸크러시",
+            "en": "confident girl-crush charisma"
+          },
+          "fresh": {
+            "ko": "청량",
+            "en": "fresh and bright"
+          },
+          "elegant": {
+            "ko": "우아",
+            "en": "elegant and graceful"
+          },
+          "intellectual": {
+            "ko": "지적",
+            "en": "intelligent and composed"
+          },
+          "sultry": {
+            "ko": "관능",
+            "en": "alluring, mature allure"
+          },
+          "playful": {
+            "ko": "발랄",
+            "en": "playful and bubbly"
+          }
+        }
+      }
+    }
+  },
+  "detail": {
+    "single": {
+      "eyelid": {
+        "label": "쌍꺼풀",
+        "values": {
+          "double": {
+            "ko": "뚜렷한 쌍꺼풀",
+            "en": "visible double eyelids"
+          },
+          "inner-double": {
+            "ko": "속쌍꺼풀",
+            "en": "subtle inner double eyelids"
+          },
+          "monolid": {
+            "ko": "무쌍",
+            "en": "monolid eyes"
+          }
+        }
+      },
+      "eyeTail": {
+        "label": "눈꼬리",
+        "values": {
+          "upturned": {
+            "ko": "올라간 눈꼬리",
+            "en": "slightly upturned outer eye corners"
+          },
+          "straight": {
+            "ko": "수평 눈꼬리",
+            "en": "level outer eye corners"
+          },
+          "downturned": {
+            "ko": "처진 눈꼬리",
+            "en": "gently downturned outer eye corners"
+          }
+        }
+      },
+      "eyeSize": {
+        "label": "눈 크기",
+        "values": {
+          "large": {
+            "ko": "큰 눈",
+            "en": "large expressive eyes"
+          },
+          "medium": {
+            "ko": "보통 눈",
+            "en": "medium-sized eyes"
+          },
+          "narrow": {
+            "ko": "가늘고 긴 눈",
+            "en": "long, narrow eyes"
+          }
+        }
+      },
+      "aegyoSal": {
+        "label": "애교살",
+        "values": {
+          "prominent": {
+            "ko": "도톰한 애교살",
+            "en": "prominent aegyo-sal under the eyes"
+          },
+          "subtle": {
+            "ko": "살짝 있는 애교살",
+            "en": "subtle aegyo-sal"
+          },
+          "none": {
+            "ko": "애교살 거의 없음",
+            "en": "smooth under-eyes without aegyo-sal"
+          }
+        }
+      },
+      "browShape": {
+        "label": "눈썹 모양",
+        "values": {
+          "straight": {
+            "ko": "일자 눈썹",
+            "en": "straight eyebrows"
+          },
+          "soft-arch": {
+            "ko": "완만한 아치 눈썹",
+            "en": "softly arched eyebrows"
+          },
+          "arched": {
+            "ko": "또렷한 아치 눈썹",
+            "en": "defined arched eyebrows"
+          }
+        }
+      },
+      "browThickness": {
+        "label": "눈썹 두께",
+        "values": {
+          "thick": {
+            "ko": "진한 눈썹",
+            "en": "full, thick eyebrows"
+          },
+          "natural": {
+            "ko": "자연스러운 눈썹",
+            "en": "natural eyebrows"
+          },
+          "thin": {
+            "ko": "가는 눈썹",
+            "en": "thin, delicate eyebrows"
+          }
+        }
+      },
+      "noseBridge": {
+        "label": "콧대",
+        "values": {
+          "high": {
+            "ko": "높은 콧대",
+            "en": "high, straight nose bridge"
+          },
+          "medium": {
+            "ko": "보통 콧대",
+            "en": "moderate nose bridge"
+          },
+          "low": {
+            "ko": "낮은 콧대",
+            "en": "low, soft nose bridge"
+          }
+        }
+      },
+      "noseTip": {
+        "label": "코끝",
+        "values": {
+          "refined": {
+            "ko": "얇고 정돈된 코끝",
+            "en": "refined slim nose tip"
+          },
+          "rounded": {
+            "ko": "둥근 코끝",
+            "en": "softly rounded nose tip"
+          },
+          "button": {
+            "ko": "작은 코",
+            "en": "small button nose"
+          }
+        }
+      },
+      "lipShape": {
+        "label": "입술 모양",
+        "values": {
+          "full": {
+            "ko": "도톰한 입술",
+            "en": "full lips"
+          },
+          "heart": {
+            "ko": "하트형 입술",
+            "en": "heart-shaped lips"
+          },
+          "medium": {
+            "ko": "보통 입술",
+            "en": "medium lips"
+          },
+          "thin": {
+            "ko": "얇은 입술",
+            "en": "thin, defined lips"
+          }
+        }
+      },
+      "lipCorners": {
+        "label": "입꼬리",
+        "values": {
+          "upturned": {
+            "ko": "올라간 입꼬리",
+            "en": "naturally upturned lip corners"
+          },
+          "neutral": {
+            "ko": "수평 입꼬리",
+            "en": "neutral lip corners"
+          }
+        }
+      },
+      "cheeks": {
+        "label": "볼",
+        "values": {
+          "full": {
+            "ko": "도톰한 앞볼",
+            "en": "full apple cheeks"
+          },
+          "balanced": {
+            "ko": "균형 잡힌 볼",
+            "en": "balanced cheeks"
+          },
+          "sculpted": {
+            "ko": "갸름하고 입체적인 볼",
+            "en": "sculpted cheekbones"
+          }
+        }
+      },
+      "jawline": {
+        "label": "턱선",
+        "values": {
+          "soft": {
+            "ko": "부드러운 턱선",
+            "en": "soft rounded jawline"
+          },
+          "v-line": {
+            "ko": "갸름한 V라인",
+            "en": "slim V-line jaw"
+          },
+          "defined": {
+            "ko": "또렷한 턱선",
+            "en": "defined jawline"
+          }
+        }
+      },
+      "hairStyle": {
+        "label": "머리 스타일",
+        "values": {
+          "straight": {
+            "ko": "생머리",
+            "en": "straight hair"
+          },
+          "wavy": {
+            "ko": "웨이브",
+            "en": "soft wavy hair"
+          },
+          "curly": {
+            "ko": "곱슬",
+            "en": "curly hair"
+          },
+          "layered": {
+            "ko": "레이어드",
+            "en": "layered cut"
+          },
+          "tied": {
+            "ko": "묶은 머리",
+            "en": "tied-back hair"
+          },
+          "updo": {
+            "ko": "올림머리",
+            "en": "updo hairstyle"
+          }
+        }
+      },
+      "bangs": {
+        "label": "앞머리",
+        "values": {
+          "none": {
+            "ko": "앞머리 없음",
+            "en": "no bangs"
+          },
+          "full": {
+            "ko": "풀뱅",
+            "en": "full blunt bangs"
+          },
+          "see-through": {
+            "ko": "시스루뱅",
+            "en": "wispy see-through bangs"
+          },
+          "side": {
+            "ko": "옆 앞머리",
+            "en": "side-swept bangs"
+          },
+          "curtain": {
+            "ko": "커튼뱅",
+            "en": "curtain bangs"
+          }
+        }
+      },
+      "makeup": {
+        "label": "메이크업",
+        "values": {
+          "natural": {
+            "ko": "내추럴",
+            "en": "natural no-makeup makeup"
+          },
+          "glowy": {
+            "ko": "물광",
+            "en": "dewy glowing makeup"
+          },
+          "blush": {
+            "ko": "블러셔 강조",
+            "en": "soft flushed blush makeup"
+          },
+          "glossy-lip": {
+            "ko": "글로시 립",
+            "en": "glossy lips with light makeup"
+          },
+          "smoky": {
+            "ko": "스모키",
+            "en": "soft smoky eye makeup"
+          },
+          "bold": {
+            "ko": "포인트 메이크업",
+            "en": "bold statement makeup"
+          }
+        }
+      },
+      "ageImpression": {
+        "label": "나이 인상",
+        "values": {
+          "youthful": {
+            "ko": "앳된 인상",
+            "en": "youthful-looking adult"
+          },
+          "early-20s": {
+            "ko": "20대 초반 인상",
+            "en": "in her early twenties"
+          },
+          "mid-20s": {
+            "ko": "20대 중반 인상",
+            "en": "in her mid twenties"
+          },
+          "late-20s": {
+            "ko": "20대 후반 인상",
+            "en": "in her late twenties"
+          }
+        }
+      },
+      "build": {
+        "label": "체형",
+        "values": {
+          "petite": {
+            "ko": "아담한 체형",
+            "en": "petite build"
+          },
+          "slim": {
+            "ko": "마른 체형",
+            "en": "slim build"
+          },
+          "slender-tall": {
+            "ko": "늘씬하고 큰 키",
+            "en": "tall and slender"
+          },
+          "athletic": {
+            "ko": "탄탄한 체형",
+            "en": "toned athletic build"
+          }
+        }
+      }
+    }
+  },
+  "stylingByVibe": {
+    "note": "머리·메이크업은 순위 인물에서 가져오지 않는다(시기마다 바뀌고 두 모델이 맞추지 못한다). 외모군 분위기에 맞는 스타일 묶음을 후보 순서대로 돌려 쓴다.",
+    "innocent": [
+      {
+        "hairLength": "long",
+        "hairColor": "black",
+        "hairStyle": "straight",
+        "bangs": "see-through",
+        "makeup": "natural"
+      },
+      {
+        "hairLength": "medium",
+        "hairColor": "dark-brown",
+        "hairStyle": "wavy",
+        "bangs": "none",
+        "makeup": "glowy"
+      }
+    ],
+    "lovely": [
+      {
+        "hairLength": "long",
+        "hairColor": "light-brown",
+        "hairStyle": "wavy",
+        "bangs": "see-through",
+        "makeup": "blush"
+      },
+      {
+        "hairLength": "bob",
+        "hairColor": "dark-brown",
+        "hairStyle": "straight",
+        "bangs": "full",
+        "makeup": "glossy-lip"
+      }
+    ],
+    "chic": [
+      {
+        "hairLength": "long",
+        "hairColor": "black",
+        "hairStyle": "straight",
+        "bangs": "none",
+        "makeup": "natural"
+      },
+      {
+        "hairLength": "medium",
+        "hairColor": "dark-brown",
+        "hairStyle": "layered",
+        "bangs": "curtain",
+        "makeup": "smoky"
+      }
+    ],
+    "girl-crush": [
+      {
+        "hairLength": "medium",
+        "hairColor": "black",
+        "hairStyle": "layered",
+        "bangs": "none",
+        "makeup": "bold"
+      },
+      {
+        "hairLength": "long",
+        "hairColor": "ash",
+        "hairStyle": "straight",
+        "bangs": "side",
+        "makeup": "smoky"
+      }
+    ],
+    "fresh": [
+      {
+        "hairLength": "bob",
+        "hairColor": "dark-brown",
+        "hairStyle": "straight",
+        "bangs": "curtain",
+        "makeup": "glowy"
+      },
+      {
+        "hairLength": "medium",
+        "hairColor": "light-brown",
+        "hairStyle": "tied",
+        "bangs": "see-through",
+        "makeup": "natural"
+      }
+    ],
+    "elegant": [
+      {
+        "hairLength": "long",
+        "hairColor": "dark-brown",
+        "hairStyle": "wavy",
+        "bangs": "side",
+        "makeup": "glossy-lip"
+      },
+      {
+        "hairLength": "medium",
+        "hairColor": "black",
+        "hairStyle": "updo",
+        "bangs": "none",
+        "makeup": "natural"
+      }
+    ],
+    "intellectual": [
+      {
+        "hairLength": "medium",
+        "hairColor": "black",
+        "hairStyle": "straight",
+        "bangs": "curtain",
+        "makeup": "natural"
+      },
+      {
+        "hairLength": "bob",
+        "hairColor": "dark-brown",
+        "hairStyle": "layered",
+        "bangs": "side",
+        "makeup": "natural"
+      }
+    ],
+    "sultry": [
+      {
+        "hairLength": "long",
+        "hairColor": "dark-brown",
+        "hairStyle": "wavy",
+        "bangs": "side",
+        "makeup": "smoky"
+      },
+      {
+        "hairLength": "long",
+        "hairColor": "black",
+        "hairStyle": "straight",
+        "bangs": "none",
+        "makeup": "glossy-lip"
+      }
+    ],
+    "playful": [
+      {
+        "hairLength": "medium",
+        "hairColor": "light-brown",
+        "hairStyle": "tied",
+        "bangs": "full",
+        "makeup": "blush"
+      },
+      {
+        "hairLength": "bob",
+        "hairColor": "ash",
+        "hairStyle": "wavy",
+        "bangs": "see-through",
+        "makeup": "glowy"
+      }
+    ]
+  },
+  "clusterBasis": {
+    "note": "외모군은 두 모델 일치율이 minAgreement 이상인 얼굴 구조 칸과 분위기(vibe)로 나눈다. 스타일링 칸·피부톤·눈매(eyeShape)는 기준에서 뺀다.",
+    "minAgreement": 0.6,
+    "vibeWeight": 2,
+    "exclude": [
+      "eyeShape",
+      "hairLength",
+      "hairColor",
+      "hairStyle",
+      "bangs",
+      "makeup",
+      "skinTone",
+      "ageImpression"
+    ]
+  },
+  "signatureFeatures": {
+    "note": "후보마다 하나씩 다르게 넣는 구별 특징. 예쁨을 해치지 않는 매력 포인트로만 고른다. expression이 있으면 그 특징이 보이는 표정으로 고정한다.",
+    "values": [
+      {
+        "key": "double-dimples",
+        "ko": "양볼 보조개",
+        "en": "deep dimples on both cheeks that appear when she smiles",
+        "expression": "a bright, warm smile showing a little of her teeth"
+      },
+      {
+        "key": "under-eye-mole",
+        "ko": "오른쪽 눈 밑 작은 점",
+        "en": "a small dark beauty mark just below her right eye"
+      },
+      {
+        "key": "eye-smile",
+        "ko": "초승달 눈웃음",
+        "en": "eyes that curve into crescent moons when she smiles",
+        "expression": "a wide, happy smile that turns her eyes into crescents"
+      },
+      {
+        "key": "lip-mole",
+        "ko": "입술 위 작은 점",
+        "en": "a tiny beauty mark above the left corner of her upper lip"
+      },
+      {
+        "key": "snaggletooth",
+        "ko": "웃을 때 보이는 덧니",
+        "en": "one slightly prominent upper canine tooth (a cute snaggletooth) visible when she smiles",
+        "expression": "a bright, warm smile showing a little of her teeth"
+      },
+      {
+        "key": "single-dimple",
+        "ko": "왼쪽 볼 보조개",
+        "en": "a single dimple on her left cheek when she smiles",
+        "expression": "a soft, slightly lopsided smile"
+      },
+      {
+        "key": "nose-freckles",
+        "ko": "콧등의 옅은 주근깨",
+        "en": "a light dusting of faint freckles across her nose bridge and upper cheeks"
+      },
+      {
+        "key": "cheek-mole",
+        "ko": "광대 위 작은 점",
+        "en": "a small beauty mark high on her left cheekbone"
+      },
+      {
+        "key": "crooked-smile",
+        "ko": "한쪽 입꼬리가 더 올라가는 미소",
+        "en": "a charming asymmetric smile where the right corner of her mouth lifts higher",
+        "expression": "a playful half-smile"
+      },
+      {
+        "key": "chin-mole",
+        "ko": "턱 끝 작은 점",
+        "en": "a tiny beauty mark just below her lower lip on the chin"
+      }
+    ]
+  }
+}

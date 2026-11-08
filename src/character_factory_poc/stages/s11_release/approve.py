@@ -28,16 +28,20 @@ def approve_g9(ctx: Context, cid: str, answer: dict) -> Path:
     rev_dir = ctx.character_dir(cid) / "s11-release" / gate.rev
     if not (rev_dir / "package.json").is_file():
         raise FactoryError(f"{cid}: {gate.rev}/package.json이 없다")
+    # 순서 12(D-0126): 트윈 승인은 발표 점검 필수 항목과 사람 확인이 다 통과해야 받는다.
+    from character_factory_poc.stages.s11_release.presentation import guard_g9
+
+    extra, note = guard_g9(ctx, cid, rev_dir, answer)
     rec = write_gate_record(
         ctx.character_dir(cid),
         state,
         gate="G9",
         rev=gate.rev,
         stage_id="s11",
-        shown=[rev_dir / "package.json", rev_dir / "gate-G9.html"],
+        shown=[rev_dir / "package.json", rev_dir / "gate-G9.html", *extra],
         decision=decision,
         reviewer=str(answer.get("reviewer") or "user"),
-        reasons=_reasons(answer),
+        reasons="; ".join(x for x in (_reasons(answer), note) if x),
         minutes=float(answer.get("minutes", 0)),
     )
     ctx.ledger(cid).record_human(gate="G9", minutes=rec.minutes, ref=f"{cid}/{gate.rev}")
