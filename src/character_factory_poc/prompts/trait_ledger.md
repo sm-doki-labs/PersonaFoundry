@@ -70,3 +70,14 @@
 - 상대의 외모와 신체 상태를 읽는 표현, 카메라 관찰 블록에 없는 목소리 상태 같은 감각 단서, 표정만으로 감정을 단정하는 표현을
   쓰지 않는다.
 - characterId와 planRev는 입력을 그대로 복사한다.
+
+## 원문 경향이 있을 때(모티브, D-0148)
+
+입력에 tendencies가 있으면 실존 인물의 장부다. tendencies.tendencies는 원문 여러 자리에서 되풀이된 상황과 반응이다.
+
+- 모든 trait는 basis에 그 특질이 나온 경향의 cell을 그대로 적는다. trigger는 그 cell의 상황을, behavior는 그 반응을 이 인물의
+  방식으로 구체적으로 쓴다. 한 cell은 trait 하나에만 쓴다.
+- 위 kind 규칙 가운데 insult_reaction 정확히 하나, flaw 하나 이상은 적용하지 않는다. 원문 경향에 근거가 있을 때만 쓴다.
+  thinSituations의 상황(원문 근거가 적은 상황)과 anecdotes의 반응으로 trait를 만들지 않는다.
+- disposition, reading, defaultResponse는 share가 크고 자리가 많은 경향에서 가져온다. 칭찬·감사·각오처럼 계기가 있는 경향은
+  평소 칸에 두지 않고 trait로 둔다.

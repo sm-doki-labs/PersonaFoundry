@@ -23,6 +23,10 @@ class LedgerTrait(Strict):
     nearMiss: str = Field(min_length=4, max_length=90, description="비슷하지만 켜지지 않는 상황")
     behavior: str = Field(min_length=4, max_length=150, description="관찰 가능한 행동 한 문장")
     rarity: Literal["rare", "sometimes"]
+    #: D-0148: 모티브만 쓴다. 이 특질이 나온 원문 경향 칸(상황/반응). 대화 프롬프트에는 넣지 않는다.
+    basis: str | None = Field(
+        default=None, pattern=r"^[A-Z_]+/[A-Z_]+$", exclude_if=lambda v: v is None
+    )
 
 
 @register("trait-ledger-v1")
@@ -41,10 +45,17 @@ class TraitLedger(Strict):
         if any(len(d) > 140 for d in self.disposition):
             raise ValueError("disposition 항목은 140자 이내다")
         kinds = [t.kind for t in self.traits]
-        if kinds.count("insult_reaction") != 1:
-            raise ValueError("insult_reaction 특질은 정확히 하나다")
-        if "flaw" not in kinds:
-            raise ValueError("flaw 특질이 하나 이상 필요하다")
+        if any(t.basis for t in self.traits):
+            # D-0148: 모티브는 원문 경향에서 고른다. 원문에 없는 시비 반응·결점을 지어내지 않는다.
+            if not all(t.basis for t in self.traits):
+                raise ValueError("모티브 장부는 모든 특질에 basis(원문 경향 칸)가 필요하다")
+            if kinds.count("insult_reaction") > 1:
+                raise ValueError("insult_reaction 특질은 하나까지다")
+        else:
+            if kinds.count("insult_reaction") != 1:
+                raise ValueError("insult_reaction 특질은 정확히 하나다")
+            if "flaw" not in kinds:
+                raise ValueError("flaw 특질이 하나 이상 필요하다")
         if len({t.id for t in self.traits}) != len(self.traits):
             raise ValueError("특질 id가 겹친다")
         return self

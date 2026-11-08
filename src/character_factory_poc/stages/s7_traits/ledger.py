@@ -8,8 +8,11 @@ from typing import Any
 
 from character_factory_poc.common.call_context import appearance_reading_problems
 from character_factory_poc.common.schema import dump
+from character_factory_poc.common.store import read_json
 from character_factory_poc.contracts.trait_ledger import TraitLedger
 from character_factory_poc.pipeline.agent import AgentSpec, run_agent
+from character_factory_poc.pipeline.origin import SOURCE, read_origin
+from character_factory_poc.stages.s3_plan import tendencies as T
 
 QUOTES = re.compile(r"[\"'“”‘’「」]")
 #: 개념 겹침을 셀 때 빼는 흔한 낱말 앞 두 글자.
@@ -56,11 +59,23 @@ VOICE_TERMS = re.compile(
 DUP_THRESHOLD = 0.6
 
 
-def check_ledger(name: str):
+def check_ledger(name: str, tendencies: dict | None = None):
     exclude = (name[:2],) if name else ()
+    cells = {t["cell"] for t in (tendencies or {}).get("tendencies", [])}
+    motif = tendencies is not None
 
     def _check(ledger: TraitLedger) -> list[str]:
         problems: list[str] = []
+        if motif:
+            # D-0148: 모티브의 조건부 특질은 원문에서 되풀이된 경향에서만 고른다.
+            for t in ledger.traits:
+                if t.basis not in cells:
+                    problems.append(
+                        f"{t.id}.basis: tendencies.tendencies의 cell 가운데 하나를 쓴다. "
+                        "원문에서 되풀이되지 않은 반응은 조건부 특질로 만들지 않는다"
+                    )
+        elif any(t.basis for t in ledger.traits):
+            problems.append("traits.basis: 원문 경향이 없는 캐릭터는 basis를 쓰지 않는다")
         texts = _strings(dump(ledger))
         if any(QUOTES.search(t) for t in texts):
             problems.append("장부에 따옴표 대사나 인용을 넣지 않는다")
@@ -121,7 +136,10 @@ def _strings(value: Any) -> list[str]:
     return []
 
 
-def _example(cid: str, plan_rev: str) -> dict[str, Any]:
+def _example(cid: str, plan_rev: str, motif: bool = False) -> dict[str, Any]:
+    kinds = (
+        ("choice", "warmth", "misreading") if motif else ("insult_reaction", "flaw", "misreading")
+    )
     return {
         "schemaVersion": "trait-ledger-v1",
         "characterId": cid,
@@ -138,25 +156,41 @@ def _example(cid: str, plan_rev: str) -> dict[str, Any]:
                 "nearMiss": "<비슷하지만 켜지지 않는 상황>",
                 "behavior": "<관찰 가능한 행동 한 문장>",
                 "rarity": "rare",
+                **({"basis": "<tendencies의 cell, 예: PRAISE/SELF_DEPRECATE>"} if motif else {}),
             }
-            for i, kind in enumerate(("insult_reaction", "flaw", "misreading"), 1)
+            for i, kind in enumerate(kinds, 1)
         ],
     }
 
 
+def motif_tendencies(ctx, cid: str, plan_rev: str) -> dict | None:
+    """모티브 G3 revision의 원문 경향. 오리지널이거나 경향이 적어 묶지 않은 기획이면 None."""
+    if read_origin(ctx.character_dir(cid)) != SOURCE:
+        return None
+    path = ctx.character_dir(cid) / "s3-plan" / plan_rev / "tendencies.json"
+    if not path.is_file():
+        return None
+    agg = read_json(path)
+    return T.agent_view(agg) if agg.get("enforced") else None
+
+
 def run_ledger(ctx, cid: str, plan, sheet, rev_dir: Path, budget, model) -> TraitLedger:
     raw_plan = {k: v for k, v in dump(plan).items() if k not in ("voiceExamples", "voiceSummary")}
+    tendencies = motif_tendencies(ctx, cid, plan.planRev)
+    inputs = {
+        "character-plan": raw_plan,
+        "trait-sheet": {k: dump(sheet)[k] for k in ("choice", "card")},
+    }
+    if tendencies is not None:
+        inputs["tendencies"] = tendencies
     result = run_agent(
         AgentSpec("trait_ledger", "trait-ledger-v1", "s7", max_check_retries=1),
         rev_dir / "ledger-workspace",
-        {
-            "character-plan": raw_plan,
-            "trait-sheet": {k: dump(sheet)[k] for k in ("choice", "card")},
-        },
-        [check_ledger(plan.name)],
+        inputs,
+        [check_ledger(plan.name, tendencies)],
         model,
         ref=f"{cid}/{rev_dir.name}/ledger",
-        contract_example=_example(cid, plan.planRev),
+        contract_example=_example(cid, plan.planRev, tendencies is not None),
         backend=ctx.agent_backend(cid, budget, "s7"),
     )
     if not result.ok:
