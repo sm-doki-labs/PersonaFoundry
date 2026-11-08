@@ -18,6 +18,7 @@ from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.origin import read_model_mode
 from character_factory_poc.stages.s0_source.run import STAGE_DIR, load_approved_source
 from character_factory_poc.stages.s10_eval.blind import BASE, REVIEWED
+from character_factory_poc.stages.s11_release.presentation import CHAT_DISCLOSURE
 
 
 def _route(root: Path, cid: str, mode: str, adopted: str | None, runs: list[Path]) -> str | None:
@@ -56,12 +57,14 @@ class SourceQuotes:
     pattern: re.Pattern[str]
 
     def public_prompt(self, text: str) -> str:
-        return "\n".join(
+        body = "\n".join(
             line
             for line in text.splitlines()
             if not line.startswith(("말투 예시:", "아래는 본인의 실제 발화다"))
             and not self.pattern.search(line)
         )
+        # D-0126 (1): 대화 모델이 읽는 판에 AI 표시를 붙인다. 발표 점검이 이 문단을 확인한다.
+        return body.rstrip("\n") + "\n\n" + CHAT_DISCLOSURE + "\n"
 
     def check(self, payload: object, label: str) -> None:
         if isinstance(payload, dict):

@@ -3066,6 +3066,30 @@
     ['media', '대표 이미지와 영상을 열어 봤어요'],
     ['names', '실제 사람 이름이나 상호가 들어가지 않았어요']
   ];
+  // 트윈 발표 점검(D-0126): 서버가 만든 presentation-check.json의 자동 결과와 사람 확인 항목.
+  // 트윈은 본인 이름이 들어가는 게 맞으니 이름 항목을 '다른 사람'으로 바꾼다.
+  var PKG_TWIN_NAMES = '본인 말고 다른 실제 사람 이름이나 상호가 들어가지 않았어요';
+  function pkgPresentation() {
+    return (state.items && state.items.presentation) || null;
+  }
+  function pkgManual() {
+    var pres = pkgPresentation();
+    var out = PKG_MANUAL.map(function (m) {
+      return { id: m[0], title: pres && m[0] === 'names' ? PKG_TWIN_NAMES : m[1], required: true };
+    });
+    if (pres) list(pres.humanChecks).forEach(function (h) {
+      out.push({ id: 'pres:' + h.id, presId: h.id, title: h.title, detail: h.detail, required: Boolean(h.required), presentation: true });
+    });
+    return out;
+  }
+  function pkgRestoreManual() {
+    var rec = (state.view && state.view.record) || {};
+    var reasons = String(rec.reasons || '');
+    pkgManual().forEach(function (m) {
+      // 승인 기록의 사람 확인 요약("[예] 항목")에서 권장 항목의 답을 되살린다.
+      state.pkgManual[m.id] = m.presentation && !m.required ? reasons.indexOf('[예] ' + m.title) >= 0 : rec.decision === 'APPROVE' || !m.presentation;
+    });
+  }
   function pkgChecks() {
     var items = state.items;
     var pkg = items.package || {};
@@ -3094,14 +3118,39 @@
     out.push({ id: 'files', title: '파일', ok: !missing.length, block: missing.length > 0, detail: missing.length ? '빠진 파일 ' + missing.length + '개' : '파일 ' + (counts.files || 0) + '개, 빠진 파일 없음' });
     var ver = items.verification || {};
     out.push({ id: 'verify', title: '앱 적재 확인', ok: ver.status === 'PASSED' || ver.status === 'OK', info: ver.status === 'NOT_RUN' || !ver.status, detail: ver.status === 'NOT_RUN' || !ver.status ? '승인한 뒤 내보내기 단계에서 시험용 DB로 확인해요' : '상태: ' + ver.status });
+    var pres = pkgPresentation();
+    if (pres) list(pres.checks).forEach(function (c) {
+      out.push({ id: 'presentation', title: '발표 · ' + c.title, ok: Boolean(c.ok), block: c.required !== false, detail: c.detail });
+    });
     return out;
+  }
+  function pkgPresentationBlock(pres) {
+    var hits = [];
+    list(pres.checks).forEach(function (c) { list(c.hits).forEach(function (h) { hits.push(h); }); });
+    var endorsement = list(pres.checks).filter(function (c) { return c.id === 'endorsement'; })[0] || {};
+    var disclosure = list(pres.checks).filter(function (c) { return c.id === 'disclosure'; })[0] || {};
+    var consent = list(pres.checks).filter(function (c) { return c.id === 'consent'; })[0] || {};
+    var places = disclosure.places || {};
+    return facts([
+      ['표시 문구', pres.disclosure],
+      ['표시 위치', [['package', '패키지'], ['appSeed', '앱 시드'], ['chat', '대화 프롬프트']].map(function (p) { return p[1] + (places[p[0]] ? ' ✓' : ' ✕'); }).join(' · ')],
+      ['대상', pres.subjectKind === 'PUBLIC_FIGURE' ? '공인' : pres.subjectKind === 'PRIVATE_PERSON' ? '사인(가족·지인)' : '-'],
+      ['공개 동의', consent.detail],
+      ['찾는 표현', joinList(endorsement.terms, ', ')]
+    ]) +
+      (hits.length
+        ? '<table class="gate-table pres-hits"><thead><tr><th>위치</th><th>표현</th><th>앞뒤 문장</th></tr></thead><tbody>' +
+          hits.map(function (h) { return '<tr><td>' + esc(h.where) + '</td><td><b>' + esc(h.term) + '</b></td><td>' + esc(h.excerpt) + '</td></tr>'; }).join('') + '</tbody></table>' +
+          '<p class="qa-note">문구를 고친 뒤 패키지를 다시 만들면 다시 점검해요. 다른 뜻으로 쓴 말이면 설정의 찾는 표현 목록을 바꿀 수 있어요.</p>'
+        : '<p class="qa-note">추천·협력·공식처럼 보이는 표현을 찾지 못했어요.</p>');
   }
   function renderPackage(items) {
     if (!state.pkgRestored) {
       state.pkgRestored = true;
-      if (faceLocked()) PKG_MANUAL.forEach(function (m) { state.pkgManual[m[0]] = true; });
+      if (faceLocked()) pkgRestoreManual();
     }
     var pkg = items.package || {};
+    var pres = items.presentation || null;
     var profile = pkg.profile || {};
     var profileRows = [
       ['이름', profile.name],
@@ -3117,6 +3166,7 @@
       return '<details class="gate-more pkg-detail" data-pkg-detail="' + id + '"' + (state.pkgOpen[id] ? ' open' : '') + '><summary>' + esc(title) + '</summary>' + body + '</details>';
     };
     return (
+      (pres ? '<p class="pres-label" role="note"><span>발표 표시</span><b>' + esc(pres.disclosure) + '</b></p>' : '') +
       '<section class="gate-section pkg-board"><h2>출시 전 점검</h2>' +
       '<p class="section-sub">' + (faceLocked() ? '승인할 때 확인한 점검표예요.' : '자동 점검을 확인하고, 사람이 볼 항목에 표시한 뒤 승인해 주세요. 항목을 누르면 아래에서 자세히 볼 수 있어요.') + '</p>' +
       '<ul class="pkg-checks" data-pkg-checks></ul>' +
@@ -3143,6 +3193,7 @@
       block('files', '파일', facts([['파일 수', (items.counts || {}).files], ['빠진 파일', joinList((items.counts || {}).missing, ', ') || '없음']])) +
       block('verify', '앱 적재 확인', facts([['상태', verification.status === 'NOT_RUN' ? '아직 안 함' : verification.status], ['시험용 DB에서 확인', verification.disposableDb ? '예' : '아니오']]) +
         list(verification.steps).map(function (step) { return '<p class="qa-note">' + (step.ok ? '✓ ' : '· ') + esc(step.name) + ' — ' + esc(step.detail) + '</p>'; }).join('')) +
+      (pres ? block('presentation', '발표 점검', pkgPresentationBlock(pres)) : '') +
       '</section>'
     );
   }
@@ -3158,33 +3209,44 @@
       return '<li><button type="button" class="pkg-check is-' + tone + '" data-pkg-jump="' + c.id + '"><span class="pkg-mark" aria-hidden="true">' + mark + '</span>' +
         '<b>' + esc(c.title) + '</b><span class="pkg-detail-text">' + esc(c.detail) + '</span><span class="sr-only">' + ({ ok: ' 통과', bad: ' 막힘', warn: ' 확인 필요', info: ' 안내' }[tone]) + '</span></button></li>';
     }).join('');
-    q('[data-pkg-manual]').innerHTML = PKG_MANUAL.map(function (m) {
-      return '<li><label class="pkg-check pkg-manual-row' + (state.pkgManual[m[0]] ? ' is-ok' : '') + '"><input type="checkbox" data-pkg-manual-box="' + m[0] + '"' + (state.pkgManual[m[0]] ? ' checked' : '') + (locked ? ' disabled' : '') + '><b>' + esc(m[1]) + '</b></label></li>';
+    var manual = pkgManual();
+    q('[data-pkg-manual]').innerHTML = manual.map(function (m) {
+      var on = Boolean(state.pkgManual[m.id]);
+      var tag = m.presentation ? '<span class="pres-tag' + (m.required ? ' is-required' : '') + '">' + (m.required ? '발표 · 필수' : '발표 · 권장') + '</span>' : '';
+      return '<li><label class="pkg-check pkg-manual-row' + (m.presentation ? ' pres-row' : '') + (on ? ' is-ok' : '') + '"><input type="checkbox" data-pkg-manual-box="' + esc(m.id) + '"' + (on ? ' checked' : '') + (locked ? ' disabled' : '') + '>' +
+        '<span class="pres-text"><b>' + esc(m.title) + '</b>' + tag + (m.detail ? '<span class="pkg-detail-text">' + esc(m.detail) + '</span>' : '') + '</span></label></li>';
     }).join('');
     var ok = checks.filter(function (c) { return c.ok && !c.warn; }).length;
     var warn = checks.filter(function (c) { return c.warn || (!c.ok && !c.block && !c.info); }).length;
     var blocks = checks.filter(function (c) { return c.block && !c.ok; });
-    var manualLeft = PKG_MANUAL.filter(function (m) { return !state.pkgManual[m[0]]; }).length;
+    var manualLeft = manual.filter(function (m) { return m.required && !state.pkgManual[m.id]; }).length;
+    var manualDone = manual.filter(function (m) { return state.pkgManual[m.id]; }).length;
     var side = q('[data-side-extra]');
     if (side) side.innerHTML = '<div class="bg-side"><p class="bg-side-title"><b>점검</b><span>' + ok + ' / ' + checks.length + ' 통과</span></p>' +
-      '<dl class="facts"><dt>확인 필요</dt><dd>' + warn + '</dd><dt>막는 문제</dt><dd>' + blocks.length + '</dd><dt>사람 확인</dt><dd>' + (PKG_MANUAL.length - manualLeft) + ' / ' + PKG_MANUAL.length + '</dd></dl></div>';
+      '<dl class="facts"><dt>확인 필요</dt><dd>' + warn + '</dd><dt>막는 문제</dt><dd>' + blocks.length + '</dd><dt>사람 확인</dt><dd>' + manualDone + ' / ' + manual.length + '</dd></dl></div>';
     if (locked) return;
     var approve = q('[data-decide="APPROVE"]');
     if (approve) approve.disabled = Boolean(state.busy || blocks.length || manualLeft);
     var hint = q('[data-side-hint]');
     if (hint) hint.textContent = blocks.length ? blocks.map(function (c) { return c.title; }).join(', ') + '에 막는 문제가 있어요. 고친 뒤 승인할 수 있어요.'
-      : manualLeft ? '사람이 볼 항목 ' + manualLeft + '개가 남았어요. 확인하고 표시해 주세요.'
+      : manualLeft ? '꼭 확인할 항목 ' + manualLeft + '개가 남았어요. 확인하고 표시해 주세요.'
       : warn ? '확인할 항목 ' + warn + '개가 있지만 승인할 수 있어요. ' + PKG_AFTER
       : '모두 통과했어요. ' + PKG_AFTER;
   }
 
   function buildPackage(decision) {
+    var answer = { decision: decision };
     if (decision === 'APPROVE') {
       var blocks = pkgChecks().filter(function (c) { return c.block && !c.ok; });
       if (blocks.length) throw Error(blocks.map(function (c) { return c.title; }).join(', ') + '에 막는 문제가 있어요.');
-      if (PKG_MANUAL.some(function (m) { return !state.pkgManual[m[0]]; })) throw Error('사람이 볼 항목을 모두 확인해 주세요.');
+      if (pkgManual().some(function (m) { return m.required && !state.pkgManual[m.id]; })) throw Error('꼭 확인할 항목을 모두 표시해 주세요.');
     }
-    return Object.assign({ decision: decision }, details());
+    if (pkgPresentation()) {
+      // 서버(presentation.guard_g9)가 필수 항목을 다시 확인하고 결정 기록에 요약을 남긴다.
+      answer.presentationChecks = {};
+      pkgManual().forEach(function (m) { if (m.presentation) answer.presentationChecks[m.presId] = Boolean(state.pkgManual[m.id]); });
+    }
+    return Object.assign(answer, details());
   }
 
   // ---------------------------------------------------------------- 렌더

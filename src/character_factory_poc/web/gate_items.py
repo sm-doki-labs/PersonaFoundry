@@ -1106,7 +1106,7 @@ def release_package(char_dir: Path, character_id: str, stage_dir: str, rev: str)
         return _empty("package", ["package.json이 없다. cfp release build를 먼저 돌린다"])
     files = package.get("files", [])
     missing = [f["path"] for f in files if not (rev_dir / f["path"]).is_file()]
-    return {
+    out = {
         "kind": "package",
         "source": "artifacts",
         "package": package,
@@ -1119,6 +1119,13 @@ def release_package(char_dir: Path, character_id: str, stage_dir: str, rev: str)
         "verification": {"status": "NOT_RUN", "disposableDb": True, "steps": []},
         "page": asset(char_dir, character_id, stage_dir, rev, "gate-G9.html"),
     }
+    # D-0126: 트윈만 발표 점검(자동 결과·사람 확인 항목)을 붙인다. 오리지널 G9는 그대로다.
+    from character_factory_poc.stages.s11_release.presentation import view
+
+    check = view(rev_dir, package)
+    if check is not None:
+        out["presentation"] = check
+    return out
 
 
 BUILDERS = {

@@ -68,6 +68,32 @@ test('layout keeps the reviewed columns: source in front, data column closes up 
   assert.ok(css.includes('"so ap sc vd pk" "so pl ps tr pk"'));
 });
 
+test('six-column twin graph fits laptop widths: columns follow name length, the original grid is untouched', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'shared', 'flow.css'), 'utf8');
+  const cols = (css.match(/\.fl-grid\.tw\{grid-template-columns:([^;]+);/) || [])[1] || '';
+  const fr = (cols.match(/[\d.]+fr/g) || []).map(parseFloat);
+  assert.equal(fr.length, 6, cols);
+  const [so, , sc, , tr] = fr;
+  assert.ok(sc === Math.max(...fr), 'scene has the longest step names');
+  assert.ok(tr === Math.min(...fr), 'training has the shortest step names');
+  assert.ok(so > 1, 'source fits its waiting status on one line');
+  assert.ok(css.includes('.fl-grid{position:relative;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));column-gap:32px'), 'original graph keeps equal columns');
+  // 줄임 규칙은 트윈 칸에만 건다.
+  assert.ok(css.includes('.fl-grid.tw .fl-row .gt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'));
+  assert.ok(!/\.fl-grid \.fl-row \.(gt|sb)\{/.test(css));
+  // 휴대폰 폭에서는 긴 프롬프트 그래프도 한 열이다(5열 상속으로 칸이 39px가 되던 문제).
+  const phone = css.split('@container canvas (max-width:760px)').slice(1).join('');
+  assert.ok(phone.includes('.fl-grid.tw.nt{grid-template-columns:minmax(0,1fr);'));
+});
+
+test('step marks stick to the last word so an icon never wraps alone', () => {
+  const mark = '<svg class="i"></svg>';
+  assert.equal(Flow.stageNameHTML('캐릭터 기획', mark), '캐릭터 <span class="nb">기획' + mark + '</span>');
+  assert.equal(Flow.stageNameHTML('평가', mark), '<span class="nb">평가' + mark + '</span>');
+  assert.equal(Flow.stageNameHTML('참고 자료 선별', ''), '참고 자료 선별');
+  assert.equal(Flow.stageNameHTML('<b> x', mark), '&lt;b&gt; <span class="nb">x' + mark + '</span>');
+});
+
 test('G0 and G1s count as reviews with the same task function', () => {
   const g = Runtime.buildGraph(TRAIN);
   const d = detailFor(TRAIN, { s0: 'AWAITING_HUMAN' }, [{ id: 'G0', status: 'AWAITING_HUMAN', rev: 'sp1', openedAt: '2026-11-08T04:40:00Z' }]);

@@ -787,6 +787,10 @@ def build_package(ctx: Context, cid: str) -> Path:
         from character_factory_poc.stages.s11_release.page import render_g9_page
 
         write_once_text(rev_dir / "gate-G9.html", render_g9_page(cid, rev, package))
+        if is_twin:  # D-0126 발표 점검. 필수 항목이 실패하면 G9 승인이 막힌다.
+            from character_factory_poc.stages.s11_release.presentation import write_check
+
+            write_check(ctx, cid, rev_dir, package)
         write_manifest(rev_dir)
     except Exception as exc:  # noqa: BLE001 - 실패는 단계 상태로 남긴다
         state.transition("s11", "CHECK_FAILED", rev=rev, error=str(exc)[:500])
@@ -851,7 +855,9 @@ def _package_files(rev_dir: Path) -> list[PackageFile]:
 
 #: 패키지 자산이 아닌 파일. package.json은 자기 해시를 담을 수 없고, 검토 페이지와
 #: manifest.sha256은 패키지 밖에서 만드는 산출물이다(LLD §5.17).
-_NOT_PACKAGE_ASSETS = frozenset({"package.json", "manifest.sha256", "gate-G9.html"})
+_NOT_PACKAGE_ASSETS = frozenset(
+    {"package.json", "manifest.sha256", "gate-G9.html", "presentation-check.json"}
+)
 
 
 __all__ = [

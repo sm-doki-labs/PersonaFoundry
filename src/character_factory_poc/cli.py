@@ -1530,6 +1530,15 @@ def _build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("verify")
     s.add_argument("character_id")
     s.set_defaults(fn=cmd_verify)
+
+    twin = sub.add_parser("twin").add_subparsers(dest="sub", required=True)
+    s = twin.add_parser("precheck", help="기준 사진으로 이미지·영상 한 건씩 확인해요")
+    s.add_argument("--photo", type=Path, required=True, help="기준 사진 경로를 넣어 주세요")
+    kinds = s.add_mutually_exclusive_group()
+    kinds.add_argument("--image-only", action="store_true", help="이미지만 확인해요")
+    kinds.add_argument("--video-only", action="store_true", help="기준 사진에서 영상만 만들어요")
+    s.add_argument("--execute", action="store_true", help="승인한 계획을 실행해요")
+    s.set_defaults(fn=cmd_twin_precheck)
     return p
 
 
@@ -1540,3 +1549,11 @@ def main(argv: list[str] | None = None) -> int:
     except FactoryError as e:
         print(f"오류: {e}", file=sys.stderr)
         return 1
+
+
+def cmd_twin_precheck(args) -> int:
+    from character_factory_poc.stages.s0_source.precheck import run_precheck
+
+    return run_precheck(
+        _ctx(args), args.photo, image=not args.video_only, video=not args.image_only
+    )

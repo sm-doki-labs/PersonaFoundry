@@ -32,6 +32,13 @@
   }
   // 트윈 단계 줄에 붙이는 쉬운 설명. 단계 이름은 서버 그래프를 그대로 쓴다.
   const TWIN_HINT = { s2: '받은 사진에서 기준 사진 고르기' };
+  // 단계 이름 뒤 표시(사람 검토·유료 아이콘)는 마지막 낱말에 붙인다. 칸이 좁아도 아이콘만 다음 줄로 떨어지지 않는다.
+  function stageNameHTML(name, marks) {
+    const s = String(name == null ? '' : name);
+    if (!marks) return E(s);
+    const i = s.lastIndexOf(' ');
+    return E(s.slice(0, i + 1)) + '<span class="nb">' + E(s.slice(i + 1)) + marks + '</span>';
+  }
   const DEMO_NOTE = 'AI 생성 · 본인과 무관한 기술 시연';
   const KIND_LABEL = { done: '완료', run: '진행 중', retry: '다시 시도 중', wait: '검토 대기', confirm: '실행 확인 대기', fail: '멈춤', todo: '예정', out: '이번 실행 범위 밖', skip: '건너뜀' };
   const ICON = {
@@ -1001,23 +1008,28 @@
           const x = v[id];
           const paid = (state.graph.paid.get(id) || []).length;
           const marks = (def.gate ? icon('user', '사람 검토 있음') : '') + (paid && (x.kind === 'todo' || x.kind === 'confirm') ? icon('coins', '유료 단계') : '');
-          const sub = x.sub ? '<span class="sb">' + (x.retry ? icon('retry') + ' ' : '') + E(x.sub) + '</span>' : '';
+          const sub = x.sub ? '<span class="sb" title="' + E(x.sub) + '">' + (x.retry ? icon('retry') + ' ' : '') + E(x.sub) + '</span>' : '';
           const glyph = x.kind === 'done' ? icon('check') : x.kind === 'fail' ? icon('x') : x.kind === 'confirm' ? icon('coins') : x.kind === 'skip' ? icon('minus') : '';
           html += '<button type="button" class="fl-row ' + x.kind + '" data-act="select" data-stage="' + E(id) + '" aria-pressed="' + (state.sel === id) + '" aria-label="' + E(def.name + ', ' + KIND_LABEL[x.kind] + (x.sub ? ', ' + x.sub : '') + (def.gate ? ', 사람 검토 있음' : '') + (paid ? ', 유료 단계' : '')) + '">' +
-            '<span class="si ' + x.kind + '">' + glyph + '</span><span class="nw"><span class="nm">' + E(def.name) + marks + '</span>' + sub + gateSub(def) + '</span></button>';
+            '<span class="si ' + x.kind + '">' + glyph + '</span><span class="nw"><span class="nm">' + stageNameHTML(def.name, marks) + '</span>' + sub + gateSub(def) + '</span></button>';
         });
       }
       return html + '</div>';
     }
     // 할 일 목록은 관문 이름(예: 얼굴 고르기)을 쓰고 그래프는 단계 이름(레퍼런스 선별)을 쓴다. 둘을 잇는다(D-0129).
-    function gateSub(def) {
+    function stageHint(def) {
       const hint = state.graph.origin === 'SOURCE' ? TWIN_HINT[def.id] : '';
-      if (hint) return '<span class="gt">' + E(hint) + '</span>';
+      if (hint) return hint;
       if (!def.gate) return '';
       const g = state.graph.byGate.get(def.gate);
       // 검토 이름의 첫 낱말이 단계 이름에 이미 있으면(소개 영상 ↔ 소개 영상 고르기) 덧붙이지 않는다.
       const head = g && g.title ? text(g.title).split(/[\s·]/)[0] : '';
-      return head && text(def.name).indexOf(head) < 0 ? '<span class="gt">검토: ' + E(g.title) + '</span>' : '';
+      return head && text(def.name).indexOf(head) < 0 ? '검토: ' + g.title : '';
+    }
+    // 트윈 그래프는 칸이 좁아 이 설명을 한 줄로 줄인다. 전체 글은 title과 인스펙터 '하는 일'에 있다.
+    function gateSub(def) {
+      const h = stageHint(def);
+      return h ? '<span class="gt" title="' + E(h) + '">' + E(h) + '</span>' : '';
     }
     function renderGraph(v, scope) {
       if (!state.detail) { region.graph.hidden = true; return; }
@@ -1215,6 +1227,7 @@
       const lane = state.graph.lanes.find((l) => (l.stages || []).some((s) => (typeof s === 'string' ? s : s.id) === id));
       const props = [];
       const prop = (k, val, cls) => { if (val) props.push('<dt>' + E(k) + '</dt><dd' + (cls ? ' class="' + cls + '"' : '') + '>' + val + '</dd>'); };
+      if (state.graph.origin === 'SOURCE') prop('하는 일', E(stageHint(def)));
       prop('상태', E(x.sub || KIND_LABEL[x.kind]));
       prop('버전', row.rev ? E(revLabel(row.rev)) : '');
       prop('시작', row.startedAt ? E(clock(row.startedAt)) : '');
@@ -1569,7 +1582,7 @@
     };
   }
 
-  const pure = { since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, MARK, mount };
+  const pure = { since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, MARK, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = pure;
   if (global) global.FactoryFlow = pure;
 })(typeof window !== 'undefined' ? window : null);

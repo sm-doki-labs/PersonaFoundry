@@ -16,17 +16,17 @@
 - 순서 3(서브에이전트 Hilbert): `stages/s2_hero/twin.py`(run_s2_twin, approve_g1s), `tests/test_twin_s2.py`.
 - 순서 4(서브에이전트 Linnaeus): `stages/s3_plan/twin.py`(run_s3_twin), `prompts/source_planner.md`, `contracts/planning.py`(EvidenceKindV2 SOURCE), `contracts/source.py`(knownFacts, chapterTemplate), `checks/registry.py`(s0, s3-twin), `tests/test_twin_s3.py`.
 - 연결(메인): `pipeline/graph.py` 트윈 s0·s2·s3 구현됨, `pipeline/orchestrator.py` 트윈 실행 함수, `pipeline/approve.py` G0·G1s, `pipeline/scheduler.py` s0 공급자, `tests/test_twin_flow.py` 통합 흐름.
-- 결정 D-0130, D-0131. 계획 문서 변경 이력.
+- 결정 D-0140, D-0141. 계획 문서 변경 이력.
 - 실제 공급자 호출, 학습, 커밋은 하지 않았다.
 
 ## 3. 결정
 
-- D-0130 트윈 s0 구현 방식(제안)
-- D-0131 순서 3·4·7 구현 방식(제안)
+- D-0140 트윈 s0 구현 방식(제안)
+- D-0141 순서 3·4·7 구현 방식(제안)
 
 ## 4. 확인한 사실과 정정
 
-- 다른 세션이 같은 날 D-0129를 먼저 썼다. 이 작업의 s0 결정은 D-0130이다.
+- 다른 세션이 같은 날 D-0129를 먼저 썼다. 이 작업의 s0 결정은 D-0140이다(처음 D-0130으로 적었다가 main과 겹쳐 옮겼다).
 - S4 장면 합성 프롬프트에는 아직 "가상 인물" 지시가 있다. 트윈 사진으로 실제 생성할 때 품질과 공급자 거절 여부를 확인해야 한다(계획 순서 11).
 - 트윈 G3에서 칸을 직접 고치면(edits) 근거 검사가 다시 돌지 않는다. 근거를 지켜야 하는 수정은 REQUEST_CHANGES로 새 후보를 받는다.
 - 트윈 기획의 내부 관계 단계 값은 연애 틀(FLIRT·DATING 등)을 유지한다. 제목·흐름만 팬·가족 틀로 바뀐다.

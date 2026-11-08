@@ -17,6 +17,7 @@ from uuid import UUID
 
 from character_factory_poc.contracts.release import CharacterPackage, Video
 from character_factory_poc.stages.export.doki_app.naming import (
+    api_seed_ids,
     chapter_uid,
     character_uid,
     relative_file,
@@ -44,17 +45,6 @@ LEGACY_TABLES = frozenset({"character_chapter", "character_stage_intro"})
 
 _GENDER_KO = {"female": "여성", "male": "남성", "other": "기타"}
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
-
-# 시드 ID는 우리 캐릭터 전용 번호대를 쓴다. 빈 DB에 넣는 묶음이라 다른 행과 겹치지 않는다.
-_CHARACTER_ID = 900001
-_CARD_ID = 900002
-_STAGE_BASE = 900101
-_MEDIA_BASE = 901001
-_FILE_BASE = 902001
-_LINK_BASE = 903001
-_CLIP_BASE = 904001
-_VIDEO_BASE = 905001
-_SLOT_BASE = 906001
 
 
 @dataclass(frozen=True)
@@ -84,6 +74,7 @@ class _Builder:
 
 
 def _stage_row(
+    character_id: int,
     stage_id: int,
     stage_uid: str,
     stage_no: int,
@@ -94,7 +85,7 @@ def _stage_row(
 ) -> list[Any]:
     return [
         stage_id,
-        _CHARACTER_ID,
+        character_id,
         stage_no,
         chapter.title,  # display_name
         None,  # appearance_note
@@ -122,6 +113,14 @@ def build_seed(
     alembic_revision: str,
     default_voice_id: str | None = None,
 ) -> ApiSeed:
+    # 정식 패키지는 characters/<cid>/s11-release/pkN 아래 있다. 동시에 내보내도
+    # 이미 생성된 캐릭터 폴더 이름만 대조하면 된다(다른 캐릭터의 출처는 읽지 않는다).
+    release = package_dir.parent
+    peers = ()
+    if release.name == "s11-release" and release.parent.name == package.characterId:
+        peers = (p.name for p in release.parent.parent.iterdir() if p.is_dir())
+    row_id = api_seed_ids(package.characterId, peers)
+    character_id = row_id("character", 0)
     slug = slug_for(package.characterId)
     uid = str(character_uid(package.characterId))
     profile = package.profile
@@ -152,7 +151,7 @@ def build_seed(
         if voice_id is None:
             unmapped.append("twin.voiceId (기본 한국어 음성이 없다. default_voice_id가 필요하다)")
         else:
-            voice_bundle_id = _CHARACTER_ID
+            voice_bundle_id = character_id
             builder.bundle["table_order"][:0] = ["character_voice", "character_voice_language"]
             builder.add("character_voice", ["id", "name"], [voice_bundle_id, slug])
             builder.add(
@@ -193,7 +192,7 @@ def build_seed(
             "call_start_label",
         ],
         [
-            _CHARACTER_ID,
+            character_id,
             profile.name,
             slug,
             _GENDER_KO[profile.gender],
@@ -253,8 +252,8 @@ def build_seed(
             "tags",
         ],
         [
-            _CARD_ID,
-            _CHARACTER_ID,
+            row_id("character_profile_card", 0),
+            character_id,
             "ko",
             None,
             None,
@@ -318,7 +317,8 @@ def build_seed(
                 "updated_at",
             ],
             _stage_row(
-                _STAGE_BASE + index,
+                character_id,
+                row_id("character_stage", index),
                 str(chapter_uid(package.characterId, chapter.chapterId)),
                 index,
                 chapter,
@@ -337,15 +337,16 @@ def build_seed(
         ("chapters[].relationshipStage", "api-svc character_stage.entry_relationship_stage", "")
     )
 
-    next_media = _MEDIA_BASE
+    media_no = 0
 
     def add_media(path: Path, media_type: str, rel: str) -> int:
-        nonlocal next_media
-        media_id = next_media
-        next_media += 1
+        nonlocal media_no
+        index = media_no
+        media_no += 1
+        media_id = row_id("media", index)
         data = path.read_bytes()
         size = _png_size(data) if media_type == "image" else None
-        key = f"api-svc/protected/characters/{_CHARACTER_ID}/{slug}/{rel}"
+        key = f"api-svc/protected/characters/{character_id}/{slug}/{rel}"
         builder.add("media", ["id", "media_type", "status"], [media_id, media_type, "ready"])
         builder.add(
             "file_store",
@@ -362,7 +363,7 @@ def build_seed(
                 "source_ref",
             ],
             [
-                _FILE_BASE + media_id,
+                row_id("file_store", index),
                 media_id,
                 "original",
                 key,
@@ -389,7 +390,7 @@ def build_seed(
     builder.add(
         "character_media",
         ["id", "character_id", "media_id", "usage_type", "content_order", "character_stage_id"],
-        [_LINK_BASE + link_no, _CHARACTER_ID, hero_id, "profile_photo", 0, None],
+        [row_id("character_media", link_no), character_id, hero_id, "profile_photo", 0, None],
     )
 
     frame_ids: dict[str, int] = {}
@@ -404,12 +405,12 @@ def build_seed(
             "character_media",
             ["id", "character_id", "media_id", "usage_type", "content_order", "character_stage_id"],
             [
-                _LINK_BASE + link_no,
-                _CHARACTER_ID,
+                row_id("character_media", link_no),
+                character_id,
                 frame_ids[chapter.chapterId],
                 "stage_photo",
                 chapter.chapterNo,
-                _STAGE_BASE + chapter.chapterNo,
+                row_id("character_stage", chapter.chapterNo),
             ],
         )
     mapping.append(
@@ -440,8 +441,8 @@ def build_seed(
                 "mood_from",
             ],
             [
-                _VIDEO_BASE,
-                _CHARACTER_ID,
+                row_id("character_video", 0),
+                character_id,
                 media_id,
                 "calls",
                 video.title or "소개 영상",
@@ -457,7 +458,7 @@ def build_seed(
         builder.add(
             "character_media",
             ["id", "character_id", "media_id", "usage_type", "content_order", "character_stage_id"],
-            [_LINK_BASE + link_no, _CHARACTER_ID, media_id, "explore_video", 0, None],
+            [row_id("character_media", link_no), character_id, media_id, "explore_video", 0, None],
         )
         mapping.append(("videos[INTRO]", "api-svc character_video(context=calls, idle)", ""))
         mapping.append(
@@ -495,7 +496,7 @@ def build_seed(
                 "pick_role",
             ],
             [
-                _CLIP_BASE + clip_no,
+                row_id("character_clip", clip_no),
                 media_id,
                 video.clipKey,
                 "v1",
@@ -512,7 +513,7 @@ def build_seed(
                     "polarity": "positive" if _mood(video) == "good" else "negative",
                 },
                 exported_at,
-                _STAGE_BASE + chapter_no,
+                row_id("character_stage", chapter_no),
                 "free",
                 "ALL",
                 None,
@@ -527,8 +528,8 @@ def build_seed(
             "character_clip_slot",
             ["id", "clip_id", "play_type", "mood_from", "label", "icon", "sort_order", "is_active"],
             [
-                _SLOT_BASE + clip_no,
-                _CLIP_BASE + clip_no,
+                row_id("character_clip_slot", clip_no),
+                row_id("character_clip", clip_no),
                 "idle" if is_idle else "reaction",
                 None if is_idle else _mood(video),
                 None,
@@ -560,7 +561,7 @@ def build_seed(
             (
                 row
                 for row in builder.tables["character_clip"]["rows"]
-                if row[2] == video.clipKey and row[11] == _STAGE_BASE + chapter_no
+                if row[2] == video.clipKey and row[11] == row_id("character_stage", chapter_no)
             ),
             None,
         )
@@ -570,12 +571,12 @@ def build_seed(
             "character_media",
             ["id", "character_id", "media_id", "usage_type", "content_order", "character_stage_id"],
             [
-                _LINK_BASE + link_no,
-                _CHARACTER_ID,
+                row_id("character_media", link_no),
+                character_id,
                 media[1],
                 "stage_preview",
                 chapter_no,
-                _STAGE_BASE + chapter_no,
+                row_id("character_stage", chapter_no),
             ],
         )
     mapping.append(
