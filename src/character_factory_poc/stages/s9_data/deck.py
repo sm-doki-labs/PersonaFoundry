@@ -254,7 +254,6 @@ def _rev_dir(session):
 def _write_and_review(session, slots, ids, notes, budget):
     from character_factory_poc.stages.s9_data import checks, samples
 
-    inputs = samples.batch_inputs(session, slots, ids, notes)
     args = dict(
         ctx=session.ctx,
         cid=session.cid,
@@ -263,32 +262,43 @@ def _write_and_review(session, slots, ids, notes, budget):
         rev_dir=_rev_dir(session),
         contract=samples.WriterOutput,
     )
-    output, ref, actual = request(
-        **args, task="sft_answers", role="data_deck_writer", inputs=inputs
-    )
     specs = samples._specs(session, slots)
-    written = [dump(c) for c in output.conversations]
-    problems = checks.batch_problems(written, specs, session.system)
-    if problems:
-        raise CheckFailed(session.stage, problems)
-    conversations = samples.assemble(
-        replace(session, writer_model=actual), slots, ids, written, ref
-    )
-    # Check assembled scene+system length as well as the pre-assembly checks.
-    problems = [
-        p
-        for c, spec in zip(conversations, specs, strict=True)
-        for p in checks.conversation_problems(c, spec)
-    ]
-    if problems:
-        raise CheckFailed(session.stage, problems)
+    attempt_notes = list(notes)
+    # D-0138: mechanical check failures get max_retries rewrites with the problems as
+    # review notes (the legacy writer path also rewrites); then the batch fails.
+    for attempt in range(1 + max(0, session.cfg.max_retries)):
+        inputs = samples.batch_inputs(session, slots, ids, attempt_notes)
+        output, ref, actual = request(
+            **args, task="sft_answers", role="data_deck_writer", inputs=inputs
+        )
+        written = [dump(c) for c in output.conversations]
+        problems = checks.batch_problems(written, specs, session.system)
+        if not problems:
+            conversations = samples.assemble(
+                replace(session, writer_model=actual), slots, ids, written, ref
+            )
+            # Check assembled scene+system length as well as the pre-assembly checks.
+            problems = [
+                f"{i + 1}번째: {p}"
+                for i, (c, spec) in enumerate(zip(conversations, specs, strict=True))
+                for p in checks.conversation_problems(c, spec)
+            ]
+        if not problems:
+            break
+        if attempt == max(0, session.cfg.max_retries):
+            raise CheckFailed(session.stage, problems)
+        attempt_notes = [
+            "; ".join(p.split(": ", 1)[1] for p in problems if p.startswith(f"{i + 1}번째:"))
+            or notes[i]
+            for i in range(len(slots))
+        ]
     review = _review(session, budget, conversations, 0)
     flagged = {r.conversationId: r.errors for r in review.reviews if r.errors}
     if not flagged:
         return conversations
     positions = [i for i, cid in enumerate(ids) if cid in flagged]
     correction_inputs = {
-        "system": session.system,
+        "system": samples.batch_inputs(session, slots, ids, notes)["system"],
         "handoff": dump(session.handoff),
         "conversations": [
             {
@@ -310,7 +320,7 @@ def _write_and_review(session, slots, ids, notes, budget):
     for pos, replacement in zip(positions, replacements, strict=True):
         # Repair cannot change turn count, so the writer's long-dialogue position
         # markers stay valid; carry them when the repair model leaves them empty.
-        for key in ("topicShiftAt", "lateTriggerAt"):
+        for key in ("topicShiftAt", "lateTriggerAt", "flowBeats"):
             if not replacement.get(key):
                 replacement[key] = written[pos].get(key, [])
     for pos, replacement in zip(positions, replacements, strict=True):

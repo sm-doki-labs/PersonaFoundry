@@ -44,7 +44,7 @@ def test_formal_endings_conflict_with_a_haeyo_plan():
 
 def test_builtin_actor_rules_describe_speaking_in_a_video_call():
     rules, ref = load_actor_rules()
-    assert ref == "builtin:actor-system-rules-v3"
+    assert ref == "builtin:actor-system-rules-v4"
     assert "문자 대화" not in rules and "영상통화" in rules
 
 

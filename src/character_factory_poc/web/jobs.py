@@ -33,7 +33,11 @@ from character_factory_poc.web.settings import WebSettings
 MAX_LOG_LINES = 2000
 MAX_HISTORY = 200
 MAX_CREATOR_BRIEF_CHARS = 20_000
-ACTIONS = {"run"}
+# D-0130: train = 유료 학습 제출·완료까지(비용 확인 필요).
+# skip-training = 학습 없이 진행을 고르고 이어서 실행한다.
+ACTIONS = {"run", "train", "skip-training"}
+TRAIN_STARTABLE = {"plan", "stopped", "fail", "hold", "done", "skip"}
+SKIP_ALLOWED = {"plan", "stopped", "fail"}
 _JOB_ID_RE = re.compile(r"^job-[A-Za-z0-9-]{1,64}$")
 
 
@@ -253,6 +257,8 @@ class JobManager:
         bad = [s for s in confirmed if not isinstance(s, str) or s not in stages]
         if bad:
             raise WebError(400, f"confirm은 단계 ID 목록이다: {bad!r}")
+        if action in {"train", "skip-training"}:
+            self._check_training_action(char_dir, action, confirmed)
         with self._lock:
             running = self._active.get(character_id)
             if running:
@@ -278,6 +284,22 @@ class JobManager:
         )
         thread.start()
         return job.as_dict(include_log=False)
+
+    def _check_training_action(self, char_dir: Path, action: str, confirmed: list[str]) -> None:
+        """학습 조작이 지금 상태에서 말이 되는지 본다(D-0130)."""
+        from character_factory_poc.web.model_path import training_view
+
+        state = reads.read_state(char_dir)[0]
+        kind = training_view(char_dir, state)["state"]
+        if action == "train":
+            if "s10t" not in confirmed:
+                raise WebError(
+                    400, "유료 학습은 비용을 확인한 뒤 시작해요(confirm에 s10t가 필요하다)"
+                )
+            if kind not in TRAIN_STARTABLE:
+                raise WebError(409, f"지금은 학습을 시작할 수 없어요(학습 상태 {kind})")
+        elif kind not in SKIP_ALLOWED:
+            raise WebError(409, f"지금은 학습 없이 진행을 고를 수 없어요(학습 상태 {kind})")
 
     def request_resume(self, character_id: str) -> dict | None:
         """관문 결정 뒤 이어서 돌린다(D-0049, LLD §6.7). 이미 돌고 있으면 끝난 뒤 한 번 더."""
@@ -308,7 +330,10 @@ class JobManager:
         self._run_locked(job)
         with self._lock:
             again = self._rerun.pop(job.character_id, False)
-        if again:
+        # 학습이 끝나면 평가부터 이어서 돈다(자동 재개 설정일 때). 평가가 GPU를 빌려야 하면
+        # 오케스트레이터가 실행 확인을 받는다(D-0130).
+        trained = job.action == "train" and job.status == "succeeded" and job.stopped_at == "s10t"
+        if again or trained:
             self.request_resume(job.character_id)
 
     def _run_locked(self, job: Job) -> None:
@@ -321,7 +346,7 @@ class JobManager:
             router = self._stdout_router()
             router.register(stream)
             try:
-                log = self._runner(job, stream)
+                log = self._dispatch(job, stream)
                 job.stopped_at = log.stopped_at
                 job.steps = list(log.steps)
                 job.waiting = list(log.waiting)
@@ -367,6 +392,73 @@ class JobManager:
         }
         values.update(over)
         return RunOptions(**values)
+
+    def _dispatch(self, job: Job, stream: _JobStream) -> RunLog:
+        if job.action == "train":
+            return self._run_train(job)
+        if job.action == "skip-training":
+            self._choose_skip(job.character_id)
+        return self._runner(job, stream)
+
+    def _choose_skip(self, character_id: str) -> None:
+        from character_factory_poc.stages.s10_train.io import choose_skip
+
+        rev = self._train_rev(character_id)
+        if rev is None:
+            raise RuntimeError("학습 계획이 없어 '학습 없이 진행'을 남길 수 없다")
+        choose_skip(rev, now_iso())
+        self._append_log_line(character_id, "s10t: 학습 없이 진행을 골랐다")
+
+    def _train_rev(self, character_id: str) -> Path | None:
+        from character_factory_poc.web.model_path import _latest
+
+        return _latest(reads.character_dir(self.root, character_id) / "s10-train", "tr")
+
+    def _run_train(self, job: Job) -> RunLog:
+        """유료 학습: 최신 계획이 그대로면 그 계획으로, 아니면 새 계획을 세워 끝까지 몬다(D-0130).
+
+        GPU 임대·감시·회수·반납 규칙은 cfp train drive와 같다. 화면의 중단 요청은
+        stop-request.json으로 들어와 drive가 GPU를 반납하고 멈춘다.
+        """
+        from character_factory_poc.stages.s10_train.drive import DriveStopped, drive_s10t
+        from character_factory_poc.stages.s10_train.io import (
+            clear_skip,
+            read_run,
+            resolve_providers,
+            run_path,
+        )
+        from character_factory_poc.stages.s10_train.run import run_s10t
+
+        config = load_config(self.root, self.settings.config_path)
+        ctx = Context(config=config, execute=True)
+        cid = job.character_id
+        log = RunLog()
+        rev = self._train_rev(cid)
+        if rev is not None:
+            clear_skip(rev)
+        planned = rev is not None and all(
+            run_path(rev, item.adapter).is_file()
+            and read_run(run_path(rev, item.adapter)).status == "PLANNED"
+            for item in resolve_providers(ctx, None)
+        )
+        which = f"({rev.name} 계획)" if planned and rev else "(새 계획)"
+        log.add("s10t: 학습 실행" + which)
+        try:
+            out = drive_s10t(ctx, cid) if planned else run_s10t(ctx, cid)
+        except DriveStopped:
+            log.add("s10t: 사람이 학습을 중단했다. GPU를 반납했다")
+            log.stopped_at = "stopped"
+            return log
+        log.add(f"s10t: 학습 끝 → {out}")
+        log.stopped_at = "s10t"
+        return log
+
+    def _append_log_line(self, character_id: str, line: str) -> None:
+        with self._lock:
+            job_id = self._active.get(character_id)
+            job = self._jobs.get(job_id) if job_id else None
+        if job is not None:
+            self._append_log(job, line)
 
     def _run_default(self, job: Job, stream: _JobStream) -> RunLog:
         """cli run과 같은 경로: 설정을 읽어 Context를 만들고 run_until을 돌린다."""

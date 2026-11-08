@@ -197,7 +197,11 @@ def test_build_requires_g7a(tmp_path):
         build.run_build(ctx, cid)
 
 
-def test_build_sns_rewrite_keeps_user_turns_and_retries(tmp_path):
+def test_build_sns_rewrite_uses_flow_only_and_retries(tmp_path):
+    """흐름 시드만 보고 양쪽을 새로 쓴다(D-0135, D-0138).
+
+    작가 입력에는 원문이 없고, 캐릭터 말이 길이 상한을 넘은 첫 응답은 다시 쓴다.
+    """
     write_sns(tmp_path / "sns.jsonl", count=4)
     toml = s9_toml(tmp_path, materials_base='["SNS_REWRITE"]')
     ctx, cid, fake = setup(tmp_path, toml=toml, fake=FakeWriterModel(sns_bad_first=True))
@@ -210,7 +214,12 @@ def test_build_sns_rewrite_keeps_user_turns_and_retries(tmp_path):
     assert sns_rows
     for row in sns_rows:
         conv = validate("conversation-v1", json.loads((out / row["path"]).read_text("utf-8")))
-        assert conv.checks.blocking["sns_user_turns_verbatim"] is True
+        assert conv.checks.blocking["source_overlap"] is True
+        assert conv.checks.blocking["flow_beats"] is True
+        assert conv.checks.blocking["turn_length"] is True
+        assert conv.provenance.flowBeats[0] == "상대가 만날 시간을 묻는다"  # 시드의 사건
+        assert conv.provenance.relationship and conv.provenance.channel == "text"
+        assert "[RELATIONSHIP]" in conv.system and "[CHANNEL]" in conv.system
         assert conv.skeletonId.startswith("sns-sns")
         assert conv.provenance.sourceRef.startswith("sns")
 
@@ -406,10 +415,14 @@ def test_checks_flag_sns_and_forbidden():
         skeletonId="sns-1",
         system="system",
         messages=[
-            Message(role="user", content="원문 질문"),
+            Message(role="user", content="새로 쓴 질문"),
             Message(role="assistant", content="다시 쓴 답"),
         ],
-        provenance={"writerModel": "fake", "requestRef": "ref"},
+        provenance={
+            "writerModel": "fake",
+            "requestRef": "ref",
+            "flowBeats": ["상대가 묻는다", "캐릭터가 답한다", "둘이 정리한다"],
+        },
     )
     assert all(checks.evaluate(good, spec).values())
     bad = good.model_copy(
@@ -417,11 +430,12 @@ def test_checks_flag_sns_and_forbidden():
             "messages": [
                 Message(role="user", content="바꾼 질문"),
                 Message(role="assistant", content="연락하지 마. 나는 대학생이야."),
-            ]
+            ],
+            "provenance": good.provenance.model_copy(update={"flowBeats": []}),
         }
     )
     result = checks.evaluate(bad, spec)
-    assert result["sns_user_turns_verbatim"] is False
+    assert result["flow_beats"] is False  # 뼈대 없이 썼다
     assert result["forbidden_phrases"] is False
     assert result["source_facts_absent"] is False
     assert len(checks.problems_of(result)) == 3
@@ -490,3 +504,379 @@ def _plan_for_split():
             writerModel="fake",
         )
     )
+
+
+def _long_sns(path, sessions: int, turns: int) -> None:
+    rows = []
+    for s in range(1, sessions + 1):
+        msgs = []
+        for t in range(turns):
+            role = "user" if t % 2 == 0 else "assistant"
+            msgs.append({"role": role, "content": f"{s}번 대화 {t}번째 말"})
+        rows.append({"conversationId": f"long{s:02d}", "messages": msgs})
+    rows.append({"conversationId": "short", "messages": msgs[:2]})
+    rows.append(
+        {"conversationId": "gap", "messages": [msgs[0], {"role": "assistant", "content": " "}] * 3}
+    )
+    rows.append({"conversationId": "same", "messages": [msgs[0], msgs[0], msgs[1], msgs[1]]})
+    rows.append({"conversationId": "lead", "messages": [msgs[1]] + msgs[:6] + [msgs[0]]})
+    path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", "utf-8")
+
+
+def test_long_sessions_are_cut_into_windows_with_one_session_id(tmp_path):
+    """긴 세션은 12턴 이하 구간으로 자르고 같은 세션 ID로 묶는다.
+
+    버린 후보는 이유별로 센다(D-0131).
+    """
+    path = tmp_path / "sns.jsonl"
+    _long_sns(path, sessions=2, turns=30)
+    sources, stats = samples.read_sns_sources(str(path), limit=5)
+    # 세션마다 첫 구간부터 돌아가며 놓는다(앞 세션이 자리를 다 차지하지 않게).
+    assert [s["sourceId"] for s in sources] == [
+        "long01~w1",
+        "long02~w1",
+        "lead",
+        "long01~w2",
+        "long02~w2",
+    ]
+    every = samples.read_sns_sources(str(path), limit=50)[0]
+    first = [s for s in every if s["sessionId"] == "long01"]
+    assert [s["sourceId"] for s in first] == ["long01~w1", "long01~w2", "long01~w3"]
+    assert [len(s["turns"]) for s in first] == [12, 12, 6]
+    assert all(
+        s["turns"][0]["role"] == "user" and s["turns"][-1]["role"] == "assistant" for s in sources
+    )
+    lead = next(s for s in every if s["sourceId"] == "lead")
+    assert len(lead["turns"]) == 6  # 앞의 캐릭터 말과 끝의 사용자 말만 다듬었다
+    assert stats["sessions"] == 6 and stats["split"] == 2 and stats["windows"] == 7
+    assert stats["dropped"] == {
+        "too_short": 1,
+        "empty_turn": 1,
+        "not_alternating": 1,
+        "over_limit": 2,
+    }
+    line = samples.source_warning(stats, used=4)
+    assert (
+        line.startswith("실제 대화 재료: 후보 대화 6개")
+        and "구간 7개" in line
+        and "4턴보다 짧음 1" in line
+    )
+    assert "상한 5개를 넘은 구간 2개" in line and "쓴 구간 4개" in line
+
+
+def test_build_keeps_session_windows_in_one_split_and_warns(tmp_path):
+    _long_sns(tmp_path / "sns.jsonl", sessions=4, turns=40)
+    toml = s9_toml(tmp_path, materials_base='["SNS_REWRITE"]')
+    ctx, cid, _fake = setup(tmp_path, toml=toml)
+    rev_dir = samples.run_samples(ctx, cid)
+    _all_select(ctx, cid, rev_dir)
+    out = build.run_build(ctx, cid)
+    rows = [r for r in _read_jsonl(out / "index.jsonl") if r["material"] == "SNS_REWRITE"]
+    assert rows
+    splits: dict[str, set] = {}
+    for row in rows:
+        splits.setdefault(row["skeletonId"], set()).add(row["split"])
+    assert all(len(v) == 1 for v in splits.values()), splits
+    assert all(k.startswith("sns-") and "~w" not in k for k in splits)
+    report = json.loads((out / "check-report.json").read_text("utf-8"))
+    assert report["sources"]["split"] == 4 and report["sources"]["used"] == len(rows)
+    assert any(w.startswith("실제 대화 재료: 후보 대화 8개") for w in report["warnings"])
+
+
+def _mixed_sources(path: Path, sns: int, nikl: int, turns: int = 8) -> None:
+    rows = []
+    for kind, count in (("AIHUB_SNS", sns), ("NIKL", nikl)):
+        for s in range(count):
+            msgs = [
+                {"role": "user" if t % 2 == 0 else "assistant", "content": f"{kind} {s}-{t}"}
+                for t in range(turns)
+            ]
+            rows.append({"conversationId": f"{kind.lower()}-{s}", "source": kind, "messages": msgs})
+    path.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", "utf-8")
+
+
+def test_corpus_windows_mix_in_as_call_scenes(tmp_path):
+    """말뭉치 구간은 앞에서 몇 개를 쓰든 약 20%가 되게 SNS 사이에 놓고 통화로 표시한다(D-0134)."""
+    path = tmp_path / "sns.jsonl"
+    _mixed_sources(path, sns=6, nikl=4)
+    sources, stats = samples.read_sns_sources(str(path), limit=5, corpus_share=0.2)
+    assert [s["source"] for s in sources] == ["SNS", "SNS", "NIKL", "SNS", "SNS"]
+    assert {s["channel"] for s in sources if s["source"] == "NIKL"} == {"call"}
+    assert {s["channel"] for s in sources if s["source"] == "SNS"} == {"text"}
+    assert stats["bySource"]["NIKL"] == {"sessions": 4, "windows": 4, "offered": 1}
+    assert stats["dropped"] == {"over_limit": 2, "over_share": 3}
+    every = samples.read_sns_sources(str(path), limit=50, corpus_share=0.2)[0]
+    for n in (5, 10):
+        assert sum(s["source"] == "NIKL" for s in every[:n]) == round(n * 0.2)
+    # SNS가 바닥나면 말뭉치를 더 넣지 않는다(6 SNS + 말뭉치 2 = 8).
+    assert len(every) == 8
+    stats["usedBySource"] = {"SNS": 4, "NIKL": 1}
+    line = samples.source_warning(stats, used=5)
+    assert "말뭉치 비율 20%를 넘은 말뭉치 구간 3개" in line
+    assert "쓴 구간 5개(SNS 4 · 말뭉치 1, 말뭉치는 통화 장면)" in line
+    only = tmp_path / "nikl.jsonl"
+    _mixed_sources(only, sns=0, nikl=3)
+    alone = samples.read_sns_sources(str(only), limit=10)[0]
+    assert [s["source"] for s in alone] == ["NIKL"] * 3  # 말뭉치만 있으면 비율을 적용하지 않는다
+
+
+def test_call_scenes_allow_jamo_marks_but_not_emoji():
+    """ㅋㅋ·ㅠㅠ·^^는 문자·통화 구분 없이 쓰고 그림 이모지만 막는다(D-0136, D-0137)."""
+    turns = [{"role": "user", "content": "여보세요"}, {"role": "assistant", "content": "원문"}]
+
+    def run(reply: str, material: str = "SNS_REWRITE") -> dict:
+        source = {"sourceId": "nikl-1", "channel": "call", "turns": turns}
+        spec = checks.ConvSpec(
+            cluster_id="base",
+            system="system",
+            material=material,
+            source=source if material == "SNS_REWRITE" else None,
+        )
+        conv = Conversation(
+            conversationId="c1",
+            clusterId="base",
+            material=material,
+            skeletonId="sns-nikl-1",
+            system="system",
+            messages=[
+                Message(role="user", content="여보세요 나야"),
+                Message(role="assistant", content=reply),
+            ],
+            provenance={
+                "writerModel": "fake",
+                "requestRef": "ref",
+                "flowBeats": ["상대가 전화를 건다", "캐릭터가 받는다", "근황을 나눈다"]
+                if material == "SNS_REWRITE"
+                else [],
+            },
+        )
+        return checks.evaluate(conv, spec)
+
+    for reply in ("ㅋㅋ 진짜?", "알겠어ㅠㅠ", "좋아^^", "보고 싶었어♥", "아 진짜? 하하"):
+        result = run(reply)
+        assert all(result.values()), (reply, result)
+    for reply in ("좋아 😊", "고마워 ❤️", "헐 🎉"):
+        for material in ("SNS_REWRITE", "SYNTH"):
+            result = run(reply, material)
+            assert result["no_emoji"] is False, (reply, material)
+            assert checks.problems_of(result) == [
+                "no_emoji: 캐릭터 말에 그림 이모지가 있다(ㅋㅋ·ㅠㅠ·^^는 써도 된다)"
+            ]
+
+
+def test_build_reports_mix_and_sends_channel_to_writer(tmp_path):
+    _mixed_sources(tmp_path / "sns.jsonl", sns=12, nikl=6)
+    toml = s9_toml(tmp_path, materials_base='["SNS_REWRITE"]')
+    from tests.support.data_fakes import _block
+
+    class Recorder(FakeWriterModel):
+        sent: list = []
+
+        def writer(self, req):
+            self.sent.extend(_block(req, "batch").get("sources", []))
+            return super().writer(req)
+
+    ctx, cid, fake = setup(tmp_path, toml=toml, fake=Recorder())
+    rev_dir = samples.run_samples(ctx, cid)
+    _all_select(ctx, cid, rev_dir)
+    out = build.run_build(ctx, cid)
+    report = json.loads((out / "check-report.json").read_text("utf-8"))
+    mix = report["sources"]["usedBySource"]
+    assert mix.get("NIKL") and mix["SNS"] > mix["NIKL"]
+    assert sum(mix.values()) == report["sources"]["used"]
+    assert any("말뭉치는 통화 장면" in w for w in report["warnings"])
+    pairs = {(s["origin"], s["channel"]) for s in fake.sent}
+    assert pairs == {("SNS", "text"), ("NIKL", "call")}
+
+
+def test_rewrite_blocks_ten_char_overlap_with_source():
+    """대사·뼈대가 원본과 공백·문장 부호를 빼고 10글자 이상 이어서 같으면 막는다.
+
+    학습 가이드 §7.1, D-0135.
+    """
+    turns = [
+        {"role": "user", "content": "내일 아침에 같이 등산 가기로 한 거 기억나?"},
+        {"role": "assistant", "content": "응 당연하지 몇 시에 만나"},
+        {"role": "user", "content": "일곱 시 반에 역 앞에서 보자"},
+        {"role": "assistant", "content": "알겠어 늦지 마"},
+    ]
+    spec = checks.ConvSpec(
+        cluster_id="base",
+        system="system",
+        material="SNS_REWRITE",
+        source={"sourceId": "s1", "channel": "text", "turns": turns},
+    )
+    beats = ["상대가 약속을 확인한다", "캐릭터가 시간을 묻는다", "만날 곳을 정한다"]
+
+    def conv(user: str, beats_: list[str] = beats, extra: int = 0) -> Conversation:
+        msgs = [
+            Message(role="user", content=user),
+            Message(role="assistant", content="그럼 몇 시에 볼까?"),
+            Message(role="user", content="여덟 시 어때"),
+            Message(role="assistant", content="좋아, 정문에서 봐."),
+        ] + [
+            Message(role="user" if k % 2 == 0 else "assistant", content=f"덧붙인 말 {k}")
+            for k in range(extra)
+        ]
+        return Conversation(
+            conversationId="c1",
+            clusterId="base",
+            material="SNS_REWRITE",
+            skeletonId="sns-s1",
+            system="system",
+            messages=msgs,
+            provenance={"writerModel": "fake", "requestRef": "ref", "flowBeats": beats_},
+        )
+
+    assert all(checks.evaluate(conv("주말에 산에 가자던 거 아직 유효해?"), spec).values())
+    # 띄어쓰기·문장 부호를 바꿔도 10글자 이상 이어서 같으면 막는다.
+    copied = checks.evaluate(conv("내일 아침에, 같이 등산 가기로 했잖아"), spec)
+    assert copied["source_overlap"] is False
+    assert checks.problems_of(copied)[0].startswith("source_overlap:")
+    # 뼈대에 원문 문장을 넣어도 막는다.
+    leak = beats[:2] + ["일곱 시 반에 역 앞에서 보자"]
+    leaked = checks.evaluate(conv("주말 산행 유효해?", leak), spec)
+    assert leaked["source_overlap"] is False
+    # 메시지 수는 원본과 2개까지 다를 수 있다.
+    assert checks.evaluate(conv("주말 산행 유효해?", extra=2), spec)["source_flow_turns"] is True
+    assert checks.evaluate(conv("주말 산행 유효해?", extra=4), spec)["source_flow_turns"] is False
+    said = [t["content"] for t in turns]
+    assert checks.longest_overlap(["내일 아침에, 같이 등산 가기로"], said) == 12
+
+
+def test_training_prompt_keeps_persona_and_drops_service_rules():
+    """학습용 짧은 프롬프트: 페르소나 칸 + 사실 규칙 + 관계·채널(D-0138, 한소민 가이드 §3)."""
+    from types import SimpleNamespace
+
+    from character_factory_poc.stages.s9_data import training_prompt as tp
+
+    text = "\n".join(
+        [
+            "[ACTOR_IDENTITY]",
+            "캐릭터 이름: 가온",
+            "",
+            "[INPUT_AND_BOUNDARIES]",
+            "서비스 공통 규칙 전문이다. " * 50,
+            "",
+            "[PERSONA / FACTS]",
+            "가온은 29세 꽃집 사장이다.",
+            "",
+            "[PERSONA / CHOICES]",
+            "상대가 놀릴 때 → 가온은 더 크게 받아친다. 상대가 진지하면 이 경향을 쓰지 않는다. "
+            "대화 전체에서 드물게 나온다.",
+            "",
+            "[PERSONA / VOICE]",
+            "해요체를 기본으로 쓴다.",
+            "",
+            "[OUTPUT]",
+            "말만 쓴다.",
+        ]
+    )
+    pair = SimpleNamespace(long=SimpleNamespace(text=text), short=SimpleNamespace(text=text))
+    built = tp.build(pair)
+    assert built.origin == "persona-sections"
+    assert "서비스 공통 규칙" not in built.core and "[OUTPUT]" not in built.core
+    assert "가온은 더 크게 받아친다." in built.core
+    assert "이 경향을 쓰지 않는다" not in built.core and "드물게" not in built.core
+    assert "[TRAINING_RULES]" in built.core
+    system = built.system("NEUTRAL", "call")
+    assert "[RELATIONSHIP]\n아직 가깝지 않은 상대다" in system
+    assert "[CHANNEL]\n음성 통화다" in system
+    legacy = tp.build(SimpleNamespace(long=SimpleNamespace(text="## 성격\n밝다"), short=None))
+    assert legacy.origin == "legacy-short" and legacy.core == "## 성격\n밝다"
+    shares = {"FAVORABLE": 0.45, "STRONGLY_FAVORABLE": 0.3, "NEUTRAL": 0.15, "UNFAVORABLE": 0.1}
+    seq = tp.assign_relationships(shares, 0, 20)
+    assert [seq.count(k) for k in shares] == [9, 6, 3, 2]
+    assert tp.assign_relationships(shares, 5, 3) == seq[5:8]  # 배치가 나뉘어도 같은 순서
+
+
+def test_writer_sees_seed_not_source_and_seeds_are_reused(tmp_path):
+    """작가 입력에는 원문이 없고 시드만 있다. 시드는 한 번 뽑아 다시 쓴다(D-0138)."""
+    from tests.support.data_fakes import _block
+
+    write_sns(tmp_path / "sns.jsonl", count=4)
+    toml = s9_toml(tmp_path, materials_base='["SNS_REWRITE"]')
+
+    class Recorder(FakeWriterModel):
+        batches: list = []
+
+        def writer(self, req):
+            self.batches.append(_block(req, "batch"))
+            return super().writer(req)
+
+    ctx, cid, fake = setup(tmp_path, toml=toml, fake=Recorder())
+    rev_dir = samples.run_samples(ctx, cid)
+    sent = [s for b in fake.batches for s in b.get("sources", [])]
+    assert sent and all("turns" not in s and s["seed"]["beats"] for s in sent)
+    assert all(b["assignments"] and b["turnMaxChars"] == 60 for b in fake.batches)
+    saved = sorted((rev_dir / "seeds").glob("*.json"))
+    assert saved and all("turns" not in json.loads(p.read_text("utf-8"))["seed"] for p in saved)
+    assert json.loads((rev_dir / "training-prompt.json").read_text("utf-8"))["coreChars"] > 0
+    calls = fake.seed_calls
+    _all_select(ctx, cid, rev_dir)
+    build.run_build(ctx, cid)
+    sources = {s["sourceId"] for b in fake.batches for s in b.get("sources", [])}
+    assert fake.seed_calls - calls <= len(sources)  # 이미 뽑은 시드는 다시 뽑지 않는다
+    assert len(list((rev_dir / "seeds").glob("*.json"))) == len(sources)
+
+
+def test_seed_check_rejects_copied_source_text():
+    from character_factory_poc.stages.s9_data import seeds
+
+    src = {
+        "sourceId": "s1",
+        "turns": [
+            {"role": "user", "content": "내일 아침에 같이 등산 가기로 한 거 기억나?"},
+            {"role": "assistant", "content": "응 당연하지"},
+        ],
+    }
+    seed = {
+        "sourceId": "s1",
+        "scene": "퇴근길에 문자를 주고받는 저녁.",
+        "counterpart": "상대: 같은 동네 친구.",
+        "beats": ["상대가 약속을 확인한다", "캐릭터가 답한다", "시간을 정한다", "마무리한다"],
+        "rhythm": "짧게 주고받는다.",
+    }
+    assert seeds.seed_problems(seeds.SeedOutput(seeds=[seed]), [src]) == []
+    copied = {**seed, "beats": [*seed["beats"][:3], "내일 아침에 같이 등산 가기로 한다"]}
+    assert seeds.seed_problems(seeds.SeedOutput(seeds=[copied]), [src])
+    wrong = {**seed, "sourceId": "other"}
+    assert seeds.seed_problems(seeds.SeedOutput(seeds=[wrong]), [src])
+
+
+def test_somin_style_checks():
+    """한소민 검사기에서 옮긴 항목: 한 턴 60자, 가까운 관계 '네,' 시작, 같은 말 반복, 경고 3종."""
+    spec = checks.ConvSpec(
+        cluster_id="base",
+        system="system",
+        material="SYNTH",
+        relationship="FAVORABLE",
+        turn_max_chars=60,
+    )
+
+    def conv(*replies: str, user: str = "오늘 뭐 해") -> Conversation:
+        msgs = []
+        for r in replies:
+            msgs += [Message(role="user", content=user), Message(role="assistant", content=r)]
+        return Conversation(
+            conversationId="c1",
+            clusterId="base",
+            material="SYNTH",
+            skeletonId="synth-1",
+            system="system",
+            messages=msgs,
+            provenance={"writerModel": "fake", "requestRef": "ref"},
+        )
+
+    assert all(checks.evaluate(conv("가게 정리 중이야", "너는?"), spec).values())
+    assert checks.evaluate(conv("가" * 61), spec)["turn_length"] is False
+    assert checks.evaluate(conv("네, 정리 중이에요"), spec)["close_formal_opener"] is False
+    neutral = checks.ConvSpec(**{**spec.__dict__, "relationship": "NEUTRAL"})
+    assert checks.evaluate(conv("네, 정리 중이에요"), neutral)["close_formal_opener"] is True
+    assert (
+        checks.evaluate(conv("오늘 반죽 망했어", "오늘 반죽 망했어ㅋㅋ"), spec)["repeated_lines"]
+        is False
+    )
+    busy = "오늘은 손님이 정말 많아서 하루 종일 정신이 하나도 없었어"
+    warns = checks.style_warnings(conv(busy, busy + "!", busy + "?", "응", "좋아", user="뭐?"))
+    assert len(warns) == 3

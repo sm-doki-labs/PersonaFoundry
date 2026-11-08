@@ -30,6 +30,7 @@ ROLE_TASKS = {
     "persona_voice_preservation": "consistency",
     "data_handoff": "scenarios",
     "data_writer": "sft_answers",
+    "data_seed": "scenarios",
 }
 TEXT_STAGES = frozenset(
     {

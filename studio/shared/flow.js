@@ -189,6 +189,8 @@
     const attempts = Number(row && row.attempts) || 0;
     const hist = (ctx.history && ctx.history[def.id]) || [];
     const gate = def.gate ? ctx.gates.get(def.gate) : null;
+    const tv = trainingStageView(ctx.training, def.id, status);
+    if (tv) return tv;
     if (status === 'APPROVED') return { kind: 'done', sub: '' };
     if (status === 'SKIPPED') return { kind: 'skip', sub: '건너뜀' };
     if (status === 'RUNNING') {
@@ -217,6 +219,7 @@
       gates: gatesById(detail),
       history: (detail && detail.history) || {},
       held: new Set(R.extractHeld(detail || {}).map((h) => h.stage)),
+      training: trainingOf(detail),
       scope: opts.scope || null
     };
     const rows = rowsById(detail);
@@ -285,6 +288,63 @@
     const m = /^[a-z]+(\d+)$/i.exec(text(rev));
     return m ? '버전 ' + m[1] : text(rev);
   }
+
+  // ---- 모델 만들기(D-0130) ----
+  // 학습 상태는 state.json의 s10t가 아니라 학습 기록(modelPath.training)에서 읽는다. 계획만 세운 학습을
+  // '완료'로 그리지 않고 '비용 확인 대기'로 보인다.
+  const MODEL_STAGES = new Set(['s9s', 's9', 's10t', 's10']);
+  function trainingOf(detail) { return (detail && detail.modelPath && detail.modelPath.training) || null; }
+  function usd(v) { return v == null || isNaN(Number(v)) ? '—' : '$' + Number(v).toFixed(2); }
+  function hoursText(h) {
+    if (h == null || isNaN(Number(h))) return '';
+    const m = Math.max(1, Math.round(Number(h) * 60));
+    return m < 60 ? m + '분' : Math.floor(m / 60) + '시간' + (m % 60 ? ' ' + (m % 60) + '분' : '');
+  }
+  function trainPhase(tr, key) { return ((tr && tr.phases) || []).find((p) => p.key === key) || null; }
+  function gpuAlive(tr) { return ((tr && tr.providers) || []).some((p) => p.gpuAlive); }
+  function trainingStageView(tr, id, status) {
+    if (!tr) return null;
+    if (id === 's10t') {
+      const ph = trainPhase(tr, 'train');
+      if (tr.state === 'plan') return { kind: 'confirm', sub: '학습 비용 확인 대기' };
+      if (tr.state === 'run') return { kind: 'run', sub: tr.stopRequested ? '중단하는 중' : '학습 중' + (ph && ph.status === 'run' && ph.meter != null ? ' · ' + ph.detail : '') };
+      if (tr.state === 'hold') return { kind: 'fail', sub: gpuAlive(tr) ? '결과 받기 실패 · GPU 남음' : '결과 받기 실패' };
+      if (tr.state === 'stopped') return { kind: 'confirm', sub: '중단함 · 다시 시작 대기' };
+      if (tr.state === 'fail') return { kind: 'fail', sub: '학습 실패 · 멈춤' };
+      if (tr.state === 'skip') return { kind: 'skip', sub: '학습 없이 진행' };
+      return null;
+    }
+    if (id === 's10' && ['plan', 'stopped', 'fail', 'run', 'hold'].includes(tr.state) && ['PENDING', 'REJECTED'].includes(status)) {
+      return { kind: 'todo', sub: tr.state === 'run' ? '학습이 끝나면 열려요' : '학습을 고르면 열려요' };
+    }
+    return null;
+  }
+  function trainingTasks(tr, busy, blocked) {
+    if (!tr) return [];
+    const why = busy ? '지금 작업이 끝나면 할 수 있어요.' : '';
+    const dl = ((tr.providers || []).map((p) => p.deadlineAt).filter(Boolean))[0];
+    if (tr.state === 'hold') {
+      const gpu = gpuAlive(tr);
+      return [{
+        kind: 'fail', stage: 's10t', order: -1,
+        title: gpu ? 'GPU가 남아 있어요' : '학습 결과를 받지 못했어요', age: '학습',
+        body: (gpu ? '결과를 받아 오지 못해 GPU를 남겨 뒀어요. 비용이 계속 나가요' + (dl ? ' · ' + clock(dl) + '에 자동 반납' : '') + '.' : '학습은 끝났지만 결과를 받아 오지 못했어요.') + ' 다시 받아 오거나 결과를 버려요.',
+        blocked,
+        actions: [{ act: 'train-retry', label: '다시 받아 오기', disabled: busy, why }, { act: 'open-model', step: 'train', label: '학습 화면 열기' }]
+      }];
+    }
+    if (['plan', 'stopped', 'fail'].includes(tr.state)) {
+      const title = tr.state === 'plan' ? '학습 비용 확인' : tr.state === 'stopped' ? '학습을 중단했어요' : '학습이 실패했어요';
+      const est = tr.estimateUsd != null ? '예상 ' + usd(tr.estimateUsd) + (tr.gpuHours ? ' · 약 ' + hoursText(tr.gpuHours) : '') + '. ' : '';
+      return [{
+        kind: 'confirm', stage: 's10t', order: 2, title, age: '유료 단계',
+        body: est + '학습을 시작하거나, 학습 없이 긴 프롬프트로 진행할지 골라요.',
+        blocked,
+        actions: [{ act: 'mconfirm', v: 'start', step: 'train', label: tr.state === 'plan' ? '학습 시작' : '다시 학습', disabled: busy, why }, { act: 'mconfirm', v: 'skip', step: 'train', label: '학습 없이 진행', disabled: busy }]
+      }];
+    }
+    return [];
+  }
   // 'video: xai_video/grok-video' 같은 공급자 표기를 쉬운 말로(D-0129).
   const KIND_KO = { video: '영상', image: '이미지', text: '글', judge: '검토' };
   const ADAPTER_KO = { xai_video: 'xAI 그록 영상', grok_oauth: '그록(계정 연결)', grok_web: '그록 웹', fake_video: '시험용 가짜 영상', fake: '시험용 가짜 모델', fake_image: '시험용 가짜 이미지', codex_image: 'Codex 이미지', openai: 'OpenAI', gemini: 'Gemini', vertex_gemini: 'Vertex Gemini' };
@@ -302,8 +362,10 @@
     const busy = Boolean(opts.jobActive);
     const rows = rowsById(detail);
     const items = [];
+    const tr = trainingOf(detail);
     graph.stages.forEach((def) => {
       if ((views[def.id] || {}).kind !== 'fail') return;
+      if (def.id === 's10t' && tr && ['hold', 'fail'].includes(tr.state)) return; // 학습 항목이 따로 알린다
       const row = rows.get(def.id) || {};
       items.push({
         kind: 'fail', stage: def.id, order: 0,
@@ -335,6 +397,7 @@
         actions: [{ act: 'review', gate: pending.id, stage, label: '검토하기' }]
       });
     });
+    trainingTasks(tr, busy, graph.byStage.has('s10t') ? remaining(graph, views, 's10t') : 0).forEach((item) => items.push(item));
     R.extractHeld(detail || {}).forEach((held) => {
       const def = graph.byStage.get(held.stage);
       items.push({
@@ -440,6 +503,7 @@
     };
     let refreshTimer = null;
     let listTimer = null;
+    let trainTimer = null;
     let source = null;
     const media = global.matchMedia ? global.matchMedia('(prefers-color-scheme: dark)') : null;
 
@@ -480,7 +544,7 @@
     }
 
     function routeId() {
-      const m = /^#c\/(.+)$/.exec(text(global.location && global.location.hash));
+      const m = /^#c\/([^/]+)(?:\/model)?$/.exec(text(global.location && global.location.hash));
       return m ? decodeURIComponent(m[1]) : null;
     }
     function route() {
@@ -630,7 +694,7 @@
         const wanted = routeId() || state.characterId || pickDefault();
         const changed = wanted !== state.characterId;
         if (changed) {
-          state.characterId = wanted; state.detail = null; state.sel = null; closeSheet(false); state.notes = []; state.open = new Set(); state.target = null;
+          state.characterId = wanted; state.detail = null; state.sel = null; closeSheet(false); state.notes = []; state.open = new Set(); state.target = null; state.mstep = null; state.mconfirm = null;
           // 새 그래프가 오기 전에는 받아 둔 같은 갈래 그래프로 그린다(이전 캐릭터의 그래프를 남기지 않는다).
           const entry = characters().find((c) => c.id === wanted);
           state.graph = state.graphs.get(graphKey(entry)) || state.graphs.get('CREATED|TRAIN') || state.graph;
@@ -641,6 +705,10 @@
           if (!(await loadCharacterGraph(wanted))) return;
         }
         await loadDetail();
+        // 학습이 도는 동안은 진행(스텝·쓴 돈)을 3초마다 다시 읽는다(D-0130). 상태 사건이 없어도 바뀐다.
+        clearTimeout(trainTimer);
+        const tr = trainingOf(state.detail);
+        if ((tr && tr.state === 'run') || (state.detail && state.detail.job && state.detail.job.action === 'train')) trainTimer = setTimeout(() => refresh(false), 3000);
         if (state.reselect) { state.reselect = false; state.sel = null; }
         const pr = state.pendingReview;
         if (pr && state.detail && state.detail.id === pr.id) {
@@ -980,7 +1048,7 @@
         const confirming = t.kind === 'confirm' && (state.confirming === t.stage || confirmingAll);
         html += '<div class="fl-item ' + t.kind + '"><span class="mk"></span><div class="tx"><div class="t1">' + E(t.title) + (t.age ? '<span class="age">' + E(t.age) + '</span>' : '') + '</div><div class="t2">' + E(t.body) + (t.blocked ? ' 뒤의 ' + t.blocked + '단계가 이 일을 기다리고 있어요.' : '') + '</div>' + (t.rec ? '<div class="rec">' + icon('spark') + E(t.rec) + '</div>' : '') + '</div>' +
           (confirming ? (confirmingAll ? confirmAllHTML() : confirmHTML(t.stage)) : '<div class="acts">' +
-          t.actions.map((a) => '<button type="button" class="btn' + (a.pri ? ' pri' : '') + '" data-act="' + a.act + '"' + (a.gate ? ' data-gate="' + E(a.gate) + '"' : '') + (a.stage ? ' data-stage="' + E(a.stage) + '"' : '') + (a.anchor ? ' data-anchor="' + E(a.anchor) + '"' : '') + (a.disabled ? ' disabled' : '') + '>' + E(a.label) + '</button>' + (a.why ? '<span class="hint">' + E(a.why) + '</span>' : '')).join('') + '</div>') + '</div>';
+          t.actions.map((a) => '<button type="button" class="btn' + (a.pri ? ' pri' : '') + '" data-act="' + a.act + '"' + (a.gate ? ' data-gate="' + E(a.gate) + '"' : '') + (a.stage ? ' data-stage="' + E(a.stage) + '"' : '') + (a.anchor ? ' data-anchor="' + E(a.anchor) + '"' : '') + (a.step ? ' data-step="' + E(a.step) + '"' : '') + (a.v ? ' data-v="' + E(a.v) + '"' : '') + (a.disabled ? ' disabled' : '') + '>' + E(a.label) + '</button>' + (a.why ? '<span class="hint">' + E(a.why) + '</span>' : '')).join('') + '</div>') + '</div>';
       });
       if (notesHTML) html += '<div class="fl-recent"><h3>방금 한 일</h3>' + notesHTML + '</div>';
       if (!tasks.length && !complete()) {
@@ -1247,16 +1315,376 @@
       const thumbs = view && Array.isArray(view.previews) ? view.previews.filter((f) => f.kind === 'image' && R.safeHref(f.url)).slice(0, 4) : [];
       const busy = Boolean(d.job) || state.busy;
       const acts = [];
+      const trv = id === 's10t' ? trainingOf(d) : null;
+      const managed = trv && ['plan', 'stopped', 'fail', 'hold', 'run', 'skip'].includes(trv.state);
+      if (managed) {
+        if (trv.state === 'hold') acts.push('<button type="button" class="btn pri block" data-act="train-retry"' + (busy ? ' disabled' : '') + '>다시 받아 오기</button>');
+        if (['plan', 'stopped', 'fail'].includes(trv.state)) acts.push('<button type="button" class="btn pri block" data-act="mconfirm" data-v="start" data-step="train"' + (busy ? ' disabled' : '') + '>' + (trv.state === 'plan' ? '학습 시작' : '다시 학습') + '</button>');
+      }
       if (x.kind === 'wait') acts.push('<button type="button" class="btn pri block" data-act="review" data-gate="' + E(def.gate) + '" data-stage="' + E(id) + '">검토하기</button>');
-      if (x.kind === 'confirm') acts.push('<button type="button" class="btn pri block" data-act="confirm" data-stage="' + E(id) + '"' + (busy ? ' disabled' : '') + '>비용 확인</button>');
-      if (x.kind === 'fail') acts.push('<button type="button" class="btn pri block" data-act="retry" data-stage="' + E(id) + '"' + (busy ? ' disabled' : '') + '>다시 실행</button>');
+      if (x.kind === 'confirm' && !managed) acts.push('<button type="button" class="btn pri block" data-act="confirm" data-stage="' + E(id) + '"' + (busy ? ' disabled' : '') + '>비용 확인</button>');
+      if (x.kind === 'fail' && !managed) acts.push('<button type="button" class="btn pri block" data-act="retry" data-stage="' + E(id) + '"' + (busy ? ' disabled' : '') + '>다시 실행</button>');
       if (gate && upper(gate.status) === 'APPROVED') acts.push('<button type="button" class="btn block" data-act="review" data-gate="' + E(def.gate) + '" data-stage="' + E(id) + '" data-readonly="1">결정 기록 보기</button>');
-      if (x.kind === 'todo' && def.implemented && !notStarted()) acts.push('<button type="button" class="btn block" data-act="run-stage" data-stage="' + E(id) + '"' + (busy ? ' disabled' : '') + '>이 단계까지 실행</button>');
+      const mstepOf = { s9s: 'data', s9: 'data', s10t: 'train', s10: 'eval' }[id];
+      if (mstepOf) acts.push('<button type="button" class="btn block" data-act="open-model" data-step="' + mstepOf + '">모델 만들기에서 보기</button>');
+      if (x.kind === 'todo' && def.implemented && !notStarted() && !mstepOf) acts.push('<button type="button" class="btn block" data-act="run-stage" data-stage="' + E(id) + '"' + (busy ? ' disabled' : '') + '>이 단계까지 실행</button>');
       const pill = '<span class="fl-pill ' + (x.kind === 'retry' ? 'run' : x.kind === 'done' ? 'ok' : ['todo', 'out', 'skip'].includes(x.kind) ? 'muted' : x.kind) + '"><span class="d"></span>' + E(KIND_LABEL[x.kind]) + '</span>';
       return '<div class="ins-head"><span class="ins-kicker">' + E((lane ? lane.label + ' 팀 · ' : '') + def.id) + '</span><div class="ins-title"><h2>' + E(def.name) + '</h2>' + pill + '</div>' + (acts.length ? '<div class="acts" style="flex-direction:column;align-items:stretch">' + acts.join('') + '</div>' : '') + '</div>' +
         '<section class="ins-sec"><h3>속성</h3><dl class="ins-props">' + props.join('') + '</dl></section>' +
         (thumbs.length ? '<section class="ins-sec"><h3>산출물 미리보기</h3><div class="fl-thumbs">' + thumbs.map((f) => '<img alt="' + E(f.name) + '" src="' + E(R.safeHref(f.url)) + '" loading="lazy">').join('') + '</div></section>' : '') +
         historyHTML(id);
+    }
+
+
+    // ---- 모델 만들기 보기(D-0130): 재료 → 데이터셋 → 학습 → 평가 ----
+    function modelMode() { return /^#c\/[^/]+\/model$/.test(text(global.location && global.location.hash)); }
+    function viewTabsHTML() {
+      const id = encodeURIComponent(state.detail.id);
+      const m = modelMode();
+      return '<nav class="md-tabs" aria-label="보기"><a href="#c/' + id + '"' + (m ? '' : ' aria-current="page"') + '>공정</a><a href="#c/' + id + '/model"' + (m ? ' aria-current="page"' : '') + '>모델 만들기</a></nav>';
+    }
+    function mp() { return (state.detail && state.detail.modelPath) || {}; }
+    function mActive() {
+      const m = mp();
+      const t = m.training || {};
+      if (['done', 'skip'].includes(t.state)) return 'eval';
+      if (['plan', 'run', 'hold', 'stopped', 'fail', 'pending'].includes(t.state)) return 'train';
+      return m.dataset ? 'data' : 'src';
+    }
+    function shortLabel(s) { return text(s).split(':')[0]; }
+    function mSteps() {
+      const m = mp();
+      const d = m.dataset;
+      const t = m.training || {};
+      const e = m.eval || {};
+      const v = views(null);
+      const steps = [];
+      const mat = m.material;
+      steps.push({ id: 'src', n: 1, ko: '재료', k: mat ? 'ok' : 'todo', s: mat ? mat.used.map((u) => u.label).join(' + ') || '정함' : '데이터 샘플을 만들면 정해져요', done: Boolean(mat) });
+      let dk = 'todo';
+      let ds = '학습 데이터를 만들기 전이에요';
+      if (d) {
+        const g7 = upper(d.gates.G7.status);
+        const g7a = upper(d.gates.G7a.status);
+        if (upper(d.status) === 'APPROVED') { dk = 'ok'; ds = '학습 ' + d.counts.train + '대화 · 승인됨'; }
+        else if (g7 === 'AWAITING_HUMAN') { dk = 'wait'; ds = '데이터셋 승인 대기'; }
+        else if (g7a === 'AWAITING_HUMAN') { dk = 'wait'; ds = '샘플 검토 대기'; }
+        else if (v.s9 && ['run', 'retry'].includes(v.s9.kind)) { dk = 'run'; ds = '만드는 중'; }
+        else if (v.s9 && v.s9.kind === 'fail') { dk = 'fail'; ds = '멈춤'; }
+        else ds = '만드는 중';
+      }
+      steps.push({ id: 'data', n: 2, ko: '데이터셋', k: dk, s: ds, done: dk === 'ok' });
+      const tv = v.s10t || {};
+      const tk = { confirm: 'wait', run: 'run', fail: 'fail', skip: 'ok', done: 'ok', todo: 'todo', wait: 'wait', retry: 'run', out: 'todo' }[tv.kind] || 'todo';
+      const tsub = t.state === 'done' ? (t.adopted ? '학습 모델을 골랐어요' : '학습 모델을 채택하지 않았어요') : t.state === 'locked' ? '데이터셋을 승인하면 열려요' : t.state === 'pending' ? '학습 계획을 세울 차례예요' : tv.sub || KIND_LABEL[tv.kind] || '';
+      steps.push({ id: 'train', n: 3, ko: '학습', k: tk, s: tsub, done: ['done', 'skip'].includes(t.state) });
+      const ev = v.s10 || {};
+      let ek = 'todo';
+      let es = '학습이 끝나면 열려요';
+      if (['done', 'skip'].includes(t.state)) {
+        const gs = upper(e.gate && e.gate.status);
+        if (gs === 'AWAITING_HUMAN') { ek = 'wait'; es = e.promptOnly ? '긴 프롬프트 채택 검토' : '블라인드 20쌍 검토'; }
+        else if (gs === 'APPROVED') { ek = 'ok'; es = e.promptOnly ? '긴 프롬프트로 채택함' : '채택 결정함'; }
+        else if (ev.kind === 'confirm') { ek = 'wait'; es = '평가 비용 확인 대기'; }
+        else if (['run', 'retry'].includes(ev.kind)) { ek = 'run'; es = '답 모으는 중'; }
+        else if (ev.kind === 'fail') { ek = 'fail'; es = '멈춤'; }
+        else es = '이어서 실행하면 시작해요';
+      }
+      steps.push({ id: 'eval', n: 4, ko: '평가', k: ek, s: es, done: ek === 'ok' });
+      return steps;
+    }
+    function mTasks() {
+      const d = state.detail;
+      const v = views(null);
+      return buildTasks(state.graph, d, v, { now: Date.now(), gateViews: state.gateViews, jobActive: Boolean(d.job) || state.busy })
+        .filter((t) => MODEL_STAGES.has(t.stage));
+    }
+    function nowBarHTML() {
+      const act = mActive();
+      const t = mTasks()[0];
+      const tr = mp().training || {};
+      const busy = Boolean(state.detail.job) || state.busy;
+      let k = 'idle';
+      let t1 = '할 일 없음';
+      let t2 = busy ? '작업이 도는 중이에요 · 사람이 할 일이 생기면 알려 드려요' : '사람이 할 일이 생기면 여기에 나와요';
+      let acts = [];
+      if (t) {
+        k = t.kind === 'fail' ? 'bad' : 'wait';
+        t1 = t.title;
+        t2 = t.body;
+        if (t.gate === 'G8' && (mp().eval || {}).promptOnly) { t1 = '긴 프롬프트 채택 검토'; t2 = '학습 없이 긴 프롬프트로 패키지를 만들지 확인해요.'; }
+        acts = t.actions.filter((a) => !(a.act === 'open-model' && state.mstep === a.step));
+      } else if (tr.state === 'run') {
+        k = 'run';
+        t2 = tr.stopRequested ? '중단을 요청했어요 · GPU를 반납하고 멈춰요' : '학습 중이에요 · 창을 닫아도 계속 돌아요. 끝나면 받은 일에 알려 드려요';
+      }
+      let html = acts.map((a, i) => '<button type="button" class="btn' + (i === 0 ? ' pri' : '') + '" data-act="' + E(a.act) + '"' + (a.gate ? ' data-gate="' + E(a.gate) + '"' : '') + (a.stage ? ' data-stage="' + E(a.stage) + '"' : '') + (a.step ? ' data-step="' + E(a.step) + '"' : '') + (a.v ? ' data-v="' + E(a.v) + '"' : '') + (a.disabled ? ' disabled' : '') + '>' + E(a.label) + '</button>').join('');
+      if (state.mstep !== act) html += '<button type="button" class="btn ghost" data-act="mstep" data-step="' + act + '">' + E({ src: '재료', data: '데이터셋', train: '학습', eval: '평가' }[act]) + ' 단계 보기</button>';
+      return '<div class="md-now ' + k + '" role="status" aria-live="polite"><span class="lab">지금 할 일</span><span class="ic">' + icon(k === 'bad' ? 'x' : k === 'wait' ? 'coins' : k === 'run' ? 'retry' : 'ok') + '</span><span class="t1">' + E(t1) + '</span><span class="t2">' + E(t2) + '</span>' + (html ? '<div class="acts">' + html + '</div>' : '') + '</div>';
+    }
+    function stepperHTML() {
+      const act = mActive();
+      return '<div class="md-steps" role="group" aria-label="모델 만들기 단계">' + mSteps().map((s) => {
+        const tail = s.id === act ? '<em>지금</em>' : s.done ? '<span class="lk" aria-hidden="true">' + LOCK + '</span>' : '';
+        return '<button type="button" class="md-st ' + s.k + '" data-act="mstep" data-step="' + s.id + '" aria-pressed="' + (state.mstep === s.id) + '" aria-label="' + E(s.n + '단계 ' + s.ko + ', ' + s.s + (s.id === act ? ', 지금 단계' : '') + (s.done && s.id !== act ? ', 읽기 전용' : '')) + '"><span class="k"><b>' + (s.k === 'ok' ? icon('check') : s.n) + '</b>' + s.n + '단계' + tail + '</span><strong>' + s.ko + '</strong><span class="s">' + E(s.s) + '</span></button>';
+      }).join('') + '</div>';
+    }
+    const LOCK = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
+    function roChip() { return '<span class="md-lock">' + LOCK + '읽기 전용</span>'; }
+    function pill(kind, label) { return '<span class="fl-pill ' + kind + '"><span class="d"></span>' + E(label) + '</span>'; }
+    function recordBtn(gate, label) {
+      const g = gatesById(state.detail).get(gate);
+      if (!g || upper(g.status) !== 'APPROVED') return '';
+      return '<button type="button" class="btn ghost" data-act="review" data-gate="' + gate + '" data-stage="' + E((state.graph.byGate.get(gate) || {}).stage || '') + '" data-readonly="1">' + E(label) + '</button>';
+    }
+    function reviewBtn(gate, label) {
+      return '<button type="button" class="btn pri" data-act="review" data-gate="' + gate + '" data-stage="' + E((state.graph.byGate.get(gate) || {}).stage || '') + '">' + E(label) + '</button>';
+    }
+    function srcHTML() {
+      const m = mp().material;
+      if (!m) return '<div class="md-pane"><div class="md-h"><h3>재료</h3>' + pill('muted', '아직 정하지 않았어요') + '</div><p class="lead">프롬프트를 승인하면 데이터 샘플을 만들면서 재료를 정해요.</p></div>';
+      const used = m.used.map((u) => E(u.label) + ' <span class="num">' + u.conversations + '대화</span>').join('<br>');
+      return '<div class="md-pane"><div class="md-h"><h3>재료</h3>' + pill('ok', '정함') + roChip() + '</div>' +
+        '<dl class="md-ro"><dt>가져오는 곳</dt><dd>' + E(m.planned.map((p) => p.label).join(' + ')) + '<small>대화 데이터 창고(말뭉치·SNS 색인)는 아직 연결하지 않았어요</small></dd>' +
+        '<dt>쓴 재료</dt><dd>' + (used || '—') + '</dd>' + sourcesRow(m.sources) +
+        rewriteRow(m) +
+        '<dt>합계</dt><dd class="num">' + m.total + '대화</dd></dl>' +
+        '<div class="md-foot"><p>끝난 단계라 여기서 바꿀 수 없어요. 클러스터마다 고른 샘플은 검토 기록에서 볼 수 있어요.</p>' + recordBtn('G7a', '샘플 검토 기록') + '</div></div>';
+    }
+    // 다시 쓰는 방식(D-0135): 흐름 뼈대만 쓰고 양쪽을 새로 써요. 원문과 겹친 가장 긴 곳과 뼈대 예시.
+    function rewriteRow(m) {
+      if (m.rewrite === 'TURN_ONLY') return '<dt>다시 쓰는 방식</dt><dd>상대 말은 두고 캐릭터 말만 다시 썼어요<small>이전 방식으로 만든 데이터셋이에요</small></dd>';
+      const s = m.sources || {};
+      const o = s.overlap;
+      const notes = ['원문 문장·사람·사실은 옮기지 않아요'];
+      if (o && o.checked) notes.push('원문과 이어서 같은 곳은 가장 길어도 ' + o.max + '글자예요(' + o.limit + '글자부터 막아요) · ' + o.checked + '대화 확인');
+      let ex = '';
+      if (s.example && s.example.beats && s.example.beats.length) {
+        const e = s.example;
+        ex = '<div class="md-beats"><span class="md-beats-h">흐름 뼈대 예시 · ' + E(e.origin === 'NIKL' ? '말뭉치' : 'SNS') + ' 원문 ' + e.sourceTurns + '턴 → 새로 쓴 ' + e.messages + '턴</span><ol>' + e.beats.map((b) => '<li>' + E(b) + '</li>').join('') + '</ol></div>';
+      }
+      return '<dt>다시 쓰는 방식</dt><dd>흐름 뼈대만 쓰고 양쪽 대사를 새로 써요' + notes.map((n) => '<small>' + E(n) + '</small>').join('') + ex + '</dd>';
+    }
+    // 실제 대화 후보 → 구간 → 쓴 구간과 버린 수(D-0131), 출처별 섞기(D-0134).
+    function sourcesRow(s) {
+      if (!s || !s.file) return '';
+      if (s.missing) return '<dt>실제 대화 후보</dt><dd class="warn">후보 파일을 찾지 못해 모두 합성으로 채웠어요<small>' + E(s.file) + '</small></dd>';
+      const lost = s.dropped.filter((d) => d.reason !== 'over_limit' && d.reason !== 'over_share');
+      const over = s.dropped.find((d) => d.reason === 'over_limit');
+      const capped = s.dropped.find((d) => d.reason === 'over_share');
+      const flow = '<span class="md-flow"><span><b>' + s.sessions + '</b>대화</span><span><b>' + s.windows + '</b>구간</span><span><b>' + (s.used == null ? s.offered : s.used) + '</b>쓴 구간</span></span>';
+      const notes = [];
+      if (s.split) notes.push('긴 대화 ' + s.split + '개를 ' + s.window + '턴 이하로 잘랐어요. 같은 대화의 구간은 학습·검증 한쪽에만 들어가요');
+      if (lost.length) notes.push('버림 ' + lost.reduce((a, d) => a + d.count, 0) + '개: ' + lost.map((d) => d.label + ' ' + d.count).join(', '));
+      if (over) notes.push('상한 ' + s.limit + '개를 넘은 구간 ' + over.count + '개는 쓰지 않았어요');
+      if (capped) notes.push('말뭉치 비율을 넘은 말뭉치 구간 ' + capped.count + '개는 쓰지 않았어요');
+      return '<dt>실제 대화 후보</dt><dd>' + flow + notes.map((n) => '<small>' + E(n) + '</small>').join('') + '</dd>' + mixRow(s);
+    }
+    // 출처별 쓴 구간: SNS는 문자 장면, 말뭉치는 통화 장면으로 써요(D-0134).
+    function mixRow(s) {
+      const rows = (s.bySource || []).filter((b) => b.windows);
+      if (!rows.length) return '';
+      const n = (b) => (b.used == null ? b.offered : b.used);
+      const total = rows.reduce((a, b) => a + n(b), 0);
+      const share = s.corpusShare == null ? null : Math.round(s.corpusShare * 100);
+      const list = rows.map((b) => '<span>' + E(b.label) + ' <b class="num">' + n(b) + '</b>' + (total ? '<em class="num">' + Math.round(n(b) / total * 100) + '%</em>' : '') + '</span>').join('');
+      const hint = rows.some((b) => b.kind === 'NIKL')
+        ? '말뭉치 구간은 통화 장면으로 써요. ㅋㅋ·ㅠㅠ는 문자 장면과 똑같이 쓰고 그림 이모지는 쓰지 않아요' + (share == null ? '' : ' · 말뭉치 목표 ' + share + '%')
+        : '말뭉치 후보가 없어 SNS만 썼어요';
+      return '<dt>출처별</dt><dd><span class="md-src">' + list + '</span><small>' + E(hint) + '</small></dd>';
+    }
+    function mixHTML(c) {
+      const total = Object.values(c.materials).reduce((a, b) => a + b, 0) || 1;
+      const sns = (c.materials.SNS_REWRITE || 0) + (c.materials.NIKL || 0);
+      const syn = c.materials.SYNTH || 0;
+      return '<div class="md-mix" role="img" aria-label="' + E('실제 대화 ' + sns + ', 합성 ' + syn) + '"><i class="a" style="width:' + (sns / total * 100) + '%"></i><i class="b" style="width:' + (syn / total * 100) + '%"></i></div><div class="md-mixl"><span>실제 대화 ' + sns + '</span><span>합성 ' + syn + '</span></div>';
+    }
+    function dataHTML() {
+      const d = mp().dataset;
+      if (!d) return '<div class="md-pane"><div class="md-h"><h3>데이터셋</h3>' + pill('muted', '아직 없어요') + '</div><p class="lead">프롬프트를 승인하면 클러스터마다 샘플을 만들고, 샘플을 검토한 뒤 나머지를 만들어요.</p></div>';
+      const ok = upper(d.status) === 'APPROVED';
+      const g7 = upper(d.gates.G7.status);
+      const g7a = upper(d.gates.G7a.status);
+      const head = '<div class="md-h"><h3>데이터셋 ' + E(revLabel(d.rev)) + '</h3>' + (ok ? pill('ok', '승인됨' + (d.gates.G7.decidedAt ? ' · ' + clock(d.gates.G7.decidedAt) : '')) + roChip() : g7 === 'AWAITING_HUMAN' || g7a === 'AWAITING_HUMAN' ? pill('wait', '검토 대기') : pill('run', '만드는 중')) + '</div>';
+      const wait = g7a === 'AWAITING_HUMAN' ? '<div class="md-note wait"><div><b>클러스터별 샘플을 검토할 차례예요</b><p>샘플을 채택하거나 고칠 점을 남기면 나머지 대화를 같은 기준으로 만들어요.</p></div>' + reviewBtn('G7a', '샘플 검토하기') + '</div>'
+        : g7 === 'AWAITING_HUMAN' ? '<div class="md-note wait"><div><b>데이터셋을 승인할 차례예요</b><p>검사 결과와 표본 20개를 보고 승인하면 학습 계획을 세워요.</p></div>' + reviewBtn('G7', '데이터셋 검토하기') + '</div>' : '';
+      const rows = d.clusters.map((c) => {
+        const s = c.sample || {};
+        const adopt = s.ADOPT || 0;
+        return '<tr><td><b>' + E(shortLabel(c.label)) + '</b>' + c.warnings.map((w) => '<small class="warn">' + E(w.replace(/^[^:]+:\s*/, '')) + '</small>').join('') + '</td><td class="r">' + (c.share != null ? Math.round(c.share * 100) + '%' : '—') + '</td><td class="r">' + E(c.target) + '</td><td class="mixc">' + mixHTML(c) + '</td><td class="nw">' + (s.total ? '채택 ' + adopt + '/' + s.total : '—') + '</td><td class="r">' + c.train + ' · ' + c.validation + ' · ' + c.eval + '</td></tr>';
+      }).join('');
+      const gates = '<div class="md-gates">' + [['G7a', '샘플 검토', d.gates.G7a], ['G7', '데이터셋 승인', d.gates.G7]].map((x) => {
+        const st = upper(x[2].status);
+        return '<div class="md-gate ' + (st === 'APPROVED' ? 'ok' : st === 'AWAITING_HUMAN' ? 'wait' : '') + '">' + icon(st === 'APPROVED' ? 'ok' : 'user') + '<div>' + x[1] + ' · ' + (st === 'APPROVED' ? '통과' : st === 'AWAITING_HUMAN' ? '검토 대기' : '아직') + '<small>' + (x[2].decidedAt ? E(clock(x[2].decidedAt)) : '') + '</small></div>' + recordBtn(x[0], '기록') + '</div>';
+      }).join('') + '</div>';
+      return '<div class="md-pane">' + head + wait +
+        '<dl class="md-stats"><div><dt>학습</dt><dd>' + d.counts.train + '<small> 대화</small></dd></div><div><dt>검증</dt><dd>' + d.counts.validation + '<small> 대화</small></dd></div><div><dt>평가</dt><dd>' + d.counts.eval + '<small> 대화</small></dd></div><div><dt>나누는 단위</dt><dd><small>같은 장면 뼈대는 한쪽에만 넣어 섞이지 않게 해요</small></dd></div></dl>' +
+        '<div class="md-h"><h4>클러스터</h4><span class="sp"></span><span class="md-legend"><span><i class="a"></i>실제 대화</span><span><i class="b"></i>합성</span></span></div>' +
+        '<div class="md-scroll"><table class="md-t"><thead><tr><th>클러스터</th><th class="r">비율</th><th class="r">목표</th><th>재료</th><th>샘플 판정</th><th class="r">학습 · 검증 · 평가</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        ((d.notes || []).length ? d.notes.map((n) => '<div class="md-note wait"><div><b>데이터셋 경고</b><p>' + E(n) + '</p></div></div>').join('') : '') +
+        (d.blocking.length ? '<div class="md-note bad"><div><b>막는 문제 ' + d.blocking.length + '건</b><p>' + E(d.blocking.join(' · ')) + '</p></div></div>' : '') + gates +
+        (ok ? '<div class="md-foot"><p>승인한 데이터셋은 바꿀 수 없어요. 학습은 이 버전으로 해요.</p></div>' : '') + '</div>';
+    }
+    function phasesHTML(tr) {
+      const list = tr.phases && tr.phases.length ? tr.phases : [];
+      return '<ol class="md-ph">' + list.map((p) => {
+        const mark = p.status === 'ok' ? icon('check') : p.status === 'fail' ? icon('x') : p.status === 'skip' ? icon('minus') : p.status === 'warn' ? '!' : '';
+        return '<li class="' + E(p.status) + '"><span class="dot">' + mark + '</span><div><b>' + E(p.name) + '</b><small>' + E(p.detail) + '</small>' + (p.meter != null ? '<div class="md-meter" role="progressbar" aria-label="학습 스텝" aria-valuenow="' + Math.round(p.meter * 100) + '" aria-valuemin="0" aria-valuemax="100"><i style="width:' + (p.meter * 100) + '%"></i></div>' : '') + '</div></li>';
+      }).join('') + '</ol>';
+    }
+    const MCONFIRM = {
+      start: ['유료 학습을 시작할까요?', (tr) => (tr.estimateUsd ? 'GPU를 빌리는 순간부터 비용이 들어요. 예상 ' + usd(tr.estimateUsd) + ', 많아도 ' + usd(tr.budgetUsd) + '에서 멈추고 GPU를 반납해요.' : '시험용 가짜 학습이라 비용이 들지 않아요. 실제 공급자라면 GPU를 빌리는 순간부터 비용이 들어요.') + (tr.state === 'done' ? ' 지금 학습 기록은 남고 새 학습을 만들어요.' : ''), 'train-go', '학습 시작', 'pri'],
+      skip: ['학습 없이 진행할까요?', () => '긴 프롬프트만으로 평가하고, 평가에서 채택을 한 번 더 확인해요. 데이터셋은 남겨 두어 나중에 학습할 수 있어요.', 'skip-go', '학습 없이 진행', 'pri'],
+      stop: ['학습을 멈출까요?', (tr) => '지금까지 학습한 결과는 버리고 GPU를 반납해요.' + (tr.spentUsd ? ' 쓴 돈 약 ' + usd(tr.spentUsd) + '(추정)은 돌려받지 못해요.' : ''), 'stop-go', '멈추고 반납', 'danger'],
+      release: ['결과를 버리고 GPU를 반납할까요?', () => '학습한 결과를 받지 못한 채 지워요. 다시 하려면 처음부터 학습해야 해요.', 'release-go', '버리고 반납', 'danger']
+    };
+    function mConfirmHTML(tr) {
+      const c = MCONFIRM[state.mconfirm];
+      if (!c) return '';
+      const busy = state.busy || (state.detail.job && state.mconfirm !== 'stop');
+      return '<div class="fl-confirm md-confirm" role="group" aria-label="' + E(c[0]) + '"><p><b>' + E(c[0]) + '</b></p><p class="est">' + E(c[1](tr)) + '</p><div class="acts"><button type="button" class="btn ' + c[4] + '" data-act="' + c[2] + '"' + (busy ? ' disabled' : '') + '>' + E(c[3]) + '</button><button type="button" class="btn ghost" data-act="mconfirm-cancel">취소</button></div></div>';
+    }
+    function trainHTML() {
+      const tr = mp().training || {};
+      const p0 = (tr.providers || [])[0] || {};
+      const busy = Boolean(state.detail.job) || state.busy;
+      const fake = p0.provider === 'fake';
+      if (tr.state === 'locked') return '<div class="md-pane"><div class="md-h"><h3>학습</h3>' + pill('muted', '아직 열리지 않았어요') + '</div><p class="lead">데이터셋을 승인하면 학습 계획(예상 비용·시간)을 세워요.</p></div>';
+      if (tr.state === 'pending') return '<div class="md-pane"><div class="md-h"><h3>학습</h3>' + pill('muted', '계획 전') + '</div><div class="md-note"><div><b>학습 계획을 세울 차례예요</b><p>계획은 비용이 들지 않아요. 계획을 세우면 예상 비용을 보고 시작할지 골라요.</p></div><button type="button" class="btn pri" data-act="resume"' + (busy ? ' disabled' : '') + '>이어서 실행</button></div></div>';
+      const confirm = mConfirmHTML(tr);
+      if (tr.state === 'skip') {
+        const g8 = upper(((mp().eval || {}).gate || {}).status);
+        return '<div class="md-pane"><div class="md-h"><h3>학습</h3>' + pill('muted', '하지 않음') + roChip() + '</div><div class="md-note"><div><b>학습 없이 긴 프롬프트로 진행하기로 했어요</b><p>데이터셋 ' + E(revLabel(tr.datasetRev)) + '는 남아 있어요.' + (g8 === 'APPROVED' ? '' : ' 평가에서 채택을 확정하기 전이면 학습으로 바꿀 수 있어요.') + '</p></div>' + (g8 === 'APPROVED' ? '' : '<button type="button" class="btn" data-act="mconfirm" data-v="start"' + (busy ? ' disabled' : '') + '>학습으로 바꾸기</button>') + '</div>' + confirm + '</div>';
+      }
+      const cfg = p0.config || {};
+      if (['plan', 'stopped', 'fail'].includes(tr.state)) {
+        const note = tr.state === 'stopped' ? '<div class="md-note"><div><b>지난 학습을 중단했어요</b><p>GPU는 반납했어요. 다시 시작하면 새 학습을 만들어요.</p></div></div>'
+          : tr.state === 'fail' ? '<div class="md-note bad"><div><b>학습이 실패했어요</b><p>' + E(p0.error || '원인을 학습 기록에서 확인해 주세요.') + '</p></div></div>' : '';
+        const grid = [
+          ['예상 비용', usd(tr.estimateUsd), '예산 ' + usd(tr.budgetUsd) + ' 안'],
+          ['예상 시간', tr.gpuHours ? '약 ' + hoursText(tr.gpuHours) : fake ? '바로 끝나요' : '—', fake ? '시험용 가짜 학습' : '준비 시간 포함'],
+          ['GPU', fake ? '빌리지 않아요' : p0.provider === 'gemma_qlora' ? '임대 GPU 한 대' : '튜닝 서비스', fake ? '시험용' : '쓰는 동안만 빌려요'],
+          ['기반 모델', E(p0.baseModel || '—'), 'QLoRA 학습'],
+          ['학습 횟수', cfg.epochs != null ? cfg.epochs + '회' : '—', cfg.checkpointEpochs ? '체크포인트 ' + cfg.checkpointEpochs.join(' · ') + '회차' : ''],
+          ['학습 데이터', E(revLabel(tr.datasetRev)), (mp().dataset ? mp().dataset.counts.train + '대화' : '')]
+        ].map((x) => '<div><dt>' + x[0] + '</dt><dd>' + x[1] + '<small>' + E(x[2]) + '</small></dd></div>').join('');
+        return '<div class="md-pane"><div class="md-h"><h3>학습 계획</h3>' + pill('wait', tr.state === 'plan' ? '비용 확인 대기' : '다시 시작 대기') + '</div>' + note + '<dl class="md-grid3">' + grid + '</dl>' +
+          (fake ? '' : '<div class="md-note"><div><b>GPU는 쓰는 동안만 빌려요</b><p>빌리기 전에 자동 반납 감시를 먼저 켜고, 끝나거나 멈추면 바로 반납해요. 예산이나 시간 상한에 닿으면 자동으로 반납해요.</p></div></div>') +
+          (confirm || '<div class="acts"><button type="button" class="btn pri" data-act="mconfirm" data-v="start"' + (busy ? ' disabled' : '') + '>' + (tr.state === 'plan' ? '학습 시작' : '다시 학습') + ' · 예상 ' + usd(tr.estimateUsd) + '</button><button type="button" class="btn ghost" data-act="mconfirm" data-v="skip"' + (busy ? ' disabled' : '') + '>학습 없이 진행</button></div>') +
+          '</div><div class="md-pane"><h4>이렇게 진행돼요</h4>' + phasesHTML(tr) + '</div>';
+      }
+      let head = '';
+      let extra = '';
+      if (tr.state === 'run') {
+        const el = hoursText(p0.elapsedHours);
+        head = '<div class="md-h"><h3>학습</h3>' + pill('run', '진행 중' + (el ? ' · ' + el + '째' : '')) + '<span class="sp"></span>' + (tr.stopRequested ? '<span class="hint">중단하는 중이에요</span>' : state.mconfirm === 'stop' ? '' : '<button type="button" class="btn danger" data-act="mconfirm" data-v="stop">학습 중단</button>') + '</div><p class="lead">창을 닫아도 계속 돌아요. 끝나면 받은 일에 알려 드려요.</p>' + confirm;
+      } else if (tr.state === 'hold') {
+        const gpu = gpuAlive(tr);
+        head = '<div class="md-h"><h3>학습</h3>' + pill('fail', '결과 받기 실패') + '</div><div class="md-note bad"><div><b>' + (gpu ? '결과를 받아 오지 못해 GPU를 남겨 뒀어요' : '학습 결과를 받아 오지 못했어요') + '</b><p>' + (gpu ? '학습 결과를 잃지 않으려고 반납하지 않았어요. 비용이 계속 나가요' + (p0.deadlineAt ? ' · ' + E(clock(p0.deadlineAt)) + '에 자동 반납' : '') + '.' : '학습은 끝났어요. 다시 받아 오면 이어서 체크포인트를 골라요.') + (p0.collectError ? '<details class="fd-tech"><summary>기술 정보</summary><pre>' + E(p0.collectError) + '</pre></details>' : '') + '</p></div><div class="acts"><button type="button" class="btn pri" data-act="train-retry"' + (busy ? ' disabled' : '') + '>다시 받아 오기</button><button type="button" class="btn danger" data-act="mconfirm" data-v="release"' + (busy ? ' disabled' : '') + '>결과 버리고 반납</button></div></div>' + confirm;
+      } else {
+        head = '<div class="md-h"><h3>학습</h3>' + pill('ok', '완료' + (p0.completedAt ? ' · ' + clock(p0.completedAt) : '')) + roChip() + '</div><div class="md-note ok"><div><b>' + (fake ? '시험용 가짜 학습을 마쳤어요' : '학습을 마치고 GPU를 반납했어요') + '</b><p>' + [p0.elapsedHours != null ? '걸린 시간 ' + hoursText(p0.elapsedHours) : '', tr.spentUsd != null ? '쓴 돈 약 ' + usd(tr.spentUsd) + '(추정)' : ''].filter(Boolean).join(' · ') + '</p></div></div>';
+        const sel = p0.selection;
+        if (sel) {
+          const pct = (x) => (x == null ? '—' : Math.round(x * 100) + '%');
+          const rows = sel.rows.map((r) => '<tr' + (r.chosen ? ' class="pick"' : '') + '><td>' + (r.role === 'base' ? '기반 모델<small>학습 없이 같은 짧은 프롬프트</small>' : E(r.epoch != null ? r.epoch + '회차' : r.arm) + (r.chosen ? '<small>골랐어요</small>' : '')) + '</td><td class="r">' + pct(r.empty) + '</td><td class="r">' + pct(r.truncated) + '</td><td class="r">' + pct(r.loop) + '</td><td>' + (r.role === 'base' ? '비교 기준' : r.eligible === false ? '<span class="bad">' + E(r.exclusion || '제외') + '</span>' : r.eligible ? '적격' : '—') + '</td><td class="r">' + (r.wins != null ? r.wins + '승' : '—') + '</td></tr>').join('');
+          extra = '<div class="md-pane"><div class="md-h"><h3>체크포인트 고르기</h3>' + pill(p0.binding ? 'ok' : 'wait', sel.decisionKo || '—') + roChip() + '</div>' +
+            (sel.reasons.length ? '<p class="lead">' + E(sel.reasons[0]) + '</p>' : sel.decision ? '' : '<p class="lead">선별 답을 만들지 않는 학습이라 마지막 체크포인트를 써요.</p>') +
+            '<div class="md-scroll"><table class="md-t"><thead><tr><th>후보</th><th class="r">빈 답</th><th class="r">잘림</th><th class="r">반복</th><th>적격</th><th class="r">짝 판정</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+            '<div class="md-foot"><p>다른 체크포인트를 쓰거나 다시 학습하려면 새 학습을 만들어요. 이번 기록은 그대로 남아요.</p><button type="button" class="btn" data-act="mconfirm" data-v="start"' + (busy ? ' disabled' : '') + '>새 학습 만들기</button></div>' + confirm + '</div>';
+        }
+      }
+      return '<div class="md-pane">' + head + '<h4>진행</h4>' + phasesHTML(tr) + '</div>' + extra;
+    }
+    // 학습 모델 조건의 평가 system(D-0139): 학습 때와 같은 학습용 짧은 프롬프트인지 보여요.
+    const REL_KO = { STRONGLY_FAVORABLE: '아주 가까운 사이', FAVORABLE: '가까운 사이', NEUTRAL: '아직 가깝지 않은 사이', UNFAVORABLE: '불편한 사이' };
+    function sftPromptText(p) {
+      if (!p) return '학습용 짧은 프롬프트 + 학습한 말투';
+      if (p.kind === 'legacy') return '옛 짧은 프롬프트(' + p.chars.toLocaleString('ko-KR') + '자) + 학습한 말투';
+      return '학습 때와 같은 짧은 프롬프트(' + p.chars.toLocaleString('ko-KR') + '자 · ' + (REL_KO[p.relationship] || p.relationship) + ' · 영상통화) + 학습한 말투';
+    }
+    function evalHTML() {
+      const m = mp();
+      const tr = m.training || {};
+      const e = m.eval || {};
+      const sets = '<h4>평가 세트</h4><ul class="md-sets"><li><span>고정 이력 질문</span><span>지난 이야기를 기억하는지</span></li><li><span>서운함</span><span>감정 표현과 회복</span></li><li><span>무례·사과 대본</span><span>사과를 받고 풀리는지</span></li><li><span>200턴 대화 · 사용자 4명</span><span>반복과 200턴째 기억</span></li></ul>';
+      if (!['done', 'skip'].includes(tr.state)) return '<div class="md-pane"><div class="md-h"><h3>평가</h3>' + pill('muted', '아직 열리지 않았어요') + '</div><p class="lead">학습이 끝나거나 학습 없이 진행을 고르면 열려요. 긴 프롬프트와 학습 모델에 같은 질문을 하고, 판정 모델 비교 뒤 블라인드 20쌍을 직접 골라요.</p>' + sets + '</div>';
+      const v = views(null).s10 || {};
+      const gs = upper(e.gate && e.gate.status);
+      const busy = Boolean(state.detail.job) || state.busy;
+      const arms = '<div class="md-vs"><div class="md-arm"><b>긴 프롬프트</b><small>학습 없음 · 지금 서비스 방식</small></div><span class="x">대</span><div class="md-arm"><b>' + (tr.state === 'skip' || !tr.adopted ? '학습 모델 없음' : '학습 모델') + '</b><small>' + (tr.state === 'skip' ? '학습 없이 진행해 비교하지 않아요' : tr.adopted ? sftPromptText(e.sftPrompt) : '학습 모델을 채택하지 않았어요') + '</small></div></div>';
+      let act = '';
+      if (gs === 'AWAITING_HUMAN') act = '<div class="md-note wait"><div><b>' + (e.promptOnly ? '긴 프롬프트로 채택할지 확인해요' : '블라인드 20쌍을 고를 차례예요') + '</b><p>' + (e.promptOnly ? '학습 결과 없이 긴 프롬프트로 패키지를 만들어요.' : '지표와 판정 모델 비교를 보고, 어느 쪽 답이 나은지 직접 골라요.') + '</p></div>' + reviewBtn('G8', e.promptOnly ? '채택 검토하기' : '블라인드 20쌍 고르기') + '</div>';
+      else if (gs === 'APPROVED') act = '<div class="md-note ok"><div><b>평가를 마쳤어요</b><p>' + (e.promptOnly ? '긴 프롬프트로 채택했어요.' : '채택 결정을 기록했어요.') + (e.gate.decidedAt ? ' · ' + E(clock(e.gate.decidedAt)) : '') + '</p></div>' + recordBtn('G8', '결정 기록') + '</div>';
+      else if (v.kind === 'confirm') act = state.confirming === 's10' ? confirmHTML('s10') : '<div class="md-note wait"><div><b>학습 모델 답을 받으려면 GPU를 다시 빌려요</b><p>예상 비용을 확인한 뒤 평가를 시작해요.</p></div><button type="button" class="btn pri" data-act="confirm" data-stage="s10"' + (busy ? ' disabled' : '') + '>비용 확인</button></div>';
+      else if (['run', 'retry'].includes(v.kind)) act = '<div class="md-note run"><div><b>답을 모으는 중이에요</b><p>끝나면 블라인드 20쌍 고르기가 열려요.</p></div></div>';
+      else if (v.kind === 'fail') act = '<div class="md-note bad"><div><b>평가가 멈췄어요</b><p>' + E(failReason((rowsById(state.detail).get('s10') || {}).lastError).summary) + '</p></div><button type="button" class="btn pri" data-act="retry" data-stage="s10"' + (busy ? ' disabled' : '') + '>다시 실행</button></div>';
+      else act = '<div class="md-note"><div><b>평가를 시작할 수 있어요</b><p>이어서 실행하면 평가부터 진행해요.</p></div><button type="button" class="btn pri" data-act="resume"' + (busy ? ' disabled' : '') + '>이어서 실행</button></div>';
+      return '<div class="md-pane"><div class="md-h"><h3>비교할 두 가지</h3>' + (gs === 'APPROVED' ? roChip() : '') + '</div>' + arms + act + '</div><div class="md-pane">' + sets + '</div>';
+    }
+    function modelHTML() {
+      if (!state.mstep) state.mstep = mActive();
+      const body = state.mstep === 'src' ? srcHTML() : state.mstep === 'data' ? dataHTML() : state.mstep === 'train' ? trainHTML() : evalHTML();
+      return '<div class="md">' + nowBarHTML() + stepperHTML() + body + '</div>';
+    }
+    function modelPanelHTML() {
+      const m = mp();
+      const tr = m.training || {};
+      const p0 = (tr.providers || [])[0] || {};
+      const st = state.mstep || mActive();
+      const props = [];
+      const prop = (k, v, meter, tone) => { if (v) props.push('<dt>' + E(k) + '</dt><dd>' + v + (meter != null ? '<div class="md-meter' + (tone ? ' ' + tone : '') + '"><i style="width:' + Math.min(100, meter * 100) + '%"></i></div>' : '') + '</dd>'); };
+      let title = '요약';
+      if (st === 'train') {
+        title = '이번 학습';
+        if (['plan', 'stopped', 'fail'].includes(tr.state)) {
+          prop('예상 비용', E(usd(tr.estimateUsd) + ' / 예산 ' + usd(tr.budgetUsd)), tr.budgetUsd ? (tr.estimateUsd || 0) / tr.budgetUsd : null);
+          prop('예상 시간', E(tr.gpuHours ? '약 ' + hoursText(tr.gpuHours) : '—'));
+        } else if (['run', 'hold', 'done'].includes(tr.state)) {
+          prop(tr.state === 'done' ? '쓴 돈(추정)' : '쓴 돈(추정)', E(usd(tr.spentUsd) + ' / 예산 ' + usd(tr.budgetUsd) + (tr.state === 'hold' && gpuAlive(tr) ? ' · 늘어나는 중' : '')), tr.budgetUsd ? (tr.spentUsd || 0) / tr.budgetUsd : null, tr.state === 'hold' ? 'bad' : tr.state === 'done' ? 'ok' : '');
+          prop('경과', E(hoursText(p0.elapsedHours) || '—'));
+          if (p0.deadlineAt) prop('자동 반납', E(clock(p0.deadlineAt) + '까지 안 끝나면'));
+          prop('GPU', E(p0.provider === 'fake' ? '빌리지 않음(시험용)' : gpuAlive(tr) ? '빌린 중' + (p0.gpu ? ' · ' + p0.gpu : '') : '반납함'));
+        }
+        prop('데이터셋', E(revLabel(tr.datasetRev || '') || '—'));
+        prop('기반 모델', E(p0.baseModel || ''));
+        if (p0.binding) prop('고른 체크포인트', E(p0.binding.checkpointId));
+      } else if (st === 'src' && m.material) {
+        const total = m.material.total || 0;
+        const sns = m.material.used.filter((u) => u.kind !== 'SYNTH').reduce((a, u) => a + u.conversations, 0);
+        prop('재료', E(m.material.used.map((u) => u.label).join(' + ')));
+        prop('실제 대화 비율', E(total ? Math.round(sns / total * 100) + '%' : '—'), total ? sns / total : null, 'acc');
+        prop('대화 데이터 창고', '연결 전');
+      } else if (st === 'data' && m.dataset) {
+        prop('전체', E(m.dataset.counts.total + '대화'));
+        prop('목표(학습)', E((m.dataset.planned || '—') + '대화'));
+        prop('경고', E(m.dataset.warnings.length + '건'));
+        if (m.dataset.trainingPrompt) prop('학습용 프롬프트', E((m.dataset.trainingPrompt.longestChars || 0).toLocaleString('ko-KR') + '자 이하 · 관계 ' + m.dataset.trainingPrompt.relationships + ' · 채널 ' + m.dataset.trainingPrompt.channels));
+        prop('막는 문제', E(m.dataset.blocking.length + '건'));
+      } else if (st === 'eval') {
+        prop('평가', E(KIND_LABEL[(views(null).s10 || {}).kind] || '—'));
+        prop('블라인드', (m.eval || {}).promptOnly ? '없음 · 학습 없이 진행해 비교하지 않아요' : '20쌍 · 사람이 골라요');
+        prop('판정', '순서를 바꿔 두 번');
+      }
+      return '<div class="ins-head"><span class="ins-kicker">모델 만들기</span><div class="ins-title"><h2>' + E(title) + '</h2></div></div><section class="ins-sec"><dl class="ins-props md-props">' + (props.join('') || '<dt>상태</dt><dd>아직 기록이 없어요</dd>') + '</dl></section>';
+    }
+    function goModel() {
+      if (modelMode()) { render(); return; }
+      state.keepStep = true;
+      global.location.hash = '#c/' + encodeURIComponent(state.detail.id) + '/model';
+    }
+    async function post(path, okText) {
+      state.busy = true;
+      state.feedback = null;
+      render();
+      try {
+        await request('POST', path, {});
+        state.feedback = okText ? { tone: 'ok', text: okText } : null;
+      } catch (error) {
+        state.feedback = { tone: 'bad', text: error.message };
+        if (error.network) state.conn = 'offline';
+      }
+      state.busy = false;
+      await refresh(false);
     }
 
     // ---- 검토 시트 ----
@@ -1355,12 +1783,27 @@
         state.sel = (tasks[0] && tasks[0].stage) || running || (next && next.id) || 's11';
         loadGateViews();
       }
+      if (state.detail && !state.form.open && modelMode()) {
+        if (!state.wasModel && !state.keepStep) { state.mstep = null; state.mconfirm = null; }
+        state.wasModel = true;
+        state.keepStep = false;
+        renderTop(v);
+        renderBanner();
+        region.head.innerHTML = titleHTML() + viewTabsHTML() + modelHTML();
+        region.graph.hidden = true;
+        region.panel.hidden = false;
+        if (region.body) region.body.classList.remove('no-panel');
+        region.panel.innerHTML = '<div class="fl-panel">' + modelPanelHTML() + '</div>';
+        renderSheet();
+        return;
+      }
+      state.wasModel = false;
       renderTop(v);
       renderBanner();
       if (state.form.open) region.head.innerHTML = formHTML();
       else if (state.projects && !characters().length) region.head.innerHTML = emptyHTML();
       else if (!state.detail) region.head.innerHTML = '';
-      else region.head.innerHTML = titleHTML() + (notStarted() ? setupHTML() : tasksHTML(v));
+      else region.head.innerHTML = titleHTML() + viewTabsHTML() + (notStarted() ? setupHTML() : tasksHTML(v));
       renderGraph(v, scope);
       region.panel.hidden = !state.detail;
       if (region.body) region.body.classList.toggle('no-panel', !state.detail);
@@ -1432,6 +1875,14 @@
       else if (act === 'confirm-cancel') { state.confirming = null; render(); }
       else if (act === 'confirm-go') { const held = R.extractHeld(state.detail).find((h) => h.stage === el.dataset.stage) || { stage: el.dataset.stage }; state.confirming = null; run(R.confirmHeldRequest(id, held), '유료 실행을 요청했어요. 이 단계만 시작해요.'); }
       else if (act === 'copy-error') copyError(el.dataset.stage);
+      else if (act === 'mstep') { state.mstep = el.dataset.step; state.mconfirm = null; render(); }
+      else if (act === 'open-model') { state.mstep = el.dataset.step || null; state.mconfirm = null; goModel(); }
+      else if (act === 'mconfirm') { state.mconfirm = el.dataset.v; state.mstep = el.dataset.step || state.mstep || 'train'; goModel(); const go = doc.querySelector('.md-confirm .btn:not(.ghost)'); if (go) go.focus(); }
+      else if (act === 'mconfirm-cancel') { state.mconfirm = null; render(); }
+      else if (act === 'train-go' || act === 'train-retry') { state.mconfirm = null; run({ characterId: id, action: 'train', confirm: ['s10t'], until: 's10t' }, act === 'train-go' ? '학습을 시작했어요. 진행은 학습 단계에서 볼 수 있어요.' : '결과를 다시 받아 오고 있어요.'); }
+      else if (act === 'skip-go') { state.mconfirm = null; run({ characterId: id, action: 'skip-training', until: currentUntil() || orchestrator().resumeUntil || 'sx' }, '학습 없이 진행해요. 평가에서 긴 프롬프트 채택을 확인해 주세요.'); }
+      else if (act === 'stop-go') { state.mconfirm = null; post('/api/characters/' + encodeURIComponent(id) + '/training/stop', '중단을 요청했어요. GPU를 반납하고 멈춰요.'); }
+      else if (act === 'release-go') { state.mconfirm = null; post('/api/characters/' + encodeURIComponent(id) + '/training/release', '결과를 버리고 GPU를 반납했어요.'); }
       else if (act === 'zoom-in') zoomStep(1);
       else if (act === 'zoom-out') zoomStep(-1);
       else if (act === 'zoom-fit') zoomFit();
@@ -1558,6 +2009,7 @@
         clearInterval(tick);
         clearInterval(poll);
         clearTimeout(refreshTimer);
+        clearTimeout(trainTimer);
         clearTimeout(listTimer);
         if (source) source.close();
         if (ro) ro.disconnect();

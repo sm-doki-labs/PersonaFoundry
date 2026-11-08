@@ -155,6 +155,12 @@ class Provenance(Strict):
     writerModel: str
     requestRef: str = Field(description="원장의 callId 또는 요청 파일 경로")
     sourceRef: str = Field(default="", description="SNS 재작성이면 원본 대화 ID")
+    flowBeats: list[str] = Field(
+        default_factory=list,
+        description="SNS 재작성이면 원본에서 뽑은 흐름 뼈대(원문 문장 없이, D-0135)",
+    )
+    relationship: str = Field(default="", description="학습용 짧은 프롬프트의 관계 배정(D-0138)")
+    channel: str = Field(default="", description="학습용 짧은 프롬프트의 채널 배정(D-0138)")
     editedBy: Literal["model", "human", "none"] = "none"
 
 

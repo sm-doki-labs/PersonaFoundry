@@ -23,7 +23,13 @@ BLOCKING_NAMES: tuple[str, ...] = (
     "roles_alternate",
     "system_present",
     "no_empty",
-    "sns_user_turns_verbatim",
+    "source_flow_turns",
+    "source_overlap",
+    "flow_beats",
+    "no_emoji",
+    "turn_length",
+    "close_formal_opener",
+    "repeated_lines",
     "no_prefill",
     "source_facts_absent",
     "forbidden_phrases",
@@ -40,6 +46,21 @@ DATASET_BLOCKING_NAMES: tuple[str, ...] = (
 PREFILL_MARKERS: tuple[str, ...] = ("네 알겠습니다", "[HISTORY]", "HISTORY_STATUS")
 APOLOGY_MARKERS: tuple[str, ...] = ("미안", "사과", "잘못했")
 _STRIP = re.compile(r"[\s.,!?~;…ㅋㅎㅠㅜ]+")
+# SNS 재작성은 원본을 흐름 뼈대로만 쓴다(학습 가이드 §7.1, D-0135). 공백·문장 부호·자모 웃음을 뺀 뒤
+# 원본과 이어서 같은 글자가 OVERLAP_LIMIT 이상이면 막는다.
+# 메시지 수는 원본과 FLOW_TURN_SLACK까지 다를 수 있다.
+OVERLAP_LIMIT = 10
+# 한소민 장기 대화 검사기(gen-r1 validate.py)에서 옮긴 말투 검사(D-0138).
+CLOSE_RELATIONSHIPS = frozenset({"STRONGLY_FAVORABLE", "FAVORABLE"})
+FORMAL_OPENER = re.compile(r"^네[,. ]")
+_ACK_WORDS = "네|응|웅|그래|그렇구나|그랬구나|좋네|좋아|고마워|알겠어|오케이|ㅇㅋ"
+GENERIC_ACK = re.compile(rf"^({_ACK_WORDS})[,.!~ ]*(ㅋ+|ㅎ+)?[.!~]*$")
+BUBBLE_MEDIAN_MAX = 26
+QUESTION_RATIO_MAX = 0.6
+# 캐릭터 말에는 그림 이모지를 쓰지 않는다. ㅋㅋ·ㅠㅠ·^^·♥ 같은 글자 표현은 허용한다(D-0137).
+EMOJI = re.compile(r"[\U0001F000-\U0001FAFF\uFE0F]")
+FLOW_TURN_SLACK = 2
+FLOW_BEATS = (3, 8)
 
 
 @dataclass(frozen=True)
@@ -55,10 +76,74 @@ class ConvSpec:
     max_length_tokens: int = 4096
     chars_per_token: float = 1.5
     turn_rule: TurnRule | None = None
+    relationship: str = ""
+    turn_max_chars: int = 0
 
 
 def normalize(text: str) -> str:
     return _STRIP.sub("", text)
+
+
+def slot_beats(source: dict[str, Any] | None, item: dict[str, Any]) -> list[str]:
+    """흐름 뼈대는 시드가 있으면 시드의 사건, 없으면 작성 응답의 flowBeats다."""
+    seed = (source or {}).get("seed") or {}
+    beats = seed.get("beats") if seed else item.get("flowBeats")
+    return [str(b) for b in beats or []]
+
+
+def style_warnings(conv: Conversation) -> list[str]:
+    """한소민 검사기의 경고 항목: 말풍선 길이, 맞장구뿐인 줄, 인터뷰 같은 질문 비율."""
+    said = [m.content for m in conv.messages if m.role == "assistant"]
+    heard = [m.content for m in conv.messages if m.role == "user"]
+    out: list[str] = []
+    bubbles = sorted(len(b) for s in said for b in s.split("\n") if b.strip())
+    texting = conv.provenance.channel in ("", "text")  # 말풍선은 문자 장면에만 있다
+    if texting and bubbles and bubbles[len(bubbles) // 2] > BUBBLE_MEDIAN_MAX:
+        out.append(f"캐릭터 말풍선 길이 중앙값이 {BUBBLE_MEDIAN_MAX}자를 넘는다")
+    generic = sum(bool(GENERIC_ACK.match(s.strip())) for s in said)
+    if generic > max(1, len(said) // 10):
+        out.append(f"맞장구뿐인 캐릭터 말이 {generic}줄이다")
+    if heard and sum("?" in u for u in heard) / len(heard) > QUESTION_RATIO_MAX:
+        out.append("상대 말의 60% 넘게 질문이다(인터뷰처럼 읽힌다)")
+    return out
+
+
+def source_texts(source: dict[str, Any] | None) -> list[str]:
+    return [str(t.get("content") or "") for t in (source or {}).get("turns", [])]
+
+
+def overlaps(texts: list[str], sources: list[str], n: int = OVERLAP_LIMIT) -> bool:
+    """texts 가운데 하나라도 원본과 정규화 뒤 n글자 이상 이어서 같으면 True."""
+    grams: set[str] = set()
+    for s in sources:
+        norm = normalize(s)
+        grams.update(norm[i : i + n] for i in range(len(norm) - n + 1))
+    if not grams:
+        return False
+    for t in texts:
+        norm = normalize(t)
+        if any(norm[i : i + n] in grams for i in range(len(norm) - n + 1)):
+            return True
+    return False
+
+
+def longest_overlap(texts: list[str], sources: list[str]) -> int:
+    """texts와 원본 사이에서 정규화 뒤 이어서 같은 가장 긴 글자 수(보고용)."""
+    best = 0
+    norms = [normalize(s) for s in sources if s.strip()]
+    for t in texts:
+        a = normalize(t)
+        for b in norms:
+            prev = [0] * (len(b) + 1)
+            for ch in a:
+                cur = [0] * (len(b) + 1)
+                for j, bj in enumerate(b, start=1):
+                    if ch == bj:
+                        cur[j] = prev[j - 1] + 1
+                        if cur[j] > best:
+                            best = cur[j]
+                prev = cur
+    return best
 
 
 def approx_tokens(text: str, chars_per_token: float) -> int:
@@ -124,6 +209,12 @@ def _alternates(messages: list[Message]) -> bool:
     return all(m.role == ("user" if i % 2 == 0 else "assistant") for i, m in enumerate(messages))
 
 
+def _no_repeat(messages: list[Message]) -> bool:
+    seen = [normalize(m.content) for m in messages if m.role == "assistant"]
+    long = [s for s in seen if len(s) >= 6]
+    return len(long) == len(set(long))
+
+
 def evaluate(conv: Conversation, spec: ConvSpec) -> dict[str, bool]:
     messages = list(conv.messages)
     results: dict[str, bool] = {
@@ -136,18 +227,31 @@ def evaluate(conv: Conversation, spec: ConvSpec) -> dict[str, bool]:
             and not any(p in conv.system for p in PREFILL_MARKERS)
             and not any(p in m.content for m in messages for p in PREFILL_MARKERS[:1])
         ),
-        "sns_user_turns_verbatim": True,
+        "source_flow_turns": True,
+        "source_overlap": True,
+        "flow_beats": True,
+        "no_emoji": not EMOJI.search(assistant_text(conv)),
+        "turn_length": not spec.turn_max_chars
+        or all(len(m.content) <= spec.turn_max_chars for m in messages if m.role == "assistant"),
+        "close_formal_opener": spec.relationship not in CLOSE_RELATIONSHIPS
+        or not any(
+            FORMAL_OPENER.match(m.content.strip()) for m in messages if m.role == "assistant"
+        ),
+        "repeated_lines": _no_repeat(messages),
         "source_facts_absent": True,
         "forbidden_phrases": True,
         "max_length": approx_tokens(conversation_text(conv), spec.chars_per_token)
         <= spec.max_length_tokens,
     }
     if spec.material == "SNS_REWRITE" and spec.source is not None:
-        source_turns = [t for t in spec.source.get("turns", []) if t.get("role") == "user"]
-        user_turns = [m for m in messages if m.role == "user"]
-        results["sns_user_turns_verbatim"] = [t["content"] for t in source_turns] == [
-            m.content for m in user_turns
-        ] and len(source_turns) == len(user_turns)
+        original = source_texts(spec.source)
+        results["source_flow_turns"] = abs(len(messages) - len(original)) <= FLOW_TURN_SLACK
+        beats = [b for b in conv.provenance.flowBeats if b.strip()]
+        results["flow_beats"] = FLOW_BEATS[0] <= len(beats) <= FLOW_BEATS[1] and len(beats) == len(
+            conv.provenance.flowBeats
+        )
+        written = [m.content for m in messages] + list(conv.provenance.flowBeats)
+        results["source_overlap"] = not overlaps([*written, conv.system], original)
     joined = conversation_text(conv)
     if spec.source_facts:
         results["source_facts_absent"] = not any(f and f in joined for f in spec.source_facts)
@@ -163,7 +267,13 @@ _REASON: dict[str, str] = {
     "roles_alternate": "user·assistant가 번갈아 나오고 user로 시작해 assistant로 끝나야 한다",
     "system_present": "system(짧은 프롬프트 + 시작 장면)이 비어 있다",
     "no_empty": "빈 답이나 빈 메시지가 있다",
-    "sns_user_turns_verbatim": "SNS 원문의 사용자 턴을 글자 그대로 유지하지 않았다",
+    "source_flow_turns": "SNS 재작성의 메시지 수가 원본과 2개 넘게 다르다",
+    "source_overlap": "대사·장면·뼈대가 원본과 공백·문장 부호를 빼고 10글자 이상 이어서 같다",
+    "flow_beats": "SNS 재작성에 흐름 뼈대(flowBeats) 3~8줄이 없다",
+    "no_emoji": "캐릭터 말에 그림 이모지가 있다(ㅋㅋ·ㅠㅠ·^^는 써도 된다)",
+    "turn_length": "캐릭터 한 턴이 길이 상한을 넘었다",
+    "close_formal_opener": "가까운 관계인데 캐릭터 말이 '네,'로 시작한다",
+    "repeated_lines": "같은 대화 안에서 캐릭터가 같은 말을 되풀이했다",
     "no_prefill": "첫 메시지가 user가 아니거나 system에 이력·프리필 표지가 있다",
     "source_facts_absent": "원본 화자의 사실이 캐릭터 설정·대사에 들어갔다",
     "forbidden_phrases": "인계안의 금지 표현이 캐릭터 대사에 있다",
@@ -187,6 +297,17 @@ def conversation_problems(conv: Conversation, spec: ConvSpec) -> list[str]:
             f"turn_range: assistant 턴이 {turns}개다. {rule.minAssistantTurns}~"
             f"{rule.maxAssistantTurns}턴으로 쓴다(user·assistant 한 쌍이 한 턴)"
         )
+    if spec.turn_max_chars and any(p.startswith("turn_length:") for p in problems):
+        long = [
+            str(i)
+            for i, m in enumerate(conv.messages)
+            if m.role == "assistant" and len(m.content) > spec.turn_max_chars
+        ]
+        problems = [p for p in problems if not p.startswith("turn_length:")]
+        problems.append(
+            f"turn_length: 캐릭터 말 {', '.join(long)}번 메시지가 "
+            f"{spec.turn_max_chars}자를 넘는다. 짧게 끊어 쓴다"
+        )
     return problems
 
 
@@ -205,9 +326,15 @@ def batch_problems(written: list[dict[str, Any]], specs: list[ConvSpec], system:
             clusterId=spec.cluster_id,  # type: ignore[arg-type]
             material=spec.material,  # type: ignore[arg-type]
             skeletonId="probe",
-            system=system,
+            system=spec.system or system,
             messages=messages,
-            provenance={"writerModel": "probe", "requestRef": "probe"},
+            provenance={
+                "writerModel": "probe",
+                "requestRef": "probe",
+                "flowBeats": (
+                    slot_beats(spec.source, item) if spec.material == "SNS_REWRITE" else []
+                ),
+            },
         )
         problems.extend(f"{i + 1}번째: {p}" for p in conversation_problems(conv, spec))
         problems.extend(f"{i + 1}번째: {p}" for p in structure_problems(item, spec.turn_rule))
@@ -216,6 +343,8 @@ def batch_problems(written: list[dict[str, Any]], specs: list[ConvSpec], system:
             problems.append(f"{i + 1}번째: scene은 5~200자의 한 문장이어야 한다(받은 값 {scene!r})")
         elif "?" in scene:
             problems.append(f"{i + 1}번째: scene에 질문(?)을 넣지 않는다")
+        if spec.material == "SNS_REWRITE" and overlaps([scene], source_texts(spec.source)):
+            problems.append(f"{i + 1}번째: scene이 원본과 10글자 이상 이어서 같다")
         if spec.material == "SNS_REWRITE":
             want = (spec.source or {}).get("sourceId", "")
             if not item.get("sourceId") or item.get("sourceId") != want:

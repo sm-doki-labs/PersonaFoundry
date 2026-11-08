@@ -725,7 +725,9 @@ class GemmaQLoraProvider:
                 )
             screen, screen_data = self._screen_state(host, job)
             if screen == "pending":
-                return run.model_copy(update={"status": "RUNNING"})
+                # 학습은 끝났고 같은 GPU에서 선별 답을 만드는 중이다(화면 진행 줄, D-0130).
+                applied = {**run.appliedConfig, "progress": self._progress(host, job, "screen")}
+                return run.model_copy(update={"status": "RUNNING", "appliedConfig": applied})
             checkpoints = self._checkpoints(data)
             applied = dict(run.appliedConfig)
             if isinstance(data.get("appliedConfig"), dict):
@@ -754,7 +756,31 @@ class GemmaQLoraProvider:
                 }
             )
         log = host.read_text(f"{job}/train.log")
-        return run.model_copy(update={"status": "RUNNING" if log is not None else "SUBMITTED"})
+        if log is None:
+            return run.model_copy(update={"status": "SUBMITTED"})
+        applied = {**run.appliedConfig, "progress": self._progress(host, job, "training")}
+        return run.model_copy(update={"status": "RUNNING", "appliedConfig": applied})
+
+    def _progress(self, host: RemoteHost, job: str, phase: str) -> dict[str, Any]:
+        """원격 state.json(단계·스텝)과 checkpoint-plan.json(전체 스텝)으로 진행을 남긴다.
+
+        읽지 못하면 단계 이름만 남긴다. 화면은 스텝이 없으면 막대를 그리지 않는다.
+        """
+        out: dict[str, Any] = {"phase": phase, "at": _now()}
+        for name, keys in (
+            ("state.json", ("step", "epoch")),
+            ("checkpoint-plan.json", ("maxSteps",)),
+        ):
+            try:
+                raw = host.read_text(f"{job}/{name}")
+                data = json.loads(raw) if raw else {}
+            except (RemoteHostError, json.JSONDecodeError):
+                data = {}
+            if isinstance(data, dict):
+                for key in keys:
+                    if isinstance(data.get(key), int | float):
+                        out[key] = data[key]
+        return out
 
     def _fetch(self, host: RemoteHost, job: str, artifact_dir: Path, items: list[dict]) -> None:
         for item in items:

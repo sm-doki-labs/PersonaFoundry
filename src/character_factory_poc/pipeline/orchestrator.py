@@ -133,6 +133,23 @@ def _training_ready(ctx: Context, cid: str) -> bool:
     return False
 
 
+def _training_undecided(ctx: Context, cid: str) -> bool:
+    """학습 계획이 있고 '학습 없이 진행'을 고르지 않았다(학습 결과도 아직 없다)."""
+    from character_factory_poc.stages.s10_train.io import latest_rev, skip_chosen
+
+    rev_dir = latest_rev(ctx, cid)
+    return rev_dir is not None and not skip_chosen(rev_dir)
+
+
+def gpu_eval_held(ctx: Context, cid: str, sid: str) -> bool:
+    """평가가 학습 어댑터로 GPU를 빌려야 하면 웹은 실행 확인을 받는다(D-0130)."""
+    if sid != "s10":
+        return False
+    from character_factory_poc.stages.s10_eval.run import needs_gpu_eval
+
+    return needs_gpu_eval(ctx, cid)
+
+
 def _last_gate_decision(ctx: Context, cid: str, gate: str) -> str | None:
     """관문 상태가 가리키는 마지막 결정 기록의 decision. 없으면 None."""
     from character_factory_poc.common.store import read_json
@@ -203,6 +220,10 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
         last = ctx.character_dir(cid) / "s10-eval" / (st.currentRev or "-")
         if not _training_ready(ctx, cid):
             waiting = st.status == "REJECTED" and prompt_only.is_prompt_only(last)
+            if opt.web and not waiting and _training_undecided(ctx, cid):
+                # D-0130: 웹은 학습 계획을 세운 뒤 사람이 '학습 시작'이나 '학습 없이 진행'을
+                # 고를 때까지 평가를 열지 않는다. 학습 화면이 비용 확인을 먼저 보인다.
+                raise NeedsInputError("학습 비용 확인 대기(학습 시작 또는 학습 없이 진행)")
             mode = str(ctx.config.stage("s10").get("untrained", "ask"))
             if mode == "wait" or waiting:
                 raise NeedsInputError(
@@ -390,7 +411,11 @@ def _step(
         # D-0049: 워크숍 실행은 유료 공급자 단계를 사람이 확인하기 전에는 돌리지 않는다.
         from character_factory_poc.pipeline.scheduler import paid_stage
 
-        if opt.web and sid not in opt.confirmed and paid_stage(ctx, sid):
+        if (
+            opt.web
+            and sid not in opt.confirmed
+            and (paid_stage(ctx, sid) or gpu_eval_held(ctx, cid, sid))
+        ):
             log.add(f"{sid}: 유료 공급자 — 실행 확인 대기")
             log.held.append(sid)
             return None

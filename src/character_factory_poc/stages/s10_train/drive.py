@@ -43,6 +43,7 @@ from character_factory_poc.stages.s10_train.io import (
     read_run,
     resolve_providers,
     run_path,
+    stop_requested,
     train_root,
     write_run,
 )
@@ -58,6 +59,27 @@ class DriveSignal(BaseException):  # noqa: N818 - KeyboardInterrupt처럼 중단
     def __init__(self, signum: int):
         super().__init__(f"신호 {signal.Signals(signum).name}")
         self.signum = signum
+
+
+class DriveStopped(BaseException):  # noqa: N818 - 중단 경로(abort)를 타도록 BaseException이다
+    """사람이 화면에서 학습 중단을 눌렀다(stop-request.json, D-0130)."""
+
+
+def _check_stop(rev_dir: Path) -> None:
+    if stop_requested(rev_dir):
+        raise DriveStopped("사람이 학습을 중단했다")
+
+
+def _wait(sleep: Callable[[float], None], interval: float, rev_dir: Path) -> None:
+    """다음 상태 확인까지 쉰다. 실제 시계로 오래 쉴 때는 중단 요청을 2초마다 본다."""
+    if sleep is not time.sleep or interval <= 2:
+        sleep(interval)
+        return
+    end = time.monotonic() + interval
+    while (left := end - time.monotonic()) > 0:
+        sleep(min(2.0, left))
+        if stop_requested(rev_dir):
+            return
 
 
 class CollectPendingError(TrainingError):
@@ -282,9 +304,11 @@ def drive_s10t(
     guarded: list[Path] = []
     with signals_as_exceptions():
         try:
+            _check_stop(rev_dir)
             guarded = _start_guards(ctx, cid, rev_dir, resolved, log)
             submit_s10t(ctx, cid, providers)
             while True:
+                _check_stop(rev_dir)
                 pending: list[str] = []
                 for item in resolved:
                     path = run_path(rev_dir, item.adapter)
@@ -329,10 +353,12 @@ def drive_s10t(
                 if not pending:
                     break
                 log("학습 진행 중: " + ", ".join(pending))
-                sleep(interval)
+                _wait(sleep, interval, rev_dir)
         except BaseException as exc:
             if not (keep_gpu and isinstance(exc, Exception)):
                 _abort_all(ctx, cid, providers, f"실행 중단: {type(exc).__name__}: {exc}")
+            if isinstance(exc, DriveStopped):
+                ensure_failed(state, rev_dir.name, "사람이 학습을 중단했다")
             raise
         finally:
             for plan_dir in guarded:
