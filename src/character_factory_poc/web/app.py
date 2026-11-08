@@ -27,7 +27,7 @@ from character_factory_poc.web.jobs import JobManager
 from character_factory_poc.web.settings import load_settings
 
 GATE_DECISIONS = {"APPROVE", "REJECT", "REQUEST_CHANGES", "SELECT"}
-PAID_PLAN_STAGES = {"s5", "s6"}
+PAID_PLAN_STAGES = {"s5", "s6", "s10"}
 _TEXT_TYPES = {"text/html", "text/css", "text/plain", "text/markdown", "application/json"}
 
 
@@ -131,7 +131,80 @@ def create_app(
         data["jobs"] = jobs.list(character_id=character_id, limit=10)
         data["lastJob"] = data["jobs"][0] if data["jobs"] else None
         data["held"] = _held(character_id, data["lastJob"])
+        data["modelPath"] = _model_path(character_id)
         return data
+
+    def _model_path(character_id: str) -> dict[str, Any]:
+        from character_factory_poc.web.model_path import model_path
+
+        char_dir = reads.character_dir(root, character_id)
+        return model_path(char_dir, reads.read_state(char_dir)[0])
+
+    @app.get("/api/characters/{character_id}/model-path")
+    def model_path_view(character_id: str) -> dict[str, Any]:
+        """모델 만들기 화면: 재료 → 데이터셋 → 학습 → 평가(D-0130). 읽기만 한다."""
+        return _model_path(character_id)
+
+    @app.post("/api/characters/{character_id}/training/stop", status_code=202)
+    def training_stop(character_id: str) -> dict[str, Any]:
+        """도는 학습을 멈춘다. drive가 다음 확인 때 GPU를 반납하고 끝낸다(D-0130)."""
+        from character_factory_poc.stages.s10_train.io import request_stop
+        from character_factory_poc.web.model_path import _latest
+
+        active = jobs.active_for(character_id)
+        if not active or active.get("action") != "train":
+            raise WebError(409, "지금 도는 학습이 없어요")
+        rev = _latest(reads.character_dir(root, character_id) / "s10-train", "tr")
+        if rev is None:
+            raise WebError(409, "학습 기록이 없어요")
+        request_stop(rev, reads.now_iso())
+        return {"stopRequested": True, "rev": rev.name, "job": active.get("jobId")}
+
+    @app.post("/api/characters/{character_id}/training/release")
+    def training_release(character_id: str) -> dict[str, Any]:
+        """결과 받기에 실패해 남겨 둔 GPU를 결과를 버리고 반납한다(D-0130)."""
+        from character_factory_poc.providers.training.errors import TrainingError
+        from character_factory_poc.stages.s10_train.drive import cleanup_s10t
+        from character_factory_poc.stages.s10_train.io import ensure_failed, read_run, write_run
+        from character_factory_poc.web.model_path import _latest, training_view
+
+        char_dir = reads.character_dir(root, character_id)
+        if jobs.active_for(character_id):
+            raise WebError(
+                409, "작업이 도는 중이라 반납할 수 없어요. 작업이 끝난 뒤 다시 눌러 주세요"
+            )
+        if training_view(char_dir, reads.read_state(char_dir)[0])["state"] != "hold":
+            raise WebError(409, "반납할 GPU나 받지 못한 결과가 없어요")
+        ctx = Context(config=load_config(root, conf.config_path), execute=True)
+        with jobs.locks.hold(character_id):
+            try:
+                removed = cleanup_s10t(ctx, character_id)
+            except (TrainingError, FactoryError) as exc:
+                raise WebError(502, f"GPU를 반납하지 못했어요: {exc}") from exc
+            rev = _latest(char_dir / "s10-train", "tr")
+            for path in sorted(rev.glob("*/training-run.json")) if rev else []:
+                run = read_run(path)
+                if run.appliedConfig.get("collectPending") or run.status not in {
+                    "FAILED",
+                    "CANCELLED",
+                    "SUCCEEDED",
+                }:
+                    applied = {k: v for k, v in run.appliedConfig.items() if k != "collectPending"}
+                    applied["error"] = "사람이 결과를 버리고 GPU를 반납했다"
+                    write_run(
+                        path,
+                        run.model_copy(
+                            update={
+                                "status": "CANCELLED",
+                                "appliedConfig": applied,
+                                "modelBinding": None,
+                            }
+                        ),
+                    )
+            if rev is not None:
+                ensure_failed(ctx.state(character_id), rev.name, "결과를 버리고 GPU를 반납했다")
+        jobs.publish_state(character_id, force=True)
+        return {"released": removed}
 
     def _held(character_id: str, last_job: dict[str, Any] | None) -> list[dict[str, Any]]:
         """마지막 작업이 실행 확인을 기다리게 둔 유료 단계(D-0049, LLD §6.7)."""
@@ -147,7 +220,8 @@ def create_app(
             status = (stages.get(sid) or {}).get("status", "PENDING")
             if status in {"APPROVED", "AWAITING_HUMAN", "SKIPPED"}:
                 continue
-            out.append({"stage": sid, "providers": paid_providers(ctx, sid)})
+            providers = paid_providers(ctx, sid) or (["gpu: vast"] if sid == "s10" else [])
+            out.append({"stage": sid, "providers": providers})
         return out
 
     @app.get("/api/characters/{character_id}/gates/{gate}")
@@ -171,6 +245,16 @@ def create_app(
             "unitPrices": dict(pcfg.extra.get("price_per_second") or {}),
             "reason": "",
         }
+        if stage == "s10":
+            # 평가 GPU 비용은 평가 세트(턴 수)를 사전 등록한 뒤 정해진다. 상한만 알린다(D-0130).
+            cap = float(ctx.config.stage("s10").get("gpu_budget_usd", 5.0))
+            out.update(adapter="vast", model="", unitPrices={})
+            out["reason"] = (
+                "평가 GPU 비용은 평가 세트를 고정한 뒤 계산해요. 많아도 $"
+                + format(cap, ".2f")
+                + "에서 멈춰요."
+            )
+            return out
         try:
             if stage == "s5":
                 from character_factory_poc.stages.s5_intro import run as s5

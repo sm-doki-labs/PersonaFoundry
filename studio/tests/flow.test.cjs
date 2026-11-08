@@ -145,3 +145,30 @@ test('out-of-scope stages and their links are faded before the first run', () =>
   assert.equal(Flow.targetLabel(graph, 'G6'), '프롬프트 승인까지');
   assert.equal(Flow.targetLabel(graph, 'sx'), '끝까지');
 });
+
+
+test('training state comes from the training record: a plan waits for cost confirmation, GPU left over is the first task (D-0130)', () => {
+  const rows = ['s9s', 's9'].map((id) => ({ id, status: 'APPROVED', attempts: 1 })).concat([{ id: 's10t', status: 'AWAITING_HUMAN', attempts: 1 }]);
+  const base = { id: 'cf-x', stages: rows, gates: [{ id: 'G7', status: 'APPROVED' }], history: {} };
+  const plan = Object.assign({}, base, { modelPath: { training: { state: 'plan', estimateUsd: 1.57, gpuHours: 1.7, providers: [] } } });
+  let v = Flow.viewsFor(graph, plan, { now: NOW });
+  assert.equal(v.s10t.kind, 'confirm');
+  assert.equal(v.s10.kind, 'todo');
+  let tasks = Flow.buildTasks(graph, plan, v, { now: NOW });
+  const confirm = tasks.find((t) => t.stage === 's10t');
+  assert.equal(confirm.title, '학습 비용 확인');
+  assert.deepEqual(confirm.actions.map((a) => a.act + ':' + a.v), ['mconfirm:start', 'mconfirm:skip']);
+
+  const hold = Object.assign({}, base, { modelPath: { training: { state: 'hold', providers: [{ gpuAlive: true, deadlineAt: '2026-11-08T06:02:00+00:00' }] } } });
+  v = Flow.viewsFor(graph, hold, { now: NOW });
+  assert.equal(v.s10t.kind, 'fail');
+  tasks = Flow.buildTasks(graph, hold, v, { now: NOW });
+  assert.equal(tasks[0].title, 'GPU가 남아 있어요');
+  assert.equal(tasks[0].actions[0].act, 'train-retry');
+  assert.equal(tasks.filter((t) => t.stage === 's10t').length, 1, '일반 실패 항목과 겹치지 않는다');
+
+  const skip = Object.assign({}, base, { modelPath: { training: { state: 'skip', providers: [] } } });
+  assert.equal(Flow.viewsFor(graph, skip, { now: NOW }).s10t.kind, 'skip');
+  // 학습 기록이 없는 옛 캐릭터는 예전처럼 state.json을 따른다.
+  assert.equal(Flow.viewsFor(graph, base, { now: NOW }).s10t.kind, 'done');
+});

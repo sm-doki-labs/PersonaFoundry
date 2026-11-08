@@ -79,6 +79,12 @@ POLICY_GUIDE_REF = (
 KNOWN_CLUSTERS: frozenset[str] = frozenset((*CLUSTERS, "long"))
 FACTORY_MATERIALS: frozenset[str] = frozenset({"SNS_REWRITE", "SYNTH"})
 PROTECTED_MIN_RATIO = 0.9
+DEFAULT_RELATIONSHIP_SHARES: dict[str, float] = {
+    "FAVORABLE": 0.45,
+    "STRONGLY_FAVORABLE": 0.3,
+    "NEUTRAL": 0.15,
+    "UNFAVORABLE": 0.1,
+}
 PROTECTED_MIN_RATIO_SOURCE = (
     "proposal (공장 운영 시작값. 정책 dataset.protectedAnchors에 수치가 없어 split.py의 "
     "학습 목표 90% 경고선과 같은 값을 쓴다)"
@@ -110,6 +116,15 @@ class S9Config:
     sns_path: str
     sns_limit: int
     guide_ref: str
+    sns_window: int = 12
+    corpus_share: float = 0.2
+    # D-0138: 학습용 짧은 프롬프트의 관계 배정 비율(한소민 데이터의 관계 분포를 반올림한 제안값),
+    # 합성 대화의 채널(서비스 채널), 캐릭터 한 턴 상한(한소민 검사기 60자).
+    relationship_shares: dict[str, float] = field(
+        default_factory=lambda: dict(DEFAULT_RELATIONSHIP_SHARES)
+    )
+    synth_channel: str = "video_call"
+    turn_max_chars: int = 60
     policy_name: str = ""
     cluster_ids: tuple[str, ...] = CLUSTERS
     labels: dict[str, str] = field(default_factory=lambda: dict(LABELS))
@@ -149,6 +164,31 @@ def _str_list(value: Any, name: str, problems: list[str]) -> tuple[str, ...]:
         problems.append(f"{name}은 비어 있지 않은 문자열 목록이다")
         return ()
     return tuple(v.strip() for v in value)
+
+
+def _relationship_shares(value: Any, problems: list[str]) -> dict[str, float]:
+    if value is None:
+        return dict(DEFAULT_RELATIONSHIP_SHARES)
+    known = set(DEFAULT_RELATIONSHIP_SHARES)
+    if not isinstance(value, dict) or set(value) - known:
+        problems.append(f"relationship_shares는 {sorted(known)} 키의 표다")
+        return dict(DEFAULT_RELATIONSHIP_SHARES)
+    out = {str(k): float(v) for k, v in value.items() if isinstance(v, int | float) and v >= 0}
+    if len(out) != len(value) or abs(sum(out.values()) - 1.0) > 0.001:
+        problems.append("relationship_shares 값은 0 이상이고 합이 1이다")
+        return dict(DEFAULT_RELATIONSHIP_SHARES)
+    return out
+
+
+def _channel(value: Any, problems: list[str]) -> str:
+    if value is None:
+        return "video_call"
+    if value not in ("text", "call", "video_call", "face_to_face"):
+        problems.append(
+            f"synth_channel은 text·call·video_call·face_to_face 가운데 하나다({value!r})"
+        )
+        return "video_call"
+    return str(value)
 
 
 @dataclass
@@ -532,6 +572,22 @@ def s9_config(ctx: Context) -> S9Config:
         source_facts=_str_list(checks.get("source_facts"), "checks.source_facts", problems),
         sns_path=str(raw.get("sns_path") or ""),
         sns_limit=_int(raw.get("sns_limit"), "sns_limit", problems, default=120, low=0, high=5000),
+        # D-0131: 긴 세션을 자르는 구간 길이(턴). S9 작성 요청이 받는 4~12턴 안이어야 한다.
+        sns_window=_int(raw.get("sns_window"), "sns_window", problems, default=12, low=4, high=12),
+        # D-0134: 실제 대화 재료 가운데 말뭉치(통화 장면) 구간의 비율. 나머지는 SNS(문자)다.
+        corpus_share=_float(
+            raw.get("corpus_share"), "corpus_share", problems, default=0.2, low=0.0, high=1.0
+        ),
+        relationship_shares=_relationship_shares(raw.get("relationship_shares"), problems),
+        synth_channel=_channel(raw.get("synth_channel"), problems),
+        turn_max_chars=_int(
+            checks.get("turn_max_chars"),
+            "checks.turn_max_chars",
+            problems,
+            default=60,
+            low=0,
+            high=2000,
+        ),
         guide_ref=str(raw.get("guide_ref") or (POLICY_GUIDE_REF if pd else GUIDE_REF)),
         **extra,
     )

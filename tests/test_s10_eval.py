@@ -523,3 +523,52 @@ def test_gemma_only_prereg_judges_and_reports_two_arms(tmp_path: Path) -> None:
     assert {m.armId for m in report.metrics} == {"LONG_BASE", "SHORT_GEMMA_SFT"}
     assert "SHORT_GEMINI_SFT" not in report.recommendation
     assert ctx.state(cid).gate("G8").status == "AWAITING_HUMAN"
+
+
+def _training_prompt(ctx: Context, cid: str, rev: str = "ds1") -> None:
+    """D-0138 학습용 짧은 프롬프트를 데이터셋 폴더에 둔다."""
+    from types import SimpleNamespace
+
+    from character_factory_poc.stages.s9_data import training_prompt as tp
+
+    text = "[ACTOR_IDENTITY]\n캐릭터 이름: 윤하린\n\n[PERSONA / FACTS]\n윤하린은 꽃집 사장이다."
+    built = tp.build(SimpleNamespace(long=SimpleNamespace(text=text), short=None))
+    write_once_json(ctx.character_dir(cid) / "s9-data" / rev / tp.FILE_NAME, built.body())
+
+
+def test_sft_arms_use_the_training_prompt(tmp_path: Path) -> None:
+    """학습 모델 조건은 학습한 데이터셋의 학습용 짧은 프롬프트로 평가한다(D-0139)."""
+    ctx, cid = _context(tmp_path)
+    _fake_models(ctx)
+    _training_prompt(ctx, cid)
+    plan = eval_prereg.load_approved_plan(ctx, cid)[0]
+    rel = eval_prereg.eval_relationship(plan, None)
+    build = eval_prereg.build_prereg(ctx, cid)
+    arms = {a.armId: a for a in build.prereg.arms}
+    assert arms["LONG_BASE"].promptRef.ref.endswith("long.md")
+    for arm in ("SHORT_GEMMA_SFT", "SHORT_GEMINI_SFT"):
+        ref = arms[arm].promptRef.ref
+        assert ref == f"s10-eval/{build.revision}/prompts/sft-system-ds1-{rel.lower()}.md"
+        text = (ctx.character_dir(cid) / ref).read_text("utf-8")
+        assert sha256_text(text) == arms[arm].promptRef.sha256
+        assert text.startswith("[ACTOR_IDENTITY]") and "[TRAINING_RULES]" in text
+        assert "[RELATIONSHIP]" in text and "[CHANNEL]\n영상통화다" in text
+        assert text.rstrip().endswith("[SCENE]\n평소처럼 영상통화로 이야기를 나누는 중이다.")
+    assert eval_prereg.eval_relationship(plan, "처음 만난 사이") == "NEUTRAL"
+    assert eval_prereg.eval_relationship(plan, "연애 중") == "STRONGLY_FAVORABLE"
+    # 평가 실행이 이 system을 그대로 보낸다.
+    gemma = FakeChat("gemma-r1", "학습")
+    eval_run.run_eval(
+        ctx,
+        cid,
+        models={"SHORT_GEMMA_SFT": gemma, "SHORT_GEMINI_SFT": FakeChat("vertex-r1", "버텍스")},
+        only_sets=["OE"],
+        only_arms=["SHORT_GEMMA_SFT"],
+    )
+    assert gemma.calls[0][0][0] == ("system", text)
+
+
+def test_sft_arms_fall_back_to_short_prompt_without_training_prompt(tmp_path: Path) -> None:
+    ctx, cid, build = _prepared(tmp_path)
+    for arm in build.prereg.arms[1:]:
+        assert arm.promptRef.ref.endswith("short.md")

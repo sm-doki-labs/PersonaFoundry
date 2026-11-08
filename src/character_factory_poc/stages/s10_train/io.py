@@ -43,6 +43,37 @@ def latest_rev(ctx: Context, cid: str) -> Path | None:
     return max(found)[1] if found else None
 
 
+# 웹 화면의 학습 조작 기록(D-0130). 학습 revision 폴더에 둔다.
+STOP_FILE = "stop-request.json"
+SKIP_FILE = "skip-training.json"
+
+
+def stop_requested(rev_dir: Path) -> bool:
+    """사람이 이 학습을 멈추라고 했는가. drive가 상태를 확인할 때마다 본다."""
+    return (Path(rev_dir) / STOP_FILE).is_file()
+
+
+def request_stop(rev_dir: Path, at: str, by: str = "web") -> None:
+    path = Path(rev_dir) / STOP_FILE
+    path.write_text(json.dumps({"at": at, "by": by}, ensure_ascii=False) + "\n", "utf-8")
+
+
+def skip_chosen(rev_dir: Path | None) -> bool:
+    """이 학습 계획 대신 '학습 없이 진행'을 골랐는가."""
+    return rev_dir is not None and (Path(rev_dir) / SKIP_FILE).is_file()
+
+
+def choose_skip(rev_dir: Path, at: str) -> None:
+    path = Path(rev_dir) / SKIP_FILE
+    path.write_text(json.dumps({"at": at, "decision": "SKIP"}, ensure_ascii=False) + "\n", "utf-8")
+
+
+def clear_skip(rev_dir: Path) -> None:
+    path = Path(rev_dir) / SKIP_FILE
+    if path.is_file():
+        path.unlink()
+
+
 def run_path(rev_dir: Path, provider: str) -> Path:
     return rev_dir / provider / "training-run.json"
 

@@ -12,6 +12,7 @@ G7a에서 채택한 샘플은 그대로 두고, 나머지는 같은 인계안과
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from character_factory_poc.stages.s9_data import checks, deck, page, split
 from character_factory_poc.stages.s9_data import plan as plan_mod
 from character_factory_poc.stages.s9_data import policy as policy_mod
 from character_factory_poc.stages.s9_data import samples as writer
+from character_factory_poc.stages.s9_data import training_prompt as tp_mod
 from character_factory_poc.stages.s9_data.plan import S9Config
 
 
@@ -91,6 +93,7 @@ def _generate(
         examples=_examples(kept),
         writer_model=deck.writer_model(ctx),
         turn_rule=turn_rule,
+        training=tp_mod.ensure(rev_dir, pair),
     )
     batch_notes = (notes + [""] * to_make)[:to_make]
     return writer.write_conversations(
@@ -175,7 +178,9 @@ def run_build(ctx: Context, cid: str) -> Path:
         if c.policy is not None and c.policy.protected
     }
 
-    sns = writer.load_sns_sources(cfg.sns_path, cfg.sns_limit)
+    sns, sns_stats = writer.read_sns_sources(
+        cfg.sns_path, cfg.sns_limit, cfg.sns_window, cfg.corpus_share
+    )
     pair = _pair(ctx, cid)
     convs: list[Conversation] = list(carried)
     try:
@@ -275,6 +280,47 @@ def run_build(ctx: Context, cid: str) -> Path:
         _write_report(rev_dir, report, cfg, extra=preport.body())
         state.transition("s9", "CHECK_FAILED", rev=rev, error="; ".join(report.problems())[:500])
         raise CheckFailed("s9", report.problems())
+    used = sum(1 for c in convs if c.material == "SNS_REWRITE")
+    sns_stats["used"] = used
+    kinds = {s["sourceId"]: s.get("source", "SNS") for s in sns}
+    # D-0135: 흐름 뼈대 재작성. 원본과 이어서 같은 가장 긴 글자 수와 뼈대 예시를 남긴다.
+    # 원문은 남기지 않는다.
+    originals = {s["sourceId"]: checks.source_texts(s) for s in sns}
+    rewritten = [c for c in convs if c.material == "SNS_REWRITE"]
+    sns_stats["rewrite"] = "SKELETON"
+    sns_stats["overlap"] = {
+        "limit": checks.OVERLAP_LIMIT,
+        "checked": len(rewritten),
+        "max": max(
+            (
+                checks.longest_overlap(
+                    [m.content for m in c.messages] + list(c.provenance.flowBeats),
+                    originals.get(c.provenance.sourceRef, []),
+                )
+                for c in rewritten
+            ),
+            default=0,
+        ),
+    }
+    sample = next((c for c in rewritten if c.provenance.flowBeats), None)
+    if sample is not None:
+        sns_stats["example"] = {
+            "conversationId": sample.conversationId,
+            "origin": kinds.get(sample.provenance.sourceRef, "SNS"),
+            "beats": list(sample.provenance.flowBeats),
+            "messages": len(sample.messages),
+            "sourceTurns": len(originals.get(sample.provenance.sourceRef, [])),
+        }
+    sns_stats["usedBySource"] = dict(
+        Counter(
+            kinds.get(c.provenance.sourceRef or "", "SNS")
+            for c in convs
+            if c.material == "SNS_REWRITE"
+        )
+    )
+    sns_warning = writer.source_warning(sns_stats, used)
+    if sns_warning:
+        result.warnings.append(sns_warning)
     files = split.write_splits(rev_dir, result)
     counts = split.cluster_counts(convs)
     dataset = DatasetRev(
@@ -294,7 +340,12 @@ def run_build(ctx: Context, cid: str) -> Path:
         rev_dir,
         report,
         cfg,
-        extra={"warnings": result.warnings, "approx": approx, **preport.body()},
+        extra={
+            "warnings": result.warnings,
+            "approx": approx,
+            "sources": sns_stats,
+            **preport.body(),
+        },
     )
     _write_page(cid, rev, rev_dir, dataset, report, convs, preport)
     write_manifest(rev_dir)

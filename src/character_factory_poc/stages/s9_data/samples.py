@@ -8,8 +8,10 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,9 +43,10 @@ from character_factory_poc.contracts.dataset import (
 from character_factory_poc.contracts.persona import PromptPair, TraitSheet
 from character_factory_poc.pipeline.agent import AgentSpec, run_agent
 from character_factory_poc.pipeline.context import Context
-from character_factory_poc.stages.s9_data import checks, deck, page
+from character_factory_poc.stages.s9_data import checks, deck, page, seeds
 from character_factory_poc.stages.s9_data import handoff as handoff_mod
 from character_factory_poc.stages.s9_data import plan as plan_mod
+from character_factory_poc.stages.s9_data import training_prompt as tp_mod
 from character_factory_poc.stages.s9_data.plan import S9Config
 from character_factory_poc.stages.s9_data.split import FILE_NAME as SPLIT_FILE_NAMES
 
@@ -55,6 +58,11 @@ class WrittenConversation(Strict):
     skeletonKey: str = ""
     scene: str
     sourceId: str = ""
+    flowBeats: list[str] = Field(
+        default_factory=list,
+        description="SNS 재작성: 원본에서 먼저 뽑은 흐름 뼈대 3~8줄(원문 문장 없이). 합성은 빈 배열"
+        "",
+    )
     messages: list[Message] = Field(min_length=2)
     topicShiftAt: list[int] = Field(
         default_factory=list, description="긴 대화: 화제가 바뀌는 user 메시지 위치(0부터)"
@@ -76,6 +84,7 @@ CONTRACT_EXAMPLE = {
             "skeletonKey": "rainy-bookshop",
             "scene": "비가 그친 저녁, 책방을 닫고 창가에 남아 문자를 주고받는다.",
             "sourceId": "",
+            "flowBeats": [],
             "messages": [
                 {"role": "user", "content": "오늘 문 닫았어?"},
                 {"role": "assistant", "content": "방금 닫았어.\n아직 창가에 앉아 있어."},
@@ -91,7 +100,9 @@ RULES: tuple[str, ...] = (
     "assistant 대사는 캐릭터 한 사람의 말만 쓴다. 상대의 말·행동·감정을 대신 쓰지 않는다.",
     "system은 입력의 system을 그대로 따르고, 새 프롬프트를 만들지 않는다.",
     "scene은 시작 상황 한 문장이다. 다음 전개나 정답을 드러내지 않고 물음표를 넣지 않는다.",
-    "SNS 재작성은 원본의 사용자 턴을 글자 그대로 두고 캐릭터 턴만 다시 쓴다. 턴 수는 그대로다.",
+    "SNS 재작성은 원본을 흐름 뼈대로만 쓴다. flowBeats 3~8줄을 먼저 적고 양쪽 대사를 새로 쓴다.",
+    "SNS 재작성의 메시지 수는 원본과 같게, 많아야 2개 차이로 쓴다.",
+    "대사와 뼈대는 원본과 공백·문장 부호를 빼고 10글자 이상 이어서 같으면 안 된다.",
     "원본 화자의 직업·나이·관계 사실을 캐릭터 설정으로 옮기지 않는다.",
     "갈등은 회복·덜 풀림·선 긋기로 끝낸다. 관계 위협이나 감정 협박으로 끝내지 않는다.",
     "같은 말끝·같은 사과 문장·같은 시작말을 대화 사이에서 반복하지 않는다.",
@@ -102,6 +113,9 @@ RULES: tuple[str, ...] = (
 class Slot:
     material: str
     source: dict[str, Any] | None = None
+    # D-0138: 학습용 짧은 프롬프트의 관계·채널 배정.
+    relationship: str = "FAVORABLE"
+    channel: str = "text"
 
 
 @dataclass
@@ -117,6 +131,14 @@ class WriteSession:
     examples: list[dict[str, Any]] = field(default_factory=list)
     writer_model: str = ""
     turn_rule: TurnRule | None = None
+    # D-0138: 학습용 짧은 프롬프트. 있으면 대화마다 핵심 + 관계 + 채널 + 장면으로 system을 만든다.
+    training: tp_mod.TrainingPrompt | None = None
+
+
+def slot_system(session: WriteSession, slot: Slot) -> str:
+    if session.training is None:
+        return session.system
+    return session.training.system(slot.relationship, slot.channel)
 
 
 def turn_rule_input(rule: TurnRule) -> dict[str, Any]:
@@ -144,73 +166,306 @@ def _write_json(path: Path, obj: Any) -> None:
     os.replace(tmp, path)
 
 
+SOURCE_MIN_TURNS = 4
+SOURCE_MAX_TURNS = 12
+DROP_REASONS = {
+    "not_alternating": "말한 사람이 번갈아 나오지 않음",
+    "empty_turn": "빈 발화가 있음",
+    "too_short": "4턴보다 짧음",
+    "over_limit": "후보 상한을 넘음",
+    "over_share": "말뭉치 비율 상한을 넘음",
+}
+# 실제 대화 재료의 출처(D-0134). 말뭉치(국립국어원 구어)는 통화 장면 재료로만 쓴다.
+SOURCE_KINDS: dict[str, str] = {"SNS": "SNS", "NIKL": "말뭉치"}
+VOICE_CHANNELS: frozenset[str] = frozenset({"call", "video_call", "face_to_face"})
+CHANNELS: frozenset[str] = frozenset({"text", *VOICE_CHANNELS})
+
+
+def source_kind(obj: dict[str, Any]) -> str:
+    """후보 한 줄의 출처. source 표시에 NIKL이 있으면 말뭉치, 나머지(표시 없음 포함)는 SNS."""
+    return "NIKL" if "NIKL" in str(obj.get("source") or "").upper() else "SNS"
+
+
+def source_channel(obj: dict[str, Any], kind: str) -> str:
+    """후보의 채널. 파일에 channel이 있으면 그것을, 없으면 말뭉치는 통화·SNS는 문자로 둔다."""
+    raw = str(obj.get("channel") or "").strip()
+    if raw in CHANNELS:
+        return raw
+    return "call" if kind == "NIKL" else "text"
+
+
+def _mix(
+    sns: list[dict[str, Any]], nikl: list[dict[str, Any]], limit: int, share: float
+) -> tuple[list[dict[str, Any]], int, int]:
+    """SNS 구간과 말뭉치 구간을 번갈아 놓는다(D-0134).
+
+    앞에서 몇 개를 쓰든 말뭉치가 share 비율 안팎이 되게 자리마다 정한다(make_slots가 앞에서부터
+    쓴다). 말뭉치만 있으면 비율을 적용하지 않는다. SNS가 바닥나면 말뭉치를 더 넣지 않는다.
+    """
+    if not sns:
+        share = 1.0
+    out: list[dict[str, Any]] = []
+    i = j = 0
+    while len(out) < limit:
+        want = math.floor((len(out) + 1) * share + 0.5)
+        if j < len(nikl) and j < want:
+            out.append(nikl[j])
+            j += 1
+        elif i < len(sns):
+            out.append(sns[i])
+            i += 1
+        else:
+            break
+    return out, i, j
+
+
 def _usable_source(msgs: list[dict[str, str]]) -> bool:
-    if not 4 <= len(msgs) <= 12 or len(msgs) % 2:
-        return False
+    return _source_problem(msgs) is None and len(msgs) <= SOURCE_MAX_TURNS
+
+
+def _source_problem(msgs: list[dict[str, str]]) -> str | None:
     if any(not m["content"].strip() for m in msgs):
-        return False
-    return all(m["role"] == ("user" if i % 2 == 0 else "assistant") for i, m in enumerate(msgs))
+        return "empty_turn"
+    if not all(m["role"] == ("user" if i % 2 == 0 else "assistant") for i, m in enumerate(msgs)):
+        return "not_alternating"
+    if len(msgs) < SOURCE_MIN_TURNS:
+        return "too_short"
+    return None
 
 
-def load_sns_sources(path: str, limit: int) -> list[dict[str, Any]]:
-    """설정 경로의 후보 대화를 읽기 전용으로 연다. 원문은 저장소에 쓰지 않는다(D-0007)."""
+def _trim(msgs: list[dict[str, str]]) -> list[dict[str, str]]:
+    """사용자로 시작하고 캐릭터로 끝나게 앞뒤만 다듬는다(가운데는 건드리지 않는다)."""
+    start = 0
+    while start < len(msgs) and msgs[start]["role"] != "user":
+        start += 1
+    end = len(msgs)
+    while end > start and msgs[end - 1]["role"] != "assistant":
+        end -= 1
+    return msgs[start:end]
+
+
+def _windows(msgs: list[dict[str, str]], size: int) -> tuple[list[list[dict[str, str]]], int]:
+    """긴 세션을 size턴 이하 구간으로 자른다(D-0131).
+
+    끝 자투리가 4턴보다 짧으면 버리고 그 턴 수를 돌려준다.
+    """
+    size = max(SOURCE_MIN_TURNS, size - size % 2)
+    parts = [msgs[k : k + size] for k in range(0, len(msgs), size)]
+    left = 0
+    if len(parts) > 1 and len(parts[-1]) < SOURCE_MIN_TURNS:
+        left = len(parts[-1])
+        parts = parts[:-1]
+    return parts, left
+
+
+def read_sns_sources(
+    path: str, limit: int, window: int = SOURCE_MAX_TURNS, corpus_share: float = 0.2
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """설정 경로의 후보 대화를 읽기 전용으로 열고, 쓸 수 있는 4~window턴 구간과 집계를 돌려준다.
+
+    S9 작성 요청은 후보 한 개를 4~12턴으로 받는다. 실제 말뭉치·SNS 세션은 20~150턴이라 그대로는
+    모두 버려졌다(K-0103). 그래서 긴 세션은 window턴 이하 구간으로 자르고, 같은 세션의 구간은
+    sessionId를 같게 둔다. skeleton_id가 sessionId를 쓰므로 분할이 한 세션을 학습·검증으로 나누지
+    않는다. 버린 후보는 이유별로 센다(데이터셋 경고). 원문은 저장소에 쓰지 않는다(D-0007).
+
+    출처(D-0134): source에 NIKL이 있는 후보는 말뭉치다. 말뭉치 구간은 통화 채널로 표시하고,
+    SNS 구간 사이에 corpus_share 비율로 섞는다. 구간마다 source·channel이 붙는다.
+    """
+    stats: dict[str, Any] = {
+        "path": Path(path).name if path else "",
+        "sessions": 0,
+        "split": 0,
+        "windows": 0,
+        "offered": 0,
+        "dropped": {},
+        "leftoverTurns": 0,
+        "window": window,
+        "limit": limit,
+        "corpusShare": corpus_share,
+        "bySource": {},
+    }
     if not path or limit <= 0:
-        return []
+        return [], stats
     p = Path(path)
     if not p.exists():
-        return []
+        stats["missing"] = True
+        return [], stats
     text = p.read_text("utf-8")
     if text.lstrip().startswith("["):
         rows: list[Any] = json.loads(text)
     else:
         rows = [json.loads(ln) for ln in text.splitlines() if ln.strip()]
-    out: list[dict[str, Any]] = []
+    dropped: Counter = Counter()
+    sessions: dict[str, list[list[dict[str, Any]]]] = {"SNS": [], "NIKL": []}
+    by_source: dict[str, Counter] = {}
     for obj in rows:
+        stats["sessions"] += 1
+        kind = source_kind(obj)
+        channel = source_channel(obj, kind)
+        seen = by_source.setdefault(kind, Counter())
+        seen["sessions"] += 1
         turns = obj.get("messages") or obj.get("turns") or []
         msgs = [
             {"role": str(t.get("role", "")), "content": str(t.get("content", ""))} for t in turns
         ]
-        if not _usable_source(msgs):
+        msgs = _trim(msgs)
+        problem = _source_problem(msgs)
+        if problem:
+            dropped[problem] += 1
             continue
-        sid = str(obj.get("conversationId") or obj.get("id") or f"sns-{len(out) + 1:04d}")
-        out.append({"sourceId": sid, "turns": msgs})
-        if len(out) >= limit:
-            break
-    return out
+        sid = str(obj.get("conversationId") or obj.get("id") or f"sns-{stats['sessions']:04d}")
+        if len(msgs) <= window:
+            parts, left = [msgs], 0
+        else:
+            parts, left = _windows(msgs, window)
+            stats["split"] += 1
+            stats["leftoverTurns"] += left
+        stats["windows"] += len(parts)
+        seen["windows"] += len(parts)
+        sessions[kind].append(
+            [
+                {
+                    "sourceId": sid if len(parts) == 1 else f"{sid}~w{k + 1}",
+                    "sessionId": sid,
+                    "source": kind,
+                    "channel": channel,
+                    "turns": part,
+                }
+                for k, part in enumerate(parts)
+            ]
+        )
+
+    # 출처마다 세션의 첫 구간부터 돌아가며 놓는다.
+    # 앞 세션의 구간이 자리를 다 차지하면 쓰는 세션 수가 줄어든다.
+    def _order(group: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+        depth = max((len(s) for s in group), default=0)
+        return [s[k] for k in range(depth) for s in group if k < len(s)]
+
+    sns, nikl = _order(sessions["SNS"]), _order(sessions["NIKL"])
+    out, i, j = _mix(sns, nikl, limit, corpus_share)
+    if len(sns) > i:
+        dropped["over_limit"] += len(sns) - i
+    if len(nikl) > j:
+        dropped["over_share" if sns else "over_limit"] += len(nikl) - j
+    for s in out:
+        by_source[s["source"]]["offered"] += 1
+    stats["offered"] = len(out)
+    stats["dropped"] = dict(dropped)
+    stats["bySource"] = {
+        k: {"sessions": c["sessions"], "windows": c["windows"], "offered": c["offered"]}
+        for k, c in by_source.items()
+    }
+    return out, stats
+
+
+def load_sns_sources(
+    path: str, limit: int, window: int = SOURCE_MAX_TURNS, corpus_share: float = 0.2
+) -> list[dict[str, Any]]:
+    """설정 경로의 후보 대화(4~window턴 구간). 집계가 필요하면 read_sns_sources를 쓴다."""
+    return read_sns_sources(path, limit, window, corpus_share)[0]
+
+
+def source_warning(stats: dict[str, Any], used: int) -> str | None:
+    """실제 대화 재료(SNS·말뭉치) 집계를 데이터셋 경고 한 줄로.
+
+    쓸 후보가 있었는데 바뀐 것이 없으면 None.
+    """
+    if not stats.get("path"):
+        return None
+    if stats.get("missing"):
+        return f"실제 대화 재료: 후보 파일 {stats['path']}을 찾지 못해 모두 합성으로 채웠어요"
+    dropped = stats.get("dropped") or {}
+    lost = sum(n for k, n in dropped.items() if k not in ("over_limit", "over_share"))
+    over = dropped.get("over_limit", 0)
+    if (
+        not (lost or over or dropped.get("over_share") or stats.get("split"))
+        and used == stats.get("offered")
+        and not (stats.get("usedBySource") or {}).get("NIKL")
+    ):
+        return None
+    parts = [f"실제 대화 재료: 후보 대화 {stats['sessions']}개"]
+    if stats.get("split"):
+        parts.append(
+            f"긴 대화 {stats['split']}개는 {stats['window']}턴 이하 구간으로 나눠 구간 "
+            f"{stats['windows']}개가 됐어요"
+        )
+    if lost:
+        why = ", ".join(
+            f"{DROP_REASONS.get(k, k)} {n}"
+            for k, n in sorted(dropped.items())
+            if k not in ("over_limit", "over_share")
+        )
+        parts.append(f"{lost}개는 버렸어요({why})")
+    if over:
+        parts.append(f"상한 {stats['limit']}개를 넘은 구간 {over}개는 쓰지 않았어요")
+    share_over = dropped.get("over_share", 0)
+    if share_over:
+        parts.append(
+            f"말뭉치 비율 {round(stats.get('corpusShare', 0) * 100)}%를 넘은 말뭉치 구간 "
+            f"{share_over}개는 쓰지 않았어요"
+        )
+    mix = stats.get("usedBySource") or {}
+    if mix.get("NIKL"):
+        parts.append(
+            f"이번 데이터에 쓴 구간 {used}개(SNS {mix.get('SNS', 0)} · 말뭉치 {mix['NIKL']}, "
+            "말뭉치는 통화 장면)"
+        )
+    else:
+        parts.append(f"이번 데이터에 쓴 구간 {used}개")
+    return " · ".join(parts)
 
 
 def make_slots(
     cfg: S9Config, cluster: str, needed: int, sources: list[dict[str, Any]], start: int = 0
 ) -> list[Slot]:
     materials = cfg.materials[cluster]
+    rels = tp_mod.assign_relationships(cfg.relationship_shares, start, needed)
     slots: list[Slot] = []
     source_i = 0
     for k in range(needed):
         material = materials[(start + k) % len(materials)]
         if material == "SNS_REWRITE" and source_i < len(sources):
-            slots.append(Slot("SNS_REWRITE", sources[source_i]))
+            src = sources[source_i]
+            slots.append(Slot("SNS_REWRITE", src, rels[k], str(src.get("channel") or "text")))
             source_i += 1
         else:
-            slots.append(Slot("SYNTH", None))
+            slots.append(Slot("SYNTH", None, rels[k], cfg.synth_channel))
     return slots
+
+
+def _source_input(i: int, s: Slot) -> dict[str, Any]:
+    src = s.source or {}
+    base = {
+        "index": i,
+        "sourceId": src["sourceId"],
+        # D-0134: 말뭉치 구간은 통화 장면으로 쓴다.
+        "origin": src.get("source", "SNS"),
+        "channel": src.get("channel", "text"),
+    }
+    if "seed" in src:
+        # D-0138: 작가는 원문을 보지 않고 시드만 본다.
+        return {
+            **base,
+            "seed": src["seed"],
+            "sourceTurns": len(src.get("turns") or []),
+            "lengths": seeds.lengths(src.get("turns") or []),
+        }
+    return {**base, "turns": src["turns"]}
 
 
 def batch_inputs(
     session: WriteSession, slots: list[Slot], ids: list[str], notes: list[str]
 ) -> dict[str, Any]:
+    tp = session.training
     out: dict[str, Any] = {
-        "system": session.system,
+        "system": tp.core if tp is not None else session.system,
         "handoff": dump(session.handoff),
         "batch": {
             "clusterId": session.cluster,
             "count": len(slots),
             "conversationIds": ids,
             "materials": [s.material for s in slots],
-            "sources": [
-                {"index": i, "sourceId": s.source["sourceId"], "turns": s.source["turns"]}
-                for i, s in enumerate(slots)
-                if s.source is not None
-            ],
+            "sources": [_source_input(i, s) for i, s in enumerate(slots) if s.source is not None],
             "skeletonRule": "같은 장면 뼈대에서 나온 대화는 같은 skeletonKey를 쓴다",
         },
         "examples": session.examples,
@@ -218,6 +473,18 @@ def batch_inputs(
     }
     if session.turn_rule is not None:
         out["batch"]["turnRule"] = turn_rule_input(session.turn_rule)
+    if tp is not None:
+        out["batch"]["assignments"] = [
+            {
+                "index": i,
+                "relationship": s.relationship,
+                "relationshipText": tp.relationships.get(s.relationship, ""),
+                "channel": s.channel,
+                "channelText": tp.channels.get(s.channel, ""),
+            }
+            for i, s in enumerate(slots)
+        ]
+        out["batch"]["turnMaxChars"] = session.cfg.turn_max_chars
     return out
 
 
@@ -226,7 +493,7 @@ def _specs(session: WriteSession, slots: list[Slot]) -> list[checks.ConvSpec]:
     return [
         checks.ConvSpec(
             cluster_id=session.cluster,
-            system=session.system,
+            system=slot_system(session, s),
             material=s.material,
             source=s.source,
             forbidden=forbidden,
@@ -234,6 +501,8 @@ def _specs(session: WriteSession, slots: list[Slot]) -> list[checks.ConvSpec]:
             max_length_tokens=session.cfg.max_length_tokens,
             chars_per_token=session.cfg.chars_per_token,
             turn_rule=session.turn_rule,
+            relationship=s.relationship if session.training is not None else "",
+            turn_max_chars=session.cfg.turn_max_chars,
         )
         for s in slots
     ]
@@ -241,7 +510,9 @@ def _specs(session: WriteSession, slots: list[Slot]) -> list[checks.ConvSpec]:
 
 def skeleton_id(cluster: str, slot: Slot, written: dict[str, Any]) -> str:
     if slot.material == "SNS_REWRITE" and slot.source is not None:
-        sid = _SAFE.sub("-", str(slot.source.get("sourceId"))).strip("-") or "unknown"
+        # 같은 세션에서 자른 구간은 같은 뼈대로 묶는다(D-0131).
+        raw = slot.source.get("sessionId") or slot.source.get("sourceId")
+        sid = _SAFE.sub("-", str(raw)).strip("-") or "unknown"
         return f"sns-{sid}"
     key = str(written.get("skeletonKey") or "").strip()
     return "synth-" + sha256_text(f"{cluster}|{key}")[:10]
@@ -258,7 +529,7 @@ def assemble(
     out: list[Conversation] = []
     for i, (slot, item) in enumerate(zip(slots, written, strict=True)):
         scene = str(item.get("scene") or "").strip()
-        system = session.system.rstrip() + "\n\n[SCENE]\n" + scene
+        system = slot_system(session, slot).rstrip() + "\n\n[SCENE]\n" + scene
         messages = [Message(role=m["role"], content=m["content"]) for m in item["messages"]]
         conv = Conversation(
             conversationId=ids[i],
@@ -271,18 +542,19 @@ def assemble(
                 "writerModel": session.writer_model,
                 "requestRef": request_ref,
                 "sourceRef": str((slot.source or {}).get("sourceId") or ""),
+                "flowBeats": checks.slot_beats(slot.source, item)
+                if slot.material == "SNS_REWRITE"
+                else [],
+                "relationship": slot.relationship if session.training is not None else "",
+                "channel": slot.channel if session.training is not None else "",
                 "editedBy": "model",
             },
         )
         blocking = checks.evaluate(conv, specs[i])
         if session.turn_rule is not None:
             blocking["long_structure"] = not checks.structure_problems(item, session.turn_rule)
-        warnings = (
-            [
-                "답변/사용자 길이 비율이 2를 넘는다",
-            ]
-            if _ratio(conv) > 2.0
-            else []
+        warnings = (["답변/사용자 길이 비율이 2를 넘는다"] if _ratio(conv) > 2.0 else []) + (
+            checks.style_warnings(conv)
         )
         out.append(
             conv.model_copy(
@@ -302,6 +574,8 @@ def write_batch(
     session: WriteSession, slots: list[Slot], ids: list[str], notes: list[str] | None = None
 ) -> list[Conversation]:
     """한 배치를 쓴다. 차단 검사 실패는 같은 입력으로 다시 쓰고, 첫 성공을 보존한다."""
+    # D-0138: 실제 대화 재료는 먼저 흐름 시드를 붙이고, 작가에게는 시드만 넘긴다.
+    slots = seeds.attach(session, slots)
     if deck.enabled(session.ctx):
         return deck.write_batch(session, slots, ids, notes or [""] * len(slots))
     budget = session.ctx.budget()
@@ -531,6 +805,7 @@ def _sample_cluster(
         examples=[],
         writer_model=deck.writer_model(ctx),
         turn_rule=plan_turn_rule(plan, cluster),
+        training=tp_mod.ensure(rev_dir, pair),
     )
     convs = write_conversations(session, ids=ids, slots=slots, rev_dir=rev_dir)
     write_once_json(
@@ -661,7 +936,7 @@ def run_samples(ctx: Context, cid: str) -> Path:
 
     state.transition("s9s", "RUNNING", rev=rev)
 
-    sns = load_sns_sources(cfg.sns_path, cfg.sns_limit)
+    sns = load_sns_sources(cfg.sns_path, cfg.sns_limit, cfg.sns_window, cfg.corpus_share)
     try:
         for c in plan.clusters:
             sources = sns if "SNS_REWRITE" in cfg.materials[c.clusterId] else []

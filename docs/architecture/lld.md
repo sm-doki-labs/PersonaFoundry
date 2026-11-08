@@ -1,10 +1,10 @@
 # 에이전틱 캐릭터 공장 상세 설계 (LLD)
 
-- 문서 버전: v1.25
+- 문서 버전: v1.30
 - 작성일: 2026-10-14
 - 수정일: 2026-11-07
 - 상태: 초안, 사용자 검토 전
-- 근거: [PRD v1.17](../product/prd.md), [시스템 명세 v1.24](spec.md). 이 문서는 명세를 코드로 옮기는 세부만 정하고 다른 결정을 담지 않는다. 절마다 근거가 되는 명세 절을 `(명세 §n)`으로 적는다.
+- 근거: [PRD v1.17](../product/prd.md), [시스템 명세 v1.25](spec.md). 이 문서는 명세를 코드로 옮기는 세부만 정하고 다른 결정을 담지 않는다. 절마다 근거가 되는 명세 절을 `(명세 §n)`으로 적는다.
 - 변경 이력: v0.1 최초 작성 / v0.2(2026-10-20) S1을 화제성 순위 → 외모 특징 프록시로 바꾸고 §2~§5·§8.1·§9~§13을 고쳤다(D-0017, D-0018) / v0.3(2026-10-20) 인물 인상 칸과 계약 v2(§5.2·§5.5·§8.1·§10, D-0020, D-0021) / v0.4(2026-10-21) G1 참조 사진·S2 구현(§2~§5·§5.7·§5.8·§8.1·§8.2·§9·§10·§12·§13, D-0022, D-0023) / v0.5(2026-10-21) S3 외모 연결, S4·G4 구현(§2~§5·§5.10·§8.3·§8.4·§12, D-0024~D-0026) / v0.6(2026-10-21) S5·G5와 xai_video·grok_web 어댑터(§2~§5·§5.11·§8.5·§9·§10·§12·§13, D-0028~D-0030) / v0.7(2026-10-21) 9:16 세로 첫 프레임과 `intro-inputs-v2`(§3·§4·§5.11·§8.5, D-0031), 실제 grok.com 화면에 맞춘 `grok_web`(§9, D-0032) / v0.8(2026-10-22) 씨앗 → 변형 기획, S3r 참고 자료, S4a·S4b·S4 배경 → 자세 → 완성 이미지, 갈래별 진행 오케스트레이터(§2~§6·§8.3·§8.3a·§8.4·§11·§12, D-0033~D-0035) / v0.9(2026-10-22) 이미지 자동 검사·수정 루프(§2·§3·§5.10b·§8.4a·§9·§11·§12, D-0036, D-0037) / v1.0(2026-10-22) S6 동작 영상 골격과 G5b(§2~§5·§5.11a·§6.1·§8.5a·§11·§12, D-0038, D-0039) / v1.1(2026-10-22) 앱 통화 영상 카탈로그, 무표정 첫 프레임, 계약 v2(§2~§4·§5.11a·§8.5·§11·§12, D-0040, D-0041) / v1.2(2026-10-27) 얼굴은 G1에서 한 장만 고르고 S2를 자동 기준 사진·동일인 검사로 바꿔 G2를 없앴다. 아직 코드에는 반영하지 않았다(§2~§4·§5.7·§5.8·§5.9·§5.17·§6.1·§8.1~§8.5·§11~§13, D-0042, D-0043) / v1.3(2026-10-27) 3일 PoC 계약: §4 명령(S1 수집·S9~S11·내보내기·웹앱), §5.14·§5.15·§5.17을 새 계약(`data-plan-v1` 등, `training-run-v2` 등, `character-package-v1`·`export-result-v1`)으로 바꾸고, §6.5 워크숍 API, §8.8~§8.11(S9 샘플·대량 두 단계와 G7a, S10 학습·평가 분리, 패키지, 우리 앱 내보내기), §9 어댑터(`grok_oauth`, 순위 수집기, `gemma_qlora`, `vertex_gemini`), §12 M8을 더했다(D-0044, D-0045) / v1.4(2026-10-28) 학습 없이 긴 프롬프트로 패키지까지 가는 G8 결정(§8.9), 학습 제출 분리(`--submit-training`), G8 답 형식(§6.5)(D-0048) / v1.5(2026-10-28) 에이전틱 실행: §3 설정, §4 명령, §5.16 관문 기록 선택 칸, §5.19~§5.21 새 계약, §6.6~§6.10 물결 실행·자동 재개·사전 검토·재작업·대기열, §11 시험, §12 M9(D-0049) / v1.6(2026-10-29) 한소민 근거로 정본 직접 보존·조건부 적용·사실 소유자 구분을 보완했다(D-0053·D-0054)
 
 ## 1. 범위와 기준
@@ -537,8 +537,8 @@ Profiler는 기획서, 기준 문서 발췌(5항목 설명, 카드 7요소 설�
 
 1. `plan`: G6 승인 `prompt-pair-v1`의 짧은 프롬프트와 특질 시트로 `data-plan-v1`을 고정한다. 클러스터 목표 수는 `round(target × share)`이고 합이 목표와 다르면 `base`에서 맞춘다.
 2. `samples`: 클러스터마다 인계안을 작성 모델로 만들고(특질 시트의 선택 기준 5항목·상황별 변화 → 행동 기준표), 같은 인계안으로 샘플 12개를 쓴다. 각 대화의 `skeletonId`는 장면 뼈대 단위로 붙인다. G7a 페이지는 클러스터별 인계안과 샘플 전문을 보여 주고 판정·고칠 점을 받는다. `REQUEST_CHANGES`면 고칠 점을 인계안에 붙여 그 클러스터만 다시 만든다.
-3. `build`: G7a에서 채택된 샘플은 그대로 넣고, 나머지는 같은 인계안 + 채택 샘플을 예시로 작성한다. 재료: `SNS_REWRITE`(`gemini-sft-poc` 후보 대화를 읽기 전용으로 열어 캐릭터 턴만 다시 쓴다, D-0007), `SYNTH`(합성 장면), `NIKL`(접근 경로가 정해질 때까지 비활성). 원본 SFT가 없는 캐릭터의 `base`는 `SNS_REWRITE`와 `SYNTH`로 채운다(가이드에서 검증되지 않은 적용, 계획서 §9).
-4. 기계 검사(차단): 형식(역할 교대·system 존재·빈 답 없음), 사용자 턴 원문 일치(SNS 재작성), 프리필 없음, 원본 화자 사실 미포함, 금지 표현, 같은 말끝·같은 사과 문장 반복(데이터셋 전체 n-gram, 가이드 §8), 최대 길이(학습 템플릿 토큰 수, 기본 4,096). 경고: 길이 비율, 감정 표지 분포. charforge의 표준 검사·렌더러를 이 프로젝트 코드로 옮겨 쓴다(다른 저장소 코드를 import하지 않는다).
+3. `build`: G7a에서 채택된 샘플은 그대로 넣고, 나머지는 같은 인계안 + 채택 샘플을 예시로 작성한다. 재료: `SNS_REWRITE`(`gemini-sft-poc` 후보 대화를 읽기 전용으로 열어 흐름 뼈대만 쓰고 양쪽 대사를 새로 쓴다, D-0135), `SYNTH`(합성 장면), `NIKL`(접근 경로가 정해질 때까지 비활성). 원본 SFT가 없는 캐릭터의 `base`는 `SNS_REWRITE`와 `SYNTH`로 채운다(가이드에서 검증되지 않은 적용, 계획서 §9).
+4. 기계 검사(차단): 형식(역할 교대·system 존재·빈 답 없음), SNS 재작성의 원본 10글자 겹침·흐름 뼈대 3~8줄·메시지 수 ±2(D-0135), 프리필 없음, 원본 화자 사실 미포함, 금지 표현, 같은 말끝·같은 사과 문장 반복(데이터셋 전체 n-gram, 가이드 §8), 최대 길이(학습 템플릿 토큰 수, 기본 4,096). 경고: 길이 비율, 감정 표지 분포. charforge의 표준 검사·렌더러를 이 프로젝트 코드로 옮겨 쓴다(다른 저장소 코드를 import하지 않는다).
 5. 분할: `skeletonId` 묶음째 나눈다. 검증은 `base`에서 `baseConversations`, 보강 클러스터마다 `augmentedShare`. 평가 세트는 학습·검증과 따로 만든다(§8.9).
 6. G7: 검사 보고서, 클러스터별 수·답변 수·토큰 수, 무작위 표본 20개를 보여 준다. 승인하면 `dataset-rev-v2`를 고정한다.
 
@@ -962,3 +962,28 @@ v1.24 변경(2026-11-08): 동작 영상 판단 이월 구현을 추가했다(D-0
 - 시험: `tests/test_web_gates.py`에 예상 비용 API(계획만, 가짜 공급자 0원, 잘못된 단계 404), `studio/tests/flow.test.cjs` 기대값('새 버전 만드는 중', '실행 N번 실패', '막혔을 때 안내', '운영 담당에게').
 
 v1.25 변경(2026-11-08): 사용성 정리 구현을 추가했다(D-0129).
+
+## 33. 모델 만들기 보기 구현(명세 §35, D-0130)
+
+- 읽기: `web/model_path.py`의 `model_path(char_dir, state)` = `{material, dataset, training, eval}`. 데이터셋은 G7이 가리키는 `s9-data/ds<k>`의 `plan.json`·`index.jsonl`(클러스터·재료·분할 수)·`check-report.json`(경고·막는 문제)·`qa/G7a-<cluster>.json`(샘플 판정)·관문 기록. 학습은 최신 `s10-train/tr<k>`의 공급자 폴더마다 `training-run.json`·`lease.json`·`guard.json`·`checkpoint-selection.json`로 진행 줄 7칸(`ok·run·fail·warn·skip·idle`)과 상태(`locked·pending·plan·run·hold·done·stopped·fail·skip`)를 낸다. hold = 결과 받기 대기(`collectPending`) 또는 끝난 실행의 GPU 기록이 살아 있음. 쓴 돈 = lease 생성~삭제(또는 지금) 시간 × `dphTotal`. API `GET /api/characters/{id}/model-path`, 캐릭터 상세 `modelPath`.
+- 쓰기: 작업 `action=train`(`confirm`에 `s10t`가 없으면 400, 학습 상태가 `plan·stopped·fail·hold·done·skip`일 때만). 최신 계획의 공급자가 모두 `PLANNED`면 `drive_s10t`, 아니면 `run_s10t`(이어 몰기 또는 새 계획). 끝나면(`stoppedAt=s10t`) `request_resume`. `action=skip-training`은 `skip-training.json`을 쓰고 기본 실행기로 이어서 돈다. `POST …/training/stop`은 도는 `train` 작업이 있을 때만 `stop-request.json`을 쓰고, `drive_s10t`가 확인마다(실제 시계로 오래 쉬면 2초마다) 보고 `DriveStopped`(BaseException)로 abort → `ensure_failed`. `POST …/training/release`는 작업이 없고 hold일 때 `cleanup_s10t` 뒤 실행 기록을 `CANCELLED`로 바꾼다.
+- 오케스트레이터: 웹 실행(`opt.web`)은 학습 결과가 없고 최신 학습 계획에 `skip-training.json`이 없으면 s10을 `NeedsInputError`로 기다리게 한다(학습 없이 진행 G8을 바로 열지 않는다). `gpu_eval_held`: s10이 실제 Gemma 어댑터 폴더(`needs_gpu_eval`)로 평가하면 유료 실행 확인 대기로 둔다. 상세 `held`의 공급자는 `gpu: vast`, 예상 비용 API는 상한만 알린다.
+- 공급자: `gemma_qlora` `status`는 원격 `state.json`(step)·`checkpoint-plan.json`(maxSteps)를 `appliedConfig.progress{phase, step, maxSteps}`로 남기고, 학습 뒤 선별 중이면 `phase=screen`. 가짜 학습 공급자는 `run_polls`(상태 확인 N번 동안 RUNNING, 스텝 증가)·`collect_failures`(결과 받기 N번 실패, 그동안 binding 없음)·`abort`를 받는다.
+- 화면: `studio/shared/flow.js` `trainingStageView`(s10t·s10 상태를 학습 기록으로)·`trainingTasks`(hold는 맨 위 실패, plan·stopped·fail은 확인)·`modelMode`·`viewTabsHTML`·`mSteps·nowBarHTML·stepperHTML·srcHTML·dataHTML·trainHTML·evalHTML·modelPanelHTML`. 확인은 `state.mconfirm`(start·skip·stop·release) 칸으로 받는다. 학습이 돌면 3초마다 상세를 다시 읽는다. CSS `.md-*`.
+- 시험: `tests/test_web_training.py` 7개(계획 상태·웹 실행이 평가를 기다림, 비용 확인 없는 시작 거절과 완료, 학습 없이 진행 → G8, 중단, 결과 받기 실패 → 다시 받기, 결과 버리고 반납, GPU 평가 확인 조건), `studio/tests/flow.test.cjs` 학습 상태·할 일.
+
+- S9 재료 구간(D-0131): `samples.read_sns_sources(path, limit, window)` → `(sources, stats)`. 후보마다 앞뒤를 다듬고(사용자 시작·캐릭터 끝) 검사해 이유별로 버리고, window턴을 넘으면 `_windows`로 자른다(끝 자투리 4턴 미만은 버림). 구간은 `{sourceId: <세션>~w<k>, sessionId, turns}`이고 세션마다 첫 구간부터 돌아가며 놓은 뒤 limit으로 자른다. `skeleton_id`는 sessionId를 쓴다. `run_build`는 `sources(+used)`를 `check-report.json`에, `source_warning` 한 줄을 분할 경고에 더한다. 화면 읽기 모델은 `dataset.sources`·`dataset.notes`(클러스터 이름으로 시작하지 않는 경고)를 준다. 설정 `[stages.s9] sns_window`.
+- S9 재료 출처(D-0134): 후보 줄의 `source`에 NIKL이 있으면 말뭉치, 나머지는 SNS다. 구간마다 `source`·`channel`(파일 값, 없으면 말뭉치 `call`·SNS `text`)을 붙인다. 출처마다 세션을 돌아가며 놓은 두 줄을 `_mix`가 합친다: 자리 n마다 `floor(n·corpus_share + 0.5)`개까지 말뭉치를 먼저 넣고 나머지는 SNS로 채운다. 말뭉치만 있으면 비율 1, SNS가 바닥나면 멈춘다(남은 말뭉치는 `over_share`). `batch_inputs`는 `sources`에 `origin`·`channel`을 싣는다. 통화 장면의 글자 표기 차단(`voice_channel_spoken`)은 D-0136으로 없앴다. 채널은 장면 설명과 말 리듬에만 쓴다. D-0137: 차단 검사 `no_emoji`는 모든 캐릭터 말에서 그림 이모지(U+1F000~U+1FAFF, U+FE0F)만 막는다. S8 공통 규칙은 `builtin:actor-system-rules-v4`(3행: 그림 이모지 금지, 자모 웃음·글자 표정 허용). `run_build`는 `sources.usedBySource`를 남긴다. 설정 `[stages.s9] corpus_share`(기본 0.2).
+- S9 흐름 뼈대 재작성(D-0135): 작성 출력 `flowBeats`(SNS 재작성 3~8줄, 합성은 빈 배열)를 `Conversation.provenance.flowBeats`에 남긴다. `checks.overlaps(texts, sources, n=10)`는 `normalize`(공백·문장 부호·ㅋㅎㅠㅜ 제거) 뒤 원본 n-gram과 겹치면 True다. 차단 검사 `source_overlap`(메시지·뼈대·system+장면), `flow_beats`, `source_flow_turns`(|메시지 수 − 원본 턴 수| ≤ 2). `batch_problems`는 장면 겹침도 본다. 덱 수리는 `flowBeats`가 비면 원래 값을 잇는다. `run_build`는 `sources.rewrite=SKELETON`, `overlap{limit, checked, max}`(`longest_overlap`), `example{beats, origin, messages, sourceTurns}`를 남긴다. 화면 읽기 모델 `material.rewrite`는 보고의 값(없으면 옛 `TURN_ONLY`).
+- S9 한소민 구성(D-0138): `training_prompt.build(pair)`는 `[PERSONA / …]` 칸(FACTS·LIFE_AND_TASTES·DISPOSITION·WANTS_AND_FEARS·READING_AND_TENSION·CHOICES·VOICE·KNOWS_AND_LIMITS, CHOICES는 예외·빈도 문장 제거) + `[TRAINING_RULES]`로 핵심을 만들고, `system(relationship, channel)`이 `[RELATIONSHIP]`·`[CHANNEL]`을 붙인다. `ensure(rev_dir, pair)`가 `training-prompt.json`을 남긴다. `Slot`에 `relationship`·`channel`, `make_slots`는 `assign_relationships(shares, start, n)`(자리마다 가장 모자란 관계)로 배정한다. `samples.write_batch`는 먼저 `seeds.attach`로 SNS 자리에 시드를 붙인다(`seeds/<sourceId>.json`, 원본 해시 확인, 없는 것만 한 번에 요청, 덱이면 `deck.request(task=scenarios, role=data_seed)`). `batch_inputs`는 시드가 있으면 원문 대신 `seed`·`sourceTurns`·`lengths`와 `assignments`·`turnMaxChars`를 싣는다. 검사: `turn_length`·`close_formal_opener`·`repeated_lines`(차단), `style_warnings`(경고). 덱 작성은 기계 검사 실패 때 문제를 메모로 최대 `max_retries`번 다시 쓴다. 설정 `[stages.s9] relationship_shares·synth_channel`, `[stages.s9.checks] turn_max_chars`.
+- 학습용 프롬프트 연결(D-0139): `training_prompt.load/find/eval_system/relationship_for_stage`. `prereg.discover_bindings`는 `datasetRev`도 읽고, `_arms(..., rev_dir, relationship)`는 학습 모델 조건마다 `sft_prompt()`가 쓴 `s10-eval/<ev>/prompts/sft-system-<ds>-<rel>.md`를 promptRef로 쓴다(없으면 short.md). `eval_relationship(plan, relationship)`. S11 `collect_sft`는 `sft/training-prompt.json`과 `Sft.trainingPrompt`, `collect_serving`은 `SftServing.systemPrompt·systemAssembly`을 채운다. 화면 읽기 모델 `dataset.trainingPrompt`, `eval.sftPrompt`.
+
+v1.26 변경(2026-11-08): 모델 만들기 보기 구현과 S9 재료 구간 자르기를 추가했다(D-0130, D-0131).
+
+v1.27 변경(2026-11-08): S9 실제 대화 재료의 출처 섞기와 통화 장면 채널 규칙을 추가했다(D-0134).
+
+v1.28 변경(2026-11-08): S9 SNS 재작성을 흐름 뼈대 + 양쪽 다시 쓰기로 바꾸고 원본 10글자 겹침 검사를 추가했다(D-0135).
+
+v1.29 변경(2026-11-08): 한소민 구성(학습용 짧은 프롬프트·관계·채널 배정·흐름 시드·작가 지침·검사기)을 S9에 추가했다(D-0138).
+
+v1.30 변경(2026-11-08): 학습용 짧은 프롬프트를 S10 평가 학습 모델 조건과 S11 서빙 기록에 연결했다(D-0139).
