@@ -34,7 +34,7 @@ from character_factory_poc.stages.s8_prompts.source import (
     project_plan,
     with_creator_traits,
 )
-from character_factory_poc.stages.s8_prompts.twin import approved_voice, voice_lines
+from character_factory_poc.stages.s8_prompts.twin import approved_voice, motif_limits, voice_lines
 
 FILLED_BY_FACTORY = ("SYSTEM_RULES", "OUTPUT")
 OUTPUT_RULE = "캐릭터가 실제로 할 말만 출력한다. JSON·라벨·해설·행동 지문은 쓰지 않는다. 보통 짧은 1~3문장으로 답하고 필요하면 말풍선처럼 줄을 나눈다. 답변 틀을 채우려고 이유·대안·질문을 덧붙이지 않는다."
@@ -456,18 +456,24 @@ def run_deck_s8(ctx: Context, cid: str, voice_probes: list[str]) -> Path:
     rules, rules_ref = load_actor_rules(ctx)
     source = project_plan(plan, sha256_file(plan_path))
     voice = None
+    limits = None
     if read_origin(ctx.character_dir(cid)) == SOURCE:
         source["sourceVoice"] = approved_voice(ctx, cid, plan)
         voice = voice_lines(plan.voiceSummary, source["sourceVoice"])
+        limits = motif_limits()
     ledger_path = sheet_path.parent / "trait-ledger.json"
     if ledger_path.exists():
         from character_factory_poc.stages.s8_prompts.actor_persona import compose_from_ledger
 
         ledger = validate("trait-ledger-v1", json.loads(ledger_path.read_text("utf-8")))
-        text, sections = compose_from_ledger(plan, ledger, rules_text=rules, voice=voice)
+        text, sections = compose_from_ledger(
+            plan, ledger, rules_text=rules, voice=voice, limits=limits
+        )
         compiler = "actor-trait-ledger-v1"
     else:
-        text, sections = compose_approved_sheet(plan, sheet, rules_text=rules, voice=voice)
+        text, sections = compose_approved_sheet(
+            plan, sheet, rules_text=rules, voice=voice, limits=limits
+        )
         compiler = "actor-approved-sheet-v1"
     from character_factory_poc.common.errors import NeedsInputError
 

@@ -19,6 +19,8 @@ MARKERS = (
     "뭐", "또", "좀", "진짜", "정말", "너무", "너무나도", "이제", "그냥", "항상", "되게",
     "사실", "어떻게 보면", "약간", "일단은", "근데", "막", "완전", "아무튼", "그러니까",
 )  # fmt: skip
+#: 말을 고르며 끼우는 군말. 강조어(진짜·너무·정말)는 담화 표지 쪽에서 센다.
+FILLERS = ("뭐", "이제", "좀", "그냥", "막", "약간", "이렇게", "어떻게 보면", "어", "음")
 SELF_POLITE = ("저", "저는", "저도", "제가", "저를", "저한테", "제")
 SELF_PLAIN = ("나", "나는", "나도", "내가", "나를", "나한테", "내")
 #: (이름, 프롬프트 표기, 정규식, 존대 여부). 위에서부터 먼저 맞는 것 하나로 센다.
@@ -80,6 +82,17 @@ LENGTH_BANDS = (("short", 0, 40), ("medium", 40, 150), ("long", 150, 10**9))
 
 def _hedged(text: str) -> bool:
     return bool(re.search(r"(?:것|거) 같", text))
+
+
+def _fillers(text: str) -> int:
+    words = _words(text)
+    return sum(words.count(f) for f in FILLERS if " " not in f) + sum(
+        text.count(f) for f in FILLERS if " " in f
+    )
+
+
+def _repeats(text: str) -> bool:
+    return bool(re.search(r"(?:^|\s)(\S{1,6}) \1(?:\s|$)", text))
 
 
 def _rate(count: int, total: int) -> float:
@@ -159,6 +172,18 @@ def build_speech_profile(corpus: list[dict], kinds: dict[str, str]) -> dict:
         },
         # '~구나'로 끝난 문장. 첫마디 다음 문장에서 상대 말을 되풀이하는 경우까지 센다.
         "gunaSentenceEndings": sum(bool(re.search(r"구나$", _bare_end(x))) for x in sentences),
+        # 군말 밀도와 되풀이는 길이에 따라 다르다. 구간별로 세어 말결 문장에 쓴다.
+        "fillerPer100Chars": round(100 * sum(map(_fillers, texts)) / max(1, len(joined)), 2),
+        "fillerByLength": {
+            name: {
+                "count": len(group),
+                "avgPerAnswer": round(statistics.mean(map(_fillers, group)), 2) if group else 0.0,
+                "repeatShare": _rate(sum(map(_repeats, group)), len(group)),
+            }
+            for name, group in (
+                (name, [t for t in texts if lo <= len(t) < hi]) for name, lo, hi in LENGTH_BANDS
+            )
+        },
         "longShare": _rate(len(long_texts), len(texts)),
         "connectors": {c: sum(t.count(c) for t in long_texts) for c in CONNECTORS},
         "repeatShare": _rate(
@@ -166,6 +191,39 @@ def build_speech_profile(corpus: list[dict], kinds: dict[str, str]) -> dict:
         ),
         "laughShare": _rate(sum(bool(LAUGH.search(t)) for t in texts), len(texts)),
     }
+
+
+def _count_words(avg: float) -> str:
+    return "0~1번" if avg < 0.5 else f"{max(1, round(avg))}번 안팎"
+
+
+def _texture_sentence(profile: dict) -> str:
+    """D-0147: 군말 밀도와 되풀이를 답 길이 구간별로 쓴다. 구간 근거가 모자라면 쓰지 않는다."""
+    bands = profile.get("fillerByLength") or {}
+    if not bands or any(bands[name]["count"] < MIN_ANSWERS for name, *_ in LENGTH_BANDS):
+        return ""
+    fillers = [
+        f
+        for f, _ in sorted(
+            ((f, profile["markerCounts"].get(f, 0)) for f in FILLERS), key=lambda x: -x[1]
+        )
+        if _ >= MIN_MARKER_COUNT
+    ][:5] or list(FILLERS[:4])
+    short, medium, long = (bands[name] for name, *_ in LENGTH_BANDS)
+    line = (
+        f"말결: 생각을 고르며 {_quote_list(fillers)} 같은 군말을 끼운다. 한 답의 군말 수는 "
+        f"한두 마디 짧은 답이 {_count_words(short['avgPerAnswer'])}, "
+        f"두세 문장 답이 {_count_words(medium['avgPerAnswer'])}, "
+        f"길게 말하는 답이 {_count_words(long['avgPerAnswer'])}이다"
+        f"(글자 100자에 {profile['fillerPer100Chars']:.1f}번 꼴). 말끔하게 정리된 문장보다 "
+        "생각나는 대로 이어 가는 말에 가깝다."
+    )
+    if long["repeatShare"] >= 0.05:
+        line += (
+            f" 길게 말할 때는 같은 말을 한 번 더 되풀이하거나 고쳐 잇는 일이 "
+            f"{_tenths(long['repeatShare'])} 정도 있다."
+        )
+    return line
 
 
 def _hedge_sentence(profile: dict) -> str:
@@ -278,7 +336,9 @@ def render_voice_definition(profile: dict, summary: str = "") -> list[str]:
                 f" 대답의 첫마디는 {_quote_list(openers)}{_josa(openers[-1], '으로', '로')} 연다."
             )
         line += (
-            " 한 문장에 같은 표지를 몰아 쓰지 않고,"
+            " 한 문장에 같은 표지를 몰아 쓰지 않는다."
+            if _texture_sentence(profile)
+            else " 한 문장에 같은 표지를 몰아 쓰지 않고,"
             " 바로 답할 수 있는 짧은 말에는 표지를 붙이지 않는다."
         )
         lines.append(line)
@@ -300,7 +360,9 @@ def render_voice_definition(profile: dict, summary: str = "") -> list[str]:
             " 문장을 끊지 않고 이어 붙인다. "
             "가벼운 질문이나 장난에는 짧게 받는다."
         )
-    if profile["repeatShare"] >= 0.03:
+    if texture := _texture_sentence(profile):
+        lines.append(texture)
+    elif profile["repeatShare"] >= 0.03:
         lines.append(
             "고쳐 말하기: 말하다가 같은 말을 한 번 더 되풀이하거나 단어를 고쳐 잇는 일이 가끔 있다."
         )

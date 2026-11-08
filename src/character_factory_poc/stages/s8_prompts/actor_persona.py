@@ -242,7 +242,7 @@ def _choice_lines(sheet) -> list[str]:
     return lines
 
 
-def compose_approved_sheet(plan, sheet, *, rules_text, voice=None):
+def compose_approved_sheet(plan, sheet, *, rules_text, voice=None, limits=None):
     """Compile the legacy approved sheet using the current actor section contract."""
     p = _raw(plan)
     # D-0080: 기획서에 없는 칸을 빈 섹션으로 조립하지 않는다(구형 character-plan-v1 등).
@@ -281,7 +281,8 @@ def compose_approved_sheet(plan, sheet, *, rules_text, voice=None):
         # 성격 시트 말버릇 칸은 검토·내보내기용이다.
         voice=voice or _unique([p.get("voiceSummary", "")]),
         # D-0089: 공동 기억·약속·관찰 규칙은 공유 프레임이 소유한다(MD-1.4). 인물의 한계만 남긴다.
-        boundaries=_unique(p.get("boundaries", [])),
+        # D-0147: 모티브는 실존 인물 한계(limits)를 더한다.
+        boundaries=_unique(p.get("boundaries", []) + list(limits or [])),
     )
     text, sections = _render(plan, profile, rules_text, None)
     if any(term in text for term in FORBIDDEN):
@@ -305,7 +306,7 @@ def _ledger_line(t) -> str:
     return line
 
 
-def compose_from_ledger(plan, ledger, *, rules_text, voice=None):
+def compose_from_ledger(plan, ledger, *, rules_text, voice=None, limits=None):
     """D-0091: 특질 장부에서 조립한다. 한 특질은 한 칸에 한 번만 들어간다(MD-1.4)."""
     p = _raw(plan)
     gender = {"female": "여성", "male": "남성", "other": ""}.get(p.get("gender"), "")
@@ -325,7 +326,7 @@ def compose_from_ledger(plan, ledger, *, rules_text, voice=None):
             + [_ledger_line(t) for t in ledger.traits]
         ),
         voice=voice or _unique([p.get("voiceSummary", "")]),
-        boundaries=_unique(p.get("boundaries", [])),
+        boundaries=_unique(p.get("boundaries", []) + list(limits or [])),
     )
     text, sections = _render(plan, profile, rules_text, None)
     if any(term in text for term in FORBIDDEN):

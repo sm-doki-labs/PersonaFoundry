@@ -80,6 +80,10 @@ def test_approved_subject_voice_reaches_both_prompts(tmp_path, monkeypatch, temp
         assert all(a not in voice for _, a in LINES)
         assert "제본사" not in voice
         assert all(q not in voice for q, _ in LINES)
+    if deck:
+        # D-0147: 모티브는 실존 인물 한계를 인물 한계 칸에 둔다.
+        limits = pair["long"]["text"].split("[PERSONA / KNOWS_AND_LIMITS]\n")[1].split("\n\n[")[0]
+        assert "실존 인물이다" in limits and "정확히 기억나지 않는다고" in limits
     # 예시는 G3 근거·비교 겹침 검사용으로 source-plan에만 남는다.
     assert excerpt in [e["quote"] for e in source["sourceVoice"]["examples"]]
     assert source["sourceVoice"]["speechProfile"]["schemaVersion"] == "speech-profile-v1"

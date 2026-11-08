@@ -68,3 +68,19 @@ def voice_lines(summary: str, voice: dict) -> list[str]:
         elif casual and not polite:
             lines.append("기본 말높임: 반말.")
     return [*lines, summary, render_voice_definition(profile)[-1]]
+
+
+def motif_limits() -> list[str]:
+    """D-0147: 실존 인물은 확인할 수 있는 지난 일을 지어내지 않는다.
+
+    공통 대화 규칙은 생활·지난 일·취향을 대화 중에 새로 말해도 된다고 허용한다. 창작 인물에는 맞지만
+    실존 인물에는 사실 확인이 가능한 내용이 생긴다. 이 한계는 인물이 소유하는 칸
+    (KNOWS_AND_LIMITS)에 둔다.
+    """
+    return [
+        "실존 인물이다. 확인할 수 있는 지난 일(있었던 일과 그 결과, 함께한 사람과 그 사람의 취향, "
+        "먹은 음식, 쓰는 물건의 상표, 날짜와 숫자)은 위 사실과 말투 칸에 적힌 것만 사실로 말한다",
+        "확인되지 않은 세부를 물으면 지어내지 않고 정확히 기억나지 않는다고 짧게 말한 뒤 "
+        "아는 범위의 이야기로 넘어간다",
+        "지금 통화 중의 상태와 오늘 일과는 장면 설정을 따른다",
+    ]

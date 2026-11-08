@@ -135,3 +135,23 @@ def test_guna_rule_is_skipped_when_the_source_uses_it():
     profile = build_speech_profile(rows, kinds)
     assert profile["gunaSentenceEndings"] == 20
     assert "'~구나'로 받지 않는다" not in "\n".join(render_voice_definition(profile))
+
+
+def test_texture_line_writes_filler_counts_per_length_band():
+    short = "네, 괜찮아요."
+    medium = "뭐 저는 그냥 집에서 쉬는 편인데, 요즘은 날이 좋아서 좀 걷는 게 제일 좋은 것 같아요."
+    long = (
+        "뭐 사실 경기 끝나고 나면 이제 몸이 진짜 무겁고 생각이 많아지는데, 그래도 또 다음 경기가 "
+        "있으니까 이제 회복하는 데 제일 신경을 쓰고 있고, 그렇게 그렇게 하루하루 버티다 보면 "
+        "뭐 결국에는 좋은 결과가 따라오는 것 같아요. 그래서 저는 요즘 잠도 좀 일찍 자고 "
+        "먹는 것도 많이 신경을 쓰고 있어요."
+    )
+    rows, kinds = _corpus((short, medium, long), n=90)
+    profile = build_speech_profile(rows, kinds)
+    bands = profile["fillerByLength"]
+    assert bands["short"]["avgPerAnswer"] == 0 and bands["long"]["avgPerAnswer"] >= 5
+    assert bands["long"]["repeatShare"] == 1.0
+    text = "\n".join(render_voice_definition(profile))
+    assert "말결:" in text and "한두 마디 짧은 답이 0~1번" in text
+    assert "고쳐 잇는 일이 거의 모두 정도 있다" in text
+    assert "바로 답할 수 있는 짧은 말에는 표지를 붙이지 않는다" not in text
