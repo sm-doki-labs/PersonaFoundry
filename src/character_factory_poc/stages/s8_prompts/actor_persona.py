@@ -95,9 +95,11 @@ def load_actor_rules(ctx=None):
     return (
         # v3(2026-11-05, D-0089): 마스터 지시서 6절·1.6·1.7을 따른다.
         # 관찰·공동 기억·공통 사실 규칙을
-        # 페르소나 칸에서 이쪽으로 옮겼다(MD-1.4). v1·v2는 과거 재현용이다.
-        files("character_factory_poc.resources").joinpath("actor-system-rules-v3.md").read_text(),
-        "builtin:actor-system-rules-v3",
+        # 페르소나 칸에서 이쪽으로 옮겼다(MD-1.4).
+        # v4(2026-11-08, D-0137): 그림 이모지만 막고 ㅋㅋ·ㅠㅠ·^^는 관계·감정에 맞게 허용한다.
+        # v1~v3은 과거 재현용이다.
+        files("character_factory_poc.resources").joinpath("actor-system-rules-v4.md").read_text(),
+        "builtin:actor-system-rules-v4",
     )
 
 

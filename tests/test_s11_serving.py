@@ -158,3 +158,28 @@ def test_long_base_or_fake_adoption_has_no_serving(flow, adopted):
     rev_dir = build_package(ctx, cid)
     assert read_json(rev_dir / "package.json")["sft"]["serving"] is None
     assert not (rev_dir / "sft" / "serving.json").exists()
+
+
+def test_serving_carries_the_training_prompt(flow):
+    """서빙 기록은 학습한 데이터셋의 학습용 짧은 프롬프트와 조립 규칙을 담는다(D-0139)."""
+    from types import SimpleNamespace
+
+    from character_factory_poc.stages.s9_data import training_prompt as tp
+
+    ctx, cid = flow
+    _gemma_run(ctx, cid)
+    run = read_json(ctx.character_dir(cid) / "s10-train/tr1/gemma_qlora/training-run.json")
+    text = "[ACTOR_IDENTITY]\n캐릭터 이름: 윤하린\n\n[PERSONA / FACTS]\n윤하린은 꽃집 사장이다."
+    built = tp.build(SimpleNamespace(long=SimpleNamespace(text=text), short=None))
+    path = ctx.character_dir(cid) / "s9-data" / run["datasetRev"] / tp.FILE_NAME
+    write_json(path, built.body())
+    rev_dir = build_package(ctx, cid)
+    package = read_json(rev_dir / "package.json")
+    assert package["sft"]["trainingPrompt"] == "sft/training-prompt.json"
+    serving = validate("sft-serving-v1", read_json(rev_dir / "sft" / "serving.json"))
+    packaged = rev_dir / "sft" / "training-prompt.json"
+    assert serving.systemPrompt is not None
+    assert serving.systemPrompt.ref == "sft/training-prompt.json"
+    assert serving.systemPrompt.sha256 == _sha(packaged.read_bytes())
+    assert "[RELATIONSHIP]" in serving.systemAssembly and "[SCENE]" in serving.systemAssembly
+    assert tp.load(packaged).core == built.core

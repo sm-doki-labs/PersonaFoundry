@@ -67,6 +67,12 @@ REQUIRED_GATES = ("G4", "G5", "G5b", "G6")
 #: 채택 어댑터 서빙 기록의 패키지 경로와 어댑터 파일(D-0077).
 SERVING_REL = "sft/serving.json"
 ADAPTER_FILES = ("adapter_model.safetensors", "adapter_config.json")
+TRAINING_PROMPT_FILE = "training-prompt.json"
+TRAINING_PROMPT_REL = "sft/training-prompt.json"
+SYSTEM_ASSEMBLY = (
+    "core + [RELATIONSHIP] 관계 문장 + [CHANNEL] 채널 문장 + [SCENE] 시작 장면. "
+    "학습·평가·서빙이 같은 순서와 같은 문장을 쓴다(D-0139)."
+)
 DEFAULT_CHAT_TEMPLATE = "gemma-4-thinking"
 
 
@@ -189,6 +195,18 @@ def collect_sft(ctx: Context, cid: str) -> tuple[Sft, list[SourceFile], list[str
             sources.append(
                 SourceFile("dataset", dataset_path, "sft/dataset.json", sha256_file(dataset_path))
             )
+            prompt_path = dataset_path.parent / TRAINING_PROMPT_FILE
+            if prompt_path.is_file():
+                # D-0139: 학습용 짧은 프롬프트를 어댑터 서빙 system의 정본으로 담는다.
+                sources.append(
+                    SourceFile(
+                        "training-prompt",
+                        prompt_path,
+                        TRAINING_PROMPT_REL,
+                        sha256_file(prompt_path),
+                    )
+                )
+                sft = sft.model_copy(update={"trainingPrompt": TRAINING_PROMPT_REL})
 
     runs: list[SourceFile] = []
     for run_path in sorted((char_dir / "s10-train").glob("tr*/**/training-run.json")):
@@ -384,6 +402,20 @@ def collect_serving(
     if problems:
         return None, problems
 
+    system_prompt, system_assembly = None, ""
+    prompt_path = char_dir / "s9-data" / run.datasetRev / TRAINING_PROMPT_FILE
+    if prompt_path.is_file():
+        latest = _latest(char_dir / "s9-data", "ds", "dataset.json")
+        packaged = latest.parent / TRAINING_PROMPT_FILE if latest is not None else None
+        if packaged is None or sha256_file(packaged) != sha256_file(prompt_path):
+            problems.append(
+                f"sft.serving: 학습에 쓴 데이터셋({run.datasetRev})의 학습용 프롬프트가 "
+                "패키지에 담는 데이터셋의 것과 다르다"
+            )
+            return None, problems
+        system_prompt = ArtifactRef(ref=TRAINING_PROMPT_REL, sha256=sha256_file(prompt_path))
+        system_assembly = str(read_json(prompt_path).get("assembly") or "") or SYSTEM_ASSEMBLY
+
     applied, requested = run.appliedConfig, run.requestedConfig
     serving = SftServing(
         characterId=cid,
@@ -409,6 +441,8 @@ def collect_serving(
             applied.get("runtimeVersions") or requested.get("expectedVersions") or {}
         ),
         checkpointSelection=selection,
+        systemPrompt=system_prompt,
+        systemAssembly=system_assembly,
     )
     return validate("sft-serving-v1", dump(serving)), []  # type: ignore[return-value]
 

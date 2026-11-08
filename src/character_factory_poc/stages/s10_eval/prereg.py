@@ -134,6 +134,7 @@ def discover_bindings(ctx: Context, cid: str) -> dict[str, dict[str, str]]:
             "ref": binding["ref"],
             "baseModel": run.get("baseModel", ""),
             "checkpointId": binding.get("checkpointId", ""),
+            "datasetRev": run.get("datasetRev", ""),
         }
     return found
 
@@ -157,12 +158,49 @@ def _judge_spec(ctx: Context, bindings: dict[str, dict[str, str]]) -> JudgeSpec:
     return JudgeSpec(model=judge.model or judge.adapter, family=family, orderSwap=True)
 
 
+def eval_relationship(plan: Any, relationship: str | None) -> str:
+    """평가 관계: 지정한 관계 말이 있으면 그 단계, 없으면 기획서 마지막 챕터 목표(D-0139)."""
+    from character_factory_poc.stages.s9_data import training_prompt as tp_mod
+    from character_factory_poc.stages.s10_eval.sets import RELATION_LABELS
+
+    if relationship:
+        stage = next((k for k, v in RELATION_LABELS.items() if v == relationship), None)
+        return tp_mod.relationship_for_stage(stage)
+    arcs = getattr(plan, "chapterArc", None) or []
+    stage = getattr(arcs[-1], "targetStage", None) if arcs else None
+    return tp_mod.relationship_for_stage(stage)
+
+
+def sft_prompt(
+    ctx: Context, cid: str, dataset_rev: str | None, rev_dir: Path, relationship: str
+) -> Path | None:
+    """학습한 데이터셋의 학습용 짧은 프롬프트로 평가 system을 만든다(D-0139).
+
+    학습·평가 system이 같아야 결과를 해석할 수 있다(학습 가이드 §3.4). 데이터셋에
+    training-prompt.json이 없으면(D-0138 전 데이터셋) None을 돌려주고 옛 짧은 프롬프트를 쓴다.
+    """
+    from character_factory_poc.stages.s9_data import training_prompt as tp_mod
+
+    rev = dataset_rev or ctx.state(cid).stage("s9").currentRev
+    path = tp_mod.find(ctx.character_dir(cid), rev)
+    if path is None:
+        return None
+    text = tp_mod.eval_system(tp_mod.load(path), relationship)
+    out = rev_dir / "prompts" / f"sft-system-{rev}-{relationship.lower()}.md"
+    if not out.exists():
+        write_once_text(out, text)
+    return out
+
+
 def _arms(
     ctx: Context,
     cid: str,
     long_path: Path,
     short_path: Path,
     bindings: dict[str, dict[str, str]],
+    *,
+    rev_dir: Path | None = None,
+    relationship: str = "FAVORABLE",
 ) -> list[Arm]:
     char_dir = ctx.character_dir(cid)
     text_model = ctx.config.provider("text").model or ctx.config.provider("text").adapter
@@ -183,12 +221,17 @@ def _arms(
             # 학습 결과도 없고 학습 공급자로 고르지도 않은 조건은 등록하지 않는다(평가가 실패한다).
             continue
         ref = info["ref"] if info else f"UNBOUND:{SFT_PROVIDERS[arm]}"
+        prompt_path = (
+            sft_prompt(ctx, cid, (info or {}).get("datasetRev"), rev_dir, relationship)
+            if rev_dir is not None
+            else None
+        ) or short_path
         arms.append(
             Arm(
                 armId=arm,  # type: ignore[arg-type]
                 promptRef=ArtifactRef(
-                    ref=short_path.relative_to(char_dir).as_posix(),
-                    sha256=sha256_text(short_path.read_text("utf-8")),
+                    ref=prompt_path.relative_to(char_dir).as_posix(),
+                    sha256=sha256_text(prompt_path.read_text("utf-8")),
                 ),
                 model=ref,
             )
@@ -263,7 +306,15 @@ def build_prereg(
             EvalPrereg(
                 characterId=cid,
                 personaVersion=persona_version,
-                arms=_arms(ctx, cid, long_path, short_path, bindings),
+                arms=_arms(
+                    ctx,
+                    cid,
+                    long_path,
+                    short_path,
+                    bindings,
+                    rev_dir=rev_dir,
+                    relationship=eval_relationship(plan, relationship),
+                ),
                 sets=sets,
                 judge=judge,
                 humanPairs=human_pairs,

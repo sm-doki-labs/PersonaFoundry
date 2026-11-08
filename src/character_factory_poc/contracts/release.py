@@ -94,6 +94,11 @@ class Sft(Strict):
         description="채택 어댑터 서빙 기록(sft-serving-v1, PackageFile.path). "
         "실제 gemma_qlora SFT를 채택했을 때만 있다",
     )
+    trainingPrompt: str | None = Field(
+        default=None,
+        description="학습용 짧은 프롬프트(training-prompt-v1, D-0138·D-0139). "
+        "어댑터 서빙 system의 정본",
+    )
 
 
 class AdapterFile(Strict):
@@ -139,6 +144,16 @@ class SftServing(Strict):
     generation: ServingGeneration = Field(default_factory=ServingGeneration)
     runtimeVersions: dict[str, Any] = Field(default_factory=dict)
     checkpointSelection: CheckpointSelectionRef | None = None
+    systemPrompt: ArtifactRef | None = Field(
+        default=None,
+        description="학습한 데이터셋의 학습용 짧은 프롬프트(패키지 sft/training-prompt.json). "
+        "None이면 D-0138 전 데이터셋이라 옛 짧은 프롬프트로 학습했다",
+    )
+    systemAssembly: str = Field(
+        default="",
+        description="서빙 system 조립 규칙: core + [RELATIONSHIP] + [CHANNEL] + [SCENE]"
+        "(학습과 같다)",
+    )
 
 
 class GateRef(Strict):

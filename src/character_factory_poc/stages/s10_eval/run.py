@@ -275,6 +275,28 @@ def adapter_dir(arm: Arm) -> Path | None:
     return path
 
 
+def needs_gpu_eval(ctx: Context, cid: str) -> bool:
+    """최신 학습 결과가 실제 Gemma 어댑터 폴더면 평가가 GPU를 빌린다(웹 실행 확인, D-0130)."""
+    from character_factory_poc.providers.training.inference import is_adapter_dir
+    from character_factory_poc.stages.s10_train.io import latest_rev, read_run
+
+    rev_dir = latest_rev(ctx, cid)
+    if rev_dir is None:
+        return False
+    for path in sorted(rev_dir.glob("*/training-run.json")):
+        try:
+            run = read_run(path)
+        except (FactoryError, ValueError, OSError):
+            continue
+        binding = run.modelBinding
+        if binding is None or binding.provider != "gemma_qlora":
+            continue
+        ref = Path(binding.ref)
+        if ref.is_absolute() and is_adapter_dir(ref):
+            return True
+    return False
+
+
 def gemma_config(ctx: Context) -> ProviderConfig:
     """학습과 같은 gemma_qlora 설정(D-0077). [stages.s10t] providers의 별칭도 따른다."""
     from character_factory_poc.stages.s10_train.io import _config_for, resolve_providers

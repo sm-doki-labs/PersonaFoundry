@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-#: 공유 프레임의 카메라 관찰 규칙(actor-system-rules-v3 본문과 같은 문장).
+#: 공유 프레임의 카메라 관찰 규칙(actor-system-rules-v3·v4 본문과 같은 문장).
 CALL_OBSERVATION_RULE = (
     # D-0089: 공유 프레임(actor-system-rules-v3)이 소유한다(MD-1.4).
     # 기기 관찰을 반응에 쓴다(MD-1.7).

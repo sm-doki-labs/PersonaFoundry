@@ -138,9 +138,33 @@ class FakeWriterModel(FakeTextModel):
         if req.stage == "s8":
             return prompter_output()
         user = req.messages[-1].content
+        if '<input name="seedSources">' in user:
+            return self.seeds(_block(req, "seedSources"))
         if '<input name="batch">' not in user:
             return self.handoff(req)
         return self.writer(req)
+
+    def seeds(self, sources: list[dict[str, Any]]) -> dict[str, Any]:
+        # D-0138: 흐름 시드. 원문 문장 없이 장면·상대·사건·리듬만 쓴다.
+        self.seed_calls = getattr(self, "seed_calls", 0) + 1
+        return {
+            "seeds": [
+                {
+                    "sourceId": s["sourceId"],
+                    "scene": f"{WORDS[i % 10]} 근처에서 퇴근길에 문자를 주고받는 저녁.",
+                    "counterpart": "상대: 같은 동네에 사는 회사원. 말이 짧고 장난을 잘 친다.",
+                    "beats": [
+                        "상대가 만날 시간을 묻는다",
+                        "캐릭터가 된다고 답한다",
+                        "상대가 조금 늦는다고 알린다",
+                        "둘이 시간을 늦춰 다시 정한다",
+                    ],
+                    "rhythm": "둘 다 짧게 주고받고 캐릭터 말은 대개 15자 안팎이다.",
+                    "cautions": [],
+                }
+                for i, s in enumerate(sources)
+            ]
+        }
 
     def handoff(self, req) -> dict[str, Any]:
         cluster = _block(req, "cluster")
@@ -216,20 +240,32 @@ class FakeWriterModel(FakeTextModel):
         }
 
     def _sns_item(self, source: dict[str, Any], n: int) -> dict[str, Any]:
+        # 시드만 보고 양쪽 대사를 새로 쓴다(D-0138). sns_bad_first면 첫 응답의 캐릭터 말 하나를
+        # 길이 상한보다 길게 써서 다시 쓰기를 부른다.
         bad = self.sns_bad_first and not self.sns_bad_served
         self.sns_bad_served = True
+        word = WORDS[n % 10]
+        count = int(source.get("sourceTurns") or len(source.get("turns") or []) or 4)
         messages = []
-        for turn in source["turns"]:
-            if turn["role"] == "user":
-                text = turn["content"] + (" 바꿔 씀" if bad else "")
-                messages.append({"role": "user", "content": text})
+        for k in range(count - count % 2):
+            if k % 2 == 0:
+                fresh = f"{word} 쪽은 {n}번째인데 {k // 2 + 1}번 물어봐도 돼?"
+                messages.append({"role": "user", "content": fresh})
             else:
-                said = f"{WORDS[n % 10]}에서 기다릴게. {n}번째 약속이야."
+                said = f"{word}에서 기다릴게. {n}-{k}번째 약속이야."
+                if bad and k == 1:
+                    said += " 그리고 오늘은 할 말이 많아서 길게 이어서 말하는 중이야."
+                    said += " 끝까지 들어 줘."
                 messages.append({"role": "assistant", "content": said})
         return {
             "skeletonKey": "",
-            "scene": f"{WORDS[n % 10]}에서 약속 시간을 맞추는 저녁.",
+            "scene": f"{word}에서 약속 시간을 맞추는 저녁.",
             "sourceId": source["sourceId"],
+            "flowBeats": [
+                "상대가 먼저 시간을 묻는다",
+                "캐릭터가 된다고 답한다",
+                "둘이 시간을 조금 늦춘다",
+            ],
             "messages": messages,
         }
 
