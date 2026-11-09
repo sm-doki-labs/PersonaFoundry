@@ -42,7 +42,8 @@ body.fl.src{overflow:hidden}
 .src-fld>label,.src-fld>legend,.src-path>label{font-size:var(--fd-fs-2);font-weight:550;color:var(--fd-fg)}
 .src-fld legend{padding:0;margin-bottom:6px}
 .src-fld .opt{font-weight:400;color:var(--fd-fg-subtle);margin-left:4px}
-.src input:not([type="radio"]):not([type="file"]),.src textarea,.src select{font:inherit;font-size:var(--fd-fs-3);color:var(--fd-fg);background:var(--fd-bg-surface);border:1px solid var(--fd-line-strong);border-radius:var(--fd-r-2);padding:0 10px;height:34px;width:100%;min-width:0;transition:border-color var(--fd-dur-1),box-shadow var(--fd-dur-1)}
+/* 스위치(checkbox)는 공통 칸 규칙에서 뺀다. 넣으면 너비 100%가 스위치를 화면 너비로 늘리고 설명 글을 한 글자 폭으로 밀어낸다. */
+.src input:not([type="radio"]):not([type="file"]):not([type="checkbox"]),.src textarea,.src select{font:inherit;font-size:var(--fd-fs-3);color:var(--fd-fg);background:var(--fd-bg-surface);border:1px solid var(--fd-line-strong);border-radius:var(--fd-r-2);padding:0 10px;height:34px;width:100%;min-width:0;transition:border-color var(--fd-dur-1),box-shadow var(--fd-dur-1)}
 .src textarea{height:auto;padding:8px 10px;resize:vertical;line-height:1.5}
 .src input:hover:not(:disabled),.src textarea:hover:not(:disabled),.src select:hover:not(:disabled){border-color:var(--fd-slate-8)}
 .src input:focus-visible,.src textarea:focus-visible,.src select:focus-visible{outline:none;border-color:var(--fd-accent);box-shadow:0 0 0 3px var(--fd-accent-bg)}
@@ -153,6 +154,28 @@ body.fl.src{overflow:hidden}
 .src-del-ask{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--fd-fg-muted)}
 .fl .btn.danger{color:var(--fd-danger-fg);border-color:var(--fd-danger-line)}
 .fl .btn.danger:hover:not(:disabled){background:var(--fd-danger-bg)}
+
+/* 만들던 초안 이어 하기(새로 만들 때만) */
+.src-resume{display:flex;flex-direction:column;gap:8px;padding:12px 14px}
+.src-resume p{margin:0;color:var(--fd-fg-muted)}
+.src-resume p b{color:var(--fd-fg);font-weight:600}
+.src-resume ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.src-resume li{display:flex;align-items:center;gap:10px;min-height:40px;border-top:1px solid var(--fd-line)}
+.src-resume .nm{font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.src-resume .meta{flex:1;color:var(--fd-fg-muted);font-size:var(--fd-fs-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.src-resume .btn{height:28px;text-decoration:none!important}
+
+/* 원문에서 찾은 화자로 바꾸는 단추 */
+.fl .btn.src-chip{height:28px;font-size:var(--fd-fs-2);border-color:var(--fd-accent);color:var(--fd-accent-fg);background:var(--fd-accent-bg)}
+
+/* 고급: 이 컴퓨터의 폴더에서 가져오기 */
+.src-adv>summary{cursor:pointer;width:fit-content;padding:4px 0;font-size:var(--fd-fs-2);color:var(--fd-fg-muted)}
+.src-adv>summary:hover{color:var(--fd-fg)}
+.src-adv[open]>summary{margin-bottom:6px}
+
+/* 시작 단추 옆 걸리는 시간 */
+.src-go-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.src-go-note{font-size:var(--fd-fs-2);color:var(--fd-fg-muted)}
 
 @media (max-width:1099px){
   body.fl.src{overflow:auto}

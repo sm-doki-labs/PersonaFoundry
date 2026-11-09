@@ -1,7 +1,7 @@
 (function (global) {
   'use strict';
 
-  // 대화 시험 화면(계획 2차 묶음 H "대화 화면"). 완성된 캐릭터와 팀이 직접 말을 주고받는다.
+  // 대화해 보기 화면(계획 2차 묶음 H, 3차 묶음 M). 완성된 캐릭터와 팀이 직접 말을 주고받는다.
   // 서버는 약속 1 대화 API만 쓴다: GET /api/characters/{cid}/chat/meta, POST /api/characters/{cid}/chat.
   // 대화 기록은 서버에 남기지 않고 이 탭의 메모리(sessionStorage)에만 둔다.
   // createChat은 DOM 없이 돌아서 시험이 가짜 fetch로 보내기·재생 순서·준비 안 됨·다시 시도를 확인한다. mount는 그 위에 화면을 그린다.
@@ -55,6 +55,50 @@
     return value.map((x) => text(x && typeof x === 'object' ? x.reason : x)).filter(Boolean);
   }
   function isMotif(origin) { return origin === 'SOURCE' || origin === 'MOTIF'; }
+
+  // 이름 규칙(진행 화면·원문 화면과 같다): 서버 표시 이름 → 없으면 '이름 미정 · slug (11/9)'. 서버의 자리 채움 이름 '캐릭터'와 ID는 이름으로 쓰지 않는다.
+  function displayName(name, id) {
+    const n = text(name).trim();
+    if (n && n !== text(id) && n !== '캐릭터') return n;
+    const m = /^cf-(\d{4})(\d{2})(\d{2})-(.+)$/.exec(text(id));
+    return m ? '이름 미정 · ' + m[4] + ' (' + Number(m[2]) + '/' + Number(m[3]) + ')' : text(id);
+  }
+  // 만든 날짜 '11/10'. 서버 값이 없으면 ID 앞의 날짜를 쓴다.
+  function createdLabel(iso, id) {
+    const d = iso ? new Date(iso) : null;
+    if (d && !isNaN(d.getTime())) return (d.getMonth() + 1) + '/' + d.getDate();
+    const m = /^cf-\d{4}(\d{2})(\d{2})-/.exec(text(id));
+    return m ? Number(m[1]) + '/' + Number(m[2]) : '';
+  }
+  function clockLabel(iso) {
+    const d = iso ? new Date(iso) : null;
+    return d && !isNaN(d.getTime()) ? String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') : '';
+  }
+  // 대화 화면 왼쪽 목록: GET /api/chat/characters(약속 3)를 그대로 쓴다. 그 API가 없는 서버면 /api/projects에서
+  // 대화 가능(chatReady) 표시가 있는 캐릭터만, 표시가 아예 없으면 전부를 같은 모양으로 바꿔 쓴다. 보관한 캐릭터는 뺀다.
+  function chatList(data, fromProjects) {
+    if (!fromProjects) return (Array.isArray(data) ? data : Array.isArray(data && data.characters) ? data.characters : []).filter((c) => c && c.characterId);
+    const list = (data && Array.isArray(data.characters) ? data.characters : []).filter((c) => c && c.id && !c.archived);
+    const known = list.some((c) => typeof c.chatReady === 'boolean');
+    return list.filter((c) => !known || c.chatReady === true).map((c) => ({ characterId: c.id, displayName: displayName(c.displayName || c.name, c.id), createdAt: c.createdAt || null, origin: c.origin || null }));
+  }
+  // 상황 목록 하나로 합치기: 이 캐릭터 전용 상황을 먼저 두고, 기본 상황 가운데 전용 상황과 제목이 같은 것은 뺀다.
+  // 기본 상황 표시는 서버가 generic을 주면 그 값을, 없으면 기본 상황 파일의 ID로 가린다.
+  const GENERIC_IDS = ['daily', 'tease', 'worry', 'unknown', 'private'];
+  function isGeneric(sc) {
+    if (!sc) return false;
+    if (typeof sc.generic === 'boolean') return sc.generic;
+    if (sc.source === 'generic' || sc.kind === 'generic') return true;
+    return GENERIC_IDS.indexOf(text(sc.id)) >= 0;
+  }
+  function groupScenarios(list) {
+    const all = Array.isArray(list) ? list.filter(Boolean) : [];
+    const key = (s) => text(s && s.title).replace(/\s+/g, '');
+    const mine = all.filter((s) => !isGeneric(s));
+    const titles = new Set(mine.map(key));
+    const generic = all.filter(isGeneric);
+    return { mine, basic: generic.filter((s) => !titles.has(key(s))), dropped: generic.filter((s) => titles.has(key(s))).map((s) => text(s.id)) };
+  }
 
   function createChat(opts) {
     const o = opts || {};
@@ -134,7 +178,7 @@
         if (meta.ready) { state.phase = 'ready'; if (!state.messages.length) restore(); }
         else { state.phase = 'not-ready'; state.reason = text(meta.reason).trim() || '아직 대화할 준비가 되지 않았어요.'; }
       } catch (error) {
-        if (error.status === 404) { state.phase = 'missing'; state.reason = '이 캐릭터를 찾지 못했어요. 주소를 확인해 주세요.'; }
+        if (error.status === 404) { state.phase = 'missing'; state.reason = '지웠거나 주소가 바뀌었을 수 있어요. 목록에서 다시 골라 주세요.'; }
         else { state.phase = 'error'; state.error = error.message; }
       }
       emit();
@@ -320,7 +364,8 @@
     const store = (() => { try { return global.localStorage; } catch (error) { return null; } })();
     const session = o.storage !== undefined ? o.storage : (() => { try { return global.sessionStorage; } catch (error) { return null; } })();
     const media = global.matchMedia ? global.matchMedia('(prefers-color-scheme: dark)') : null;
-    const ui = { theme: (store && ['light', 'dark'].includes(store.getItem('fd-theme'))) ? store.getItem('fd-theme') : 'system', projects: null, open: new Set(), lastSeen: '', stick: true, announced: '' };
+    const ui = { theme: (store && ['light', 'dark'].includes(store.getItem('fd-theme'))) ? store.getItem('fd-theme') : 'system', chars: null, open: new Set(), lastSeen: '', stick: true, announced: '' };
+    const narrow = global.matchMedia ? global.matchMedia('(max-width: 1099px)') : null;
     let chat = null;
     let unsub = null;
     let tick = null;
@@ -336,53 +381,71 @@
       applyTheme(); renderSide(); renderHead();
     }
 
-    async function loadProjects() {
+    async function loadCharacters() {
       const fetchFn = o.fetch || (global.fetch && global.fetch.bind(global));
       if (!fetchFn) return;
-      try {
-        const res = await fetchFn(apiPath(o.apiBase, '/api/projects'), { credentials: 'same-origin', cache: 'no-store' });
-        if (res.ok) { ui.projects = await res.json(); renderSide(); }
-      } catch (error) { /* 목록은 보조 길잡이라 실패해도 대화는 된다 */ }
+      const get = async (p) => { const res = await fetchFn(apiPath(o.apiBase, p), { credentials: 'same-origin', cache: 'no-store' }); return res.ok ? res.json() : Promise.reject(res.status); };
+      try { ui.chars = chatList(await get('/api/chat/characters'), false); }
+      catch (error) {
+        try { ui.chars = chatList(await get('/api/projects'), true); } catch (e) { /* 목록은 보조 길잡이라 실패해도 대화는 된다 */ }
+      }
+      renderSide(); renderHead();
+      if (chat) { renderCall(); renderList(); }
     }
 
     function meta() { return chat && chat.state.meta; }
-    function nameOf() { const m = meta(); return text(m && m.name).trim() || (chat ? chat.characterId : ''); }
+    function nameOf() {
+      if (!chat) return '';
+      const m = meta() || {};
+      const cid = chat.characterId;
+      const listed = (ui.chars || []).find((c) => c.characterId === cid);
+      const pick = [m.displayName, listed && listed.displayName, m.name].map((x) => text(x).trim()).find((x) => x && x !== cid && x !== '캐릭터');
+      return pick || displayName('', cid);
+    }
 
-    // 왼쪽 사이드바: 진행 화면(factory.html)과 같은 모양. 캐릭터를 누르면 그 캐릭터와 대화한다.
+    // 왼쪽 사이드바: 진행 화면(factory.html)과 같은 모양. 대화 가능한 캐릭터만 이름과 만든 날짜로 보이고, 누르면 그 캐릭터와 대화한다.
+    // 이름과 날짜가 같은 캐릭터가 둘 이상이면 시각까지 붙여 가린다. 돌아가기는 머리줄 위치 표시가 맡는다.
     function renderSide() {
       if (!R.side) return;
       const cid = chat ? chat.characterId : '';
-      const list = (ui.projects && ui.projects.characters) || [];
+      const list = ui.chars || [];
+      const dateOf = (c) => createdLabel(c.createdAt, c.characterId);
+      const twin = (c) => list.filter((x) => x.displayName === c.displayName && dateOf(x) === dateOf(c)).length > 1;
       const items = list.map((c) => {
-        const name = text(c.name).trim() || c.id;
-        return '<a class="fd-nav" href="chat.html#c/' + E(encodeURIComponent(c.id)) + '"' + (c.id === cid ? ' aria-current="page"' : '') + ' title="' + E(name) + '">' +
-          '<span class="fd-av" aria-hidden="true">' + E(initial(name)) + '</span><span class="lbl">' + E(name) + '</span></a>';
+        const name = displayName(c.displayName, c.characterId);
+        const when = [dateOf(c), twin(c) ? clockLabel(c.createdAt) : ''].filter(Boolean).join(' ');
+        return '<a class="fd-nav" href="chat.html#c/' + E(encodeURIComponent(c.characterId)) + '"' + (c.characterId === cid ? ' aria-current="page"' : '') + ' title="' + E(name + (when ? ' · ' + when + ' 만듦' : '')) + '">' +
+          '<span class="fd-av" aria-hidden="true">' + E(initial(name)) + '</span><span class="lbl">' + E(name) + '</span>' + (when ? '<span class="num">' + E(when) + '</span>' : '') + '</a>';
       }).join('');
       const theme = THEMES.map((t) => '<button type="button" data-act="theme" data-theme="' + t[0] + '" aria-pressed="' + (ui.theme === t[0]) + '" aria-label="' + t[2] + '" title="' + t[2] + '">' + icon(t[1]) + '</button>').join('');
       R.side.innerHTML = '<div class="fd-brand">' + MARK + '<div class="fd-word"><b>Foundry</b><small>캐릭터 공장</small></div></div>' +
-        '<div class="fd-side-actions"><a class="btn block ch-sidebtn" href="' + E(factoryHref(cid)) + '" title="진행 화면으로">' + icon('back') + '<span class="lbl">진행 화면으로</span></a></div>' +
-        '<nav aria-label="캐릭터 탐색"><a class="fd-nav" href="factory.html#all" title="전체 캐릭터">' + icon('grid') + '<span class="lbl">전체 캐릭터</span>' + (list.length ? '<span class="num">' + list.length + '명</span>' : '') + '</a>' +
-        '<h2>대화할 캐릭터</h2>' + (items || '<p class="hint" style="padding:0 8px">' + (ui.projects ? '아직 없어요' : '불러오는 중이에요') + '</p>') + '</nav>' +
-        '<div class="fd-side-foot"><div class="fd-theme" role="group" aria-label="화면 테마">' + theme + '</div><div class="fd-foot-links"><a href="help.html" target="_blank" rel="noopener">사용 안내</a></div></div>';
+        '<nav aria-label="캐릭터 탐색"><a class="fd-nav" href="factory.html#all" title="전체 캐릭터">' + icon('grid') + '<span class="lbl">전체 캐릭터</span></a>' +
+        '<h2>대화할 수 있는 캐릭터</h2>' + (items || '<p class="hint" style="padding:0 8px">' + (ui.chars ? '아직 없어요' : '불러오는 중이에요') + '</p>') + '</nav>' +
+        '<div class="fd-side-foot"><a class="fd-help" href="help.html" target="_blank" rel="noopener" title="사용 안내" aria-label="사용 안내">?</a><div class="fd-theme" role="group" aria-label="화면 테마">' + theme + '</div><div class="fd-foot-links"><a href="help.html" target="_blank" rel="noopener">사용 안내</a></div></div>';
     }
 
     function renderHead() {
       if (!R.head) return;
-      const cid = chat ? chat.characterId : '';
+      // 없는 캐릭터면 그 ID를 이름처럼 보이지 않는다.
+      const cid = chat && chat.state.phase !== 'missing' ? chat.characterId : '';
       const i = Math.max(0, THEMES.findIndex((t) => t[0] === ui.theme));
       const cur = THEMES[i];
       const next = THEMES[(i + 1) % THEMES.length];
       const crumb = cid
-        ? '<a class="up" href="factory.html#all">전체 캐릭터</a><span class="sep" aria-hidden="true">/</span><a class="up" href="' + E(factoryHref(cid)) + '">' + E(nameOf()) + '</a><span class="sep" aria-hidden="true">/</span><b aria-current="page">대화 테스트</b>'
-        : '<a class="up" href="factory.html#all">전체 캐릭터</a><span class="sep" aria-hidden="true">/</span><b aria-current="page">대화 테스트</b>';
+        ? '<a class="up" href="factory.html#all">전체 캐릭터</a><span class="sep" aria-hidden="true">/</span><a class="up" href="' + E(factoryHref(cid)) + '">' + E(nameOf()) + '</a><span class="sep" aria-hidden="true">/</span><b aria-current="page">대화해 보기</b>'
+        : '<a class="up" href="factory.html#all">전체 캐릭터</a><span class="sep" aria-hidden="true">/</span><b aria-current="page">대화해 보기</b>';
       R.head.innerHTML = '<nav class="fd-crumb" aria-label="위치">' + crumb + '</nav>' +
+        '<a class="ch-head-help" href="help.html" target="_blank" rel="noopener" title="사용 안내" aria-label="사용 안내">?</a>' +
         '<button type="button" class="fd-head-theme" data-act="theme" data-theme="' + next[0] + '" aria-label="화면 테마: 지금 ' + cur[2] + '. 누르면 ' + next[2] + '" title="화면 테마: ' + cur[2] + '">' + icon(cur[1]) + '</button>';
     }
 
-    // 통화 머리: 캐릭터 이름, 모티브 안내, 지금 상태, 새 대화, 모델 정보 한 줄.
+    // 통화 머리: 캐릭터 이름, 모티브 안내, 지금 상태, 새 대화·고칠 점 적기, 접힌 '설정 보기'(모델·온도·판).
+    // 캐릭터를 고르지 않았거나 없는 캐릭터면 머리를 숨기고 상태 카드만 보인다.
     function renderCall() {
       if (!R.call) return;
       const s = chat ? chat.state : null;
+      R.call.hidden = !s || s.phase === 'missing';
+      if (R.call.hidden) { R.call.innerHTML = ''; return; }
       const m = meta() || {};
       const ready = !!(s && s.phase === 'ready');
       const speaking = !!(s && s.pending);
@@ -390,21 +453,22 @@
       if (s && s.phase === 'loading') pill = '<span class="fl-pill muted"><span class="d"></span>불러오는 중</span>';
       else if (speaking) pill = '<span class="fl-pill run"><span class="d"></span>답을 쓰는 중</span>';
       else if (ready && s.play && s.play.status === 'running') pill = '<span class="fl-pill run"><span class="d"></span>재생 중</span>';
-      else if (ready) pill = '<span class="fl-pill ok"><span class="d"></span>대화할 수 있어요</span>';
-      else if (s && s.phase === 'not-ready') pill = '<span class="fl-pill wait"><span class="d"></span>아직 준비 중</span>';
+      else if (ready) pill = '<span class="fl-pill ok"><span class="d"></span>대화 가능</span>';
       const model = m.model || {};
       const info = [];
-      if (model.model) info.push('<span title="대화 모델">' + E(model.model) + (model.via ? ' · ' + E(viaLabel(model.via)) : '') + '</span>');
-      if (m.temperature != null && m.temperature !== '') info.push('<span title="답의 다양성(온도)">온도 ' + E(m.temperature) + '</span>');
-      if (revLabel(m.promptRev)) info.push('<span title="프롬프트 ' + E(m.promptRev) + '">프롬프트 ' + E(revLabel(m.promptRev)) + '</span>');
-      if (revLabel(m.chapterRev)) info.push('<span title="챕터 시작 설정 ' + E(m.chapterRev) + '">장면 ' + E(revLabel(m.chapterRev)) + '</span>');
-      const name = chat ? nameOf() : '대화 테스트';
+      if (ready) {
+        if (model.model) info.push('<span title="대화 모델">' + E(model.model) + (model.via ? ' · ' + E(viaLabel(model.via)) : '') + '</span>');
+        if (m.temperature != null && m.temperature !== '') info.push('<span title="답의 다양성(온도)">온도 ' + E(m.temperature) + '</span>');
+        if (revLabel(m.promptRev)) info.push('<span>프롬프트 ' + E(revLabel(m.promptRev)) + '</span>');
+        if (revLabel(m.chapterRev)) info.push('<span>장면 ' + E(revLabel(m.chapterRev)) + '</span>');
+      }
+      const name = nameOf();
       const hasTalk = !!(s && (s.messages.length || s.pending || s.play));
-      R.call.innerHTML = '<div class="ch-av' + (speaking ? ' is-speaking' : '') + '" aria-hidden="true">' + E(chat ? initial(name) : '?') + '</div>' +
+      R.call.innerHTML = '<div class="ch-av' + (speaking ? ' is-speaking' : '') + '" aria-hidden="true">' + E(initial(name)) + '</div>' +
         '<div class="ch-who"><div class="ch-name"><h1 id="ch-title">' + E(name) + '</h1>' + pill + '</div>' +
         (isMotif(m.origin) ? '<p class="ch-note">' + E(MOTIF_NOTE) + '</p>' : '') +
-        (info.length ? '<p class="ch-info" aria-label="대화 설정">' + info.join('<span class="dot" aria-hidden="true">·</span>') + '</p>' : '') + '</div>' +
-        (ready ? '<button type="button" class="btn" data-act="reset" data-key="reset"' + (hasTalk ? '' : ' disabled') + '>' + icon('refresh') + '새 대화</button>' : '');
+        (info.length ? '<details class="ch-set" data-open-key="set"' + (ui.open.has('set') ? ' open' : '') + '><summary data-key="sum:set">설정 보기</summary><p class="ch-info" aria-label="대화 설정">' + info.join('<span class="dot" aria-hidden="true">·</span>') + '</p></details>' : '') + '</div>' +
+        (ready ? '<div class="ch-acts"><a class="btn" href="' + E(factoryHref(chat.characterId)) + '" title="진행 화면에서 프롬프트에 고칠 점을 적어요">고칠 점 적기</a><button type="button" class="btn" data-act="reset" data-key="reset"' + (hasTalk ? '' : ' disabled') + '>' + icon('refresh') + '새 대화</button></div>' : '');
     }
 
     function playbarHTML(s) {
@@ -428,7 +492,8 @@
         // 멈춘 재생은 띠의 "이어서 재생"이 같은 일을 하므로 말 옆 단추는 두지 않는다.
         const inline = !(s.play && s.play.status === 'stopped');
         return '<li class="ch-msg me' + (failed ? ' is-failed' : '') + '" data-mid="' + E(msg.id) + '"><div class="col"><span class="sr">나: </span><div class="bub">' + E(msg.content) + '</div>' +
-          (failed ? '<div class="ch-fail"' + (msg.stopped ? '' : ' role="alert"') + '>' + icon(msg.stopped ? 'stop' : 'alert') + '<span>' + E(msg.error) + '</span>' + (inline ? '<button type="button" class="btn" data-act="retry" data-key="retry"' + (s.pending ? ' disabled' : '') + '>' + icon('refresh') + (msg.stopped ? '답 받기' : '다시 시도') + '</button>' : '') + '</div>' : '') + '</div></li>';
+          // 직접 멈춘 말은 오류가 아니라서 회색 안내로, 실패만 빨간 경고로 보인다.
+          (failed ? '<div class="ch-fail' + (msg.stopped ? ' is-stopped' : '') + '"' + (msg.stopped ? '' : ' role="alert"') + '>' + icon(msg.stopped ? 'stop' : 'alert') + '<span>' + E(msg.error) + '</span>' + (inline ? '<button type="button" class="btn" data-act="retry" data-key="retry"' + (s.pending ? ' disabled' : '') + '>' + icon('refresh') + (msg.stopped ? '답 받기' : '다시 시도') + '</button>' : '') + '</div>' : '') + '</div></li>';
       }
       const empty = !text(msg.content).trim();
       const bits = [];
@@ -460,7 +525,8 @@
       const msgs = s.messages;
       let html = msgs.map((m, i) => messageHTML(m, s, i === msgs.length - 1)).join('');
       if (s.pending) html += typingHTML(s);
-      if (!html) html = '<li class="ch-empty"><p><b>' + E(nameOf()) + '</b>에게 먼저 말을 걸어 보세요.</p><p class="hint">오른쪽 상황을 누르면 준비된 말을 하나씩 보내고 답을 받아요.</p></li>';
+      // 좁은 화면에서는 상황 목록이 대화 아래에 있다.
+      if (!html) html = '<li class="ch-empty"><p><b>' + E(nameOf()) + '</b>에게 먼저 말을 걸어 보세요.</p><p class="hint">' + (narrow && narrow.matches ? '아래' : '오른쪽') + ' 상황을 누르면 준비된 말을 하나씩 보내고 답을 받아요.</p></li>';
       R.list.innerHTML = html;
       const lastMsg = msgs[msgs.length - 1];
       const newReply = !!(lastMsg && lastMsg.role === 'assistant' && lastMsg.id !== ui.lastSeen);
@@ -479,11 +545,15 @@
       const s = chat ? chat.state : null;
       let html = '';
       if (!chat) {
-        html = '<div class="ch-card"><h2>대화할 캐릭터를 골라 주세요</h2><p>왼쪽 목록이나 진행 화면에서 완성된 캐릭터를 고르면 여기서 바로 말을 걸 수 있어요.</p><div class="acts"><a class="btn pri" href="factory.html#all">전체 캐릭터 보기</a></div></div>';
+        html = '<div class="ch-card"><h2>대화할 캐릭터를 골라 주세요</h2><p>대화 가능한 캐릭터를 고르면 여기서 바로 말을 걸 수 있어요.</p><div class="acts"><a class="btn pri" href="factory.html#all">전체 캐릭터 보기</a></div></div>';
       } else if (s.phase === 'loading') {
         html = '<div class="ch-card is-muted" aria-busy="true"><p class="row"><span class="ch-spin" aria-hidden="true"></span>대화 준비 상태를 확인하는 중이에요…</p></div>';
       } else if (s.phase === 'not-ready') {
-        html = '<div class="ch-card is-wait" role="status"><h2>아직 대화할 수 없어요</h2><p>' + E(s.reason) + '</p><div class="acts"><a class="btn pri" href="' + E(factoryHref(chat.characterId)) + '">진행 화면에서 이어 가기</a><button type="button" class="btn" data-act="reload" data-key="reload">' + icon('refresh') + '다시 확인</button></div></div>';
+        // 서버가 빠진 것과 할 일(reason), 갈 곳(nextHref)을 준다(약속 3). 없으면 진행 화면으로 보낸다.
+        const m = meta() || {};
+        const next = /^(factory|sources)\.html(#|$)/.test(text(m.nextHref)) ? text(m.nextHref) : factoryHref(chat.characterId);
+        const label = next.indexOf('sources.html') === 0 ? '원문 화면 열기' : '진행 화면 열기';
+        html = '<div class="ch-card is-wait" role="status"><h2>아직 대화할 수 없어요</h2><p>' + E(s.reason) + '</p><div class="acts"><a class="btn pri" href="' + E(next) + '">' + label + '</a><button type="button" class="btn" data-act="reload" data-key="reload">' + icon('refresh') + '다시 확인</button></div></div>';
       } else if (s.phase === 'missing') {
         html = '<div class="ch-card is-bad" role="alert"><h2>캐릭터를 찾지 못했어요</h2><p>' + E(s.reason) + '</p><div class="acts"><a class="btn pri" href="factory.html#all">전체 캐릭터 보기</a></div></div>';
       } else if (s.phase === 'error') {
@@ -528,13 +598,15 @@
       R.panel.hidden = !ready;
       if (!ready) { R.panel.innerHTML = ''; return; }
       const m = meta() || {};
-      const scs = Array.isArray(m.scenarios) ? m.scenarios : [];
+      const groups = groupScenarios(m.scenarios);
       const samples = Array.isArray(m.samples) ? m.samples : [];
       const byScenario = new Map();
       samples.forEach((x) => { const k = text(x && x.scenarioId); if (!byScenario.has(k)) byScenario.set(k, []); byScenario.get(k).push(x); });
+      // 뺀 기본 상황의 받아 둔 답도 함께 뺀다(같은 제목이 두 번 보이지 않게).
+      groups.dropped.forEach((id) => byScenario.delete(id));
       const p = s.play;
       const locked = !!s.pending || !!(p && p.status === 'running');
-      const items = scs.map((sc) => {
+      const itemHTML = (sc) => {
         const turns = Array.isArray(sc.turns) ? sc.turns : [];
         const on = !!(p && p.scenarioId === sc.id);
         const done = on ? Math.min(p.index, p.turns.length) : 0;
@@ -543,18 +615,27 @@
         const mine = byScenario.get(text(sc.id)) || [];
         byScenario.delete(text(sc.id));
         const title = text(sc.title) || '상황';
+        // 누르면 지금 대화를 지우고 새로 시작하므로 단추에 그 사실을 적는다.
         const sub = on
           ? (now ? '재생 중 · ' + Math.min(done + 1, turns.length) + '/' + turns.length : (p.status === 'done' ? '모두 재생했어요' : '멈춤 · ' + done + '/' + turns.length))
-          : '말 ' + turns.length + '개' + (turns[0] ? ' · “' + E(clip(turns[0], 16)) + '”' : '');
+          : '말 ' + turns.length + '개 · 새 대화로 시작해요';
         return '<li class="ch-sc' + (on ? ' is-on is-' + p.status : '') + '">' +
-          '<button type="button" class="ch-sc-play" data-act="play" data-id="' + E(sc.id) + '" data-key="play:' + E(sc.id) + '"' + (locked || !turns.length ? ' disabled' : '') + ' aria-label="' + E(title) + ' 상황 재생, 말 ' + turns.length + '개">' +
+          '<button type="button" class="ch-sc-play" data-act="play" data-id="' + E(sc.id) + '" data-key="play:' + E(sc.id) + '"' + (locked || !turns.length ? ' disabled' : '') + ' aria-label="' + E(title) + ' 상황 재생, 새 대화로 말 ' + turns.length + '개를 보내요">' +
           '<span class="ic" aria-hidden="true">' + icon(on && p.status === 'done' ? 'check' : 'play') + '</span><span class="tx"><b>' + E(title) + '</b><small>' + sub + '</small></span></button>' +
           turnList + samplesHTML(mine, 'sc:' + text(sc.id)) + '</li>';
-      }).join('');
+      };
+      // 전용 상황이 있으면 먼저 펼쳐 두고 남은 기본 상황은 접는다. 전용 상황이 없으면 기본 상황을 바로 보인다.
+      const mineHTML = groups.mine.map(itemHTML).join('');
+      const basicHTML = groups.basic.map(itemHTML).join('');
+      const playingBasic = !!(p && groups.basic.some((x) => x.id === p.scenarioId));
+      let list = '';
+      if (mineHTML) {
+        list = '<ul class="ch-scs">' + mineHTML + '</ul>';
+        if (basicHTML) list += '<details class="ch-basic" data-open-key="basic"' + (ui.open.has('basic') || playingBasic ? ' open' : '') + '><summary data-key="sum:basic">기본 상황 <span class="n">' + groups.basic.length + '개</span></summary><ul class="ch-scs">' + basicHTML + '</ul></details>';
+      } else if (basicHTML) list = '<ul class="ch-scs">' + basicHTML + '</ul>';
       const rest = Array.from(byScenario.values()).reduce((a, b) => a.concat(b), []);
       R.panel.innerHTML = '<section class="ch-sec" aria-labelledby="ch-sc-h"><div class="ch-sec-h"><h2 id="ch-sc-h">상황 재생</h2>' + (p && p.status === 'running' ? '<button type="button" class="btn ghost" data-act="stop" data-key="stop">' + icon('stop') + '멈추기</button>' : '') + '</div>' +
-        '<p class="hint">누르면 대화를 새로 시작하고 준비된 말을 하나씩 보내요. 답이 오면 다음 말을 보내요.</p>' +
-        (items ? '<ul class="ch-scs">' + items + '</ul>' : '<p class="ch-none">준비된 상황이 없어요.</p>') + '</section>' +
+        (list || '<p class="ch-none">준비된 상황이 없어요.</p>') + '</section>' +
         (rest.length ? '<section class="ch-sec" aria-labelledby="ch-sm-h"><div class="ch-sec-h"><h2 id="ch-sm-h">그 밖에 받아 둔 답</h2></div>' + samplesHTML(rest, 'rest') + '</section>' : '');
     }
 
@@ -601,7 +682,7 @@
       chat = cid ? createChat({ fetch: o.fetch, apiBase: o.apiBase, characterId: cid, storage: session, gap: o.gap, pause: o.pause }) : null;
       if (chat) {
         unsub = chat.subscribe(() => {
-          if (chat) doc.title = (chat.state.meta ? nameOf() + ' · ' : '') + '대화 테스트 · Foundry';
+          if (chat) doc.title = (chat.state.meta ? nameOf() + ' · ' : '') + '대화해 보기 · Foundry';
           render();
         });
       }
@@ -670,11 +751,11 @@
 
     applyTheme();
     open();
-    loadProjects();
+    loadCharacters();
     return { get chat() { return chat; }, open };
   }
 
-  const api = { createChat, mount, routeId, seconds, revLabel, viaLabel, rejectedCount, isMotif, MOTIF_NOTE };
+  const api = { createChat, mount, routeId, seconds, revLabel, viaLabel, rejectedCount, isMotif, displayName, createdLabel, chatList, isGeneric, groupScenarios, MOTIF_NOTE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global) global.CharacterChat = api;
 })(typeof window !== 'undefined' ? window : globalThis);

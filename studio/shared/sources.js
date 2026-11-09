@@ -51,15 +51,39 @@
     const i = s.lastIndexOf('.');
     return i > 0 ? s.slice(0, i) : s;
   }
-  // 파일 이름과 확장자로 종류를 짐작한다. 사람이 카드에서 고칠 수 있다.
-  function guessKind(filename) {
+  // 파일 이름과 확장자로 종류를 짐작한다. 이름에 실마리가 없으면 null(서버가 내용으로 짐작한 값을 쓴다, 계획 3차 약속 4).
+  function kindHint(filename) {
     const ext = extOf(filename);
     const name = text(filename).toLowerCase();
     if (ext === '.srt' || ext === '.vtt') return 'TRANSCRIPT';
     if (/kakao|카톡|카카오/.test(name) || ext === '.csv') return 'KAKAO_EXPORT';
     if (/기사|뉴스|article|news/.test(name)) return 'ARTICLE';
-    if (/받아쓰기|자막|transcript|subtitle/.test(name)) return 'TRANSCRIPT';
-    return 'INTERVIEW';
+    if (/받아쓰기|자막|transcript|subtitle|vlog|브이로그|방송|유튜브|youtube|라디오|radio|podcast|팟캐스트|라이브|casual/.test(name)) return 'TRANSCRIPT';
+    if (/인터뷰|interview|press|기자회견|회견/.test(name)) return 'INTERVIEW';
+    return null;
+  }
+  // 사람이 카드에서 고칠 수 있다. 실마리가 없으면 인터뷰로 둔다.
+  function guessKind(filename) { return kindHint(filename) || 'INTERVIEW'; }
+  // 서버가 원문에서 찾은 화자 이름(줄 수 많은 순). 없는 서버면 빈 목록.
+  function speakersOf(rec) {
+    return (Array.isArray(rec && rec.detectedSpeakers) ? rec.detectedSpeakers : []).map((s) => text(s && typeof s === 'object' ? s.name : s).trim()).filter(Boolean);
+  }
+  // 원문에서 찾은 대상 화자 제안: 서버 제안 → 가장 많이 말한 화자.
+  function suggestedSpeaker(rec) {
+    const s = rec && rec.suggested && text(rec.suggested.subjectSpeaker).trim();
+    return s || speakersOf(rec)[0] || '';
+  }
+  // 조사 '으로/로': 받침이 있으면(ㄹ 받침 빼고) '으로'. 한글이 아니면 '(으)로'.
+  function ro(word) {
+    const c = text(word).trim().slice(-1).charCodeAt(0) - 0xac00;
+    if (!(c >= 0 && c < 11172)) return '(으)로';
+    const jong = c % 28;
+    return jong && jong !== 8 ? '으로' : '로';
+  }
+  // 만든 날짜 '11/10'. 읽을 수 없으면 빈칸.
+  function shortDate(iso) {
+    const d = iso ? new Date(iso) : null;
+    return d && !isNaN(d.getTime()) ? (d.getMonth() + 1) + '/' + d.getDate() : '';
   }
   // 원문 이름(textId) 제안: 파일 이름의 영문·숫자를 쓰고, 남는 게 없으면 종류-번호로 만든다. 이미 쓴 이름과 겹치지 않게 뒤에 번호를 붙인다.
   function suggestTextId(filename, kind, taken) {
@@ -200,6 +224,7 @@
       character: null, // 시작한 뒤 캐릭터 진행(GET /api/characters/{cid})
       chat: null, // 대화 준비 상태(GET /api/characters/{cid}/chat/meta, 계획 2차 약속 1)
       projects: null,
+      drafts: null, // 시작하지 않은 초안(GET /api/sources/drafts). 그 API가 없는 서버면 null로 둔다.
       announce: ''
     };
     let seq = 0;
@@ -298,6 +323,12 @@
           modelMode: d && d.modelMode ? d.modelMode : null,
           autoReview: d && typeof d.autoReview === 'boolean' ? d.autoReview : null,
           progress: (d && d.progress) || null,
+          // 계획 3차 약속 3: 서버가 한 곳에서 정한 상태·대화 가능·목표 진행. 없는 서버면 아래 옛 표시로 돌아간다.
+          status: d && d.status ? text(d.status) : null,
+          statusLabel: d && d.statusLabel ? text(d.statusLabel) : '',
+          chatReady: d && typeof d.chatReady === 'boolean' ? d.chatReady : null,
+          goal: d && d.goal && Number(d.goal.total) > 0 ? d.goal : null,
+          displayName: d && d.displayName ? text(d.displayName) : '',
           awaiting: Boolean(d && ((d.pendingGates && d.pendingGates.length) || d.awaitingHuman)),
           running: Boolean(d && d.job),
           failed: stages.some((s) => text(s && s.status).toUpperCase() === 'CHECK_FAILED')
@@ -321,6 +352,16 @@
       } catch (error) { state.projects = state.projects || []; }
       emit();
       return state.projects;
+    }
+    // 만들다 만 초안 목록. 서버에 API가 없거나 실패하면 조용히 숨긴다.
+    async function drafts() {
+      try {
+        const data = await request('GET', '/api/sources/drafts');
+        const list = Array.isArray(data) ? data : Array.isArray(data && data.drafts) ? data.drafts : [];
+        state.drafts = list.filter((x) => x && x.characterId);
+      } catch (error) { state.drafts = null; }
+      emit();
+      return state.drafts;
     }
     // 화면에 보일 생성 설정: 서버 값(초안·캐릭터)이 있으면 그것, 없으면 이 화면에서 보낸 값.
     function settings() {
@@ -380,8 +421,8 @@
       Array.from(list || []).forEach((file) => {
         const key = 'u' + (++seq);
         const problem = checkFile(file);
-        const kind = guessKind(file.name);
-        const subject = state.draft && state.draft.subject;
+        const hint = kindHint(file.name);
+        const kind = hint || 'INTERVIEW';
         const entry = {
           key,
           file,
@@ -393,11 +434,14 @@
           fileId: null,
           step: 'start',
           error: problem,
+          kindFromName: !!hint,
+          touched: {}, // 올리는 동안 사람이 고친 칸. 서버 제안으로 덮지 않는다.
+          // 원문 이름은 보이지 않게 파일 이름으로 정하고, 대상 화자는 비워 보내 서버가 원문에서 찾은 이름을 쓰게 한다(약속 4).
           meta: {
             textId: problem ? '' : suggestTextId(file.name, kind, takenIds()),
             kind,
             register: defaultRegister(kind),
-            subjectSpeaker: text(subject && subject.displayName),
+            subjectSpeaker: '',
             userSpeaker: '',
             date: '',
             sourceUrl: ''
@@ -452,14 +496,14 @@
         entry.phase = 'checking';
         entry.progress = 1;
         emit();
-        const sent = Object.assign({}, entry.meta);
-        const rec = await request('POST', filesPath(entry.fileId) + '/complete', metaBody(sent));
+        const rec = await request('POST', filesPath(entry.fileId) + '/complete', metaBody(entry.meta));
         if (entry.cancelled) throw Object.assign(new Error('abort'), { aborted: true });
         state.uploads = state.uploads.filter((u) => u !== entry);
         upsert(rec);
         state.announce = entry.filename + ' 파일을 올렸어요.';
-        // 확인하는 동안 사람이 고친 값이 있으면 이어서 저장한다.
-        if (!sameMeta(sent, entry.meta)) queuePatch(rec.fileId, entry.meta);
+        // 확인하는 동안 사람이 고친 값과 서버가 원문에서 짐작한 값을 이어서 저장한다.
+        const next = afterCheck(rec, entry);
+        if (!sameMeta(metaOfRecord(rec), next)) queuePatch(rec.fileId, next);
       } catch (error) {
         delete aborts[entry.key];
         if (entry.cancelled || error.aborted) {
@@ -476,6 +520,23 @@
       pump();
       if (!active && !state.uploads.some((u) => u.phase === 'queued')) await refresh();
     }
+    // 확인 응답 뒤 저장할 값: 서버 값에 사람이 올리는 동안 고친 칸을 얹고, 아직 아무도 정하지 않은 칸은 서버 제안(약속 4)으로 채운다.
+    // 대상 화자가 비었으면 서버 제안이나 원문에서 가장 많이 말한 화자를 쓴다. 제안을 주지 않는 옛 서버면 예전처럼 표시 이름을 넣는다.
+    function afterCheck(rec, entry) {
+      const next = {};
+      META_FIELDS.forEach((f) => { next[f] = entry.touched[f] ? text(entry.meta[f]) : text(rec[f] == null ? '' : rec[f]); });
+      const sug = (rec && rec.suggested) || {};
+      if (!entry.touched.kind && !entry.kindFromName && KINDS.some((k) => k[0] === sug.kind) && sug.kind !== next.kind) {
+        next.kind = sug.kind;
+        if (!entry.touched.register) next.register = REGISTERS.some((x) => x[0] === sug.register) ? sug.register : (defaultRegister(sug.kind) || next.register);
+      }
+      if (!next.subjectSpeaker.trim()) {
+        const old = rec && rec.suggested === undefined && rec.detectedSpeakers === undefined;
+        next.subjectSpeaker = suggestedSpeaker(rec) || (old ? text(state.draft && state.draft.subject && state.draft.subject.displayName) : '');
+      }
+      return next;
+    }
+
     function retry(key) {
       const entry = state.uploads.find((u) => u.key === key);
       if (!entry || entry.phase !== 'failed') return;
@@ -532,7 +593,12 @@
       if (Object.keys(raw).length) state.rawInput[key] = raw; else delete state.rawInput[key];
       if (Object.keys(errs).length) state.fieldErrors[key] = errs; else delete state.fieldErrors[key];
       if (errs[field]) { emit(); return null; }
-      if (entry) { entry.meta = meta; emit(); return Promise.resolve(); }
+      if (entry) {
+        entry.meta = meta;
+        entry.touched[field] = true;
+        emit();
+        return Promise.resolve();
+      }
       return queuePatch(rec.fileId, meta);
     }
 
@@ -662,19 +728,24 @@
         const st = f.status === 'ready' ? ['ok', '준비됐어요'] : f.status === 'problem' ? ['wait', '확인이 필요해요'] : ['muted', '다 올라가지 않았어요'];
         const problems = (f.problems || []).map(text);
         if (f.status === 'pending' && !problems.length) problems.push('이 파일은 끝까지 올라가지 않았어요. 지우고 다시 올려 주세요.');
-        out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, meta: metaOfRecord(f), display: Object.assign(metaOfRecord(f), state.rawInput[key] || {}), editable: f.status !== 'pending' && !state.finalized, removable: !state.finalized && state.busy !== 'remove:' + key, retry: false, saving: state.saving[key] || '', saveError: state.saveError[key] || '', fieldErrors: state.fieldErrors[key] || {} });
+        // 원문에서 찾은 화자가 지금 대상 화자와 다르면 한 번에 바꾸는 단추를 건넨다(약속 4 suggested·detectedSpeakers).
+        const meta = metaOfRecord(f);
+        const found = suggestedSpeaker(f);
+        const names = speakersOf(f);
+        const speaker = !state.finalized && f.status !== 'pending' && found && found !== text(meta.subjectSpeaker).trim() && (f.status === 'problem' || (names.length && names.indexOf(text(meta.subjectSpeaker).trim()) < 0)) ? found : '';
+        out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, speaker, meta, display: Object.assign(metaOfRecord(f), state.rawInput[key] || {}), editable: f.status !== 'pending' && !state.finalized, removable: !state.finalized && state.busy !== 'remove:' + key, retry: false, saving: state.saving[key] || '', saveError: state.saveError[key] || '', fieldErrors: state.fieldErrors[key] || {} });
       });
       state.uploads.forEach((u) => {
         const map = { queued: ['muted', '기다리는 중'], starting: ['run', '준비하는 중'], sending: ['run', '올리는 중 ' + Math.round(u.progress * 100) + '%'], checking: ['run', '확인하는 중'], failed: ['fail', '올리지 못했어요'], rejected: ['fail', '받을 수 없는 파일'] };
         const st = map[u.phase] || ['muted', ''];
-        out.push({ key: u.key, source: 'upload', fileId: u.fileId, filename: u.filename, size: u.size, tone: st[0], status: st[1], phase: u.phase, progress: u.phase === 'sending' ? u.progress : null, problems: u.error ? [u.error] : [], meta: u.meta, display: Object.assign({}, u.meta, state.rawInput[u.key] || {}), editable: u.phase !== 'rejected' && !state.finalized, removable: !u.cancelled, retry: u.phase === 'failed', saving: '', saveError: '', fieldErrors: state.fieldErrors[u.key] || {} });
+        out.push({ key: u.key, source: 'upload', fileId: u.fileId, filename: u.filename, size: u.size, tone: st[0], status: st[1], phase: u.phase, progress: u.phase === 'sending' ? u.progress : null, problems: u.error ? [u.error] : [], speaker: '', meta: u.meta, display: Object.assign({}, u.meta, state.rawInput[u.key] || {}), editable: u.phase !== 'rejected' && !state.finalized, removable: !u.cancelled, retry: u.phase === 'failed', saving: '', saveError: '', fieldErrors: state.fieldErrors[u.key] || {} });
       });
       return out;
     }
     function uploading() { return state.uploads.some((u) => ACTIVE.indexOf(u.phase) >= 0); }
 
     return {
-      state, load, refresh, progress, projects, settings, createDraft, validateDraft, addFiles, retry, dismiss, editFile, removeFile, importPath, finalize, deleteDraft, reset, startState, items, uploading,
+      state, load, refresh, progress, projects, drafts, settings, createDraft, validateDraft, addFiles, retry, dismiss, editFile, removeFile, importPath, finalize, deleteDraft, reset, startState, items, uploading,
       subscribe(fn) { listeners.push(fn); return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); }; }
     };
   }
@@ -705,23 +776,28 @@
     return m ? '이름 미정 · ' + m[4] + ' (' + Number(m[2]) + '/' + Number(m[3]) + ')' : text(id);
   }
   // 사이드바 캐릭터 한 줄. 진행 화면 사이드바와 같은 모양이고 누르면 그 캐릭터의 진행 화면으로 간다.
+  // 이름·상태·진행 수는 서버가 정한 값(약속 3 displayName·status·goal)을 먼저 쓰고, 없으면 예전 계산으로 돌아간다.
+  const STATUS_DOT = { chat_ready: 'ok', running: 'run', needs_review: 'wait', failed: 'fail' };
   function sideItemHTML(c) {
-    const name = displayName(c.name, c.id);
+    const name = text(c.displayName).trim() || displayName(c.name, c.id);
     const p = c.progress || {};
+    const g = c.goal && Number(c.goal.total) > 0 ? c.goal : null;
     const failed = (c.stages || []).some((s) => text(s && s.status).toUpperCase() === 'CHECK_FAILED');
-    const st = failed ? 'fail' : c.awaitingHuman ? 'wait' : c.job ? 'run' : p.total && p.done >= p.total ? 'ok' : '';
+    const st = c.status ? (STATUS_DOT[c.status] || '') : failed ? 'fail' : c.awaitingHuman ? 'wait' : c.job ? 'run' : p.total && p.done >= p.total ? 'ok' : '';
+    const num = g ? g.done + '/' + g.total : p.total ? p.done + '/' + p.total : '';
     const motif = c.origin === 'SOURCE';
-    return '<a class="fd-nav" href="factory.html#c/' + E(encodeURIComponent(text(c.id))) + '" title="' + E(name + (motif ? ' · 모티브' : '')) + '">' +
+    return '<a class="fd-nav" href="factory.html#c/' + E(encodeURIComponent(text(c.id))) + '" title="' + E(name + (c.statusLabel ? ' · ' + c.statusLabel : '') + (motif ? ' · 모티브' : '')) + '">' +
       '<span class="fd-av" aria-hidden="true">' + E(Array.from(name)[0] || '?') + '<span class="st ' + st + '"></span></span>' +
       '<span class="lbl">' + E(name) + '</span>' + (motif ? '<span class="fd-org" aria-label="모티브">모티브</span>' : '') +
-      (p.total ? '<span class="num">' + E(p.done + '/' + p.total) + '</span>' : '') + '</a>';
+      (num ? '<span class="num">' + E(num) + '</span>' : '') + '</a>';
   }
   function sideHTML(list, theme) {
-    const items = (list || []).map(sideItemHTML).join('');
+    const shown = (list || []).filter((c) => !c.archived);
+    const items = shown.map(sideItemHTML).join('');
     const themes = THEMES.map((t) => '<button type="button" data-act="theme" data-theme="' + t[0] + '" aria-pressed="' + (theme === t[0]) + '" aria-label="' + t[2] + '" title="' + t[2] + '">' + icon(t[1]) + '</button>').join('');
     return '<div class="fd-brand">' + MARK + '<div class="fd-word"><b>Foundry</b><small>캐릭터 공장</small></div></div>' +
       '<div class="fd-side-actions"><a class="btn block" href="sources.html" aria-current="page" title="원문으로 새 캐릭터" style="text-decoration:none">' + icon('user') + '<span class="lbl">원문으로 만들기</span></a></div>' +
-      '<nav aria-label="캐릭터 탐색"><a class="fd-nav" href="factory.html#all" title="전체 캐릭터">' + icon('grid') + '<span class="lbl">전체 캐릭터</span><span class="num">' + (list ? list.length + '명' : '') + '</span></a>' +
+      '<nav aria-label="캐릭터 탐색"><a class="fd-nav" href="factory.html#all" title="전체 캐릭터">' + icon('grid') + '<span class="lbl">전체 캐릭터</span><span class="num">' + (list ? shown.length + '명' : '') + '</span></a>' +
       '<a class="fd-nav" href="factory.html#all/mine" title="받은 일">' + icon('inbox') + '<span class="lbl">받은 일</span></a>' +
       '<h2>캐릭터</h2>' + (list ? items || '<p class="hint" style="padding:0 8px">아직 없어요</p>' : '<p class="hint" style="padding:0 8px">불러오는 중이에요</p>') + '</nav>' +
       '<div class="fd-side-foot"><a class="fd-help" href="help.html" target="_blank" rel="noopener" title="사용 안내" aria-label="사용 안내">?</a><div class="fd-theme" role="group" aria-label="화면 테마">' + themes + '</div><div class="fd-foot-links"><a href="help.html" target="_blank" rel="noopener">사용 안내</a><a href="factory.html#all">진행 화면</a></div></div>';
@@ -744,14 +820,14 @@
       '</div>' +
       '<div class="src-bar" data-bar role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden><span></span></div>' +
       '<ul class="src-problems" data-problems hidden></ul>' +
+      '<div class="src-file-acts" data-speaker-row hidden><button type="button" class="btn src-chip" data-act="use-speaker"></button></div>' +
       '<div class="src-file-acts" data-retry-row hidden><button type="button" class="btn" data-act="retry">' + icon('retry') + '다시 올리기</button></div>' +
       '<div class="src-fields" id="' + id('body') + '" data-body>' +
-        fld('textId', '원문 이름', input('textId', 'text', ' spellcheck="false" inputmode="latin"'), '영문, 숫자, -, _로 적어요. 파일마다 달라야 해요.') +
         fld('kind', '종류', '<select id="' + id('kind') + '" data-field="kind" aria-describedby="' + id('kind') + '-h">' + options(KINDS, item.meta.kind) + '</select>', '') +
         fld('register', '말한 자리', '<select id="' + id('register') + '" data-field="register" aria-describedby="' + id('register') + '-h">' + options(REGISTERS, item.meta.register) + '</select>', '') +
-        fld('date', '날짜', input('date', 'date'), '말하거나 쓴 날이에요.') +
         fld('subjectSpeaker', '대상 화자 이름', input('subjectSpeaker', 'text'), '원문에 적힌 그 사람의 이름이에요.') +
         fld('userSpeaker', '상대 화자 이름', input('userSpeaker', 'text'), '카톡·대담에서 이야기 상대의 이름이에요. 없으면 비워 두세요.') +
+        fld('date', '날짜', input('date', 'date'), '말하거나 쓴 날이에요.') +
         fld('sourceUrl', '출처 주소', input('sourceUrl', 'url', ' placeholder="https://" spellcheck="false"'), '', true) +
       '</div>' +
       '<p class="src-save" data-save></p>' +
@@ -781,7 +857,8 @@
       startBtn: $('[data-start]'), reasons: $('[data-reasons]'), done: $('[data-done]'), doneLink: $('[data-done-link]'),
       delRow: $('[data-del]'), delConfirm: $('[data-del-confirm]'), publicNote: $('[data-public-note]'),
       side: $('[data-side]'), headTheme: $('[data-head-theme]'), fileSum: $('[data-file-sum]'), startLead: $('[data-start-lead]'),
-      doneTitle: $('[data-done-title]'), doneText: $('[data-done-text]'), prog: $('[data-prog]'), progText: $('[data-prog-text]'), chatLink: $('[data-chat-link]')
+      doneTitle: $('[data-done-title]'), doneText: $('[data-done-text]'), prog: $('[data-prog]'), progText: $('[data-prog-text]'), chatLink: $('[data-chat-link]'),
+      title: $('[data-title]'), intro: $('[data-intro]'), crumb: $('[data-crumb]'), resume: $('[data-resume]'), adv: $('[data-adv]'), startNote: $('[data-start-note]')
     };
     let chapterTouched = false;
     let confirmDelete = false;
@@ -854,7 +931,7 @@
           const modeEl = r.summary.querySelector('[data-sum-mode]');
           if (modeEl) { modeEl.textContent = labelOf(MODES, set.modelMode); modeEl.parentElement.hidden = !set.modelMode; }
           const autoEl = r.summary.querySelector('[data-sum-auto]');
-          if (autoEl) { autoEl.textContent = set.autoReview === false ? '단계마다 사람이 확인해요' : '사람 확인 없이 대화 테스트까지 가요'; autoEl.parentElement.hidden = set.autoReview == null; }
+          if (autoEl) { autoEl.textContent = set.autoReview === false ? '단계마다 사람이 확인해요' : '사람 확인 없이 대화해 보기까지 가요'; autoEl.parentElement.hidden = set.autoReview == null; }
           const notes = r.summary.querySelector('[data-sum-notes]');
           const memo = [text(basis.scope) && text(basis.scope) !== DEFAULT_SCOPE ? text(basis.scope) : '', text(basis.notes)].filter(Boolean).join(' · ');
           notes.textContent = memo;
@@ -862,6 +939,31 @@
         }
       }
       if (r.publicNote) r.publicNote.hidden = !(hasDraft && d.subject && d.subject.kind === 'PUBLIC_FIGURE');
+      renderTitle();
+    }
+    // 이미 있는 초안·캐릭터면 제목과 위치 표시를 그 이름으로 바꾼다. 새로 만들 때만 소개 문장과 만들던 초안 목록을 보인다.
+    function nameNow() {
+      const c = S.character || {};
+      const d = S.draft;
+      return text(c.displayName).trim() || text(d && d.subject && d.subject.displayName).trim();
+    }
+    function renderTitle() {
+      const name = S.cid ? nameNow() : '';
+      if (r.title) r.title.textContent = name || '원문으로 새 캐릭터';
+      if (r.crumb) r.crumb.textContent = name || '원문으로 새 캐릭터';
+      if (r.intro) r.intro.hidden = !!S.cid;
+      if (!r.resume) return;
+      const list = !S.cid && !S.loading && Array.isArray(S.drafts) ? S.drafts : [];
+      const html = list.length
+        ? '<p><b>만들던 초안 ' + list.length + '개</b>가 있어요. 이어서 하거나 아래에서 새로 시작해요.</p><ul>' + list.map((x) => {
+          const n = Array.isArray(x.files) ? x.files.length : Number(x.files) || 0;
+          const meta = [shortDate(x.createdAt), n ? '원문 ' + n + '개' : '원문 없음'].filter(Boolean).join(' · ');
+          const nm = text(x.displayName).trim() || displayName('', x.characterId);
+          return '<li><span class="nm">' + E(nm) + '</span><span class="meta">' + E(meta) + '</span><a class="btn" href="#c/' + E(encodeURIComponent(text(x.characterId))) + '" aria-label="' + E(nm + ' 초안 이어서 하기') + '">이어서</a></li>';
+        }).join('') + '</ul>'
+        : '';
+      if (r.resume.dataset.html !== html) { r.resume.innerHTML = html; r.resume.dataset.html = html; }
+      r.resume.hidden = !html;
     }
 
     function syncCard(el, item) {
@@ -891,6 +993,14 @@
       if (probs.dataset.html !== ph) { probs.innerHTML = ph; probs.dataset.html = ph; }
       probs.hidden = !item.problems.length;
       probs.classList.toggle('bad', item.tone === 'fail');
+      const sp = q('[data-speaker-row]');
+      sp.hidden = !item.speaker;
+      if (item.speaker) {
+        const chip = sp.firstChild;
+        chip.dataset.name = item.speaker;
+        chip.textContent = "원문에서 찾은 '" + item.speaker + "'" + ro(item.speaker);
+        chip.setAttribute('aria-label', '대상 화자를 원문에서 찾은 ' + item.speaker + ro(item.speaker) + ' 바꾸기: ' + item.filename);
+      }
       q('[data-retry-row]').hidden = !item.retry;
       const x = q('[data-act="remove"]');
       x.disabled = !item.removable;
@@ -979,7 +1089,8 @@
         if (want.length !== now.length || want.some((el, i) => el !== now[i])) want.forEach((el) => r.list.appendChild(el));
       }
       if (r.pathRow) {
-        r.pathRow.hidden = !(d && d.allowPathImport && !S.finalized);
+        // 폴더에서 가져오기는 이 컴퓨터에서만 쓰는 기능이라 '고급' 안에 접어 둔다.
+        if (r.adv) r.adv.hidden = !(d && d.allowPathImport && !S.finalized);
         if (r.pathBtn) { r.pathBtn.disabled = S.busy === 'import'; r.pathBtn.textContent = S.busy === 'import' ? '가져오는 중…' : '가져오기'; }
       }
     }
@@ -991,9 +1102,14 @@
       const auto = set.autoReview !== false;
       setStep(r.steps.info, d ? 'done' : 'active');
       setStep(r.steps.start, !d ? 'todo' : S.finalized ? 'done' : st.ready ? 'active' : 'wait');
+      if (r.startLead) r.startLead.hidden = !!S.finalized;
       if (r.startLead) r.startLead.textContent = auto
-        ? '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. 사람 확인 없이 프롬프트와 대화 테스트까지 이어서 만들어요.'
+        ? '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. 사람 확인 없이 대화해 보기까지 이어서 만들어요.'
         : '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. 다 되면 진행 화면에서 출처 확인을 기다려요.';
+      if (r.startNote) {
+        r.startNote.textContent = (auto ? '보통 15~20분 걸려요' : '단계마다 진행 화면에서 확인해요') + ' · 이미지·영상·학습은 하지 않아요';
+        r.startNote.hidden = !!S.finalized;
+      }
       if (r.startBtn) {
         r.startBtn.disabled = !st.ready || !!S.busy;
         r.startBtn.hidden = !!S.finalized;
@@ -1010,28 +1126,35 @@
         const c = S.character || {};
         const chat = S.chat || {};
         const p = c.progress || {};
-        let title = '만들기 시작했어요';
-        let body = auto ? '사람 확인 없이 대화 테스트까지 만들어요. 이 화면을 열어 두면 준비됐을 때 대화해 보기 버튼이 생겨요.' : '출처 정리가 끝나면 진행 화면에 출처 확인 차례가 떠요. 그때 원문과 사실 목록을 보고 넘길지 정해요.';
-        if (chat.ready) { title = '대화해 볼 수 있어요'; body = '프롬프트와 첫 장면이 준비됐어요. 대화해 보고 이상하면 진행 화면에서 고쳐 달라고 요청해요.'; }
-        else if (c.failed) { title = '중간에 멈췄어요'; body = '어느 단계에서 멈췄는지 진행 화면에서 보고 다시 실행해 주세요.'; }
-        else if (c.awaiting) { title = '사람 확인을 기다려요'; body = '진행 화면에서 확인할 차례가 있어요. 확인하고 나면 이어서 만들어요.'; }
-        else if (chat.reason && auto) body = chat.reason;
+        // 상태 이름은 모든 화면이 같은 말을 쓴다(약속 3 statusLabel): 만드는 중 · 확인 필요 · 대화 가능 · 실패 · 멈춤.
+        // 서버가 상태를 주지 않으면 예전처럼 진행 기록에서 짐작한다.
+        const ready = c.chatReady === true || chat.ready === true;
+        const st = ready ? 'chat_ready' : c.status || (c.failed ? 'failed' : c.awaiting ? 'needs_review' : 'running');
+        const LABEL = { chat_ready: '대화 가능', running: '만드는 중', needs_review: '확인 필요', failed: '실패', stopped: '멈춤', draft: '만드는 중' };
+        const title = (st !== 'chat_ready' && c.statusLabel) || LABEL[st] || '만드는 중';
+        let body = '';
+        if (st === 'failed') body = '어느 단계에서 멈췄는지 진행 화면에서 봐 주세요.';
+        else if (st === 'needs_review') body = '진행 화면에서 확인할 차례가 있어요. 확인하면 이어서 만들어요.';
+        else if (st === 'stopped') body = '진행 화면에서 멈춘 까닭을 봐 주세요.';
+        else if (st !== 'chat_ready') body = auto ? (chat.reason && !c.status ? chat.reason : '보통 15~20분 걸려요. 이 화면을 열어 두면 다 됐을 때 대화해 보기 버튼이 생겨요.') : '출처 정리가 끝나면 진행 화면에 확인할 차례가 떠요.';
         if (r.doneTitle) r.doneTitle.textContent = title;
-        if (r.doneText) r.doneText.textContent = body;
-        r.done.dataset.tone = chat.ready ? 'ok' : c.failed ? 'fail' : c.awaiting ? 'wait' : 'run';
+        if (r.doneText) { r.doneText.textContent = body; r.doneText.hidden = !body; }
+        r.done.dataset.tone = { chat_ready: 'ok', failed: 'fail', needs_review: 'wait', stopped: 'wait' }[st] || 'run';
         if (r.prog) {
-          r.prog.hidden = !(S.finalized && p.total);
-          if (p.total) {
-            const pct = Math.round(p.done / p.total * 100);
+          // 진행 막대는 만드는 동안만 보인다. 대화 가능이면 다 된 것이라 숨긴다. 단계 수는 목표까지 필요한 단계로 센다(약속 3 goal).
+          const g = c.goal || (p.total ? { done: p.done, total: p.total } : null);
+          r.prog.hidden = !(S.finalized && g && !ready);
+          if (g && !ready) {
+            const pct = Math.round(g.done / g.total * 100);
             const bar = r.prog.querySelector('[data-prog-bar]');
-            if (bar) { bar.firstChild.style.width = pct + '%'; bar.setAttribute('aria-label', '전체 ' + p.total + '단계 중 ' + p.done + '단계 완료'); }
-            if (r.progText) r.progText.textContent = p.done + '/' + p.total + '단계' + (c.running ? ' · 진행 중' : '');
+            if (bar) { bar.firstChild.style.width = pct + '%'; bar.setAttribute('aria-label', g.total + '단계 중 ' + g.done + '단계 완료'); }
+            if (r.progText) r.progText.textContent = (g.label ? text(g.label) + ' · ' : '') + g.done + '/' + g.total + '단계';
           }
         }
         if (r.chatLink) {
-          r.chatLink.hidden = !chat.ready;
+          r.chatLink.hidden = !ready;
           if (S.cid) r.chatLink.href = 'chat.html#c/' + encodeURIComponent(S.cid);
-          if (r.doneLink) r.doneLink.classList.toggle('pri', !chat.ready);
+          if (r.doneLink) r.doneLink.classList.toggle('pri', !ready);
         }
       }
       if (r.delRow) {
@@ -1048,11 +1171,11 @@
         if (r.banner.dataset.html !== html) { r.banner.innerHTML = html; r.banner.dataset.html = html; }
       }
       if (r.live && S.announce) { r.live.textContent = S.announce; S.announce = ''; }
-      if (doc.title !== undefined) doc.title = (d && d.subject ? text(d.subject.displayName) + ' · ' : '') + '원문으로 새 캐릭터 · Foundry';
+      if (doc.title !== undefined) doc.title = (S.cid && nameNow() ? nameNow() : '원문으로 새 캐릭터') + ' · Foundry';
     }
     // 시작한 뒤에는 대화 준비가 될 때까지 진행을 가끔 다시 읽는다. 화면이 숨으면 쉬고, 대화 API가 없으면 멈춘다.
     function schedule() {
-      const want = !!(S.finalized && S.cid && !(S.chat && (S.chat.ready || S.chat.unavailable)));
+      const want = !!(S.finalized && S.cid && !(S.chat && (S.chat.ready || S.chat.unavailable)) && !(S.character && S.character.chatReady === true));
       if (want && !pollTimer && global && global.setInterval) {
         pollTimer = global.setInterval(() => { if (!(doc.hidden)) intake.progress(); }, 6000);
       } else if (!want && pollTimer) { global.clearInterval(pollTimer); pollTimer = null; }
@@ -1099,12 +1222,13 @@
         setTimeout(() => { const t = next && next.querySelector('[data-act="remove"]'); if (t && doc.contains(t)) t.focus(); else if (r.drop) { const p = r.drop.querySelector('[data-act="pick"]'); if (p) p.focus(); } }, 0);
       }
       else if (act === 'retry' && key) intake.retry(key);
+      else if (act === 'use-speaker' && key) intake.editFile(key, 'subjectSpeaker', el.dataset.name);
       else if (act === 'start') intake.finalize().then((done) => { if (done) intake.projects(); if (done && r.done) { const h = r.done.querySelector('h3'); if (h) h.focus(); } });
       else if (act === 'ask-delete') { confirmDelete = true; render(); const no = r.delRow.querySelector('[data-act="cancel-delete"]'); if (no) no.focus(); }
       else if (act === 'cancel-delete') { confirmDelete = false; render(); const ask = r.delRow.querySelector('[data-act="ask-delete"]'); if (ask) ask.focus(); }
-      else if (act === 'delete') intake.deleteDraft().then((ok) => { if (ok) { confirmDelete = false; chapterTemplateReset(); render(); const n = r.form && r.form.querySelector('[name="displayName"]'); if (n) n.focus(); } });
+      else if (act === 'delete') intake.deleteDraft().then((ok) => { if (ok) { confirmDelete = false; chapterTemplateReset(); render(); intake.drafts(); const n = r.form && r.form.querySelector('[name="displayName"]'); if (n) n.focus(); } });
       else if (act === 'reload') { const cid = route(); if (cid) intake.load(cid); }
-      else if (act === 'restart') { intake.reset(); clearHash(); render(); }
+      else if (act === 'restart') { intake.reset(); clearHash(); render(); intake.drafts(); }
     }
     function chapterTemplateReset() {
       chapterTouched = false;
@@ -1144,7 +1268,7 @@
       if (r.drop) r.drop.classList.remove('is-over');
       if (r.drop && r.drop.contains(e.target)) intake.addFiles(e.dataTransfer.files);
     }
-    function onHash() { const cid = route(); if (cid && cid !== S.cid) intake.load(cid); else if (!cid && S.cid) intake.reset(); }
+    function onHash() { const cid = route(); if (cid && cid !== S.cid) intake.load(cid); else if (!cid && S.cid) { intake.reset(); intake.drafts(); } }
     function onLeave(e) { if (intake.uploading()) { e.preventDefault(); e.returnValue = ''; } }
 
     doc.addEventListener('submit', onSubmit);
@@ -1156,7 +1280,7 @@
     doc.addEventListener('drop', onDrop);
     if (global && global.addEventListener) { global.addEventListener('hashchange', onHash); global.addEventListener('beforeunload', onLeave); }
     const cid = route();
-    if (cid) intake.load(cid); else render();
+    if (cid) intake.load(cid); else { render(); intake.drafts(); }
     intake.projects();
     return {
       intake,
@@ -1174,7 +1298,7 @@
     };
   }
 
-  const api = { MAX_BYTES, EXTENSIONS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, guessKind, suggestTextId, checkFile, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
+  const api = { MAX_BYTES, EXTENSIONS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, ro, shortDate, suggestTextId, checkFile, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global) global.SourceIntake = api;
 })(typeof window !== 'undefined' ? window : null);

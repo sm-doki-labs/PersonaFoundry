@@ -20,15 +20,16 @@
 <aside class="fd-side" data-side aria-label="탐색"></aside>
 <div class="fd-main">
 <header class="fd-head src-head">
-  <nav class="fd-crumb" aria-label="위치"><a class="up" href="factory.html#all">전체 캐릭터</a><span class="sep" aria-hidden="true">/</span><b aria-current="page">원문으로 새 캐릭터</b></nav>
+  <nav class="fd-crumb" aria-label="위치"><a class="up" href="factory.html#all">전체 캐릭터</a><span class="sep" aria-hidden="true">/</span><b aria-current="page" data-crumb>원문으로 새 캐릭터</b></nav>
   <button type="button" class="fd-head-theme" data-act="theme-next" data-head-theme aria-label="화면 테마 바꾸기"></button>
 </header>
 <div class="src-scroll">
 <main class="src-main" id="src-main" tabindex="-1">
   <div class="src-title">
-    <h1>원문으로 새 캐릭터</h1>
-    <p>실제 인물의 인터뷰나 대화 원문을 올리면 그 사람의 말투와 생각을 바탕으로 대화 캐릭터를 만들어요. 다 만들어지면 바로 대화해 볼 수 있어요.</p>
+    <h1 data-title>원문으로 새 캐릭터</h1>
+    <p data-intro>실제 인물의 인터뷰나 대화 원문을 올리면 그 사람의 말투와 생각을 바탕으로 대화 캐릭터를 만들어요. 다 만들어지면 바로 대화해 볼 수 있어요.</p>
   </div>
+  <div class="src-card src-resume" data-resume hidden></div>
   <div data-banner></div>
   <p class="sr" data-live aria-live="polite"></p>
 
@@ -85,7 +86,7 @@
 
           <div class="src-switch">
             <label class="src-switch-row" for="src-auto">
-              <span class="src-switch-tx"><b>사람 확인 없이 끝까지 만들기</b><small id="src-auto-h">켜 두면 출처 확인, 기획 고르기, 프롬프트 확인을 자동으로 넘기고 대화 테스트까지 가요. 이미지·영상·학습처럼 돈이 드는 단계는 자동으로 돌리지 않아요. 끄면 단계마다 사람이 보고 넘겨요.</small></span>
+              <span class="src-switch-tx"><b>사람 확인 없이 끝까지 만들기</b><small id="src-auto-h">확인 단계를 자동으로 넘겨요. 돈이 드는 단계는 돌리지 않아요.</small></span>
               <input type="checkbox" id="src-auto" name="autoReview" role="switch" checked aria-describedby="src-auto-h">
             </label>
           </div>
@@ -127,15 +128,18 @@
           <input type="file" data-picker multiple accept=".txt,.srt,.vtt,.csv,.json,text/plain,text/csv,application/json" hidden aria-hidden="true" tabindex="-1">
         </div>
 
-        <form class="src-path" data-path hidden>
-          <label for="src-path">경로로 가져오기</label>
-          <div class="row"><input id="src-path" data-path-input autocomplete="off" spellcheck="false" placeholder="예: /Users/me/sources/son" aria-describedby="src-path-h"><button type="submit" class="btn" data-path-go>가져오기</button></div>
-          <p class="src-fhint" id="src-path-h">이 컴퓨터에서 공장을 돌릴 때만 쓸 수 있어요. 폴더나 파일 경로를 적어 주세요.</p>
-        </form>
-
         <p class="src-empty" data-empty hidden>아직 올린 원문이 없어요.</p>
         <div class="src-fold" data-file-sum hidden></div>
         <div class="src-list" data-list aria-label="올린 원문"></div>
+
+        <details class="src-adv" data-adv hidden>
+          <summary>고급</summary>
+          <form class="src-path" data-path>
+            <label for="src-path">이 컴퓨터의 폴더에서 가져오기</label>
+            <div class="row"><input id="src-path" data-path-input autocomplete="off" spellcheck="false" placeholder="예: /Users/me/sources/son" aria-describedby="src-path-h"><button type="submit" class="btn" data-path-go>가져오기</button></div>
+            <p class="src-fhint" id="src-path-h">공장을 이 컴퓨터에서 돌릴 때만 쓸 수 있어요. 폴더나 파일 위치를 적어 주세요.</p>
+          </form>
+        </details>
       </section>
     </li>
 
@@ -145,7 +149,7 @@
         <h2 id="st-start" tabindex="-1">만들기 시작</h2>
         <p class="src-lead" data-start-lead>원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요.</p>
         <div class="src-reasons" data-reasons hidden></div>
-        <div class="acts"><button type="button" class="btn pri src-go" data-act="start" data-start disabled>만들기 시작</button></div>
+        <div class="acts src-go-row"><button type="button" class="btn pri src-go" data-act="start" data-start disabled>만들기 시작</button><span class="src-go-note" data-start-note>보통 15~20분 걸려요 · 이미지·영상·학습은 하지 않아요</span></div>
         <div class="src-card src-done" data-done hidden>
           <h3 tabindex="-1" data-done-title>만들기 시작했어요</h3>
           <p data-done-text></p>
