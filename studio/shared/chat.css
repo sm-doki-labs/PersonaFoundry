@@ -1,0 +1,147 @@
+/* 대화 테스트(계획 2차 H). 진행 화면(flow.css)의 셸·사이드바·머리줄·버튼·배지를 그대로 쓰고 이 화면의 배치만 더한다.
+   색은 foundry-tokens.css 의미 토큰만 쓴다. 파랑은 "답을 쓰는 중·재생 중", 초록은 "끝남", 주황은 "아직 준비 중", 빨강은 "실패"에만 쓴다.
+   가운데는 영상통화처럼 한 사람과 마주 보는 기둥, 오른쪽은 상황 재생과 만들 때 받아 둔 답이다. */
+.ch .fd-nav,.ch a.btn{text-decoration:none!important}
+.ch-skip{position:absolute;left:12px;top:-40px;z-index:10;padding:6px 10px;border-radius:var(--fd-r-2);background:var(--fd-bg-surface);border:1px solid var(--fd-line-strong)}
+.ch-skip:focus{top:10px}
+
+.ch-body{display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:0}
+.ch-body:has(>.ch-panel[hidden]){grid-template-columns:minmax(0,1fr)}
+/* 숨긴 칸이 줄 수를 바꾸므로 grid 대신 세로 flex로 쌓고 말 목록만 늘어난다. 입력 칸은 늘 맨 아래에 붙는다. */
+.ch-stage{min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--fd-bg-app)}
+.ch-stage>*{flex:none;width:min(100%,820px);margin-inline:auto;padding-inline:var(--fd-space-6)}
+.ch-stage>.sr{width:1px;padding:0}
+
+/* 통화 머리 */
+.ch-call{display:flex;align-items:center;gap:14px;padding-top:var(--fd-space-5);padding-bottom:var(--fd-space-4);border-bottom:1px solid var(--fd-line)}
+.ch-av{position:relative;flex:none;width:48px;height:48px;border-radius:50%;display:grid;place-items:center;font-size:var(--fd-fs-6);font-weight:600;letter-spacing:-.02em;background:var(--fd-bg-active);color:var(--fd-fg);box-shadow:inset 0 0 0 1px var(--fd-line)}
+.ch-av.sm{width:28px;height:28px;font-size:var(--fd-fs-2);margin-top:2px}
+/* 시그니처: 답을 쓰는 동안만 테두리가 영상통화의 "말하는 중" 표시처럼 숨 쉰다. 실제 요청 상태와 1:1이다. */
+.ch-av::after{content:"";position:absolute;inset:-3px;border-radius:50%;border:2px solid var(--fd-run-solid);opacity:0;transform:scale(.96);transition:opacity var(--fd-dur-2) var(--fd-ease),transform var(--fd-dur-2) var(--fd-ease)}
+.ch-av.is-speaking::after{opacity:1;transform:none;animation:ch-talk 1.6s ease-in-out infinite}
+.ch-who{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.ch-name{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.ch-name h1{margin:0;font-size:var(--fd-fs-6);font-weight:600;letter-spacing:-.02em;line-height:1.25}
+.ch-note{margin:0;font-size:var(--fd-fs-2);color:var(--fd-fg-subtle)}
+.ch-info{margin:2px 0 0;display:flex;flex-wrap:wrap;align-items:center;gap:2px 0;font-size:var(--fd-fs-2);color:var(--fd-fg-muted);font-variant-numeric:tabular-nums}
+.ch-info .dot{padding:0 6px;color:var(--fd-fg-subtle)}
+
+/* 상태 카드: 준비 안 됨 · 없음 · 불러오기 실패 · 불러오는 중 */
+.ch-state{padding-top:var(--fd-space-6)}
+.ch-card{background:var(--fd-bg-surface);border:1px solid var(--fd-line);border-radius:var(--fd-r-4);box-shadow:var(--fd-shadow-xs);padding:var(--fd-space-5);display:flex;flex-direction:column;gap:10px;max-width:560px}
+.ch-card h2{margin:0;font-size:var(--fd-fs-5);font-weight:600;letter-spacing:-.015em}
+.ch-card p{margin:0;color:var(--fd-fg-muted);text-wrap:pretty}
+.ch-card .row{display:flex;align-items:center;gap:10px}
+.ch-card.is-wait{border-color:var(--fd-attention-line)}
+.ch-card.is-wait h2{color:var(--fd-attention-fg)}
+.ch-card.is-bad{border-color:var(--fd-danger-line);background:var(--fd-danger-bg)}
+.ch-card.is-bad h2,.ch-card.is-bad p{color:var(--fd-danger-fg)}
+.ch-card .acts{margin-top:4px}
+.ch-spin{width:14px;height:14px;flex:none;border-radius:50%;border:2px solid color-mix(in srgb,var(--fd-run-solid) 25%,transparent);border-top-color:var(--fd-run-solid);animation:fl-spin .9s linear infinite}
+
+/* 재생 띠 */
+.ch-bar{padding-top:var(--fd-space-3)}
+.ch-playbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 8px 8px 12px;border:1px solid var(--fd-line);border-radius:var(--fd-r-3);background:var(--fd-bg-surface);font-size:var(--fd-fs-3)}
+.ch-playbar .tx{flex:1 1 240px;min-width:0;color:var(--fd-fg-muted);font-variant-numeric:tabular-nums}
+.ch-playbar .tx b{color:var(--fd-fg);font-weight:600}
+.ch-playbar.is-error{border-color:var(--fd-danger-line)}
+.ch-prog{display:inline-flex;gap:3px}
+.ch-prog i{width:14px;height:4px;border-radius:2px;background:var(--fd-slate-6)}
+.ch-prog i.ok{background:var(--fd-success-solid)}
+.ch-prog i.now{background:var(--fd-run-solid);animation:ch-blink 1.2s ease-in-out infinite}
+.ch-playbar.is-error .ch-prog i:not(.ok):first-of-type{background:var(--fd-danger-solid)}
+
+/* 말 목록 */
+.ch-list{list-style:none;margin-block:0;flex:1 1 auto!important;min-height:0;overflow:auto;scrollbar-gutter:stable;padding-top:var(--fd-space-5);padding-bottom:var(--fd-space-4);display:flex;flex-direction:column;gap:14px;overscroll-behavior:contain}
+.ch-msg{display:flex;gap:10px;align-items:flex-start;min-width:0}
+.ch-msg .col{display:flex;flex-direction:column;gap:4px;min-width:0;max-width:min(68ch,86%)}
+.ch-msg.me{justify-content:flex-end}
+.ch-msg.me .col{align-items:flex-end}
+.ch-msg .bub{padding:9px 13px;font-size:var(--fd-fs-4);line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;word-break:keep-all;text-wrap:pretty}
+.ch-msg.ai .bub{background:var(--fd-bg-surface);border:1px solid var(--fd-line);border-radius:4px 14px 14px 14px;box-shadow:var(--fd-shadow-xs)}
+.ch-msg.me .bub{background:var(--fd-bg-active);border-radius:14px 4px 14px 14px}
+.ch-msg .bub.empty{color:var(--fd-fg-subtle);font-style:italic}
+.ch-msg .meta{display:flex;gap:6px;flex-wrap:wrap;padding-left:2px;font-size:var(--fd-fs-1);color:var(--fd-fg-subtle);font-variant-numeric:tabular-nums}
+.ch-msg .meta .t{color:var(--fd-fg-muted)}
+.ch-msg.is-failed .bub{opacity:.75}
+.ch-fail{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;font-size:var(--fd-fs-2);color:var(--fd-danger-fg)}
+.ch-fail .btn{height:26px;padding:0 10px;font-size:var(--fd-fs-2)}
+.ch-msg.is-typing .bub{display:inline-flex;align-items:center;gap:10px;color:var(--fd-fg-muted);font-size:var(--fd-fs-3);font-variant-numeric:tabular-nums}
+.ch-dots{display:inline-flex;gap:4px}
+.ch-dots i{width:6px;height:6px;border-radius:50%;background:var(--fd-run-solid);animation:ch-dot 1.2s ease-in-out infinite}
+.ch-dots i:nth-child(2){animation-delay:.15s}.ch-dots i:nth-child(3){animation-delay:.3s}
+.ch-empty{margin:auto;text-align:center;display:flex;flex-direction:column;gap:4px;padding:var(--fd-space-8) 0;color:var(--fd-fg-muted)}
+.ch-empty p{margin:0}
+.ch-empty b{color:var(--fd-fg);font-weight:600}
+
+/* 입력 */
+.ch-composer{padding-top:var(--fd-space-2);padding-bottom:var(--fd-space-4)}
+.ch-box{display:flex;align-items:flex-end;gap:8px;padding:6px 6px 6px 12px;border:1px solid var(--fd-line-strong);border-radius:var(--fd-r-4);background:var(--fd-bg-surface);box-shadow:var(--fd-shadow-sm);transition:border-color var(--fd-dur-1),box-shadow var(--fd-dur-1)}
+.ch-box:focus-within{border-color:var(--fd-accent);box-shadow:0 0 0 3px var(--fd-accent-bg)}
+.ch-box textarea{flex:1;min-width:0;resize:none;border:0;outline:none;background:transparent;font:inherit;font-size:var(--fd-fs-4);line-height:1.5;color:var(--fd-fg);padding:5px 0;max-height:168px}
+.ch-box textarea:focus-visible{outline:none}
+.ch-box textarea::placeholder{color:var(--fd-fg-subtle)}
+.ch-box textarea:disabled{cursor:not-allowed}
+.ch .ch-send{height:34px;padding:0 14px}
+.ch .ch-send[data-mode="stop"]{background:var(--fd-bg-surface);color:var(--fd-fg);border-color:var(--fd-line-strong)}
+.ch .ch-send[data-mode="stop"]:hover{background:var(--fd-bg-hover)}
+.ch-hint{margin:6px 2px 0;font-size:var(--fd-fs-1);color:var(--fd-fg-subtle)}
+
+/* 오른쪽 패널 */
+.ch-panel{min-height:0;overflow:auto;scrollbar-gutter:stable;border-left:1px solid var(--fd-line);background:var(--fd-bg-surface);padding:var(--fd-space-4);display:flex;flex-direction:column;gap:var(--fd-space-6)}
+.ch-sec{display:flex;flex-direction:column;gap:8px}
+.ch-sec-h{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:28px}
+.ch-sec-h h2{margin:0;font-size:var(--fd-fs-3);font-weight:600}
+.ch-sec>.hint{margin:0 0 4px;text-wrap:pretty}
+.ch-sec-h .btn{height:26px;padding:0 8px;font-size:var(--fd-fs-2)}
+.ch-scs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.ch-sc{border-radius:var(--fd-r-3);border:1px solid transparent}
+.ch-sc.is-on{border-color:var(--fd-line);background:var(--fd-bg-subtle)}
+.ch-sc-play{display:flex!important;align-items:flex-start;gap:10px;width:100%;padding:8px 10px;border-radius:var(--fd-r-3);transition:background var(--fd-dur-1)}
+.ch-sc-play:hover:not(:disabled){background:var(--fd-bg-hover)}
+.ch-sc-play:disabled{opacity:.55}
+.ch-sc.is-on .ch-sc-play:disabled{opacity:1}
+.ch-sc-play .ic{flex:none;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--fd-line-strong);color:var(--fd-fg-muted);margin-top:1px}
+.ch-sc-play .ic svg{width:10px;height:10px;fill:currentColor;stroke-width:1.5}
+.ch-sc.is-running .ch-sc-play .ic{border-color:var(--fd-run-solid);color:var(--fd-run-fg)}
+.ch-sc.is-done .ch-sc-play .ic{border-color:transparent;background:var(--fd-success-bg);color:var(--fd-success-fg)}
+.ch-sc.is-done .ch-sc-play .ic svg{fill:none;stroke-width:2.4}
+.ch-sc-play .tx{display:flex;flex-direction:column;min-width:0}
+.ch-sc-play b{font-weight:600}
+.ch-sc-play small{color:var(--fd-fg-muted);font-size:var(--fd-fs-2);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ch-turns{margin:0;padding:0 10px 10px 44px;list-style:none;display:flex;flex-direction:column;gap:4px;font-size:var(--fd-fs-2);color:var(--fd-fg-subtle)}
+.ch-turns li{position:relative;overflow-wrap:anywhere}
+.ch-turns li::before{content:"";position:absolute;left:-14px;top:7px;width:6px;height:6px;border-radius:50%;border:1.5px solid var(--fd-slate-8)}
+.ch-turns li.ok{color:var(--fd-fg-muted)}
+.ch-turns li.ok::before{border-color:transparent;background:var(--fd-success-solid)}
+.ch-turns li.now{color:var(--fd-fg);font-weight:500}
+.ch-turns li.now::before{border-color:transparent;background:var(--fd-run-solid)}
+.ch-samples{margin:0 10px 8px 44px;font-size:var(--fd-fs-2)}
+.ch-sec>.ch-samples{margin:0}
+.ch-samples summary{cursor:pointer;color:var(--fd-fg-muted);padding:2px 0;list-style-position:outside;width:max-content;max-width:100%}
+.ch-samples summary:hover{color:var(--fd-fg)}
+.ch-samples .n{color:var(--fd-fg-subtle);font-variant-numeric:tabular-nums}
+.ch-sample{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.ch-sample .st{margin:0;font-weight:600;color:var(--fd-fg)}
+.ch-sample ol{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px}
+.ch-sample li{display:flex;flex-direction:column;gap:2px;padding-left:10px;border-left:2px solid var(--fd-line)}
+.ch-sample p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55}
+.ch-sample .u{color:var(--fd-fg-muted)}
+.ch-sample .r{color:var(--fd-fg)}
+.ch-none{margin:0;color:var(--fd-fg-muted)}
+
+/* 반응형: 사이드바 레일과 숨김은 flow.css 규칙을 따른다. 좁으면 상황 패널이 대화 아래로 간다. */
+@media (max-width:1099px){
+  .ch-body{grid-template-columns:minmax(0,1fr)}
+  .ch-stage{height:calc(100dvh - 53px)}
+  .ch-stage>*{padding-inline:var(--fd-space-4)}
+  .ch-panel{border-left:0;border-top:1px solid var(--fd-line);overflow:visible}
+}
+@keyframes ch-talk{0%,100%{opacity:.35;transform:scale(1)}50%{opacity:1;transform:scale(1.06)}}
+@keyframes ch-dot{0%,80%,100%{opacity:.3;transform:none}40%{opacity:1;transform:translateY(-2px)}}
+@keyframes ch-blink{50%{opacity:.4}}
+@media (prefers-reduced-motion:reduce){
+  .ch-av.is-speaking::after,.ch-dots i,.ch-prog i.now,.ch-spin{animation:none}
+  .ch-av::after{transition:none}
+}
+
