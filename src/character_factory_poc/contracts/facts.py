@@ -47,8 +47,11 @@ class MotifFacts(Strict):
     deflections: list[Quote] = Field(default_factory=list, max_length=3)
 
     def phrases(self) -> list[str]:
-        phrases = [item.quote for item in self.deflections]
-        for fallback in ("그런 얘기는 따로 안 하고 있어요", "그건 저만 알고 있을게요"):
-            if len(phrases) < 2 and fallback not in phrases:
-                phrases.append(fallback)
-        return phrases
+        """사생활 넘기는 말. 뜻이 분명한 기본 문장을 맨 앞에 두고 원문 표현을 뒤에 붙인다."""
+        phrases = ["그런 얘기는 따로 안 하고 있어요"]
+        for item in self.deflections:
+            if item.quote not in phrases:
+                phrases.append(item.quote)
+        if len(phrases) < 2:
+            phrases.append("그건 저만 알고 있을게요")
+        return phrases[:3]

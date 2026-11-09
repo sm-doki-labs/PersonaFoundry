@@ -96,7 +96,7 @@ def test_quote_must_match_approved_subject_and_fallback_is_separate():
     )
     doc = facts.collect(provider, [fact()], rows, {"c"})
     assert doc.items[0].selfView is None
-    assert doc.phrases() == ["그건 비밀이죠", "그런 얘기는 따로 안 하고 있어요"]
+    assert doc.phrases() == ["그런 얘기는 따로 안 하고 있어요", "그건 비밀이죠"]
     provider.proposals["views"].append(base | good)
     assert facts.collect(provider, [fact()], rows, {"c"}).items[0].selfView.msgId == "a"
 

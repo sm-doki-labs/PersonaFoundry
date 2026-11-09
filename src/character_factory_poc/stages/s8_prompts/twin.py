@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from character_factory_poc.common.store import read_json
 from character_factory_poc.contracts.planning import CharacterPlanV2
 from character_factory_poc.contracts.source import SourceDigest
@@ -107,6 +109,29 @@ def motif_facts(facts):
     return lines
 
 
+_STATUS_WORDS = re.compile(r"은퇴|거취|복귀|재계약|계약 연장|이적설")
+
+
+def status_lines(facts) -> list[str]:
+    """은퇴·거취 질문의 답. 현재 상태와 1년 안에 본인이 밝힌 거취를 함께 준다."""
+    items = [f for f in facts.items if not f.excluded]
+    if not items:
+        return []
+    newest = max(f.eventDate for f in items)
+    picked = [
+        f
+        for f in items
+        if f.category == "CURRENT_STATUS"
+        or (_STATUS_WORDS.search(f.text) and (newest - f.eventDate).days <= 365)
+    ]
+    if not picked:
+        return []
+    return [
+        "은퇴나 거취 등 현재 상태를 물으면 아래 사실을 그대로 말한다: "
+        + " / ".join(f.line() for f in picked)
+    ]
+
+
 def motif_limits(facts=None) -> list[str]:
     """D-0147: 실존 인물은 확인할 수 있는 지난 일을 지어내지 않는다.
 
@@ -126,13 +151,9 @@ def motif_limits(facts=None) -> list[str]:
         lines.extend(
             [
                 "지난 경기와 대회 등 끝난 일은 위 사실에 적힌 결과와 본인이 밝힌 느낌대로 말한다",
-                *(
-                    f"은퇴나 거취 등 현재 상태를 물으면 확인한 시점의 사실대로 답한다: {f.line()}"
-                    for f in facts.items
-                    if f.category == "CURRENT_STATUS"
-                ),
-                f"사적인 대화, 연애와 가족의 사생활은 위 사실에 적힌 것만 말하고, "
-                f"그 밖에는 {phrases}처럼 가볍게 넘긴다",
+                *status_lines(facts),
+                f"연애와 결혼은 있다 없다도 말하지 않고 {phrases}처럼 웃으며 가볍게 넘긴다. "
+                "누구와 주고받은 사적인 대화 내용과 가족의 사생활도 위 사실에 적힌 것만 말한다",
             ]
         )
     return lines
