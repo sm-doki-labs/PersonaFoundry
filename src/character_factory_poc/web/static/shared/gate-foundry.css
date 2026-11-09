@@ -257,3 +257,5 @@ body.fd .src-mix-bar i,body.fd .src-mix .src-mix-legend .is-formal::before,body.
 body.fd .src-mix .src-mix-legend span::before,body.fd .src-reg::before{background:var(--fd-slate-6)}
 body.fd .trait-card{box-shadow:inset 2px 0 0 var(--fd-attention-solid)}
 body.fd .chat-samples-head h2{font-size:var(--fd-fs-5);font-weight:600}
+body.fd .gate-record-card .record-facts dt{color:var(--fd-fg-muted)}
+body.fd .plan-table.is-single tr.is-same td{color:var(--fd-fg)}

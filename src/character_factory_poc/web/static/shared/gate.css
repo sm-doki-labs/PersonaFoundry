@@ -608,3 +608,16 @@ a.fact-chip:focus-visible{outline:2px solid var(--focus,currentColor);outline-of
 .trait-when{margin:0;font-size:12.5px;line-height:1.5;color:var(--muted)}
 .trait-do{margin:0;font-size:13.5px;line-height:1.6}
 @media (prefers-reduced-motion:reduce){.fact-card,.fact-toggle,.fact-chip{transition:none}}
+/* 결정 기록(읽기 전용): 결정 버튼·입력칸·메모·단축키 안내를 숨기고, 맨 위 요약 카드만 남긴다(QA F06). */
+body.gate-record .side-hint,body.gate-record .side-actions,body.gate-record .side-status,body.gate-record .side-keys,body.gate-record .side-more{display:none}
+body.gate-record.gate-side-empty .gate-side{display:none}
+body.gate-record.gate-side-empty div.gate-wrap{grid-template-columns:minmax(0,1fr)}
+.gate-record-card .record-facts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 14px;margin:6px 0 0}
+.gate-record-card .record-facts dt{color:var(--muted)}
+.gate-record-card .record-facts dd{margin:0;overflow-wrap:anywhere}
+.gate-record-card .record-later-title{margin:10px 0 2px;font-weight:600}
+.gate-record-card .record-later{margin:0;padding-left:18px}
+/* 기획안이 하나일 때: 비교 표가 아니라 항목·값 카드로 읽힌다(QA F07). */
+.plan-table.is-single tr.is-same td{color:var(--text)}
+.doc-block.is-single{grid-template-columns:minmax(0,1fr)}
+.plan-tech{margin-top:12px}
