@@ -177,6 +177,47 @@ body.fl.src{overflow:hidden}
 .src-go-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .src-go-note{font-size:var(--fd-fs-2);color:var(--fd-fg-muted)}
 
+/* 영상 등급: 요약 줄의 바꾸기, 펼친 카드 */
+.src-sum-edit{font-size:var(--fd-fs-2);margin-left:6px}
+.src-tier-edit{display:flex;flex-direction:column;gap:8px;padding:12px}
+.src-tier-edit[hidden]{display:none}
+
+/* 영상용 사진: 원문 목록 아래 미리보기 칸 */
+.src-photos{display:flex;flex-direction:column;gap:8px;margin-top:var(--fd-space-2);padding:12px 14px;border:1px solid var(--fd-line);border-radius:var(--fd-r-3);background:var(--fd-bg-surface);transition:border-color var(--fd-dur-1),background var(--fd-dur-1)}
+.src-photos[hidden]{display:none}
+.src-photos.is-over{border-color:var(--fd-accent);background:var(--fd-accent-bg)}
+.src-photos h3{margin:0;font-size:var(--fd-fs-3);font-weight:600}
+.src-photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:10px}
+.src-photo-list{display:contents}
+.src-photo{position:relative;margin:0;display:flex;flex-direction:column;gap:4px;min-width:0}
+.src-photo-img{aspect-ratio:1;border-radius:var(--fd-r-2);overflow:hidden;display:grid;place-items:center;background:var(--fd-bg-inset);color:var(--fd-fg-subtle);border:1px solid var(--fd-line)}
+.src-photo-img img{width:100%;height:100%;object-fit:cover;display:block}
+.src-photo-img .i{width:22px;height:22px}
+.src-photo[data-tone="wait"] .src-photo-img{border-color:var(--fd-attention-solid)}
+.src-photo[data-tone="fail"] .src-photo-img{border-color:var(--fd-danger-solid)}
+.src-photo .src-bar{margin:0}
+.src-photo figcaption{display:flex;flex-direction:column;min-width:0;font-size:var(--fd-fs-2)}
+.src-photo .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.src-photo .st{color:var(--fd-fg-muted);text-wrap:pretty}
+.src-photo[data-tone="wait"] .st{color:var(--fd-attention-fg)}
+.src-photo[data-tone="fail"] .st{color:var(--fd-danger-fg)}
+.fl .btn.src-photo-x{position:absolute;top:4px;right:4px;width:26px;height:26px;padding:0;background:var(--fd-bg-surface);box-shadow:var(--fd-shadow-xs)}
+.fl .btn.src-photo-x[hidden]{display:none}
+.fl .btn.src-photo-retry{height:26px;font-size:var(--fd-fs-2)}
+.src-photo-add{aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:8px;border:1.5px dashed var(--fd-line-strong);border-radius:var(--fd-r-2);background:var(--fd-bg-subtle);color:var(--fd-fg);font:inherit;font-size:var(--fd-fs-2);font-weight:550;cursor:pointer;transition:border-color var(--fd-dur-1),background var(--fd-dur-1)}
+.src-photo-add:hover{border-color:var(--fd-accent);background:var(--fd-accent-bg)}
+.src-photo-add:focus-visible{outline:2px solid var(--fd-focus);outline-offset:2px}
+.src-photo-add small{font-weight:400;color:var(--fd-fg-muted);font-size:11px}
+.src-photo-add .i{width:18px;height:18px}
+.src-photo-add[hidden]{display:none}
+
+/* 시작한 뒤 영상 줄 */
+.src-vline{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:var(--fd-fs-2);color:var(--fd-run-fg)}
+.src-vline[hidden]{display:none}
+.src-vline[data-tone="ok"]{color:var(--fd-success-fg)}
+.src-vline[data-tone="fail"]{color:var(--fd-danger-fg)}
+.src-vline .src-spin[hidden]{display:none}
+
 @media (max-width:1099px){
   body.fl.src{overflow:auto}
   .src-scroll{overflow:visible}

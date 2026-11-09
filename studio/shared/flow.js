@@ -52,6 +52,52 @@
     const d = detail || {};
     return d.id && isChatReady(d) ? 'chat.html#c/' + encodeURIComponent(d.id) : '';
   }
+  // 영상 등급(계획 4차 약속 5). 원문 화면(sources.js)과 같은 표·같은 카드다(시험이 같은지 본다). 화면에는 개수를 쓰지 않는다.
+  const VIDEO_TIERS = [
+    ['none', '영상 없이', '대화만 만들어요. 영상 비용이 들지 않아요.', 0],
+    ['light', '라이트', '첫 장면만, 기본 감정으로 가장 빨리 확인해요.', 1],
+    ['standard', '스탠다드', '세 장면 모두, 기본 감정으로 만들어요.', 2],
+    ['pro', '프로', '세 장면 모두, 더 다양한 감정으로 만들어요.', 3],
+    ['max', '맥스', '앱에서 쓰는 반응 전부예요. 가장 오래 걸리고 비용도 가장 커요.', 4]
+  ];
+  const COST_WORD = ['없음', '적음', '보통', '많음', '가장 많음'];
+  function tierOf(value) { return VIDEO_TIERS.some((t) => t[0] === value) ? value : 'none'; }
+  function tierName(value) { return VIDEO_TIERS.find((t) => t[0] === tierOf(value))[1]; }
+  function tierCardsHTML(name, value, opts) {
+    const o = opts || {};
+    const cur = tierOf(value);
+    return VIDEO_TIERS.filter((t) => !(o.paidOnly && t[0] === 'none')).map((t) => {
+      // 시간·비용 네 칸. '영상 없이'는 설명이 비용 없음을 말하므로 칸을 두지 않는다.
+      const meter = t[3] ? '<span class="vt-cost" role="img" aria-label="시간·비용 ' + COST_WORD[t[3]] + '">' + [1, 2, 3, 4].map((n) => '<i' + (n <= t[3] ? ' class="on"' : '') + '></i>').join('') + '</span>' : '';
+      return '<label class="vt-opt"><input type="radio" name="' + E(name) + '" value="' + t[0] + '"' + (t[0] === cur ? ' checked' : '') + (o.disabled ? ' disabled' : '') + '><span class="vt-tx"><span class="vt-top"><b>' + t[1] + '</b>' + meter + '</span><small>' + t[2] + '</small></span></label>';
+    }).join('');
+  }
+  // 영상 상태 한 줄(원문 화면과 같은 규칙). 상태를 알면 등급 이름을 붙여 쓰고, 영상이 없으면 빈칸이다(머리·목록에 아무것도 붙이지 않는다).
+  // 모르는 상태일 때만 서버 videoLabel을 쓴다.
+  function videoText(c) {
+    const x = c || {};
+    const tier = tierOf(x.videoTier);
+    const st = text(x.videoStatus);
+    if (st === 'failed') return '영상을 만들지 못했어요';
+    if (st === 'making') return '영상 만드는 중 · ' + tierName(tier);
+    if (st === 'ready') return '영상 있음 · ' + tierName(tier);
+    if (st === 'none' || !text(x.videoLabel).trim()) return tier === 'none' ? '' : '영상 기다리는 중 · ' + tierName(tier);
+    return text(x.videoLabel).trim();
+  }
+  function videoTone(c) { return { making: 'run', ready: 'ok', failed: 'fail' }[text(c && c.videoStatus)] || ''; }
+  // 영상 만들기를 건넬 캐릭터: 대화 가능하고, 영상이 아직 없거나 실패했고, 도는 작업이 없을 때. 영상 상태를 주지 않는 서버면 건네지 않는다.
+  function canMakeVideo(detail) {
+    const d = detail || {};
+    return isChatReady(d) && !d.job && (d.videoStatus === 'none' || d.videoStatus === 'failed');
+  }
+  // 원문 초안(GET /api/sources/{id})에서 준비된 사진 수. 사진 기록은 fileType "photo"(없는 서버면 확장자)로 알아본다.
+  function readyPhotos(draft) {
+    return ((draft && draft.files) || []).filter((f) => {
+      const t = text(f && f.fileType);
+      const photo = t ? t === 'photo' : /\.(jpe?g|png|webp)$/i.test(text(f && f.filename));
+      return photo && f.status === 'ready';
+    }).length;
+  }
   // 캐릭터 상태는 모든 화면이 같은 낱말을 쓴다(3차 약속 3). 서버 status·statusLabel이 먼저이고,
   // 없을 때만 이 화면이 가진 기록으로 같은 규칙을 따라 정한다. done은 끝까지 마친 오리지널 캐릭터에만 쓴다.
   const STATUS_LABEL = { draft: '시작 전', running: '만드는 중', needs_review: '확인 필요', chat_ready: '대화 가능', failed: '실패', stopped: '멈춤', done: '완료' };
@@ -182,7 +228,8 @@
     chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
     gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
     more: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
-    archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><line x1="10" y1="12" x2="14" y2="12"/>'
+    archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><line x1="10" y1="12" x2="14" y2="12"/>',
+    video: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/>'
   };
   // 브랜드 마크: 보라 둥근 사각형 안의 F와 불꽃 점(D-0102).
   const MARK = '<svg class="fd-mark" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="var(--fd-accent)"/><path d="M8.5 17V7h7.5M8.5 12h5" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16.4" cy="16.4" r="1.7" fill="#fff"/></svg>';
@@ -704,6 +751,10 @@
       const tw = c && c.origin === 'SOURCE';
       return '<span class="fd-track' + (tw ? ' tw' : '') + '"><span class="d" aria-hidden="true"></span>' + E(trackLabel(c)) + '</span>';
     }
+    function videoChipHTML(c) {
+      const t = videoText(c);
+      return t ? '<span class="fd-vid ' + videoTone(c) + '"><span class="d" aria-hidden="true"></span>' + E(t) + '</span>' : '';
+    }
 
     // ---- 캐릭터 요약(개요·사이드바·받은 일이 같은 기준으로 센다) ----
     function summaryOf(c) {
@@ -828,6 +879,7 @@
         if (changed) {
           state.characterId = wanted; state.detail = null; state.sel = null; closeSheet(false); state.notes = []; state.open = new Set(); state.target = null; state.mstep = null; state.mconfirm = null;
           state.showOff = false; state.menuOpen = false; state.moreOpen = false;
+          state.video = null;
           // 새 그래프가 오기 전에는 받아 둔 같은 갈래 그래프로 그린다(이전 캐릭터의 그래프를 남기지 않는다).
           const entry = characters().find((c) => c.id === wanted);
           state.graph = state.graphs.get(graphKey(entry)) || state.graphs.get('CREATED|TRAIN') || state.graph;
@@ -1066,7 +1118,7 @@
       // 공정 보기에서는 '대화해 보기'가 지금 할 일 카드의 주 버튼이다. 머리에는 다른 보기(모델 만들기)에서만 둔다.
       const href = chatHref(d);
       const chat = href && modelMode() ? '<a class="btn fd-chat" href="' + E(href) + '">' + icon('chat') + '대화해 보기</a>' : '';
-      return '<div class="fd-title"><h1 tabindex="-1">' + E(nameOf(d)) + '</h1>' + trackHTML(d) + (sub ? '<p>' + E(sub) + '</p>' : '') + prog + demo + chat + moreHTML(d) + '</div>';
+      return '<div class="fd-title"><h1 tabindex="-1">' + E(nameOf(d)) + '</h1>' + trackHTML(d) + videoChipHTML(d) + (sub ? '<p>' + E(sub) + '</p>' : '') + prog + demo + chat + moreHTML(d) + '</div>';
     }
     // 캐릭터 메뉴: 기술 정보(ID)와 보관하기. 다시 그려도 열린 상태를 유지한다.
     function archivedNow(d) { const c = characters().find((x) => x.id === d.id); return Boolean((c && c.archived) || d.archived); }
@@ -1139,7 +1191,7 @@
       if (top && top.kind === 'wait') act = '<button type="button" class="btn' + (i === 0 && s.rank <= 1 ? ' pri' : '') + '" data-act="ov-review" data-id="' + E(c.id) + '" data-gate="' + E(top.gate) + '" data-stage="' + E(top.stage || '') + '">검토하기</button>';
       else if (s.chat) act = '<a class="btn" href="' + E(s.chat) + '">' + icon('chat') + '대화해 보기</a>';
       else if (s.status.status === 'draft' && c.origin === 'SOURCE') act = '<a class="btn" href="sources.html#c/' + E(encodeURIComponent(c.id)) + '">이어 하기</a>';
-      const sub = [l.note, [p.job, p.age ? p.age + '세' : ''].filter(Boolean).join(' · ')].filter(Boolean).join(' · ') || (c.origin === 'SOURCE' ? '' : '아직 기획 전이에요');
+      const sub = [[l.note, [p.job, p.age ? p.age + '세' : ''].filter(Boolean).join(' · ')].filter(Boolean).join(' · ') || (c.origin === 'SOURCE' ? '' : '아직 기획 전이에요'), videoText(c)].filter(Boolean).join(' · ');
       return '<tr class="' + st + '"><th scope="row"><a class="ov-name" href="' + E(href) + '"><span class="fd-av" aria-hidden="true">' + E(Array.from(l.name)[0] || '?') + '<span class="st ' + st + '"></span></span><span><b>' + E(l.name) + trackHTML(c) + '</b>' + (sub ? '<small>' + E(sub) + '</small>' : '') + '</span></a></th>' +
         '<td class="ov-now">' + statusPill(s.status) + '<span class="ov-now-t">' + now + '</span></td>' +
         '<td><div class="ov-prog">' + segs + '<span class="n">' + (g.ids ? E(g.label) + ' ' : '') + g.done + '/' + g.total + '단계</span></div></td>' +
@@ -1261,9 +1313,15 @@
       }
       if (chat) {
         const t1 = st === 'chat_ready' ? '다 만들었어요 · 대화할 수 있어요' : '대화할 수 있어요';
-        const t2 = st === 'chat_ready' ? '만든 캐릭터와 바로 대화해 볼 수 있어요.' : st === 'running' ? '그동안 다른 단계를 더 만들고 있어요.' : '아래 할 일을 마치지 않아도 대화해 볼 수 있어요.';
-        html += '<div class="fl-item ok"><span class="mk"></span><div class="tx"><div class="t1">' + E(t1) + '</div><div class="t2">' + E(t2) + '</div></div><div class="acts"><a class="btn pri" href="' + E(chat) + '">' + icon('chat') + '대화해 보기</a></div>' +
-          (st === 'chat_ready' && !tasks.length && !d.job ? moreBuildHTML() : '') + '</div>';
+        let t2 = st === 'chat_ready' ? '만든 캐릭터와 바로 대화해 볼 수 있어요.' : st === 'running' ? '그동안 다른 단계를 더 만들고 있어요.' : '아래 할 일을 마치지 않아도 대화해 볼 수 있어요.';
+        // 영상(약속 5): 만드는 중이면 그렇다고 적고, 영상이 없거나 실패했으면 보조 버튼으로 영상 만들기를 건넨다.
+        if (d.videoStatus === 'making') t2 += ' 영상은 만드는 중이에요. 다 되면 대화할 때 영상이 나와요.';
+        else if (d.videoStatus === 'ready') t2 = st === 'chat_ready' ? '영상까지 다 만들었어요. 대화해 보기에서 영상과 함께 대화해요.' : t2;
+        const vOpen = Boolean(state.video && state.video.open);
+        const vBtn = canMakeVideo(d) ? '<button type="button" class="btn" data-act="video-open" aria-expanded="' + vOpen + '">' + icon('video') + (d.videoStatus === 'failed' ? '영상 다시 만들기' : '영상 만들기') + '</button>' : '';
+        html += '<div class="fl-item ok"><span class="mk"></span><div class="tx"><div class="t1">' + E(t1) + '</div><div class="t2">' + E(t2) + '</div></div><div class="acts"><a class="btn pri" href="' + E(chat) + '">' + icon('chat') + (d.videoStatus === 'ready' ? '영상과 함께 대화해 보기' : '대화해 보기') + '</a>' + vBtn + '</div>' +
+          (vBtn && vOpen ? videoHTML(d) : '') +
+          (st === 'chat_ready' && !tasks.length && !d.job && !vOpen ? moreBuildHTML() : '') + '</div>';
       }
       // '다음 검토'는 그릴 때마다 새 상태로 다시 고른다(결정 직후 새 검토가 생길 수 있다).
       state.notes.forEach((n) => { if (n.act === 'next-review') { const nr = nextReviewAfter(n.gate); n.label = nr ? nr.label : ''; } });
@@ -1287,6 +1345,51 @@
         }
       }
       return html + '</section>';
+    }
+    // 영상 만들기 고르기(약속 5). 사진이 없으면 원문 화면으로 보내고, 있으면 등급 카드와 시작 버튼을 보인다.
+    function videoHTML(d) {
+      const v = state.video || {};
+      const src = 'sources.html#c/' + encodeURIComponent(d.id);
+      const photoLink = '<a class="btn" href="' + E(src) + '">원문 화면에서 사진 올리기</a>';
+      const close = '<button type="button" class="btn ghost" data-act="video-cancel">닫기</button>';
+      if (v.photos == null) return '<div class="fl-vid" role="group" aria-label="영상 만들기"><p>올린 사진을 확인하는 중이에요…</p></div>';
+      if (v.photos === 0) return '<div class="fl-vid" role="group" aria-label="영상 만들기"><p>영상을 만들려면 얼굴이 잘 보이는 사진이 1장 이상 있어야 해요. 원문 화면에서 사진을 올린 뒤 다시 눌러 주세요.</p><div class="acts">' + photoLink + close + '</div></div>';
+      const busy = Boolean(v.busy || state.busy);
+      return '<div class="fl-vid" role="group" aria-label="영상 만들기"><div class="vt-grid" role="radiogroup" aria-label="영상 등급">' + tierCardsHTML('videoTierPick', v.tier, { paidOnly: true, disabled: busy }) + '</div>' +
+        '<p>영상 단계는 비용이 들어요. 시작하면 고른 등급의 장면만 이어서 만들고, 다 되면 대화할 때 영상이 나와요.</p>' +
+        (v.error ? '<p class="err" role="alert">' + E(v.error) + '</p>' : '') +
+        '<div class="acts"><button type="button" class="btn" data-act="video-go"' + (busy ? ' disabled' : '') + '>' + (v.busy ? '시작하는 중…' : E(tierName(v.tier)) + ' 영상 만들기 시작') + '</button>' + (v.noPhoto ? photoLink : '') + '<button type="button" class="btn ghost" data-act="video-cancel">취소</button></div></div>';
+    }
+    async function openVideo() {
+      const d = state.detail;
+      if (!d) return;
+      const id = d.id;
+      const t = tierOf(d.videoTier);
+      state.video = { open: true, tier: t === 'none' ? 'light' : t, photos: null, busy: false, error: '' };
+      render();
+      let n = -1; // 원문 초안을 읽지 못하면 모른다(-1). 그때는 고르게 두고 서버가 막으면 그 문장을 보인다.
+      try { n = readyPhotos(await request('GET', '/api/sources/' + encodeURIComponent(id))); } catch (error) { n = -1; }
+      if (state.video && state.detail && state.detail.id === id) { state.video.photos = n; render(); }
+    }
+    async function startVideo() {
+      const d = state.detail;
+      const v = state.video;
+      if (!d || !v || v.busy) return;
+      const tier = tierOf(v.tier) === 'none' ? 'light' : v.tier;
+      v.busy = true;
+      v.error = '';
+      render();
+      try {
+        await request('POST', '/api/characters/' + encodeURIComponent(d.id) + '/videos', { videoTier: tier });
+        state.video = null;
+        state.feedback = { tone: 'ok', text: tierName(tier) + ' 영상을 만들기 시작했어요. 다 되면 대화할 때 영상이 나와요.' };
+      } catch (error) {
+        v.busy = false;
+        v.error = error.status === 404 || error.status === 405 ? '이 서버에서는 아직 영상을 만들 수 없어요.' : error.message;
+        v.noPhoto = /사진/.test(v.error);
+        if (error.network) state.conn = 'offline';
+      }
+      await refresh(false);
     }
     // 대화 가능까지 마친 뒤 더 만들 때 갈 목표. 지금 목표와 같으면 끝까지 간다.
     function nextGoal() {
@@ -2205,6 +2308,9 @@
       else if (act === 'archived') { state.showArchived = !state.showArchived; state.form.open = false; if (route().overview) render(); else global.location.hash = '#all'; }
       else if (act === 'show-off') { state.showOff = !state.showOff; zoomFit(); render(); }
       else if (act === 'more') { state.moreOpen = !state.moreOpen; render(); }
+      else if (act === 'video-open') { if (state.video && state.video.open) { state.video = null; render(); } else openVideo(); }
+      else if (act === 'video-cancel') { state.video = null; render(); const b = doc.querySelector('[data-act="video-open"]'); if (b) b.focus(); }
+      else if (act === 'video-go') startVideo();
       else if (act === 'resume-more') { state.moreOpen = false; run(R.runRequest(id, el.dataset.until || 'sx', []), '이어서 실행을 요청했어요. 비용이 큰 단계는 시작하기 전에 다시 물어봐요.'); }
       else if (act === 'toggle') { const lane = el.dataset.lane; if (state.open.has(lane)) state.open.delete(lane); else state.open.add(lane); render(); }
       else if (act === 'review') { state.batch = null; state.opener = el; state.review = { gate: el.dataset.gate, stage: el.dataset.stage || (state.graph.byGate.get(el.dataset.gate) || {}).stage, readonly: el.dataset.readonly === '1' }; state.sel = state.review.stage; render(); }
@@ -2281,6 +2387,7 @@
         global.location.hash = '#c/' + encodeURIComponent(el.value);
       } else if (el.matches('[data-target]')) { state.target = el.value; render(); }
       else if (el.matches('[data-ov-gate]')) { state.ov.gate = el.value; render(); }
+      else if (el.name === 'videoTierPick' && state.video) { state.video.tier = el.value; render(); const r0 = doc.querySelector('[name="videoTierPick"][value="' + el.value + '"]'); if (r0) r0.focus(); }
     }
     function onSubmit(event) {
       if (event.target.matches('[data-form]')) { event.preventDefault(); create(event.target); }
@@ -2383,7 +2490,7 @@
     };
   }
 
-  const pure = { since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, s8cName, chatHref, isChatReady, statusOf, STATUS_LABEL, goalStages, goalOf, goalView, nameLabels, labelOf, autoSlug, splitAttempts, MODE_LABEL, MARK, mount };
+  const pure = { since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, s8cName, chatHref, isChatReady, statusOf, STATUS_LABEL, goalStages, goalOf, goalView, nameLabels, labelOf, autoSlug, splitAttempts, MODE_LABEL, MARK, VIDEO_TIERS, tierOf, tierName, tierCardsHTML, videoText, videoTone, canMakeVideo, readyPhotos, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = pure;
   if (global) global.FactoryFlow = pure;
 })(typeof window !== 'undefined' ? window : null);

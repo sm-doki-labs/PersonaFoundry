@@ -620,3 +620,32 @@ body.fl{font-family:var(--fd-font);font-size:var(--fd-fs-3);line-height:1.5;lett
 @container canvas (max-width:760px){
   .fl-grid.tw.goal{grid-template-columns:minmax(0,1fr);grid-template-areas:var(--goal-stack)}
 }
+/* 영상 등급 카드(계획 4차 약속 5). 원문 화면과 진행 화면의 영상 만들기가 같은 카드를 쓴다. 개수는 쓰지 않고 시간·비용을 네 칸으로 견준다. */
+.vt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px}
+.vt-opt{position:relative;display:flex;padding:10px 12px;border:1px solid var(--fd-line);border-radius:var(--fd-r-3);background:var(--fd-bg-surface);cursor:pointer;transition:border-color var(--fd-dur-1),background var(--fd-dur-1)}
+.vt-opt:hover{background:var(--fd-bg-hover)}
+.vt-opt:has(input:checked){border-color:var(--fd-accent);background:var(--fd-accent-bg)}
+.vt-opt:has(input:focus-visible){outline:2px solid var(--fd-focus);outline-offset:2px}
+.vt-opt:has(input:disabled){cursor:default;opacity:.6}
+.vt-opt input{position:absolute;opacity:0;pointer-events:none}
+.vt-tx{display:flex;flex-direction:column;gap:4px;min-width:0}
+.vt-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.vt-top b{font-weight:600}
+.vt-tx small{color:var(--fd-fg-muted);font-size:var(--fd-fs-2);line-height:1.45;text-wrap:pretty}
+.vt-cost{display:inline-flex;gap:2px;flex:none}
+.vt-cost i{width:4px;height:10px;border-radius:1px;background:var(--fd-slate-6)}
+.vt-cost i.on{background:var(--fd-fg-muted)}
+.vt-opt:has(input:checked) .vt-cost i.on{background:var(--fd-accent)}
+/* 캐릭터 머리·목록의 영상 상태 한 줄 */
+.fd-vid{display:inline-flex;align-items:center;gap:6px;font-size:var(--fd-fs-2);font-weight:400;color:var(--fd-fg-muted);white-space:nowrap;align-self:center}
+.fd-vid .d{width:6px;height:6px;border-radius:50%;flex:none;background:var(--fd-slate-8)}
+.fd-vid.run .d{background:var(--fd-run-solid)}
+.fd-vid.ok .d{background:var(--fd-success-solid)}
+.fd-vid.fail{color:var(--fd-danger-fg)}
+.fd-vid.fail .d{background:var(--fd-danger-solid)}
+/* 대화 가능 카드 안의 영상 만들기 */
+.fl-vid{flex-basis:100%;padding-left:20px;display:flex;flex-direction:column;gap:8px}
+.fl-vid>p{margin:0;color:var(--fd-fg-muted);font-size:var(--fd-fs-2);max-width:62ch}
+.fl-vid .acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.fl-vid .err{color:var(--fd-danger-fg)}
+.fl-vid .btn{text-decoration:none}

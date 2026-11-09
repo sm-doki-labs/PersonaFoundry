@@ -26,8 +26,21 @@ function fakeServer(opts) {
     f.status = ok ? 'ready' : 'problem';
     f.problems = ok ? [] : ["원문에서 '" + f.subjectSpeaker + "'이라는 화자를 찾지 못했어요. 원문에 있는 이름: " + names.join(', ')];
   }
+  // 4차 약속 5: 사진은 fileType "photo"로 같은 줄에 선다. photoRule을 켜면 서버도 영상 등급이 있는데 사진이 없으면 시작을 막는다.
+  const isPhoto = (name) => /\.(jpe?g|png|webp)$/i.test(name);
+  function photoGate() {
+    if (!o.photoRule || !db.draft) return;
+    const need = db.draft.videoTier && db.draft.videoTier !== 'none' && !db.files.some((f) => f.fileType === 'photo' && f.status === 'ready');
+    const msg = '영상을 만들려면 사진이 1장 이상 있어야 해요.';
+    const noText = '대화나 글이 담긴 원문을 하나 이상 올려 주세요.';
+    db.problems = db.problems.filter((p) => p !== msg && p !== noText && p !== '원문 파일을 하나 이상 올려 주세요.');
+    if (!db.files.some((f) => f.fileType === 'text')) db.problems.push(noText);
+    if (need) db.problems.push(msg);
+    db.canFinalize = db.files.some((f) => f.fileType === 'text' && f.status === 'ready') && !need;
+  }
   function view() {
-    return { characterId: 'cf-son', subject: db.draft.subject, usageBasis: db.draft.usageBasis, store: o.store, allowPathImport: o.allowPathImport, files: db.files.map((f) => Object.assign({}, f)), problems: db.problems.slice(), canFinalize: db.canFinalize };
+    photoGate();
+    return { characterId: 'cf-son', subject: db.draft.subject, usageBasis: db.draft.usageBasis, videoTier: db.draft.videoTier, store: o.store, allowPathImport: o.allowPathImport, files: db.files.map((f) => Object.assign({}, f)), problems: db.problems.slice(), canFinalize: db.canFinalize };
   }
   async function fetch(url, init) {
     const method = (init && init.method) || 'GET';
@@ -38,15 +51,21 @@ function fakeServer(opts) {
     if (db.fail[key]) { db.fail[key]--; return json(500, { detail: '잠깐 문제가 있었어요.' }); }
     let m;
     if (method === 'POST' && u.pathname === '/api/sources/drafts') {
-      db.draft = { subject: { displayName: body.displayName, kind: body.subjectKind }, usageBasis: body.usageBasis, chapterTemplate: body.chapterTemplate, modelMode: body.modelMode, autoReview: body.autoReview };
+      db.draft = { subject: { displayName: body.displayName, kind: body.subjectKind }, usageBasis: body.usageBasis, chapterTemplate: body.chapterTemplate, modelMode: body.modelMode, autoReview: body.autoReview, videoTier: body.videoTier };
       return json(200, { characterId: 'cf-son' });
+    }
+    if (method === 'PATCH' && u.pathname === '/api/sources/cf-son/settings') {
+      if (o.noSettings) return json(404, { detail: 'Not Found' });
+      db.draft.videoTier = body.videoTier;
+      return json(200, { characterId: 'cf-son', videoTier: body.videoTier });
     }
     if (method === 'GET' && u.pathname === '/api/sources/cf-son') return db.draft ? json(200, view()) : json(404, { detail: 'Not Found' });
     if (method === 'GET' && u.pathname === '/api/sources/drafts') return db.drafts ? json(200, db.drafts) : json(404, { detail: 'Not Found' });
     if (method === 'GET' && /^\/api\/sources\/[^/]+$/.test(u.pathname)) return json(404, { detail: 'Not Found' });
     if (method === 'POST' && u.pathname === '/api/sources/cf-son/files') {
       const fileId = 'f' + (++db.seq);
-      db.files.push({ fileId, filename: body.filename, size: body.size, sha256: '', status: 'pending', textId: null, kind: null, register: null, subjectSpeaker: null, userSpeaker: null, date: null, sourceUrl: null, problems: [] });
+      if (db.finalized && !isPhoto(body.filename)) return json(409, { detail: '이미 만들기를 시작했어요.' });
+      db.files.push({ fileId, filename: body.filename, size: body.size, sha256: '', status: 'pending', fileType: isPhoto(body.filename) ? 'photo' : 'text', textId: null, kind: null, register: null, subjectSpeaker: null, userSpeaker: null, date: null, sourceUrl: null, problems: [] });
       const upload = o.store === 's3'
         ? { method: 'PUT', url: 'https://bucket.s3.ap-northeast-2.amazonaws.com/sources/cf-son/' + fileId + '?X-Amz-Signature=abc', headers: { 'Content-Type': body.contentType } }
         : { method: 'PUT', url: '/api/sources/cf-son/files/' + fileId + '/content', headers: { 'Content-Type': 'application/octet-stream' } };
@@ -58,10 +77,12 @@ function fakeServer(opts) {
     }
     if ((m = /^\/api\/sources\/cf-son\/files\/(f\d+)\/complete$/.exec(u.pathname)) && method === 'POST') {
       const f = db.files.find((x) => x.fileId === m[1]);
+      if (f.fileType === 'photo' && Object.keys(body || {}).length) return json(422, { detail: '사진에는 화자 정보를 넣지 않아도 돼요.' });
       Object.assign(f, body, { sha256: 'h' + m[1] });
-      check(f);
+      if (f.fileType === 'photo') { f.status = 'ready'; f.problems = []; } else check(f);
       db.canFinalize = true;
       db.problems = [];
+      photoGate();
       return json(200, Object.assign({}, f));
     }
     if ((m = /^\/api\/sources\/cf-son\/files\/(f\d+)$/.exec(u.pathname))) {
@@ -69,7 +90,7 @@ function fakeServer(opts) {
       if (method === 'PATCH') { Object.assign(f, body); check(f); return json(200, Object.assign({}, f)); }
       if (method === 'DELETE') { db.files = db.files.filter((x) => x !== f); if (!db.files.length) { db.canFinalize = false; db.problems = ['원문 파일을 하나 이상 올려 주세요.']; } return { ok: true, status: 204, json: async () => null }; }
     }
-    if (method === 'POST' && u.pathname === '/api/sources/cf-son/finalize') return json(200, { jobId: 'job-1' });
+    if (method === 'POST' && u.pathname === '/api/sources/cf-son/finalize') { db.finalized = true; return json(200, { jobId: 'job-1' }); }
     if (method === 'GET' && u.pathname === '/api/characters/cf-son') return json(200, Object.assign({ id: 'cf-son', origin: 'SOURCE', modelMode: db.draft && db.draft.modelMode, autoReview: db.draft && db.draft.autoReview, progress: { done: db.done || 0, total: 12 }, pendingGates: [], stages: [], job: (db.done || 0) < 12 ? { id: 'job-1' } : null }, db.detail || {}));
     if (method === 'GET' && u.pathname === '/api/characters/cf-son/chat/meta') return db.noChat ? json(404, { detail: 'Not Found' }) : json(200, { characterId: 'cf-son', ready: !!db.chatReady, reason: db.chatReady ? '' : '프롬프트를 아직 만들고 있어요.' });
     if (method === 'DELETE' && u.pathname === '/api/sources/cf-son') { db.draft = null; db.files = []; return { ok: true, status: 204, json: async () => null }; }
@@ -115,7 +136,10 @@ test('text ids are suggested from the file name, fall back to kind-number, and n
   assert.match(S.suggestTextId('2024.txt', 'ARTICLE', []), /^article-2024$/);
   assert.equal(S.textIdProblem('ok_id-1'), null);
   assert.ok(S.textIdProblem('한글'));
-  assert.ok(S.checkFile(file('photo.png')));
+  assert.ok(S.checkFile(file('clip.mp4')));
+  assert.ok(S.checkFile(file('photo.gif')), 'only jpg, png and webp photos are taken');
+  assert.equal(S.checkFile(file('face.png', 5000, 'image/png')), null, 'photos are accepted for the video step');
+  assert.match(S.checkFile(file('face.jpg', S.PHOTO_MAX_BYTES + 1)), /15MB/);
   assert.ok(S.checkFile(file('big.txt', S.MAX_BYTES + 1)));
   assert.equal(S.checkFile(file('a.vtt')), null);
 });
@@ -123,7 +147,7 @@ test('text ids are suggested from the file name, fall back to kind-number, and n
 test('local store: draft, then files → PUT with cookies to our server → complete with the suggested meta', async () => {
   const server = fakeServer();
   const intake = await ready(server);
-  assert.deepEqual(server.calls[0].body, { displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', usageBasis: { scope: '최종 발표 시연', notes: '공개 인터뷰만' }, knownFacts: { age: '34세', gender: '남성', job: '축구선수', background: '' }, modelMode: 'PROMPT_ONLY', autoReview: true });
+  assert.deepEqual(server.calls[0].body, { displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', usageBasis: { scope: '최종 발표 시연', notes: '공개 인터뷰만' }, knownFacts: { age: '34세', gender: '남성', job: '축구선수', background: '' }, modelMode: 'PROMPT_ONLY', autoReview: true, videoTier: 'none' });
   server.calls.length = 0;
   intake.addFiles([file('KakaoTalk_son.txt', 3000)]);
   await settle();
@@ -190,10 +214,10 @@ test('rejected files never reach the server and do not block the start', async (
   const server = fakeServer();
   const intake = await ready(server);
   server.calls.length = 0;
-  intake.addFiles([file('photo.png'), file('ok.txt')]);
+  intake.addFiles([file('clip.mp4'), file('ok.txt')]);
   await settle();
-  assert.ok(!server.calls.some((c) => c.body && c.body.filename === 'photo.png'));
-  const bad = intake.items().find((i) => i.filename === 'photo.png');
+  assert.ok(!server.calls.some((c) => c.body && c.body.filename === 'clip.mp4'));
+  const bad = intake.items().find((i) => i.filename === 'clip.mp4');
   assert.equal(bad.status, '받을 수 없는 파일');
   assert.equal(intake.startState().ready, true);
 });
@@ -310,7 +334,7 @@ test('a draft with only a memo sends the team-internal scope, and carries the mo
   assert.deepEqual(body.usageBasis, { scope: S.DEFAULT_SCOPE, notes: '발표용' });
   assert.equal(body.modelMode, 'TRAIN');
   assert.equal(body.autoReview, false);
-  assert.deepEqual(intake.settings(), { modelMode: 'TRAIN', autoReview: false }, 'the summary shows what the server holds');
+  assert.deepEqual(intake.settings(), { modelMode: 'TRAIN', autoReview: false, videoTier: 'none' }, 'the summary shows what the server holds');
 
   const other = fakeServer();
   const b = S.createIntake({ fetch: other.fetch, origin: ORIGIN, XHR: null });
@@ -506,3 +530,179 @@ test('file cards hide the internal text id, the path import is folded under 고�
   assert.ok(html.includes('data-resume') && html.includes('data-title') && html.includes('data-crumb'));
   assert.ok(!/대화 테스트/.test(html + js), 'the chat page is called 대화해 보기 everywhere');
 });
+
+// ---- 4차 약속 5: 영상 등급과 사진 ----
+async function tierDraft(server, videoTier) {
+  const intake = S.createIntake({ fetch: server.fetch, origin: ORIGIN, XHR: null });
+  await intake.createDraft({ displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', age: '34세', gender: '남성', job: '축구선수', videoTier });
+  return intake;
+}
+const photo = (name, size) => file(name || 'face.jpg', size == null ? 5000 : size, 'image/jpeg');
+
+test('five video tiers with plain names, no clip counts, and the same cards on both screens', () => {
+  assert.deepEqual(S.VIDEO_TIERS.map((t) => t[0]), ['none', 'light', 'standard', 'pro', 'max']);
+  assert.deepEqual(S.VIDEO_TIERS.map((t) => t[1]), ['영상 없이', '라이트', '스탠다드', '프로', '맥스']);
+  const html = S.tierCardsHTML('videoTier', 'none');
+  const visible = html.replace(/<[^>]+>/g, ' ');
+  assert.ok(!/\d/.test(visible), 'no numbers on the cards');
+  assert.ok(!/\d+\s*개|클립/.test(html), 'no clip counts anywhere, not even in labels');
+  assert.equal((html.match(/type="radio"/g) || []).length, 5);
+  assert.match(html, /value="none" checked/, 'no video is the default');
+  assert.match(visible, /첫 장면만, 기본 감정으로 가장 빨리 확인해요/);
+  assert.match(visible, /가장 오래 걸리고 비용도 가장 커요/);
+  assert.ok(!S.tierCardsHTML('x', 'light', { paidOnly: true }).includes('value="none"'));
+  assert.equal(S.tierOf('ultra'), 'none');
+  const Flow = require('../shared/flow.js');
+  assert.deepEqual(Flow.VIDEO_TIERS, S.VIDEO_TIERS, 'the factory screen uses the same table');
+  assert.equal(Flow.tierCardsHTML('videoTierPick', 'pro', { paidOnly: true }), S.tierCardsHTML('videoTierPick', 'pro', { paidOnly: true }), 'and the same card markup');
+});
+
+test('the 영상 section sits after the model mode with a cost note, and the summary can change it before the start', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'sources.html'), 'utf8');
+  const mode = html.indexOf('name="modelMode" value="TRAIN"');
+  const tier = html.indexOf('data-tier-cards');
+  assert.ok(mode > 0 && tier > mode && tier < html.indexOf('class="src-switch"'), 'after 모델 준비 방식, before the auto-run switch');
+  assert.match(html, /<legend>영상<\/legend>/);
+  assert.match(html, /영상 단계는 비용이 들어요/);
+  assert.ok(html.includes('data-sum-video') && html.includes('data-act="tier-edit"') && html.includes('data-tier-edit'));
+  assert.match(html, /영상용 사진/);
+  assert.match(html, /얼굴이 잘 보이는 사진 1장 이상/);
+  assert.match(html, /data-photo-picker multiple accept="[^"]*\.webp/);
+});
+
+test('a chosen tier goes with the draft; photos use the same upload and the start waits for one ready photo', async () => {
+  const server = fakeServer();
+  const intake = await tierDraft(server, 'light');
+  assert.equal(server.calls[0].body.videoTier, 'light');
+  assert.equal(intake.settings().videoTier, 'light');
+  intake.addFiles([file('interview.txt')]);
+  await settle();
+  let st = intake.startState();
+  assert.equal(st.ready, false);
+  assert.ok(st.needPhoto);
+  assert.ok(st.reasons.some((x) => /얼굴이 잘 보이는 사진을 1장 이상/.test(x)), st.reasons.join(' / '));
+  server.calls.length = 0;
+  intake.addFiles([photo('face.jpg')]);
+  assert.equal(intake.photoItems()[0].tone, 'run', 'the photo is on its way');
+  assert.equal(intake.startState().ready, false, 'not while the photo is still going up');
+  await settle();
+  assert.deepEqual(seq(server.calls).filter((s) => !s.includes('/api/characters/')), ['POST /api/sources/cf-son/files', 'PUT /api/sources/cf-son/files/f2/content', 'POST /api/sources/cf-son/files/f2/complete', 'GET /api/sources/cf-son'], 'no PATCH: photos have no fields to fix');
+  assert.equal(server.calls[0].body.contentType, 'image/jpeg');
+  assert.deepEqual(server.calls[2].body, {}, 'the photo check goes with an empty body');
+  const photos = intake.photoItems();
+  assert.equal(photos.length, 1);
+  assert.equal(photos[0].status, '준비됐어요');
+  assert.deepEqual(intake.items().map((i) => i.filename), ['interview.txt'], 'photos are not listed as source texts');
+  st = intake.startState();
+  assert.equal(st.ready, true, st.reasons.join(' / '));
+  await intake.finalize();
+  assert.ok(server.calls.some((c) => c.path === '/api/sources/cf-son/finalize'));
+});
+
+test('a photo alone is not a source text, and a server photo rule is shown once in its own words', async () => {
+  const server = fakeServer({ photoRule: true });
+  const intake = await tierDraft(server, 'pro');
+  intake.addFiles([photo('face.webp')]);
+  await settle();
+  assert.deepEqual(intake.startState().reasons.filter((x) => /원문/.test(x)), ['대화나 글이 담긴 원문을 하나 이상 올려 주세요.'], 'a photo alone is not a source text, said once');
+  intake.removeFile(intake.photoItems()[0].key);
+  await settle();
+  intake.addFiles([file('interview.txt')]);
+  await settle();
+  const reasons = intake.startState().reasons;
+  assert.deepEqual(reasons.filter((x) => /사진/.test(x)), ['영상을 만들려면 사진이 1장 이상 있어야 해요.'], 'no second sentence saying the same thing');
+});
+
+test('the photo box refuses other files, big photos stay out, and photos can still be added after the start', async () => {
+  const server = fakeServer();
+  const intake = await tierDraft(server, 'standard');
+  intake.addFiles([file('notes.txt'), photo('huge.jpg', S.PHOTO_MAX_BYTES + 1)], { photoOnly: true });
+  const refused = intake.photoItems();
+  assert.deepEqual(refused.map((p) => p.status), ['받을 수 없는 사진', '받을 수 없는 사진']);
+  assert.match(refused[0].problems[0], /jpg, png, webp/);
+  assert.match(refused[1].problems[0], /15MB/);
+  assert.equal(intake.items().length, 0, 'a text picked in the photo box does not become a source');
+  refused.forEach((p) => intake.dismiss(p.key));
+  intake.addFiles([file('interview.txt'), photo('face.png')]);
+  await settle();
+  await intake.finalize();
+  server.calls.length = 0;
+  intake.addFiles([file('more.txt'), photo('second.jpg')]);
+  await settle();
+  assert.deepEqual(server.calls.filter((c) => c.method === 'POST' && c.path.endsWith('/files')).map((c) => c.body.filename), ['second.jpg'], 'texts are locked after the start, photos are not');
+  assert.equal(intake.photoItems().length, 2);
+  assert.ok(intake.photoItems().every((p) => !p.removable), 'photos already in use cannot be removed after the start');
+});
+
+test('the tier can be changed before the start, and an older server says so plainly', async () => {
+  const server = fakeServer();
+  const intake = await tierDraft(server, 'none');
+  assert.equal(await intake.setTier('pro'), true);
+  const call = server.calls.find((c) => c.method === 'PATCH');
+  assert.equal(call.path, '/api/sources/cf-son/settings');
+  assert.deepEqual(call.body, { videoTier: 'pro' });
+  assert.equal(intake.settings().videoTier, 'pro');
+  const old = fakeServer({ noSettings: true });
+  const b = await tierDraft(old, 'none');
+  assert.equal(await b.setTier('light'), false);
+  assert.equal(b.state.error, '이 서버에서는 아직 영상 등급을 바꿀 수 없어요.');
+  assert.equal(b.settings().videoTier, 'none');
+});
+
+test('after the start the card shows chat first, then "영상 만드는 중 · 라이트", then a chat link that mentions video', async () => {
+  const before = S.doneView({ status: 'running', statusLabel: '만드는 중', videoTier: 'light', videoStatus: 'none' }, { ready: false }, { auto: true, tier: 'light' });
+  assert.equal(before.ready, false);
+  assert.equal(before.video.show, false, 'no video line until chat works');
+  assert.match(before.body, /영상은 대화가 된 뒤에 이어서 만들어요/);
+  const making = S.doneView({ chatReady: true, videoTier: 'light', videoStatus: 'making' }, { ready: true }, { tier: 'light' });
+  assert.equal(making.title, '대화 가능');
+  assert.deepEqual(making.video, { show: true, text: '영상 만드는 중 · 라이트', tone: 'run', making: true });
+  assert.equal(making.chatLabel, '대화해 보기');
+  assert.match(making.body, /대화는 지금 해 볼 수 있어요/);
+  const waiting = S.doneView({ chatReady: true, videoTier: 'light', videoStatus: 'none' }, null, {});
+  assert.equal(waiting.video.text, '영상 만드는 중 · 라이트', 'the server has not flipped to making yet, the line already says so');
+  const done = S.doneView({ chatReady: true, videoTier: 'light', videoStatus: 'ready' }, null, {});
+  assert.equal(done.chatLabel, '영상과 함께 대화해 보기');
+  assert.match(done.body, /영상까지 다 만들었어요/);
+  assert.equal(done.video.tone, 'ok');
+  const failed = S.doneView({ chatReady: true, videoTier: 'max', videoStatus: 'failed' }, null, {});
+  assert.equal(failed.chatLabel, '대화해 보기');
+  assert.match(failed.body, /영상은 만들지 못했어요/);
+  const none = S.doneView({ chatReady: true, videoTier: 'none', videoStatus: 'none' }, null, {});
+  assert.equal(none.video.show, false);
+  assert.equal(none.body, '');
+  [before, making, done, failed].forEach((v) => assert.ok(!/\d+\s*개/.test(v.body + v.video.text), 'no counts'));
+});
+
+test('progress keeps reading until the video is ready or failed, and stops for servers without video fields', async () => {
+  const server = fakeServer();
+  const intake = await tierDraft(server, 'light');
+  intake.addFiles([file('interview.txt'), photo()]);
+  await settle();
+  server.db.detail = { status: 'chat_ready', chatReady: true, videoTier: 'light', videoStatus: 'making', videoLabel: '' };
+  server.db.chatReady = true;
+  await intake.finalize();
+  const c = intake.state.character;
+  assert.equal(c.videoTier, 'light');
+  assert.equal(c.videoStatus, 'making');
+  assert.equal(S.wantsPoll(intake.state), true);
+  server.db.detail.videoStatus = 'ready';
+  await intake.progress();
+  assert.equal(S.wantsPoll(intake.state), false);
+  server.db.detail = { status: 'chat_ready', chatReady: true };
+  await intake.progress();
+  assert.equal(intake.state.character.videoStatus, null);
+  assert.equal(S.wantsPoll(intake.state), false, 'an older server without videoStatus stops once chat works');
+  assert.equal(S.wantsPoll({ finalized: { jobId: 'j' }, cid: 'x', character: { chatReady: false } }), true);
+});
+
+test('video text names the tier for known states, stays empty without video, and matches the factory screen', () => {
+  assert.equal(S.videoText({ videoTier: 'pro', videoStatus: 'making', videoLabel: '영상을 만들고 있어요' }), '영상 만드는 중 · 프로');
+  assert.equal(S.videoText({ videoTier: 'standard', videoStatus: 'ready' }), '영상 있음 · 스탠다드');
+  assert.equal(S.videoText({ videoTier: 'none', videoStatus: 'none', videoLabel: '아직 영상이 없어요' }), '');
+  assert.equal(S.videoText({}), '');
+  const Flow = require('../shared/flow.js');
+  const cases = [{}, { videoTier: 'light', videoStatus: 'none' }, { videoTier: 'max', videoStatus: 'failed' }, { videoTier: 'pro', videoStatus: 'odd', videoLabel: '확인 중' }];
+  cases.forEach((c) => assert.equal(Flow.videoText(c), S.videoText(c)));
+});
+
