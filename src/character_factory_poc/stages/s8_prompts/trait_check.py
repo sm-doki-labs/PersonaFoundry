@@ -18,6 +18,7 @@ from character_factory_poc.common.config import ProviderConfig
 from character_factory_poc.common.ledger import Ledger
 from character_factory_poc.common.schema import validate
 from character_factory_poc.common.store import next_rev
+from character_factory_poc.pipeline.origin import SOURCE, read_origin
 from character_factory_poc.providers.base import ChatRequest, Message, extract_json_object
 from character_factory_poc.providers.openai_compat import OpenAICompatTextModel
 from character_factory_poc.providers.tracked import TrackedTextModel
@@ -232,6 +233,7 @@ def run_trait_check(
     else:
         items = make_items(gen, ledger)
     (out / "items.json").write_text(json.dumps(items, ensure_ascii=False, indent=2), "utf-8")
+    temperature = ctx.config.demo_chat_temperature(read_origin(ctx.character_dir(cid)) == SOURCE)
     for s in range(1, samples + 1) if not rejudge else ():
         for i, it in enumerate(items, 1):
             r = talk.complete(
@@ -241,7 +243,7 @@ def run_trait_check(
                     (Message("system", system), Message("user", it["text"])),
                     f"tc-{i}-s{s}",
                     max_output_tokens=4000,
-                    temperature=0.8,
+                    temperature=temperature,
                 )
             )
             reply = r.text.strip()
