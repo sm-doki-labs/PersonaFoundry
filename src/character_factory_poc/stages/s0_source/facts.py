@@ -122,6 +122,7 @@ class GeminiFactsProvider:
         self.model, self.ledger, self.budget, self.ref = model, ledger, budget, ref
         self.context = context or {}
         self.today = today or date.today()
+        self.timeout_s = 180
 
     def generate(self, prompt, *, search):
         key = os.getenv("GEMINI_API_KEY")
@@ -136,12 +137,20 @@ class GeminiFactsProvider:
         started = time.monotonic()
         ok, usage = False, {}
         try:
-            resp = httpx.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
-                headers={"x-goog-api-key": key},
-                json=payload,
-                timeout=90,
-            )
+            # Gemini 응답 시간이 들쭉날쭉하다(60초를 넘는 때가 있다).
+            # 넉넉히 기다리고, 시간 초과는 한 번 더 보낸다.
+            for attempt in (1, 2):
+                try:
+                    resp = httpx.post(
+                        f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent",
+                        headers={"x-goog-api-key": key},
+                        json=payload,
+                        timeout=self.timeout_s,
+                    )
+                    break
+                except httpx.TimeoutException:
+                    if attempt == 2:
+                        raise FactoryError("Gemini 사실 수집 응답이 너무 늦다") from None
             if not resp.is_success:
                 raise FactoryError(f"Gemini 사실 수집 실패(HTTP {resp.status_code})")
             data = resp.json()
@@ -325,11 +334,19 @@ def collect(provider: FactsProvider, rows, corpus, held_ids, *, count=10, chars=
             if q:
                 dialogue.append({k: q[k] for k in ("msgId", "speaker", "text")})
             dialogue.append({k: r[k] for k in ("msgId", "speaker", "text")})
-    proposals = provider.propose(
-        [dict(factId=f.factId, text=f.line(), candidates=views.get(f.factId, [])) for f in items]
-        + [dict(factId="사적인 질문", candidates=deflect)],
-        dialogue,
-    )
+    try:
+        proposals = provider.propose(
+            [
+                dict(factId=f.factId, text=f.line(), candidates=views.get(f.factId, []))
+                for f in items
+            ]
+            + [dict(factId="사적인 질문", candidates=deflect)],
+            dialogue,
+        )
+    except (FactoryError, httpx.HTTPError, json.JSONDecodeError):
+        # 본인 발화 대조가 실패해도 사실 목록은 쓴다.
+        # 본인 시점 줄과 원문 넘기는 말만 빠지고 기본 문장을 쓴다.
+        proposals = {"views": [], "deflections": []}
     if not isinstance(proposals, dict) or any(
         not isinstance(proposals.get(k, []), list) for k in ("views", "deflections")
     ):

@@ -321,3 +321,14 @@ def test_recent_and_career_pools_share_the_slots():
     rows += [row("career", "2018-06-27", "독일전"), row("career", "2020-12-17", "푸스카스")]
     kept, _ = facts.rank(rows, 4, 700, today=date(2026, 11, 10))
     assert [f.text for f in kept] == ["최근6", "독일전", "최근5", "푸스카스"]
+
+
+def test_quote_step_failure_keeps_facts():
+    class Broken(facts.FakeFactsProvider):
+        def propose(self, items, corpus):
+            raise facts.FactoryError("Gemini 사실 수집 응답이 너무 늦다")
+
+    rows = [dict(msgId="a", speaker="SUBJECT", text="마지막 무대가 좋았어요")]
+    doc = facts.collect(Broken(), [fact()], rows, set())
+    assert len(doc.items) == 1 and doc.items[0].selfView is None
+    assert doc.phrases()[0] == "그런 얘기는 따로 안 하고 있어요"
