@@ -76,3 +76,36 @@
 4. 결정 기록 D-0150~ 과 PR.
 5. AWS 적용은 위 1~3이 끝난 뒤.
 
+
+## 2차: 팀 도구로 다듬기와 대화 테스트 (2026-11-10)
+
+사용자 지시: "대화는 생성 이후에 해볼 수 있게, 완성되면 테스트해 볼 수 있는 페이지", "동의나 승인 같은 귀찮은 것들은 스킵(팀 3명 내부 도구)", "나머지는 병렬로 구축해서 연결".
+
+| 묶음 | 브랜치 | 쓰기 경계 |
+|---|---|---|
+| F 대화 백엔드 | codex/oc2-chat-api | web/demo_chat.py(새), common/demo_chat.py 또는 stages/s8_prompts/demo_chat.py(새), resources/demo-scenarios-v1.json(새), web/app.py(라우트 설치 한 줄), web/gate_items.py(G6 표본·추론 특질 항목만), deploy/factory.server.toml([providers.demo_chat]만), factory.example.toml([providers.demo_chat]만), tests/test_demo_chat*.py |
+| G 흐름 백엔드 | codex/oc2-flow | pipeline/graph.py, pipeline/orchestrator.py, pipeline/approve.py(자동 진행 기록만), web/jobs.py, web/sources.py, contracts/source.py(사용 근거 선택화), stages/s0_source/precheck.py·run.py(사용 근거 잠금만), stages/s8_prompts/chapter_start.py(단계 실행 연결만), web/reads.py(modelMode·autoReview 노출만), tests/test_oc2_flow*.py |
+| H 대화 화면 | codex/oc2-chat-ui | studio/chat.html(새), studio/shared/chat.js·chat.css(새), studio/tests/chat*.cjs(새), web/app.py 화면 허용 목록에 chat.html 한 줄 |
+| I 검토·생성 화면 | codex/oc2-review-ui | src/character_factory_poc/web/static/shared/gate.js·gate*.css(G0 사실·원문 표, G6 표본·추론 특질), studio/sources.html·shared/sources.js·sources.css, studio/shared/flow.js·flow.css(대화 테스트 진입, 사이드바 갈래 표시, 이름 통일), studio/help.html, studio/tests/*.cjs |
+
+### 약속 1. 대화 API (F가 만들고 H·I가 부른다)
+
+- GET /api/characters/{cid}/chat/meta → {characterId, name, origin, ready, reason, promptRev, chapterRev, model:{via, model}, temperature, scenarios:[{id, title, turns:[str]}], samples:[{scenarioId, title, turns:[{user, reply}]}]}
+  - ready는 S8 프롬프트와 S8c 챕터 시작 설정이 모두 있을 때 true. 아니면 reason에 쉬운 한국어 이유.
+  - scenarios는 resources/demo-scenarios-v1.json(인물에 매이지 않는 일반 시나리오: 첫인사·일상, 칭찬·장난, 고민, 모르는 것, 사생활)에 캐릭터 폴더의 demo/scenarios.json(있으면, 인물 전용)을 앞에 더한다.
+- POST /api/characters/{cid}/chat 본문 {messages:[{role:"user"|"assistant", content}], via?:"studio"|"vertex"} → {reply, ms, rejected, model}
+  - 시스템 프롬프트 = 최신 S8 long.md + 챕터 시작 ch1(관계·장면·장면 경계, V27-fan과 같은 배치). 메모 걸러내기(common/reply_guard.py)를 쓴다. 온도는 [stages.s8] motif_demo_chat_temperature(기본 0.8).
+  - 대화 모델은 [providers.demo_chat](기본 AI Studio gemini-3.8-flash, GEMINI_API_KEY). via=vertex는 로컬에서만.
+  - 대화 기록은 서버에 저장하지 않는다. 409: 프롬프트 없음.
+- 함수 run_samples(ctx, cid) → s8-chapters/<rev>/samples.json(일반 시나리오마다 한 번). G가 S8c 단계 끝에서 부른다.
+- G6 관문 항목에 samples와 inferredTraits:[{situation, situationKo, behavior, refs:[{msgId, quote}]}]를 싣는다(모티브만).
+
+### 약속 2. 생성 설정 (G가 만들고 I가 부른다)
+
+- POST /api/sources/drafts 본문에 modelMode("PROMPT_ONLY" 기본 | "BIND_EXISTING" | "TRAIN"), autoReview(기본 true)를 더한다. usageBasis는 선택(없으면 scope "팀 내부 사용").
+- autoReview가 true면 오케스트레이터가 G0 승인, G3 첫 후보 선택, G6 승인을 사람 대신 기록하고(reviewer "자동 진행") 계속 돈다. 유료 단계(이미지·영상·학습)는 자동으로 돌리지 않는다.
+- S8c(챕터 시작 설정)를 그래프 단계로 넣는다: 모티브는 s8 뒤, G6 앞에서 자동 실행하고 끝에 run_samples를 부른다(F가 없으면 건너뛴다). 오리지널 그래프는 바꾸지 않는다.
+- 동의(consentBy·consentDate)와 사용 근거 누락은 더 이상 G0을 잠그지 않는다.
+- finalize는 autoReview면 대화 준비(S8c 끝)까지, 아니면 G0까지 작업을 건다.
+- 캐릭터 상세 응답에 modelMode, autoReview를 싣는다. 화면 이름은 PROMPT_ONLY="프롬프트만"으로 통일한다.
+
