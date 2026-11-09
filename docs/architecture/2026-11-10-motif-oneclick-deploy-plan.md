@@ -141,3 +141,33 @@ QA 원문: ~/Documents/Codex/2026-11-07/new-chat/ux-qa/{create,review,chat}/ (�
 - GET /api/sources/drafts → 시작하지 않은 초안 [{characterId, displayName, createdAt, files}] 최신순.
 - 화면 이름은 "대화해 보기"로 통일한다("대화 테스트" 쓰지 않음).
 
+
+
+## 4차: 영상 통화 대화와 영상 등급 (2026-11-10)
+
+사용자 지시: "테스트 대화는 영상도 뽑아서 현행 서비스마냥 대화 중에 적절한 걸 뽑아서 보여주는 식", "영상 개수(5개·20개·60개) 대신 light·standard·pro·max 선택지".
+
+서비스 기준(api-svc, 읽기만): 대기 영상(idle_good/idle_bad)이 돌고, 캐릭터가 한 마디 하면 앱이 POST /followup-clip에 유저 직전 한 마디 + 캐릭터가 방금 한 말을 보낸다. 서버는 감정(emotion) 클립 전부의 use_when을 보고 모델이 상위 3개를 점수와 함께 고르며, 반복 회피 규칙이 최종 결정하고, 딱 맞는 게 없으면 none(대기 유지). 앱은 none이면 옅은 반응(미소·끄덕 류)을 대신 튼다(frontend WEB/src/domain/fallbackClip.ts). 공장 등급은 stages/s6_actions/catalog.py VIDEO_TIERS.
+
+| 묶음 | 브랜치 | 쓰기 경계 |
+|---|---|---|
+| N 영상 만들기 백엔드 | codex/v-make | contracts/source.py(사진 형식만), web/sources.py, pipeline/origin.py, pipeline/orchestrator.py, pipeline/graph.py, web/jobs.py, web/reads.py(영상 필드만), stages/s6_actions/run.py(캐릭터별 등급 읽기만), stages/s2_hero/twin.py·s4*(자동 고르기 연결이 꼭 필요할 때만), tests/test_v_make*.py |
+| O 영상 고르기 백엔드 | codex/v-clip | common/clip_pick.py(새), web/demo_chat.py(clips·clip 라우트), common/demo_chat.py(영상 목록 읽기만), web/app.py(라우트 한 줄), resources/clip-pick-*(새), tests/test_v_clip*.py |
+| P 영상 통화 화면 | codex/v-chat-ui | studio/chat.html·shared/chat.js·chat.css, studio/tests/chat*.cjs |
+| Q 생성·진행 화면 | codex/v-make-ui | studio/sources.html·shared/sources.js·sources.css, studio/shared/flow.js·flow.css, studio/help.html, studio/tests/sources*·flow*·help* |
+
+### 약속 5. 영상 등급과 사진 (N이 만들고 Q가 쓴다)
+
+- 영상 등급 값: "none" | "light" | "standard" | "pro" | "max". 화면 이름은 영상 없이 / 라이트 / 스탠다드 / 프로 / 맥스. 화면에는 개수를 쓰지 않는다.
+- POST /api/sources/drafts 본문에 videoTier(기본 "none")를 더한다. PATCH /api/sources/{cid}/settings 본문 {videoTier}로 시작 전·대화 가능 뒤에도 바꿀 수 있다.
+- 원문 업로드는 사진(.jpg .jpeg .png .webp, 15MB 이하)도 받는다. FileRecord에 fileType: "text" | "photo"를 싣는다. 사진은 출처 묶음 photos로 들어간다. videoTier가 none이 아니면 사진이 1장 이상 있어야 시작할 수 있다(problems에 쉬운 말로).
+- 자동 진행에서 videoTier가 none이 아니면 대화 가능 뒤에도 이어서 기준 사진(G1s 첫 사진), 장면 이미지(G4a·G4b·G4 첫 후보), 동작 영상(G5b 승인)을 등급의 장면만 자동으로 돈다. 등급을 고른 것이 유료 실행 확인을 대신한다. 소개 영상(S5)과 학습은 돌리지 않는다.
+- POST /api/characters/{id}/videos 본문 {videoTier} → 대화 가능한 캐릭터에 영상 만들기를 건다({jobId}).
+- 캐릭터 상세·목록에 videoTier, videoStatus("none" | "making" | "ready" | "failed"), videoLabel(쉬운 말)을 싣는다.
+
+### 약속 6. 대화 중 영상 고르기 (O가 만들고 P가 부른다)
+
+- GET /api/characters/{cid}/chat/clips?chapter=ch1 → {ready, chapter, idle:{good:{clipKey,url}, bad:{clipKey,url}}, emotion:[{clipKey, url, mood, title, useWhen}], special:[...]}. 승인된 S6 영상(최신 승인 판)만 쓴다. 영상이 없으면 ready=false.
+- POST /api/characters/{cid}/chat/clip 본문 {userMessage, replyText, recent:[clipKey], chapter?} → {clip:{clipKey,url,mood,title}|null, kind:"emotion"|"none", mood}. api-svc app/services/character/clip_picker.py의 고르기(상위 3개 점수, 반복 회피, none 허용)를 옮긴다. 모델은 [providers.demo_chat].
+- 화면(P)은 none이면 api-svc 앱과 같은 옅은 반응 대체 규칙(fallbackClip.ts)을 쓴다. 대화 내용은 저장하지 않는다.
+
