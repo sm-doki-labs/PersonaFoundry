@@ -109,3 +109,35 @@
 - finalize는 autoReview면 대화 준비(S8c 끝)까지, 아니면 G0까지 작업을 건다.
 - 캐릭터 상세 응답에 modelMode, autoReview를 싣는다. 화면 이름은 PROMPT_ONLY="프롬프트만"으로 통일한다.
 
+
+
+## 3차: 사용성 QA 반영 (2026-11-10)
+
+QA 원문: ~/Documents/Codex/2026-11-07/new-chat/ux-qa/{create,review,chat}/ (스크린샷). 핵심: 상태가 화면마다 다름(P0: 진행 화면 "대화해 보기" → 대화 화면 막힘), 쓰지 않는 단계·개발 용어 과다, 목록에서 캐릭터를 못 찾음, 원문 화면 스위치 깨짐·개발용 오류, 기록 시트가 결정 화면처럼 보임.
+
+| 묶음 | 브랜치 | 쓰기 경계 |
+|---|---|---|
+| J 상태·목록 백엔드 | codex/qa-api | web/reads.py, web/app.py(라우트만), web/sources.py, web/demo_chat.py, common/demo_chat.py(meta·목록만), pipeline/origin.py(보관 표시만), tests/test_qa_*.py |
+| K 진행 화면 | codex/qa-flow | studio/shared/flow.js·flow.css, studio/factory.html, studio/shared/appbar.js, studio/tests/flow*.cjs |
+| L 검토 기록 화면 | codex/qa-gate | src/character_factory_poc/web/static/shared/gate.js·gate*.css, web/gate_items.py(표시용 필드만), tests/test_web_*gate*.py |
+| M 원문·대화·안내 화면 | codex/qa-pages | studio/sources.html·shared/sources.js·sources.css, studio/chat.html·shared/chat.js·chat.css, studio/help.html, studio/tests/sources*·chat*·help* |
+
+### 약속 3. 캐릭터 상태 (J가 만들고 K·M이 쓴다)
+
+- GET /api/projects의 캐릭터 항목과 GET /api/characters/{id}에 다음을 싣는다.
+  - displayName: 표시 이름. 기획 이름 → 출처 초안의 표시 이름(intake subject.displayName) 순. 둘 다 없을 때만 "이름 미정".
+  - status: draft(원문만 올림, 시작 전) | running | needs_review(사람 결정 대기) | chat_ready | failed | stopped. statusLabel: 시작 전 / 만드는 중 / 확인 필요 / 대화 가능 / 실패 / 멈춤.
+  - chatReady: 대화 화면 meta의 ready와 같은 함수로 계산한다(한 곳에서만 판정).
+  - goal: {label, done, total}. 모티브는 대화 가능까지 필요한 단계만 센다(그 모드의 그래프에서 s0→s3→s7→s8→s8c, 학습 모드면 학습 단계 포함). 오리지널은 지금 계산 그대로.
+  - createdAt(ISO), archived(bool).
+- POST /api/characters/{id}/archive 본문 {archived: bool}. 보관한 캐릭터는 목록 기본 보기에서 숨긴다(지우지 않는다).
+- GET /api/chat/characters → 대화 가능한 캐릭터만 [{characterId, displayName, createdAt, origin}] 최신순.
+- chat/meta가 ready=false일 때: reason은 빠진 것과 할 일을 쉬운 말로("팬 통화 장면이 아직 없어요. 진행 화면에서 만들어 주세요"), running이면 "만드는 중이에요", missing:["prompt"|"scene"], nextHref.
+
+### 약속 4. 원문 받기 (J가 만들고 M이 쓴다)
+
+- complete·PATCH 응답 FileRecord에 detectedSpeakers:[{name, lines}](원문 화자 이름, 줄 수 많은 순)와 suggested:{subjectSpeaker, userSpeaker, kind, register}를 싣는다. 대상 화자를 비워 보내면 서버가 suggested.subjectSpeaker(표시 이름과 가장 비슷하거나 가장 많이 말한 화자)를 쓴다. textId를 비워 보내면 파일 이름으로 만든다(겹치면 뒤에 번호).
+- problems 문구는 해요체 한 문장, 필드 이름 없이 쓴다(예: "원문에서 '손흥민'이라는 화자를 찾지 못했어요. 원문에 있는 이름: 손흥민(진행), 상대").
+- GET /api/sources/drafts → 시작하지 않은 초안 [{characterId, displayName, createdAt, files}] 최신순.
+- 화면 이름은 "대화해 보기"로 통일한다("대화 테스트" 쓰지 않음).
+
