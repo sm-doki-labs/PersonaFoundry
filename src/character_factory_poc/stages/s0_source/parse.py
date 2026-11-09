@@ -12,12 +12,15 @@
 from __future__ import annotations
 
 import csv
+import html
 import io
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
 
-from character_factory_poc.contracts.source import SourcePack, SourceText
+from character_factory_poc.contracts.source import SourcePack, SourceSubject, SourceText, UsageBasis
 
 MEDIA = {
     "사진",
@@ -263,13 +266,63 @@ def split_holdout(msgs: list[Msg], fraction: float) -> tuple[list[Msg], list[Msg
     return [m for m in msgs if m.convId not in held], [m for m in msgs if m.convId in held]
 
 
+def restriction_problems(raw: str) -> list[str]:
+    pattern = r"무단\s*전재|재배포\s*금지|AI\s*학습(?:용|에|을|을 위한)?[^.\n]{0,32}(?:금지|불허)"
+    return [f"원문 이용 제한: {m}" for m in dict.fromkeys(re.findall(pattern, raw, re.I))]
+
+
+def read_source(spec: SourceText, raw: str, subject_name: str) -> list[Msg]:
+    suffix = Path(spec.path).suffix.lower()
+    if suffix in {".srt", ".vtt"}:
+        if spec.kind != "TRANSCRIPT":
+            raise SourceError("자막은 TRANSCRIPT로 등록해야 한다")
+        lines = []
+        for block in re.split(r"\n\s*\n", raw.replace("\r\n", "\n").lstrip("\ufeff")):
+            cue = block.splitlines()
+            timing = next((i for i, line in enumerate(cue[:2]) if "-->" in line), None)
+            if timing is None or block.startswith(("NOTE", "STYLE", "REGION")):
+                continue
+            for offset, line in enumerate(cue[timing + 1 :]):
+                body = re.sub(r"<v(?:\.[^ >]+)?\s+([^>]+)>", r"\1: ", line.strip())
+                body = html.unescape(re.sub(r"<[^>]+>", "", body)).strip()
+                if body:
+                    if offset == 0 and not _SPEAKER_LINE.match(body):
+                        body = f"{spec.subjectSpeaker or subject_name}: {body}"
+                    lines.append(body)
+        raw = "\n".join(lines)
+    elif suffix == ".json":
+        data = json.loads(raw)
+        if isinstance(data, str):
+            raw = data
+        elif isinstance(data, list) and all(isinstance(s, str) for s in data):
+            raw = "\n".join(data)
+        else:
+            raise SourceError("JSON 원문은 문자열 또는 문자열 목록이어야 한다")
+    if spec.kind == "KAKAO_EXPORT":
+        part = read_kakao(spec.textId, raw)
+    elif spec.kind == "ARTICLE":
+        part = read_article(spec.textId, raw, spec.date, subject_name)
+    else:
+        part = read_dialogue(spec.textId, raw, spec.date)
+    if not part:
+        raise SourceError(f"{spec.textId}: 읽은 메시지가 없다(형식 확인)")
+    assign_speakers(part, spec, subject_name)
+    return part
+
+
 def usage_problems(pack: SourcePack) -> list[str]:
     """사용 근거가 비면 G0 승인을 잠근다(D-0120, D-0126)."""
-    basis = pack.usageBasis
-    problems: list[str] = []
+    problems = basis_problems(pack.subject, pack.usageBasis)
+    for spec in pack.texts:
+        problems.extend(restriction_problems(Path(spec.path).read_text("utf-8")))
+    return problems
+
+
+def basis_problems(subject: SourceSubject, basis: UsageBasis) -> list[str]:
+    problems = restriction_problems(basis.notes)
     if not basis.scope.strip():
         problems.append("usageBasis.scope(사용 범위)가 비었다")
-    if pack.subject.kind == "PRIVATE_PERSON":
+    if subject.kind == "PRIVATE_PERSON":
         if not (basis.consentBy or "").strip():
             problems.append("사인(PRIVATE_PERSON)은 usageBasis.consentBy(동의한 사람)가 필요하다")
         if not (basis.consentDate or "").strip():

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -564,7 +565,18 @@ def cmd_run(args) -> int:
     )
     from character_factory_poc.stages.s3_plan.common import new_character
 
-    ctx = Context.load(_root(args), execute=args.execute, max_calls=args.max_calls)
+    root = _root(args)
+    if os.getenv("CFP_SERVER_MODE") == "1":
+        if getattr(args, "source_pack", None):
+            raise SystemExit("서버에서는 --source-pack 대신 출처 화면을 사용한다")
+        server_root = Path(os.getenv("CFP_ROOT") or root).resolve()
+        if args.root == ".":
+            root = server_root
+        paths = [root, root / "runs" / "characters" / args.character_id]
+        paths.extend(Path(v) for v in (args.brief, args.probes, args.ranking, args.seed) if v)
+        if any(not path.resolve().is_relative_to(server_root) for path in paths):
+            raise SystemExit("서버에서는 공장 루트 밖 경로를 사용할 수 없다")
+    ctx = Context.load(root, execute=args.execute, max_calls=args.max_calls)
     opt = RunOptions(
         until=args.until,
         auto_approve=set(args.auto_approve or []),
