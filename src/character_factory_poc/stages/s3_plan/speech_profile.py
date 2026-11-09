@@ -1,16 +1,11 @@
-"""모티브 말버릇 정의(D-0145). 승인 원문의 대상 발화 통계로 대화 프롬프트 말투 칸을 만든다.
-
-말투 예시를 프롬프트에 붙이면 모델이 예시 문장을 옮겨 쓰고 이름이 오른 표지를 과장한다
-(2026-11-09 v4·v5 측정). 여기서는 어미 분포, 담화 표지, 첫마디, 자기 지칭, 답 길이, 웃음 표기,
-받는 말을 세고 그 수치를 말로 풀어 쓴다.
-기사(ARTICLE)는 기자가 어미를 바꾸므로 세지 않는다. 비교 세트는 corpus에 없으므로 섞이지 않는다.
-"""
+"""승인 원문의 말한 자리와 답 길이에 따라 모티브 말투 칸을 만든다."""
 
 from __future__ import annotations
 
 import re
 import statistics
 from collections import Counter
+from itertools import pairwise
 
 SCHEMA = "speech-profile-v1"
 CONVERSATION_KINDS = frozenset({"KAKAO_EXPORT", "TRANSCRIPT"})
@@ -99,7 +94,21 @@ def _rate(count: int, total: int) -> float:
     return round(count / total, 3) if total else 0.0
 
 
-def build_speech_profile(corpus: list[dict], kinds: dict[str, str]) -> dict:
+def _answer_pairs(corpus, kinds):
+    for prev, row in pairwise(corpus):
+        tid = _text_id(row["msgId"])
+        if (
+            row["speaker"] == "SUBJECT"
+            and prev["speaker"] == "USER"
+            and prev.get("convId") == row.get("convId")
+            and _text_id(prev["msgId"]) == tid
+            and kinds.get(tid) != "ARTICLE"
+            and _clean(row["text"])
+        ):
+            yield prev, row
+
+
+def _aggregate(corpus: list[dict], kinds: dict[str, str], *, casual_only: bool = False) -> dict:
     """corpus: 승인 원문(비교 세트 제외). kinds: textId → TextKind."""
     rows = [
         r
@@ -120,19 +129,11 @@ def build_speech_profile(corpus: list[dict], kinds: dict[str, str]) -> dict:
     self_polite = sum(w in SELF_POLITE for w in words)
     self_plain = sum(w in SELF_PLAIN for w in words)
     # 답: 같은 대화에서 상대 말 바로 뒤에 온 대상 발화
-    answers: list[tuple[str, str]] = []
-    prev = None
-    for r in corpus:
-        if (
-            r["speaker"] == "SUBJECT"
-            and prev is not None
-            and prev["speaker"] == "USER"
-            and prev.get("convId") == r.get("convId")
-            and kinds.get(_text_id(r["msgId"])) != "ARTICLE"
-        ):
-            answers.append((kinds.get(_text_id(r["msgId"]), ""), _clean(r["text"])))
-        prev = r
-    talk = [a for k, a in answers if k in CONVERSATION_KINDS]
+    answers = [
+        (kinds.get(_text_id(r["msgId"]), ""), _clean(r["text"]))
+        for _, r in _answer_pairs(corpus, kinds)
+    ]
+    talk = [a for k, a in answers if casual_only or k in CONVERSATION_KINDS]
     scope = "CONVERSATION" if len(talk) >= MIN_ANSWERS else "ALL"
     pool = talk if scope == "CONVERSATION" else [a for _, a in answers]
     lengths = sorted(len(a) for a in pool)
@@ -271,7 +272,7 @@ def _quote_list(items: list[str]) -> str:
 ACKS = ("네", "아", "어", "예", "그렇죠", "맞아요", "진짜요", "아니요", "아니", "응", "어어")
 
 
-def render_voice_definition(profile: dict, summary: str = "") -> list[str]:
+def _legacy_lines(profile: dict, summary: str = "") -> list[str]:
     """말투 칸 문장. 근거가 모자란 항목은 쓰지 않는다. 수치는 '열에 N'으로 풀어 쓴다."""
     lines: list[str] = []
     endings = profile["endings"]
@@ -400,3 +401,224 @@ def _closing() -> str:
         "본인이 밝힌 사실과 말투를 따르고, "
         "원문에 없는 경험이나 사용자와의 공동 기억을 지어내지 않는다."
     )
+
+
+def default_register_fallback(kind: str) -> str:
+    return "CASUAL" if kind in CONVERSATION_KINDS else "FORMAL"
+
+
+def source_registers(texts) -> dict[str, str]:
+    return {
+        t.textId: getattr(t, "register", None) or default_register_fallback(t.kind) for t in texts
+    }
+
+
+DEFAULT_HABIT_WORDS = ("진짜", "그냥", "너무", "정말")
+
+# 고유명사를 모르는 상태에서 사람·장소·상품 이름을 놓치지 않도록,
+# 견본에 한해서는 지시어·부사·일상 술어만으로 이루어진 온전한 답을 고른다.
+_SAMPLE_WORDS = frozenset(
+    (
+        """
+아 어 음 네 예 응 와 아니 아니요 그렇죠 맞아요 그러게요 그럼요 그래요 괜찮아요
+저 저는 저도 제가 나 나는 나도 내가 그게 그건 그거 그거는 이게 이건 이거 이거는
+요즘 요새 요새는 오늘 오늘은 지금 아까 원래 그냥 좀 또 너무 정말 진짜 되게 많이 더 덜
+사실 이렇게 그렇게 저렇게 이 정도는 그래서 근데 그래도 그럼 혹시 안 못 잘 다 왜 뭐
+거 것 거는 건 걸 게 수도 수 있는 없는 있어요 없어요 같아요 같죠 같은데요 같네요
+좋아요 좋아해요 좋죠 좋네요 좋았어요 재밌어요 재밌네요 재밌었습니다 재미있었어요
+감사해요 감사합니다 고마워요 반가워요 궁금해요 어렵죠 어렵네요 쉽죠 되죠 되나요
+그랬어요 그랬는데 했어요 했죠 해요 하는 하고 하죠 하세요 해주세요 보세요 봐보세요
+보셨어요 보지 않나 않나요 나와요 많죠 많아요 모르겠어요 알겠어요 아닐까요 아니에요
+맞아 맞지 그래 그랬어 그랬지 좋아 괜찮아 했어 했지 몰라 모르겠어 알겠어 고마워
+"""
+    ).split()
+)
+
+
+def _samples(answers: list[str]) -> list[str]:
+    pool = []
+    for text in sorted(set(answers)):
+        if not 10 <= len(text) <= 60 or not re.fullmatch(r"[가-힣 .,?!~…ㅋㅎ]+", text):
+            continue
+        words = re.findall(r"[가-힣]+", text)
+        if words and all(w in _SAMPLE_WORDS for w in words):
+            pool.append((text, words[0], _ending(text), words[-1]))
+    chosen, starts, endings, last = [], set(), set(), set()
+    while pool and len(chosen) < 8:
+        item = max(
+            pool,
+            key=lambda x: (
+                int(x[1] not in starts) + int(x[2] not in endings),
+                x[3] not in last,
+                x[0].endswith((".", "?", "!")),
+                -abs(len(x[0]) - 25),
+            ),
+        )
+        text, first, ending, tail = item
+        chosen.append(text)
+        starts.add(first)
+        endings.add(ending)
+        last.add(tail)
+        pool.remove(item)
+    return chosen if len(chosen) >= 6 else []
+
+
+def build_speech_profile(
+    corpus: list[dict],
+    kinds: dict[str, str],
+    registers: dict[str, str] | None = None,
+    model_habit_words: list[str] | None = None,
+) -> dict:
+    """승인 원문만 받는다. 기사와 비교 세트는 어느 자리의 근거에도 넣지 않는다."""
+    profile = _aggregate(corpus, kinds)
+    by_id = {k: (registers or {}).get(k) or default_register_fallback(v) for k, v in kinds.items()}
+    groups = {"FORMAL": [], "CASUAL": []}
+    for row in corpus:
+        tid = _text_id(row["msgId"])
+        if kinds.get(tid) != "ARTICLE" and tid in by_id:
+            groups[by_id[tid]].append(row)
+    casual_rows = groups["CASUAL"]
+    casual = _aggregate(casual_rows, kinds, casual_only=True)
+    raw_answers = [row["text"] for _, row in _answer_pairs(casual_rows, kinds)]
+    answers = [_clean(a) for a in raw_answers if _clean(a)]
+    habits = list(
+        dict.fromkeys(DEFAULT_HABIT_WORDS if model_habit_words is None else model_habit_words)
+    )
+    casual["habitWords"] = habits
+    casual["habitShare"] = _rate(
+        sum(bool(set(_words(a)).intersection(habits)) for a in answers), len(answers)
+    )
+    casual["gunaShare"] = _rate(
+        sum(any(_bare_end(s).endswith("구나") for s in _sentences(a)) for a in answers),
+        len(answers),
+    )
+    # 중앙값을 상한으로 오해하지 않도록 일상 답의 약 3분의 2가 들어오는 길이를 안내한다.
+    casual["typicalChars"] = (
+        sorted(map(len, answers))[2 * (len(answers) - 1) // 3] if answers else 0
+    )
+    profile.update(
+        casual=casual,
+        formal=_aggregate(groups["FORMAL"], kinds),
+        samples=_samples(raw_answers),
+    )
+    return profile
+
+
+def _frequency(share: float) -> str:
+    if 0.25 <= share <= 1 / 3:
+        return "서너 답에 한 번꼴로"
+    return (
+        "거의 매 답에서"
+        if share >= 0.85
+        else (
+            f"답의 {share:.0%} 정도에서" if share > 0.5 else f"{round(1 / share)}개 답에 한 번꼴로"
+        )
+    )
+
+
+def render_voice_definition(profile: dict, summary: str = "") -> list[str]:
+    """일상 답이 충분하면 자리별 지침을 쓴다. 예전 통계와 작은 표본은 종전대로 읽는다."""
+    c = profile.get("casual")
+    if not c or c["answers"]["count"] < MIN_ANSWERS or c["sentences"] < MIN_SENTENCES:
+        return _legacy_lines(profile, summary)
+    f, ans = profile["formal"], c["answers"]
+    lines = []
+    ends = c["endings"]
+    formal_rate = (ends["formal"] + ends["hedgeFormal"]) / c["sentences"]
+    known = sum(ends[n] for n, _, _, p in ENDINGS if p is not None)
+    if known >= MIN_ANSWERS:
+        level = "존댓말" if c["politeShare"] >= 0.8 else "반말" if c["politeShare"] <= 0.2 else ""
+        base = (
+            f"{level}을 기본으로 쓴다." if level else summary.strip() or "존댓말과 반말을 섞는다."
+        )
+        if level == "존댓말" and ends["haeyo"] + ends["jyo"] > ends["formal"] + ends["hedgeFormal"]:
+            base = "해요체로 말한다."
+        if (
+            f["sentences"] >= MIN_SENTENCES
+            and f["endings"]["formal"] + f["endings"]["hedgeFormal"] >= MIN_MARKER_COUNT
+        ):
+            base += " 소감·각오를 맺을 때 하십시오체('-습니다/-ㅂ니다')를 쓴다."
+        lines.append(
+            f"상대높임 등급: {base} 일상 대화에서 하십시오체는 문장의 {formal_rate:.0%} 정도다."
+        )
+    elif summary:
+        lines.append(summary)
+    span = max(10, round(c["typicalChars"] / 10) * 10)
+    brief = "대개 한두 문장, " if ans["atMostTwoSentences"] >= 0.6 else ""
+    lines.append(
+        f"발화 길이: 가벼운 질문에는 {brief}{span}자 안팎으로 답한다."
+        + (
+            " 소감·각오·회상은 생각을 풀어 길게 말한다."
+            if f["longShare"] >= 0.1 and f["subjectMessages"] >= MIN_ANSWERS
+            else ""
+        )
+    )
+    reflective = f if f["hedgeByLength"]["long"]["count"] >= MIN_ANSWERS else c
+    long = reflective["hedgeByLength"]["long"]
+    if long["count"] >= MIN_ANSWERS:
+        conn = [
+            k
+            for k, v in sorted(reflective["connectors"].items(), key=lambda x: -x[1])
+            if v >= MIN_MARKER_COUNT
+        ][:3]
+        if conn:
+            lines.append(f"절 연결: 생각을 길게 풀 때 {_quote_list(conn)} 같은 말로 절을 잇는다.")
+        if long["share"] >= 0.1:
+            lines.append(
+                "완화 표현: 생각이나 느낌을 길게 풀 때 '~것 같아요/~것 같습니다'로 맺는다"
+                f"(긴 발화의 {long['share']:.0%}). 가벼운 답은 바로 맺는다."
+            )
+    fillers = [
+        w
+        for w, n in sorted(c["markerCounts"].items(), key=lambda x: -x[1])
+        if w in FILLERS and w not in c["habitWords"] and n >= MIN_MARKER_COUNT
+    ][:3]
+    short = c["fillerByLength"]["short"]
+    if fillers and short["count"] >= MIN_ANSWERS:
+        lines.append(
+            f"담화 표지: 생각을 고를 때 {_quote_list(fillers)} 같은 말을 끼운다."
+            f" 짧은 답의 군말은 {_count_words(short['avgPerAnswer'])}이다."
+        )
+        if long["count"] >= MIN_ANSWERS:
+            avg = reflective["fillerByLength"]["long"]["avgPerAnswer"]
+            lines[-1] += f" 150자 넘게 풀어 말할 때 군말은 {_count_words(avg)}이다."
+    elif fillers:
+        lines.append(f"담화 표지: 생각을 고를 때 {_quote_list(fillers)} 같은 말을 끼운다.")
+    if c["habitWords"] and not c["habitShare"]:
+        lines.append(f"강조 부사: {_quote_list(c['habitWords'])} 없이 담백하게 말한다.")
+    elif c["habitWords"]:
+        lines.append(
+            f"강조 부사: {_quote_list(c['habitWords'])} 가운데 하나를 골라 "
+            f"{_frequency(c['habitShare'])}, 한 답에 하나까지 쓴다."
+        )
+    lines.append(
+        f"반복: 강조할 때 같은 말을 한 번 더 되풀이한다(일상 발화의 {c['repeatShare']:.0%})."
+        if c["repeatShare"]
+        else "반복: 같은 말은 한 번으로 맺는다."
+    )
+    starts = [
+        (w, n)
+        for w, n in ans["firstWords"].items()
+        if n >= MIN_MARKER_COUNT and w in _SAMPLE_WORDS and w not in c["habitWords"]
+    ][:4]
+    if starts:
+        lines.append(
+            "발화 개시어: "
+            + ", ".join(f"'{w}'({n / ans['count']:.0%})" for w, n in starts)
+            + "처럼 열거나 바로 본론으로 들어간다."
+        )
+    guna = c["gunaShare"]
+    lines.append(
+        "응답 방식: 상대 말을 짧게 받거나 곧바로 답한다. "
+        + (f"'-구나'로 받는 답은 {guna:.0%} 정도다." if guna else "'-구나'로 되받는 일은 드물다.")
+    )
+    lines.append(f"표기: 웃음 표기와 이모티콘은 일상 발화의 {c['laughShare']:.0%} 정도에 쓴다.")
+    lines.append(_closing())
+    if profile["samples"]:
+        lines.extend(
+            [
+                "말의 결 견본: 내용과 소재는 따라 하지 말고 말의 길이와 맺는 방식만 참고한다.",
+                *(f'- "{s}"' for s in profile["samples"]),
+            ]
+        )
+    return lines

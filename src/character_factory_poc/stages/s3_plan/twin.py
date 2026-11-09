@@ -36,6 +36,7 @@ from character_factory_poc.stages.s3_plan.speech_profile import (
     MIN_SENTENCES,
     build_speech_profile,
     render_voice_definition,
+    source_registers,
 )
 
 _ARCS = {
@@ -341,7 +342,7 @@ def _profile_section(profile: dict | None, summary: str) -> str:
     note = (
         "원문 문장이 적어 말투 칸은 아래 말투 요약을 쓴다."
         if profile["sentences"] < MIN_SENTENCES
-        else "말투 칸은 아래 문장으로 들어간다. 말투 예시 문장은 대화 프롬프트에 넣지 않는다."
+        else "말투 칸은 아래 문장으로 들어간다. 일상 답에서 고른 견본이 있으면 함께 보여 준다."
     )
     preview = "\n".join(render_voice_definition(profile, summary))
     return (
@@ -557,7 +558,12 @@ def run_s3_twin(ctx: Context, cid: str) -> Path:
         )
         write_once_json(folder / "variants.json", dump(variants))
         # D-0145: S8 말투 칸과 같은 함수로 계산한다. 비교 세트는 corpus에 없다.
-        profile = build_speech_profile(corpus, kinds)
+        profile = build_speech_profile(
+            corpus,
+            kinds,
+            source_registers(index.texts),
+            ctx.config.stage("s8").get("model_habit_words"),
+        )
         write_once_json(folder / "speech-profile.json", profile)
         write_once_text(folder / "gate-G3.html", _page(plan, source, profile, agg))
         write_manifest(folder)
