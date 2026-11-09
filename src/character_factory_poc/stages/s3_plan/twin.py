@@ -220,9 +220,9 @@ def _check(source: dict, sample: list[dict], guard: list[dict], tendencies: dict
                         )
                     elif enforced and key in TENDENCY_FIELDS and not cells.get(ev.ref):
                         problems.append(
-                            f"{loc}: 서로 다른 자리 {T.MIN_OCCASIONS}곳 이상에서 되풀이된 "
-                            "경향의 답을 근거로 쓴다(tendencies.answerCells에 있는 msgId). "
-                            "한 번 나온 말은 lifeAndTastes 같은 생활 칸에 둔다"
+                            f"{loc}: 주요 경향(자리 {T.MIN_OCCASIONS}곳 이상, 그 상황 답의 "
+                            f"{T.MAIN_SHARE:.0%} 이상)의 답을 근거로 쓴다(tendencies.answerCells에 "
+                            "있는 msgId). 드물게 나온 말은 lifeAndTastes 같은 생활 칸에 둔다"
                         )
                 elif ev.kind == "USER" and key in _FACT_FIELDS:
                     fact = ev.ref.removeprefix("knownFacts.")
@@ -265,15 +265,16 @@ def _tendency_section(agg: dict | None) -> str:
         return ""
     head = (
         f"대상 답 {agg['answers']}개 가운데 {agg['tagged']}개를 상황·반응으로 표시했다. "
-        f"서로 다른 자리(영상·글과 날짜) {agg['minOccasions']}곳 이상에서 나온 반응만 "
-        "경향으로 본다. "
+        f"서로 다른 자리(영상·글과 날짜) {agg['minOccasions']}곳 이상에서, 그 상황 답의 "
+        f"{agg.get('mainShare', T.MAIN_SHARE):.0%} 이상에서 나온 반응만 "
+        "특질로 쓰는 주요 경향으로 본다. "
         "표시는 모델이 했으므로 인용이 반응과 맞는지 함께 본다."
     )
     if not agg["enforced"]:
         head += " 경향 칸이 적어 이번 기획은 경향 묶음 검사를 하지 않았다."
     body = []
     for sit, total in agg["situations"].items():
-        rows = [r for r in agg["rows"] if r["situation"] == sit and r["kind"] == "TENDENCY"][:4]
+        rows = [r for r in agg["rows"] if r["situation"] == sit and T.is_main(r)][:4]
         if not rows:
             continue
         moves = "\n".join(

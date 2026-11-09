@@ -58,6 +58,21 @@ def test_tendency_needs_three_occasions_not_three_answers():
     assert "msgIds" not in json.dumps(view)
 
 
+def test_rare_tendency_is_not_a_main_tendency(monkeypatch):
+    # 자리가 많아도 그 상황 답에서 드물게 나온 반응은 특질로 올리지 않는다.
+    pairs = _pairs([(f"a{i}", f"v{i}@d") for i in range(10)])
+    tags = [
+        {"id": f"a{i}", "situation": "TEAMMATE", "moves": ["OWN_EXPERIENCE"], "evidence": ""}
+        for i in range(10)
+    ]
+    for t in tags[:3]:
+        t["moves"].append("HOLD_LINE")
+    monkeypatch.setattr(T, "MAIN_SHARE", 0.35)
+    rows = {r["cell"]: r for r in T.aggregate(pairs, tags)["rows"]}
+    assert rows["TEAMMATE/HOLD_LINE"]["kind"] == "TENDENCY"
+    assert not rows["TEAMMATE/HOLD_LINE"]["main"] and rows["TEAMMATE/OWN_EXPERIENCE"]["main"]
+
+
 def test_parse_tags_drops_unknown_ids_and_labels():
     raw = {
         "items": [
@@ -95,7 +110,7 @@ def test_s3_binds_traits_to_tendencies_and_reuses_tags(tmp_path, monkeypatch):
     model.add(f"s3:{cid}/pr1/tendencies/0", tags)
     ctx.config.stages["s3t"] = {"max_check_retries": 0}
     # 기본 응답은 세 번째 선택의 근거로 한 번만 나온 답을 쓴다.
-    with pytest.raises(CheckFailed, match="되풀이된 경향"):
+    with pytest.raises(CheckFailed, match="주요 경향"):
         run_s3_twin(ctx, cid)
     first = ctx.character_dir(cid) / "s3-plan/pr1"
     agg = read_json(first / "tendencies.json")
@@ -129,6 +144,8 @@ def test_motif_ledger_needs_tendency_basis_not_an_invented_insult_reaction():
     view = {"tendencies": [{"cell": "TASTE/OWN_EXPERIENCE"}]}
     problems = check_ledger("인물", view)(ledger)
     assert not [p for p in problems if "basis" in p]
+    # 같은 상황의 경향은 trait 하나로 합친다.
+    assert sum("같은 상황(TASTE)" in p for p in problems) == 2
     other = check_ledger("인물", {"tendencies": [{"cell": "PRAISE/ADMIT"}]})(ledger)
     assert sum("basis" in p for p in other) == 3
     assert any("basis" in p for p in check_ledger("인물")(ledger))

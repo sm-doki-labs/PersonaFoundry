@@ -9,8 +9,8 @@
 
 source.sharedSpeechEndings는 승인 원문 전체에서 센 대상 발화의 마지막 종결형 표지 수다. 미분류는 등급을 알 수 없다는 뜻이다. 챕터별로 나뉜 관측이 아니므로 관계가 깊어지면 반말로 바뀐다고 가정하지 않는다. 말투의 구체적인 판단에는 여전히 직접 인용이 필요하다.
 
-tendencies는 승인 원문 전체의 대상 답을 상황 하나와 반응 몇 개로 표시해 센 표다(D-0148). tendencies.tendencies는 서로 다른 자리(영상·글과 날짜) 여러 곳에서 되풀이된 반응이고, share는 그 상황의 답 가운데 그 반응이 나온 비율이다. tendencies.anecdotes는 몇 자리에서만 나온 반응이다.
+tendencies는 승인 원문 전체의 대상 답을 상황 하나와 반응 몇 개로 표시해 센 표다(D-0148). tendencies.tendencies는 서로 다른 자리(영상·글과 날짜) 여러 곳에서 되풀이됐고 그 상황 답의 mainShare 이상에서 나온 주요 경향이며, share는 그 상황의 답 가운데 그 반응이 나온 비율이다. tendencies.minor는 드물게 나오거나 몇 자리에서만 나온 반응이다.
 
 - enforced가 true이면 coreTraits와 choices는 경향에서만 쓴다. 근거 msgId는 tendencies.answerCells에 있는 답이어야 하고, 문장은 그 답이 속한 경향의 반응을 쓴다. 한 상황에 여러 반응이 있으면 share가 큰 반응을 먼저 쓰고, 작은 반응을 그 상황의 대표 행동으로 올리지 않는다.
-- 일화(한 번이나 몇 번만 나온 말)는 lifeAndTastes처럼 생활·취향 칸에만 쓴다. 일화 하나를 평소 행동이나 상황별 첫 행동으로 일반화하지 않는다.
+- minor와 한 번만 나온 말은 lifeAndTastes처럼 생활·취향 칸에만 쓴다. 드문 반응 하나를 평소 행동이나 상황별 첫 행동으로 일반화하지 않는다.
 - thinSituations의 상황은 원문 근거가 적다. 그 상황의 반응을 choices나 contrastTrait로 지어내지 않고 비워 둔다. 사람이 G3에서 정한다.

@@ -52,6 +52,9 @@ MOVES = {
 MIN_OCCASIONS = 3
 #: 경향 칸이 이만큼 있어야 기획·장부의 특질을 경향에 묶는다. 원문이 적으면 G3에 그 사실만 보인다.
 MIN_TENDENCY_CELLS = 3
+#: 특질로 쓰는 주요 경향: 그 상황 답 가운데 이 비율 이상에서 나온 경향. 드문 경향을 특질로 올리면
+#: 그 상황의 답이 모두 그 반응이 된다(손흥민 v5: 동료 답 5%의 '선 긋기'가 동료 질문 5개 중 4개).
+MAIN_SHARE = 0.15
 #: 상황의 답이 이보다 적으면 G3에 원문 근거가 적은 상황으로 보인다.
 THIN_SITUATION = 10
 BATCH = 40
@@ -197,36 +200,44 @@ def aggregate(pairs: list[dict], tags: Iterable[dict]) -> dict:
                 "occasions": len(occasions),
                 "years": [years[0], years[-1]] if years else [],
                 "kind": "TENDENCY" if len(occasions) >= MIN_OCCASIONS else "ANECDOTE",
+                "main": len(occasions) >= MIN_OCCASIONS
+                and len(items) / sit_total[sit] >= MAIN_SHARE,
                 "examples": [{"msgId": i["msgId"], "quote": i["evidence"]} for i in ev[::step][:3]],
                 "msgIds": sorted(i["msgId"] for i in items),
             }
         )
     rows.sort(key=lambda r: (-sit_total[r["situation"]], r["situation"], -r["answers"], r["move"]))
-    tendency = sum(r["kind"] == "TENDENCY" for r in rows)
+    main = sum(r["main"] for r in rows)
     thin = [
         s
         for s in SITUATIONS
         if s != "OTHER"
         and (
             sit_total.get(s, 0) < THIN_SITUATION
-            or not any(r["situation"] == s and r["kind"] == "TENDENCY" for r in rows)
+            or not any(r["situation"] == s and r["main"] for r in rows)
         )
     ]
     return {
         "schemaVersion": SCHEMA,
         "promptSha": prompt_sha(),
         "minOccasions": MIN_OCCASIONS,
+        "mainShare": MAIN_SHARE,
         "answers": len(pairs),
         "tagged": len(tags),
         "situations": dict(sorted(sit_total.items(), key=lambda x: -x[1])),
         "thinSituations": thin,
-        "enforced": tendency >= MIN_TENDENCY_CELLS,
+        "enforced": main >= MIN_TENDENCY_CELLS,
         "rows": rows,
     }
 
 
+def is_main(r: dict) -> bool:
+    # mainShare 이전에 쓴 tendencies.json도 같은 기준으로 읽는다.
+    return r.get("main", r["kind"] == "TENDENCY" and r["share"] >= MAIN_SHARE)
+
+
 def agent_view(agg: dict) -> dict:
-    """에이전트 입력: 경향 칸은 예시와 함께, 일화 칸은 이름과 수만 준다. msgId 목록은 뺀다."""
+    """에이전트 입력: 주요 경향은 예시와 함께, 나머지는 이름과 수만 준다. msgId 목록은 뺀다."""
 
     def label(r: dict) -> str:
         return f"{SITUATIONS[r['situation']]} → {MOVES[r['move']]}"
@@ -236,6 +247,7 @@ def agent_view(agg: dict) -> dict:
         "situations": agg["situations"],
         "thinSituations": agg["thinSituations"],
         "enforced": agg["enforced"],
+        "mainShare": MAIN_SHARE,
         "tendencies": [
             {
                 "cell": r["cell"],
@@ -247,21 +259,21 @@ def agent_view(agg: dict) -> dict:
                 "examples": r["examples"],
             }
             for r in agg["rows"]
-            if r["kind"] == "TENDENCY"
+            if is_main(r)
         ],
-        "anecdotes": [
-            {"cell": r["cell"], "meaning": label(r), "answers": r["answers"]}
+        "minor": [
+            {"cell": r["cell"], "meaning": label(r), "answers": r["answers"], "share": r["share"]}
             for r in agg["rows"]
-            if r["kind"] == "ANECDOTE"
+            if not is_main(r)
         ],
     }
 
 
 def tendency_cells(agg: dict) -> dict[str, list[str]]:
-    """msgId → 그 답이 속한 경향 칸들."""
+    """msgId → 그 답이 속한 주요 경향 칸들."""
     out: dict[str, list[str]] = defaultdict(list)
     for r in agg["rows"]:
-        if r["kind"] == "TENDENCY":
+        if is_main(r):
             for m in r["msgIds"]:
                 out[m].append(r["cell"])
     return dict(out)
@@ -269,7 +281,7 @@ def tendency_cells(agg: dict) -> dict[str, list[str]]:
 
 def example_ids(agg: dict) -> list[str]:
     """경향 예시 msgId. 칸마다 첫 예시부터, 답이 많은 칸부터 돌아가며 늘어놓는다."""
-    rows = sorted((r for r in agg["rows"] if r["kind"] == "TENDENCY"), key=lambda r: -r["answers"])
+    rows = sorted((r for r in agg["rows"] if is_main(r)), key=lambda r: -r["answers"])
     out: list[str] = []
     for k in range(3):
         for r in rows:

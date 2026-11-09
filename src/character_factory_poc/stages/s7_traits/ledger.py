@@ -67,13 +67,22 @@ def check_ledger(name: str, tendencies: dict | None = None):
     def _check(ledger: TraitLedger) -> list[str]:
         problems: list[str] = []
         if motif:
-            # D-0148: 모티브의 조건부 특질은 원문에서 되풀이된 경향에서만 고른다.
+            # D-0148: 모티브의 조건부 특질은 원문의 주요 경향에서만 고르고, 한 상황에 하나만 둔다.
+            seen: dict[str, str] = {}
             for t in ledger.traits:
                 if t.basis not in cells:
                     problems.append(
                         f"{t.id}.basis: tendencies.tendencies의 cell 가운데 하나를 쓴다. "
-                        "원문에서 되풀이되지 않은 반응은 조건부 특질로 만들지 않는다"
+                        "원문에서 드물게 나온 반응(minor)은 조건부 특질로 만들지 않는다"
                     )
+                    continue
+                sit = t.basis.split("/")[0]
+                if sit in seen:
+                    problems.append(
+                        f"{seen[sit]}·{t.id}: 같은 상황({sit})의 경향은 trait 하나로 합치고 "
+                        "behavior에 주요 반응을 비중 순서대로 함께 쓴다"
+                    )
+                seen.setdefault(sit, t.id)
         elif any(t.basis for t in ledger.traits):
             problems.append("traits.basis: 원문 경향이 없는 캐릭터는 basis를 쓰지 않는다")
         texts = _strings(dump(ledger))

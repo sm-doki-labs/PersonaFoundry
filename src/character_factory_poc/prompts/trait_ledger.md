@@ -73,11 +73,14 @@
 
 ## 원문 경향이 있을 때(모티브, D-0148)
 
-입력에 tendencies가 있으면 실존 인물의 장부다. tendencies.tendencies는 원문 여러 자리에서 되풀이된 상황과 반응이다.
+입력에 tendencies가 있으면 실존 인물의 장부다. tendencies.tendencies는 원문 여러 자리에서 되풀이되고 그 상황 답의
+mainShare 이상에서 나온 주요 경향이다. share는 그 상황의 답 가운데 그 반응이 나온 비율이다.
 
-- 모든 trait는 basis에 그 특질이 나온 경향의 cell을 그대로 적는다. trigger는 그 cell의 상황을, behavior는 그 반응을 이 인물의
-  방식으로 구체적으로 쓴다. 한 cell은 trait 하나에만 쓴다.
+- trait 하나는 상황 하나를 맡는다. basis에는 그 상황에서 share가 가장 큰 주요 경향의 cell을 적고, trigger는 그 상황을 쓴다.
+  같은 상황으로 trait를 둘 이상 만들지 않는다.
+- behavior에는 그 상황의 주요 경향을 share가 큰 순서대로 함께 쓴다. 실제 사람은 한 답에서 여러 반응을 섞는다. 비중이 작은
+  반응 하나만으로 behavior를 쓰면 그 상황의 답이 모두 그 반응이 된다.
 - 위 kind 규칙 가운데 insult_reaction 정확히 하나, flaw 하나 이상은 적용하지 않는다. 원문 경향에 근거가 있을 때만 쓴다.
-  thinSituations의 상황(원문 근거가 적은 상황)과 anecdotes의 반응으로 trait를 만들지 않는다.
+  thinSituations의 상황(원문 근거가 적은 상황)과 minor의 반응으로 trait를 만들지 않는다.
 - disposition, reading, defaultResponse는 share가 크고 자리가 많은 경향에서 가져온다. 칭찬·감사·각오처럼 계기가 있는 경향은
   평소 칸에 두지 않고 trait로 둔다.
