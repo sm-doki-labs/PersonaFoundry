@@ -115,6 +115,14 @@ def _twin_stages() -> dict[str, Stage]:
         if sid == "s1":
             continue
         out[sid] = _TWIN_FRONT.get(sid, stage)
+        if sid == "s8":
+            out["s8c"] = Stage(
+                "s8c",
+                "챕터 시작 설정",
+                deps=frozenset({"G3"}),
+                after=frozenset({"s8"}),
+                implemented=True,
+            )
         if sid == "s9":
             out["s9h"] = _TWIN_FRONT["s9h"]
     return out

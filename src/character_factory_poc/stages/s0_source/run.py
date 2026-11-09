@@ -233,14 +233,8 @@ def _page(
     reviewed=None,
 ) -> str:
     by_id = {r["msgId"]: r for r in sample}
-    lock = (
-        "승인 잠김 — 다음을 채운 출처 묶음으로 다시 돌린다:\n- " + "\n- ".join(index.usageProblems)
-        if index.usageProblems
-        else "사용 근거가 채워져 있다."
-    )
     basis = pack.usageBasis
     sections = [
-        ("승인 조건", lock),
         (
             "대상과 사용 근거",
             f"대상: {pack.subject.displayName} ({pack.subject.kind})\n"
@@ -350,7 +344,6 @@ def run_s0(ctx: Context, cid: str, pack_path: Path | None = None) -> Path:
         holdoutMessages=len(held),
         masked=masked,
         otherParticipants=other,
-        usageProblems=parse.usage_problems(pack),
     )
     if index.corpusSubjectMessages == 0:
         raise CheckFailed("s0", ["비교 세트를 빼고 나니 대상 인물 메시지가 없다"])

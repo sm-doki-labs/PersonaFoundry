@@ -18,6 +18,7 @@ from character_factory_poc.pipeline.graph import CREATED, GATES, STAGES, gates_f
 from character_factory_poc.pipeline.origin import (
     graph_for_dir,
     origin_label,
+    read_auto_review,
     read_model_mode,
     read_origin,
 )
@@ -57,6 +58,7 @@ STAGE_DIRS = {
     "s6": "s6-actions",
     "s7": "s7-traits",
     "s8": "s8-prompts",
+    "s8c": "s8-chapters",
     "s9s": "s9-data",
     "s9": "s9-data",
     "s10t": "s10-train",
@@ -425,6 +427,8 @@ def graph_lanes(graph):
     lanes = []
     for lane in [SOURCE_LANE, *LANES]:
         ids = ("s9h", *lane["stages"]) if lane["id"] == "training" else lane["stages"]
+        if "s8" in ids:
+            ids = (*ids, "s8c")
         kept = [sid for sid in ids if sid in graph]
         if kept:
             label = "평가" if lane["id"] == "training" and "s10t" not in graph else lane["label"]
@@ -640,6 +644,7 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
         "stateError": error,
         "summary": summary,
         **{k: summary[k] for k in ("origin", "originLabel", "modelMode")},
+        "autoReview": read_auto_review(char_dir),
         "persona": summary["persona"],
         "stages": summary["stages"],
         "gates": summary["gates"],
@@ -769,6 +774,15 @@ def gate_view(root: Path, character_id: str, gate: str) -> dict[str, Any]:
             items.update(
                 title="연결한 모델 채택", adoptLabel="연결한 모델로 진행", adoptTarget=options[0]
             )
+    if gate == "G0" and "usageProblems" in items:
+        # 이전 판에 남은 사용 근거 안내도 승인을 막지 않아요.
+        items["usageProblems"] = []
+    if (
+        gate == "G8"
+        and metadata["modelMode"] == "PROMPT_ONLY"
+        and items.get("viewKind") == "promptOnly"
+    ):
+        items.update(title="프롬프트만", adoptLabel="프롬프트만 사용해요")
     missing = list(items.get("problems", []))
     if meta["connected"] and rev_dir is None:
         missing.append(

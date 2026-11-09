@@ -35,7 +35,12 @@ from character_factory_poc.contracts.source import (
     UsageBasis,
 )
 from character_factory_poc.pipeline.context import Context
-from character_factory_poc.pipeline.origin import SOURCE, write_origin
+from character_factory_poc.pipeline.origin import (
+    SOURCE,
+    read_auto_review,
+    write_model_mode,
+    write_origin,
+)
 from character_factory_poc.stages.s0_source import parse
 from character_factory_poc.stages.s3_plan.common import new_character
 from character_factory_poc.web import reads
@@ -57,7 +62,9 @@ class KnownFacts(Strict):
 class Draft(Strict):
     displayName: str = Field(min_length=1)
     subjectKind: SubjectKind
-    usageBasis: UsageBasis
+    usageBasis: UsageBasis = Field(default_factory=UsageBasis)
+    modelMode: Literal["PROMPT_ONLY", "BIND_EXISTING", "TRAIN"] = "PROMPT_ONLY"
+    autoReview: bool = True
     chapterTemplate: Literal["FAN_CALL", "FAMILY_CALL"] | None = None
     knownFacts: KnownFacts = Field(default_factory=KnownFacts)
 
@@ -121,9 +128,7 @@ def find_file(draft, fid):
 
 
 def summary(draft):
-    problems = parse.basis_problems(
-        SourceSubject(**draft["subject"]), UsageBasis(**draft["usageBasis"])
-    )
+    problems = []
     files = draft["files"]
     ids = [f["textId"] for f in files if f["textId"]]
     if len(ids) != len(set(ids)):
@@ -184,7 +189,8 @@ def install_source_routes(app, conf, jobs):
         ctx = Context(config=load_config(conf.root, conf.config_path), execute=False)
         cid = new_character(ctx, f"motif-{uuid4().hex[:16]}")
         folder = ctx.character_dir(cid)
-        write_origin(folder, SOURCE)
+        write_origin(folder, SOURCE, auto_review=body.autoReview)
+        write_model_mode(folder, body.modelMode)
         subject = SourceSubject(displayName=body.displayName, kind=body.subjectKind)
         save(
             inside(folder, "s0-source", "intake.json"),
@@ -193,7 +199,9 @@ def install_source_routes(app, conf, jobs):
                 subject=subject.model_dump(),
                 usageBasis=body.usageBasis.model_dump(),
                 chapterTemplate=body.chapterTemplate,
-                knownFacts={k: v.strip() for k, v in body.knownFacts.model_dump().items() if v.strip()},
+                knownFacts={
+                    k: v.strip() for k, v in body.knownFacts.model_dump().items() if v.strip()
+                },
                 files=[],
             ),
         )
@@ -260,7 +268,7 @@ def install_source_routes(app, conf, jobs):
                 raise ValueError("원본 해시가 다르다")
             item["sha256"] = digest
             raw = data.decode("utf-8-sig")
-            problems.extend(parse.restriction_problems(raw))
+            item["warnings"] = parse.restriction_problems(raw)
             parse.read_source(spec, raw, draft["subject"]["displayName"])
         except UnicodeError:
             problems.append("원문은 UTF-8로 저장해야 한다")
@@ -338,7 +346,9 @@ def install_source_routes(app, conf, jobs):
                 **opts,
             )
             save(inside(folder, "source-pack.json"), pack.model_dump(mode="json"))
-            draft["jobId"] = jobs.submit(cid, until="G0")["jobId"]
+            draft["jobId"] = jobs.submit(cid, until="s8c" if read_auto_review(folder) else "G0")[
+                "jobId"
+            ]
             return {"jobId": draft["jobId"]}
 
     app.include_router(router)

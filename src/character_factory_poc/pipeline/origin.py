@@ -64,7 +64,15 @@ def is_twin(char_dir: Path) -> bool:
     return read_origin(char_dir) == SOURCE
 
 
-def write_origin(char_dir: Path, origin: str) -> None:
+def read_auto_review(char_dir: Path) -> bool:
+    path = Path(char_dir) / ORIGIN_FILE
+    if not path.is_file():
+        return False
+    data = json.loads(path.read_text("utf-8"))
+    return data.get("origin") == SOURCE and data.get("autoReview") is True
+
+
+def write_origin(char_dir: Path, origin: str, *, auto_review: bool = False) -> None:
     """출신을 처음 한 번 쓴다. 같은 값이면 그대로 두고, 다른 값이면 거절한다."""
     if origin not in ORIGINS:
         raise FactoryError(f"알 수 없는 출신: {origin}")
@@ -83,6 +91,8 @@ def write_origin(char_dir: Path, origin: str) -> None:
         "label": origin_label(origin),
         "setAt": datetime.now(UTC).isoformat(timespec="seconds"),
     }
+    if origin == SOURCE:
+        record["autoReview"] = auto_review
     path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
