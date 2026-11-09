@@ -1,12 +1,15 @@
 /* 원문으로 새 캐릭터(계획 A2). 진행 화면(flow.css)의 버튼·배지·머리줄을 그대로 쓰고 이 화면의 배치만 더한다.
    색은 foundry-tokens.css 의미 토큰만 쓴다. 단계 줄은 공정 그래프의 선 규칙을 따른다: 끝난 단계는 실선, 아직은 점선. */
-body.fl.src{overflow:auto;min-height:100dvh}
+/* 진행 화면과 같은 앱 셸(사이드바 + 머리줄) 안에 놓는다. 넓은 화면은 본문만 스크롤하고, 좁은 화면은 사이드바가 숨고 페이지가 스크롤한다. */
+body.fl.src{overflow:hidden}
+.src-scroll{min-height:0;overflow:auto;scrollbar-gutter:stable;background:var(--fd-bg-app)}
 .src [tabindex="-1"]:focus-visible{outline:none}
 .src-skip{position:absolute;left:12px;top:-40px;z-index:10;padding:6px 10px;border-radius:var(--fd-r-2);background:var(--fd-bg-surface);border:1px solid var(--fd-line-strong)}
 .src-skip:focus{top:10px}
-.src-head{position:sticky;top:0;z-index:5}
-.src-brand{display:inline-flex;align-items:center;gap:8px;color:var(--fd-fg)!important;text-decoration:none!important;margin-right:8px}
-.src-brand b{font-size:var(--fd-fs-4);font-weight:650;letter-spacing:-.02em}
+.src .fd-side-actions .btn[aria-current="page"]{border-color:var(--fd-accent);background:var(--fd-accent-bg);color:var(--fd-accent-fg)}
+.src .fd-side a.fd-nav{color:var(--fd-fg-muted);text-decoration:none}
+.src .fd-side a.fd-nav:hover{color:var(--fd-fg);text-decoration:none}
+.src .fd-side .fd-side-actions a.btn:hover{text-decoration:none}
 .src-main{max-width:760px;margin:0 auto;padding:var(--fd-space-8) var(--fd-space-6) 96px;display:flex;flex-direction:column;gap:var(--fd-space-4);outline:none}
 .src-title h1{margin:0;font-size:var(--fd-fs-7);font-weight:650;letter-spacing:-.025em;line-height:1.25}
 .src-title p{margin:8px 0 0;color:var(--fd-fg-muted);font-size:var(--fd-fs-4);max-width:62ch;text-wrap:pretty}
@@ -63,6 +66,21 @@ body.fl.src{overflow:auto;min-height:100dvh}
 .src-summary div{min-width:0}
 .src-summary dt{font-size:var(--fd-fs-2);color:var(--fd-fg-muted)}
 .src-summary dd{margin:2px 0 0;font-weight:500;overflow-wrap:anywhere}
+.src-summary div[hidden]{display:none}
+
+/* 생성 설정: 자동 진행 스위치와 접힌 메모 */
+.src-switch{padding:12px 14px;border:1px solid var(--fd-line);border-radius:var(--fd-r-3)}
+.src-switch-row{display:flex;align-items:flex-start;gap:16px;cursor:pointer}
+.src-switch-tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.src-switch-tx b{font-weight:600}
+.src-switch-tx small{color:var(--fd-fg-muted);font-size:var(--fd-fs-2);text-wrap:pretty}
+.src input[role="switch"]{appearance:none;-webkit-appearance:none;flex:none;position:relative;width:36px;height:20px;margin:2px 0 0;border-radius:999px;background:var(--fd-slate-7);cursor:pointer;transition:background var(--fd-dur-1)}
+.src input[role="switch"]::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--fd-white,#fff);box-shadow:var(--fd-shadow-xs);transition:transform var(--fd-dur-2) var(--fd-ease)}
+.src input[role="switch"]:checked{background:var(--fd-accent)}
+.src input[role="switch"]:checked::after{transform:translateX(16px)}
+.src-memo>summary{cursor:pointer;width:fit-content;min-height:28px;display:flex;align-items:center;gap:6px;font-size:var(--fd-fs-2);font-weight:550;color:var(--fd-fg)}
+.src-memo>summary .opt{font-weight:400;color:var(--fd-fg-subtle)}
+.src-memo[open]>summary{margin-bottom:6px}
 .src-state{display:flex;flex-direction:column;gap:10px}
 .src-state[data-loading]{flex-direction:row;align-items:center;color:var(--fd-fg-muted)}
 .src-state.bad{border-color:var(--fd-danger-line);background:var(--fd-danger-bg)}
@@ -80,6 +98,11 @@ body.fl.src{overflow:auto;min-height:100dvh}
 .src-path .row input{flex:1}
 .src-path .row .btn{height:34px}
 .src-empty{margin:0;color:var(--fd-fg-subtle)}
+.src-fold{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 8px 10px 14px;border:1px solid var(--fd-line);border-radius:var(--fd-r-3);background:var(--fd-bg-surface)}
+.src-fold p{margin:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;min-width:0}
+.src-fold p span{color:var(--fd-fg-muted);font-size:var(--fd-fs-2);font-variant-numeric:tabular-nums}
+.src-fold .btn .i{transition:transform var(--fd-dur-2) var(--fd-ease)}
+.src-fold .btn[aria-expanded="true"] .i{transform:rotate(180deg)}
 
 /* 파일 카드 */
 .src-list{display:flex;flex-direction:column;gap:10px}
@@ -114,19 +137,30 @@ body.fl.src{overflow:auto;min-height:100dvh}
 .src-reasons p{margin:0 0 4px;font-weight:600;font-size:var(--fd-fs-2)}
 .src-reasons ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:2px}
 .fl .btn.src-go{height:36px;padding:0 16px}
-.src-done{display:flex;flex-direction:column;gap:6px;border-color:color-mix(in srgb,var(--fd-success-fg) 30%,transparent)}
-.src-done h3{margin:0;font-size:var(--fd-fs-4);font-weight:600;color:var(--fd-success-fg);outline:none}
+.src-done{display:flex;flex-direction:column;gap:6px}
+.src-done h3{margin:0;font-size:var(--fd-fs-4);font-weight:600;outline:none}
+.src-done[data-tone="ok"]{border-color:color-mix(in srgb,var(--fd-success-fg) 30%,transparent)}
+.src-done[data-tone="ok"] h3{color:var(--fd-success-fg)}
+.src-done[data-tone="wait"] h3{color:var(--fd-attention-fg)}
+.src-done[data-tone="fail"] h3{color:var(--fd-danger-fg)}
 .src-done p{margin:0 0 6px;color:var(--fd-fg-muted)}
 .src-done .btn{text-decoration:none!important}
+.src-prog{display:flex;align-items:center;gap:10px;margin:0 0 6px;font-size:var(--fd-fs-2);color:var(--fd-fg-muted);font-variant-numeric:tabular-nums}
+.src-prog-bar{flex:1;max-width:280px;height:6px;border-radius:999px;background:var(--fd-bg-inset);overflow:hidden}
+.src-prog-bar i{display:block;height:100%;width:0;border-radius:inherit;background:var(--fd-run-solid);transition:width var(--fd-dur-3,300ms) var(--fd-ease)}
+.src-done[data-tone="ok"] .src-prog-bar i{background:var(--fd-success-solid)}
 .src-del{margin-top:var(--fd-space-4);padding-top:var(--fd-space-3);border-top:1px solid var(--fd-line)}
 .src-del-ask{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--fd-fg-muted)}
 .fl .btn.danger{color:var(--fd-danger-fg);border-color:var(--fd-danger-line)}
 .fl .btn.danger:hover:not(:disabled){background:var(--fd-danger-bg)}
 
+@media (max-width:1099px){
+  body.fl.src{overflow:auto}
+  .src-scroll{overflow:visible}
+}
 @media (max-width:640px){
   .src-row{grid-template-columns:1fr}
   .src-main{padding:var(--fd-space-5) var(--fd-space-4) 64px}
-  .src-head{padding:8px 16px}
   .src-step{grid-template-columns:24px minmax(0,1fr);column-gap:12px}
   .src-dot{width:24px;height:24px}
   .src-step::before{left:11px;top:28px}
@@ -138,4 +172,4 @@ body.fl.src{overflow:auto;min-height:100dvh}
   .src-file-head .fl-pill{grid-row:2;grid-column:2/-1;justify-self:start}
   .src-file-head .src-file-ic{grid-row:1/3;align-self:start}
 }
-@media (prefers-reduced-motion:reduce){.src-spin{animation:none}.src-bar span,.src-tog .i{transition:none}}
+@media (prefers-reduced-motion:reduce){.src-spin{animation:none}.src-bar span,.src-tog .i,.src-fold .btn .i,.src-prog-bar i,.src input[role="switch"],.src input[role="switch"]::after{transition:none}}

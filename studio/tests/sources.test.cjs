@@ -26,7 +26,7 @@ function fakeServer(opts) {
     if (db.fail[key]) { db.fail[key]--; return json(500, { detail: '잠깐 문제가 있었어요.' }); }
     let m;
     if (method === 'POST' && u.pathname === '/api/sources/drafts') {
-      db.draft = { subject: { displayName: body.displayName, kind: body.subjectKind }, usageBasis: body.usageBasis, chapterTemplate: body.chapterTemplate };
+      db.draft = { subject: { displayName: body.displayName, kind: body.subjectKind }, usageBasis: body.usageBasis, chapterTemplate: body.chapterTemplate, modelMode: body.modelMode, autoReview: body.autoReview };
       return json(200, { characterId: 'cf-son' });
     }
     if (method === 'GET' && u.pathname === '/api/sources/cf-son') return db.draft ? json(200, view()) : json(404, { detail: 'Not Found' });
@@ -56,6 +56,8 @@ function fakeServer(opts) {
       if (method === 'DELETE') { db.files = db.files.filter((x) => x !== f); if (!db.files.length) { db.canFinalize = false; db.problems = ['원문 파일을 하나 이상 올려 주세요.']; } return { ok: true, status: 204, json: async () => null }; }
     }
     if (method === 'POST' && u.pathname === '/api/sources/cf-son/finalize') return json(200, { jobId: 'job-1' });
+    if (method === 'GET' && u.pathname === '/api/characters/cf-son') return json(200, Object.assign({ id: 'cf-son', origin: 'SOURCE', modelMode: db.draft && db.draft.modelMode, autoReview: db.draft && db.draft.autoReview, progress: { done: db.done || 0, total: 12 }, pendingGates: [], stages: [], job: (db.done || 0) < 12 ? { id: 'job-1' } : null }, db.detail || {}));
+    if (method === 'GET' && u.pathname === '/api/characters/cf-son/chat/meta') return db.noChat ? json(404, { detail: 'Not Found' }) : json(200, { characterId: 'cf-son', ready: !!db.chatReady, reason: db.chatReady ? '' : '프롬프트를 아직 만들고 있어요.' });
     if (method === 'DELETE' && u.pathname === '/api/sources/cf-son') { db.draft = null; db.files = []; return { ok: true, status: 204, json: async () => null }; }
     return json(404, { detail: 'Not Found' });
   }
@@ -103,11 +105,11 @@ test('text ids are suggested from the file name, fall back to kind-number, and n
 test('local store: draft, then files → PUT with cookies to our server → complete with the suggested meta', async () => {
   const server = fakeServer();
   const intake = await ready(server);
-  assert.deepEqual(server.calls[0].body, { displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', usageBasis: { scope: '최종 발표 시연', notes: '공개 인터뷰만' }, knownFacts: { age: '34세', gender: '남성', job: '축구선수', background: '' } });
+  assert.deepEqual(server.calls[0].body, { displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', usageBasis: { scope: '최종 발표 시연', notes: '공개 인터뷰만' }, knownFacts: { age: '34세', gender: '남성', job: '축구선수', background: '' }, modelMode: 'PROMPT_ONLY', autoReview: true });
   server.calls.length = 0;
   intake.addFiles([file('KakaoTalk_son.txt', 3000)]);
   await settle();
-  assert.deepEqual(seq(server.calls), ['POST /api/sources/cf-son/files', 'PUT /api/sources/cf-son/files/f1/content', 'POST /api/sources/cf-son/files/f1/complete', 'GET /api/sources/cf-son']);
+  assert.deepEqual(seq(server.calls).filter((s) => !s.includes('/api/characters/')), ['POST /api/sources/cf-son/files', 'PUT /api/sources/cf-son/files/f1/content', 'POST /api/sources/cf-son/files/f1/complete', 'GET /api/sources/cf-son']);
   assert.deepEqual(server.calls[0].body, { filename: 'KakaoTalk_son.txt', size: 3000, contentType: 'text/plain' });
   const put = server.calls[1];
   assert.equal(put.url, '/api/sources/cf-son/files/f1/content');
@@ -273,12 +275,91 @@ test('path import is only offered when the server allows it; missing drafts say 
   assert.match(c.state.loadError.text, /찾을 수 없어요/);
 });
 
-test('draft form checks name, kind and scope before calling the server', async () => {
+test('draft form checks name, kind and basic facts before calling the server; usage scope is optional', async () => {
   const server = fakeServer();
   const intake = S.createIntake({ fetch: server.fetch, origin: ORIGIN, XHR: null });
   const res = await intake.createDraft({ displayName: ' ', subjectKind: '', scope: '' });
-  assert.deepEqual(Object.keys(res.errors).sort(), ['age', 'displayName', 'gender', 'job', 'scope', 'subjectKind']);
+  assert.deepEqual(Object.keys(res.errors).sort(), ['age', 'displayName', 'gender', 'job', 'subjectKind']);
   assert.equal(server.calls.length, 0);
+});
+
+test('a draft with only a memo sends the team-internal scope, and carries the model mode and auto-run choice', async () => {
+  const server = fakeServer();
+  const intake = S.createIntake({ fetch: server.fetch, origin: ORIGIN, XHR: null });
+  await intake.createDraft({ displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', age: '34세', gender: '남성', job: '축구선수', notes: ' 발표용 ', modelMode: 'TRAIN', autoReview: false });
+  const body = server.calls[0].body;
+  assert.deepEqual(body.usageBasis, { scope: S.DEFAULT_SCOPE, notes: '발표용' });
+  assert.equal(body.modelMode, 'TRAIN');
+  assert.equal(body.autoReview, false);
+  assert.deepEqual(intake.settings(), { modelMode: 'TRAIN', autoReview: false }, 'the summary shows what the server holds');
+
+  const other = fakeServer();
+  const b = S.createIntake({ fetch: other.fetch, origin: ORIGIN, XHR: null });
+  await b.createDraft({ displayName: '엄마', subjectKind: 'PRIVATE_PERSON', age: '58세', gender: '여성', job: '교사', modelMode: 'SOMETHING' });
+  assert.equal(other.calls[0].body.modelMode, 'PROMPT_ONLY', 'unknown modes fall back to the default');
+  assert.equal(other.calls[0].body.autoReview, true, 'auto-run is on unless switched off');
+  assert.equal(other.calls[0].body.usageBasis.scope, '팀 내부 사용');
+});
+
+test('after the start, progress and chat readiness are read; the chat link appears only when the server says ready', async () => {
+  const server = fakeServer();
+  const intake = await ready(server);
+  intake.addFiles([file('a.txt')]);
+  await settle();
+  assert.equal(intake.state.chat, null, 'nothing is asked about chat before the start');
+  server.db.done = 3;
+  await intake.finalize();
+  assert.deepEqual(intake.state.character.progress, { done: 3, total: 12 });
+  assert.equal(intake.state.character.running, true);
+  assert.deepEqual(intake.state.chat, { ready: false, reason: '프롬프트를 아직 만들고 있어요.' });
+  server.db.done = 12;
+  server.db.chatReady = true;
+  await intake.progress();
+  assert.equal(intake.state.chat.ready, true);
+  assert.equal(intake.state.character.running, false);
+
+  const old = fakeServer();
+  const b = await ready(old);
+  b.addFiles([file('a.txt')]);
+  await settle();
+  old.db.noChat = true;
+  await b.finalize();
+  assert.deepEqual(b.state.chat, { ready: false, unavailable: true, reason: '' }, 'a server without the chat API stops the polling quietly');
+  old.db.detail = { pendingGates: ['G0'] };
+  await b.progress();
+  assert.equal(b.state.character.awaiting, true);
+});
+
+test('long file lists are summarised by kind and register, counting files that still need a look', () => {
+  const it = (kind, register, tone, phase) => ({ meta: { kind, register }, tone, phase });
+  const sum = S.fileSummary([it('INTERVIEW', 'FORMAL', 'ok'), it('INTERVIEW', 'FORMAL', 'ok'), it('TRANSCRIPT', 'CASUAL', 'wait'), it('KAKAO_EXPORT', 'CASUAL', 'fail', 'rejected')]);
+  assert.equal(sum.total, 3, 'files the page refused are not counted');
+  assert.equal(sum.ready, 2);
+  assert.equal(sum.attention, 1);
+  assert.deepEqual(sum.kinds, [['인터뷰', 2], ['받아쓰기', 1]]);
+  assert.deepEqual(sum.registers, [['공식 자리', 2], ['캐주얼 자리', 1]]);
+});
+
+test('the sidebar lists characters with a motif marker and links into the factory screen', () => {
+  const html = S.sideHTML([{ id: 'cf-son', name: '손흥민', origin: 'SOURCE', progress: { done: 4, total: 18 }, awaitingHuman: true }, { id: 'cf-a', name: '하진우', origin: 'CREATED', progress: { done: 18, total: 18 } }], 'dark');
+  assert.ok(html.includes('href="factory.html#c/cf-son"'));
+  assert.equal((html.match(/class="fd-org"/g) || []).length, 1, 'only the motif character is marked');
+  assert.ok(html.includes('<span class="st wait">') && html.includes('<span class="st ok">'));
+  assert.ok(html.includes('data-theme="dark" aria-pressed="true"'));
+  assert.ok(html.includes('href="sources.html" aria-current="page"'));
+  assert.ok(S.sideHTML([{ id: 'cf-20261109-son-motif', name: '' }], 'system').includes('이름 미정 · son-motif (11/9)'), 'unnamed characters read like the factory sidebar');
+});
+
+test('the page sits in the factory shell, offers the model mode and auto-run switch, and keeps the memo optional', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'sources.html'), 'utf8');
+  assert.ok(html.includes('class="fd-shell"') && html.includes('data-side'));
+  assert.ok(!/name="scope"/.test(html), 'no required usage scope field');
+  assert.ok(/<details class="src-memo">[\s\S]*name="notes"/.test(html), 'the memo is folded and optional');
+  assert.ok(!/동의/.test(html), 'no consent fields');
+  const modes = Array.from(html.matchAll(/name="modelMode" value="([A-Z_]+)"( checked)?/g)).map((m) => m[1] + (m[2] ? '*' : ''));
+  assert.deepEqual(modes, ['PROMPT_ONLY*', 'BIND_EXISTING', 'TRAIN']);
+  assert.ok(/role="switch" checked/.test(html), 'auto-run is on by default');
+  assert.ok(html.includes('data-chat-link'));
 });
 
 test('the page has every region the script reads, keeps copy free of code names, and the factory links to it', () => {

@@ -32,13 +32,16 @@
   th{color:var(--fd-fg-subtle);font-weight:600}
   kbd{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 5px;border:1px solid var(--fd-line-strong);border-radius:4px;background:var(--fd-bg-subtle);font:600 12px/1 ui-monospace,monospace}
   .box{padding:12px 14px;border:1px solid var(--fd-line);border-radius:10px;background:var(--fd-bg-surface)}
+  .steps{counter-reset:s;list-style:none;padding:0;display:flex;flex-direction:column;gap:10px}
+  .steps li{counter-increment:s;display:grid;grid-template-columns:28px 1fr;gap:10px;align-items:start}
+  .steps li::before{content:counter(s);display:grid;place-items:center;width:24px;height:24px;border-radius:50%;border:1px solid var(--fd-line-strong);font-size:12.5px;font-weight:600;color:var(--fd-fg-muted)}
 </style>
 </head>
 <body>
 <main>
   <h1>Foundry 사용 안내</h1>
   <p class="lead">캐릭터를 만드는 동안 AI가 단계마다 후보를 만들고, 사람은 중간중간 고르거나 승인해요. 처음이라면 위에서부터 순서대로 읽어 보세요.</p>
-  <nav class="toc" aria-label="목차"><a href="#start">처음 할 일</a><a href="#screen">화면 읽는 법</a><a href="#words">용어</a><a href="#decide">결정 버튼</a><a href="#cost">비용</a><a href="#keys">단축키</a><a href="#stuck">막혔을 때</a></nav>
+  <nav class="toc" aria-label="목차"><a href="#start">처음 할 일</a><a href="#motif">원문으로 만들기</a><a href="#screen">화면 읽는 법</a><a href="#words">용어</a><a href="#decide">결정 버튼</a><a href="#cost">비용</a><a href="#keys">단축키</a><a href="#stuck">막혔을 때</a></nav>
 
   <h2 id="start">처음 할 일</h2>
   <ol>
@@ -47,6 +50,15 @@
     <li><b>실행 시작</b>을 누르면 단계가 돌아요. 사람이 할 일이 생기면 가운데 <b>지금 할 일</b>에 나타나요.</li>
     <li><b>검토하기</b>를 누르면 오른쪽에서 검토 화면이 열려요. 고르고 오른쪽 <b>결정</b> 칸의 버튼을 누르면 다음 단계가 이어서 돌아요.</li>
   </ol>
+
+  <h2 id="motif">원문으로 만들기(모티브)</h2>
+  <p>실제 인물의 인터뷰나 대화 원문으로 캐릭터를 만들어요. 사이드바에서 <b>모티브</b> 표시가 붙은 캐릭터예요.</p>
+  <ol class="steps">
+    <li><div><b>원문 올리기</b>: 사이드바의 <b>원문으로 만들기</b>에서 이름·기본 정보를 적고 원문 파일(txt·srt·vtt·csv·json)을 올려요. 모델 준비 방식은 처음에는 <b>프롬프트만</b>이 가장 빨라요. 사용 근거는 따로 적지 않아도 되고, 남길 말이 있으면 메모에 적어요.</div></li>
+    <li><div><b>자동 진행</b>: <b>사람 확인 없이 끝까지 만들기</b>를 켜 두면 출처 확인, 기획 고르기, 프롬프트 확인을 자동으로 넘기고 대화 테스트까지 만들어요. 이미지·영상·학습처럼 돈이 드는 단계는 자동으로 돌리지 않아요. 끄면 단계마다 진행 화면에서 직접 확인해요.</div></li>
+    <li><div><b>대화해 보기</b>: 프롬프트가 나오면 원문 화면과 캐릭터 화면에 <b>대화해 보기</b> 버튼이 생겨요. 직접 말을 걸어 말투와 행동을 확인하고, 이상하면 프롬프트 검토에서 고칠 점을 적어 다시 만들어요. 대화 내용은 서버에 남지 않아요.</div></li>
+  </ol>
+  <p>출처 확인 화면에서는 공개 기사에서 모은 사실을 카드로 보고, 틀리거나 쓰지 않을 사실은 <b>이 사실 빼기</b>로 뺄 수 있어요. 프롬프트 확인 화면에서는 장면별 대화 표본과, 원문에 근거가 없어 공장이 추론한 특질을 함께 봐요.</p>
 
   <h2 id="screen">화면 읽는 법</h2>
   <dl>

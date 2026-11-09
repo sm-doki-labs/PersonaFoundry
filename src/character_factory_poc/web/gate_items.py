@@ -1035,6 +1035,8 @@ def source_pack(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> 
                 "subjectSpeaker": spec.get("subjectSpeaker"),
                 "userSpeaker": spec.get("userSpeaker"),
                 "date": spec.get("date"),
+                "register": t.get("register") or spec.get("register"),
+                "sourceUrl": spec.get("sourceUrl"),
             }
         )
     reps = [r for r in digest.get("representative", []) if isinstance(r, dict)]

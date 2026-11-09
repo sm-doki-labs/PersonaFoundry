@@ -87,6 +87,9 @@ def test_g0_view_shows_source_summary_without_holdout_text(tmp_path, twin_decisi
         assert items["usageProblems"] == [] and items["usage"]["consentBy"]
         assert items["texts"][0]["subjectSpeaker"] == "엄마"
         assert items["texts"][0]["userSpeaker"] == "나"
+        # 말한 자리는 G0 원문 표에 보인다. 묶음에 적지 않았으면 종류 기본값(카톡 → 캐주얼)이다.
+        assert items["texts"][0]["register"] == "CASUAL"
+        assert items["texts"][0]["sourceUrl"] is None
         assert items["agent"]["speakerCheck"]["confirmed"] is True
         reps = items["agent"]["representative"]
         assert reps and all(r["text"] for r in reps)

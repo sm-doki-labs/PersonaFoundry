@@ -402,7 +402,12 @@ body.fl{font-family:var(--fd-font);font-size:var(--fd-fs-3);line-height:1.5;lett
 .fd-track .d{width:6px;height:6px;border-radius:50%;flex:none;background:var(--fd-slate-8)}
 .fd-track.tw{color:var(--fd-fg)}
 .fd-track.tw .d{background:var(--fd-fg)}
+/* 사이드바 캐릭터 줄의 모티브 표시(2차). 좁은 사이드바에서는 이름과 함께 숨는다. */
+.fd-nav .fd-org{flex:none;height:18px;padding:0 6px;border:1px solid var(--fd-line-strong);border-radius:999px;display:inline-flex;align-items:center;font-size:11px;font-weight:500;color:var(--fd-fg-muted);line-height:1}
+@media (max-width:1439px){.fd-nav .fd-org{display:none}}
 .fd-title .fd-track{align-self:center}
+.fd-title .fd-chat{margin-left:auto;align-self:center;text-decoration:none}
+.fd-title .fd-chat:hover{text-decoration:none}
 .ov-name .fd-track{margin-left:6px}
 .fd-demo{font-size:var(--fd-fs-2);color:var(--fd-fg-subtle)}
 

@@ -119,6 +119,28 @@ test('track badge text: original, or twin with how the model is prepared', () =>
   assert.equal(Flow.trackLabel({}), '오리지널');
   assert.equal(Flow.trackLabel({ origin: 'SOURCE', originLabel: '모티브', modelMode: 'TRAIN' }), '모티브 · 학습');
   assert.equal(Flow.trackLabel({ origin: 'SOURCE', modelMode: 'BIND_EXISTING' }), '모티브 · 학습된 모델 연결');
-  assert.equal(Flow.trackLabel({ origin: 'SOURCE', modelMode: 'PROMPT_ONLY' }), '모티브 · 긴 프롬프트');
+  assert.equal(Flow.trackLabel({ origin: 'SOURCE', modelMode: 'PROMPT_ONLY' }), '모티브 · 프롬프트만');
+});
+
+test('chat test link opens only for motif characters whose prompt (s8) exists', () => {
+  const row = (status) => ({ id: 's8', status });
+  const base = { id: 'cf-son', origin: 'SOURCE' };
+  assert.equal(Flow.chatHref(Object.assign({}, base, { stages: [row('AWAITING_HUMAN')] })), 'chat.html#c/cf-son', 'G6 waiting means the prompt is already written');
+  assert.equal(Flow.chatHref(Object.assign({}, base, { stages: [row('APPROVED')] })), 'chat.html#c/cf-son');
+  assert.equal(Flow.chatHref(Object.assign({}, base, { stages: [row('RUNNING')] })), '');
+  assert.equal(Flow.chatHref(Object.assign({}, base, { stages: [] })), '');
+  assert.equal(Flow.chatHref({ id: 'cf-orig', origin: 'CREATED', stages: [row('APPROVED')] }), '', 'original characters have no chat test yet');
+  assert.equal(Flow.chatHref({ id: 'a b', origin: 'SOURCE', stages: [row('APPROVED')] }), 'chat.html#c/a%20b');
+});
+
+test('the S8c step is named after the opening scene, and mode names match the upload page', () => {
+  assert.equal(Flow.s8cName('SOURCE', ''), '팬 통화 장면');
+  assert.equal(Flow.s8cName('SOURCE', 'FAN_CALL'), '팬 통화 장면');
+  assert.equal(Flow.s8cName('SOURCE', 'FAMILY_CALL'), '통화 장면');
+  assert.equal(Flow.s8cName('CREATED', ''), '통화 장면');
+  const S = require('../shared/sources.js');
+  ['PROMPT_ONLY', 'BIND_EXISTING'].forEach((m) => assert.equal(S.MODES.find((x) => x[0] === m)[1], Flow.MODE_LABEL[m], m));
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'shared', 'flow.js'), 'utf8');
+  assert.ok(src.includes("c.origin === 'SOURCE' ? '<span class=\"fd-org\""), 'the sidebar marks motif characters');
 });
 

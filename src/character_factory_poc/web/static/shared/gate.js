@@ -2053,6 +2053,69 @@
   }
 
   // ---------------------------------------------------------------- G6
+  // 시연 상황 이름(trait_ledger.demoSituation). 코드 값은 화면에 보이지 않는다.
+  var SITUATION_KO = { TEASE: '장난·놀림', WORRY: '고민 털어놓기', CRITICISM: '비판', UNKNOWN: '모르는 질문', PRIVATE: '사생활 질문' };
+  // 특질 시트의 빈칸 이름. 모르는 칸 이름은 보이지 않고 개수로만 센다.
+  var UNRESOLVED_KO = { 'card.bigFiveNotes': '성격 5요인 메모' };
+  var INFERRED_LINE = /^원문 경향 없음 · ([A-Z_]+) \(INFERRED, 참고 ([^)]*)\): ([\s\S]*?) → ([\s\S]*)$/;
+  function charName() {
+    var s = (state.character && state.character.summary) || {};
+    return s.name && s.name !== state.characterId ? s.name : '캐릭터';
+  }
+  // 서버가 inferredTraits(약속 1)를 주면 그대로, 없으면 특질 시트 미정 줄에서 같은 모양으로 읽는다.
+  function inferredTraits(items) {
+    if (Array.isArray(items.inferredTraits)) return items.inferredTraits;
+    return list((items.traitSheet || {}).unresolved).map(function (line) {
+      var m = INFERRED_LINE.exec(String(line || ''));
+      return m ? { situation: m[1], trigger: m[3], behavior: m[4], refs: m[2] ? [{ msgId: m[2] }] : [] } : null;
+    }).filter(Boolean);
+  }
+  function unresolvedText(sheet) {
+    var names = [];
+    var other = 0;
+    list(sheet && sheet.unresolved).forEach(function (line) {
+      var s = String(line || '');
+      if (INFERRED_LINE.test(s) || s.indexOf('INFERRED') >= 0) return;
+      if (UNRESOLVED_KO[s]) names.push(UNRESOLVED_KO[s]);
+      else if (/^[A-Za-z0-9_.]+$/.test(s)) other += 1;
+      else names.push(s);
+    });
+    if (other) names.push('그 밖의 칸 ' + other + '개');
+    return names.join(', ');
+  }
+  function sampleTranscripts(items) {
+    var samples = list(items.samples).filter(function (s) { return s && list(s.turns).length; });
+    if (!samples.length) return '';
+    var who = charName();
+    var chat = state.characterId ? '/studio/chat.html#c/' + encodeURIComponent(state.characterId) : '';
+    return '<section class="gate-section"><div class="chat-samples-head"><h2>대화 표본 ' + samples.length + '개 장면</h2>' +
+      (chat ? '<a class="btn btn--ghost" href="' + esc(chat) + '" target="_blank" rel="noopener">직접 대화해 보기</a>' : '') + '</div>' +
+      '<p class="section-sub">장면마다 이 프롬프트로 한 번씩 대화해 본 결과예요. 이 인물답게 답하는지 읽어 보고 승인해 주세요.</p>' +
+      '<div class="chat-samples">' + samples.map(function (s) {
+        return '<article class="chat-sample"><h3>' + esc(s.title || '장면') + '<span>' + list(s.turns).length + '턴</span></h3><div class="chat-log">' +
+          list(s.turns).map(function (t) {
+            return (t.user ? '<p class="bubble is-user"><span>사용자</span>' + esc(t.user) + '</p>' : '') +
+              (t.reply ? '<p class="bubble is-char"><span>' + esc(who) + '</span>' + esc(t.reply) + '</p>' : '<p class="bubble is-char is-none"><span>' + esc(who) + '</span>(답이 없어요)</p>');
+          }).join('') + '</div></article>';
+      }).join('') + '</div></section>';
+  }
+  function inferredCards(items) {
+    var traits = inferredTraits(items);
+    if (!traits.length) return '';
+    return '<section class="gate-section"><h2>원문에 직접 근거가 없어 추론한 특질 ' + traits.length + '개</h2>' +
+      '<p class="section-sub">원문에서 이 상황의 말버릇을 찾지 못해 공장이 다른 원문을 보고 짐작했어요. 이 인물답지 않으면 아래 수정 요청에 적어 주세요.</p>' +
+      '<ul class="trait-cards">' + traits.map(function (t) {
+        var refs = list(t.refs).filter(function (r) { return r && r.quote; });
+        var tip = list(t.refs).map(function (r) { return r && r.msgId; }).filter(Boolean).join(', ');
+        return '<li class="trait-card"' + (tip && !refs.length ? ' title="' + esc('참고한 원문 위치 ' + tip) + '"' : '') + '>' +
+          '<div class="trait-top"><b>' + esc(t.situationKo || SITUATION_KO[t.situation] || '그 밖의 상황') + '</b><span class="badge-chip is-warn">추론</span></div>' +
+          (t.trigger ? '<p class="trait-when">' + esc(t.trigger) + '</p>' : '') +
+          '<p class="trait-do">' + esc(t.behavior || '') + '</p>' +
+          (refs.length ? '<div class="trait-refs"><span class="fact-label">참고한 원문</span>' + refs.map(function (r) {
+            return '<blockquote' + (r.msgId ? ' title="' + esc('원문 위치 ' + r.msgId) + '"' : '') + '>' + esc(r.quote) + '</blockquote>';
+          }).join('') + '</div>' : '') + '</li>';
+      }).join('') + '</ul></section>';
+  }
   function renderPrompts(items) {
     var long = items.long || {};
     var short = items.short || {};
@@ -2069,10 +2132,15 @@
       })
       .join('');
     var sheet = items.traitSheet;
+    var samples = sampleTranscripts(items);
+    var open = unresolvedText(sheet);
     return (
-      '<section class="gate-section"><h2>표본 응답</h2>' +
-      '<p class="section-sub">검토 모델의 판정은 참고용이에요. 승인은 사람이 해요.</p>' +
-      (probes || '<p class="empty">표본 응답이 아직 없어요.</p>') + '</section>' +
+      samples + inferredCards(items) +
+      (probes || !samples
+        ? '<section class="gate-section"><h2>' + (samples ? '긴·짧은 프롬프트 비교' : '표본 응답') + '</h2>' +
+          '<p class="section-sub">검토 모델의 판정은 참고용이에요. 승인은 사람이 해요.</p>' +
+          (probes || '<p class="empty">표본 응답이 아직 없어요.</p>') + '</section>'
+        : '') +
       '<section class="gate-section"><details class="gate-more"><summary>프롬프트 원문 · 긴 ' + esc(long.chars || 0) +
       '자 · 짧은 ' + esc(short.chars || 0) + '자' + (items.shortAdopted ? ' · 짧은 프롬프트 채택' : '') +
       '</summary><p class="section-sub">구성: ' + esc(joinList(items.sections, ', ')) + '</p>' +
@@ -2091,7 +2159,7 @@
                   .map(function (p) { return p.dilemma + ' → ' + p.choice; })
                   .join(' / ')],
                 ['말버릇', (sheet.card.dialogueHabits || {}).lexicon],
-                ['미정', joinList(sheet.unresolved, ', ')]
+                ['아직 비어 있는 칸', open]
               ])
             : '') +
           '<p class="section-sub"><a href="' + esc(sheet.url) +
@@ -2814,7 +2882,7 @@
 
   // ---------------------------------------------------------------- G0 출처 확인(모티브, 사람 전용)
   // 비교 세트는 개수만 보여요. 원문은 서버가 화면 자료·파일 목록 어디에도 싣지 않는다(D-0120).
-  var TEXT_KIND_KO = { KAKAO_EXPORT: '카톡 내보내기', INTERVIEW: '인터뷰', ARTICLE: '기사', TRANSCRIPT: '받아 적은 글' };
+  var TEXT_KIND_KO = { KAKAO_EXPORT: '카톡 내보내기', INTERVIEW: '인터뷰', ARTICLE: '기사', TRANSCRIPT: '받아쓰기' };
   var SUBJECT_KO = { PUBLIC_FIGURE: '공개 인물', PRIVATE_PERSON: '가까운 사람' };
   var MASK_KO = { phone: '전화번호', email: '이메일', account: '계좌·번호', participant: '다른 참여자 이름' };
   var DIGEST_KO = { DAILY: '일상', AFFECTION: '애정', CONFLICT: '갈등', ADVICE: '조언', HUMOR: '농담', WORK: '일', OTHER: '기타' };
@@ -2830,23 +2898,18 @@
     var counts = items.counts || {};
     var agent = items.agent || {};
     var speaker = agent.speakerCheck || {};
-    var privatePerson = (items.subject || {}).kind === 'PRIVATE_PERSON';
-    var consent = usage.consentBy && usage.consentDate;
     var flags = list(agent.piiFlags).length;
     var m = items.masked || {};
     var maskText = Object.keys(MASK_KO).filter(function (k) { return m[k]; }).map(function (k) { return MASK_KO[k] + ' ' + m[k]; }).join(' · ');
+    // 팀 내부 도구라 동의 기록은 보지 않는다. 사용 범위가 비면 '팀 내부 사용'으로 본다(계획 2차 약속 2).
     return [
-      { title: '사용 범위', tone: usage.scope ? 'ok' : 'bad', detail: usage.scope || '비어 있어요. 어디에 쓰는지 적어야 승인할 수 있어요.' },
-      {
-        title: '동의 기록',
-        tone: consent ? 'ok' : privatePerson ? 'bad' : 'info',
-        detail: consent ? usage.consentBy + ' · ' + usage.consentDate
-          : privatePerson ? '가까운 사람은 동의한 사람과 날짜가 있어야 승인할 수 있어요.' : '공개 인물이라 동의 기록 없이도 승인할 수 있어요.'
-      },
+      { title: '쓰는 곳', tone: usage.scope ? 'ok' : 'info', detail: usage.scope ? (usage.scope.length > 80 ? usage.scope.slice(0, 80) + '…' : usage.scope) : '적지 않아서 팀 내부 사용으로 봐요.' },
       {
         title: '화자 지정',
         tone: speaker.confirmed ? 'ok' : 'warn',
-        detail: (speaker.confirmed ? '출처 정리 에이전트가 화자를 확인했어요' : '출처 정리 에이전트가 화자를 확인하지 못했어요') + (speaker.note ? ' · ' + speaker.note : '')
+        detail: (speaker.confirmed ? '출처 정리 에이전트가 화자를 확인했어요' : '출처 정리 에이전트가 화자를 확인하지 못했어요') +
+          (speaker.note && speaker.note.length <= 90 ? ' · ' + speaker.note : ''),
+        more: speaker.note && speaker.note.length > 90 ? speaker.note : ''
       },
       {
         title: '개인정보 가림',
@@ -2865,8 +2928,105 @@
   function checkRow(c) {
     var mark = { ok: '✓', bad: '✕', warn: '!', info: 'i' }[c.tone];
     return '<li><div class="pkg-check src-check is-' + c.tone + '"><span class="pkg-mark" aria-hidden="true">' + mark + '</span>' +
-      '<b>' + esc(c.title) + '</b><span class="pkg-detail-text">' + esc(c.detail) + '</span><span class="sr-only">' +
+      '<b>' + esc(c.title) + '</b><span class="pkg-detail-text">' + esc(c.detail) +
+      (c.more ? '<details class="src-check-more"><summary>에이전트 메모 보기</summary>' + esc(c.more) + '</details>' : '') + '</span><span class="sr-only">' +
       ({ ok: ' 통과', bad: ' 막힘', warn: ' 확인 필요', info: ' 안내' }[c.tone]) + '</span></div></li>';
+  }
+  // 사실 종류·말한 자리 이름. 코드 값은 화면에 보이지 않는다.
+  var FACT_CAT_KO = { BIO: '기본 정보', CAREER: '경력', RESULT: '경기 결과', AWARD: '수상', RECORD: '기록', CURRENT_STATUS: '지금 상태' };
+  var REGISTER_KO = { FORMAL: '공식 자리', CASUAL: '캐주얼 자리' };
+  var SOURCE_ROWS = 10;
+  // 계획 §1 default_register와 같은 표: 인터뷰·기사는 공식 자리, 카톡·받아쓰기는 캐주얼 자리.
+  function registerOf(t) {
+    var r = t && t.register;
+    if (r === 'FORMAL' || r === 'CASUAL') return r;
+    var k = t && t.kind;
+    return k === 'INTERVIEW' || k === 'ARTICLE' ? 'FORMAL' : k === 'KAKAO_EXPORT' || k === 'TRANSCRIPT' ? 'CASUAL' : '';
+  }
+  function hostOf(url) {
+    var m = /^https?:\/\/([^\/?#:@]+)/i.exec(String(url || ''));
+    return m ? m[1].replace(/^www\./i, '').toLowerCase() : '';
+  }
+  function dateKo(value) {
+    var m = /^(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?/.exec(String(value || ''));
+    if (!m) return String(value || '');
+    return m[1] + '년' + (m[2] ? ' ' + Number(m[2]) + '월' : '') + (m[3] ? ' ' + Number(m[3]) + '일' : '');
+  }
+  // 출처 칩: 주소 전체 대신 도메인만 보이고, 누르면 새 탭에서 열린다. 긴 주소는 툴팁에만 둔다.
+  function sourceChip(s) {
+    var url = String((s && s.url) || '');
+    var host = hostOf(url);
+    if (!host) return s && s.title ? '<span class="fact-chip">' + esc(s.title) + '</span>' : '';
+    var title = s.title && s.title !== host ? s.title + ' · ' + host : host;
+    return '<a class="fact-chip" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer" title="' + esc(title) + '">' + esc(host) +
+      '<span aria-hidden="true">↗</span><span class="sr-only"> (새 탭)</span></a>';
+  }
+  function factCard(f, locked) {
+    var out = Boolean(f.excluded);
+    var srcs = list(f.sources).map(sourceChip).join('');
+    var self = f.selfView && (f.selfView.paraphrase || f.selfView.quote) ? f.selfView : null;
+    return '<li class="fact-card' + (out ? ' is-out' : '') + '">' +
+      '<div class="fact-top"><span class="fact-cat">' + esc(FACT_CAT_KO[f.category] || '사실') + '</span>' +
+      (f.eventDate ? '<time datetime="' + esc(f.eventDate) + '">' + esc(dateKo(f.eventDate)) + '</time>' : '') +
+      '<span class="fact-out-badge">빼기로 했어요</span></div>' +
+      '<p class="fact-text">' + esc(f.text) + '</p>' +
+      (srcs ? '<div class="fact-srcs"><span class="fact-label">출처</span>' + srcs + '</div>' : '') +
+      (self ? '<div class="fact-self"><span class="fact-label">본인 시점</span>' + (self.paraphrase ? '<p>' + esc(self.paraphrase) + '</p>' : '') +
+        (self.quote ? '<blockquote' + (self.msgId ? ' title="' + esc('원문 위치 ' + self.msgId) + '"' : '') + '>' + esc(self.quote) + '</blockquote>' : '') + '</div>' : '') +
+      '<label class="fact-toggle"><input type="checkbox" data-exclude-fact value="' + esc(f.factId) + '"' + (out ? ' checked' : '') + (out || locked ? ' disabled' : '') + '>' +
+      '<span>' + (out ? '이미 뺀 사실이에요' : '이 사실 빼기') + '</span></label></li>';
+  }
+  function renderFacts(pf) {
+    var facts = list(pf.items);
+    var locked = faceLocked();
+    var deflections = list(pf.deflections).filter(function (d) { return d && d.quote; });
+    return '<section class="gate-section"><h2>공개 사실 ' + facts.length + '개</h2>' +
+      '<p class="section-sub">' + (locked ? '공개 기사에서 모은 사실이에요. 이미 결정한 관문이라 고칠 수 없어요.' : '공개 기사에서 모은 사실이에요. 대화에서 이 인물의 사실로 쓰니, 틀렸거나 쓰지 않을 사실은 \'이 사실 빼기\'를 눌러 주세요. 승인할 때 함께 빠져요.') + '</p>' +
+      (facts.length ? '<ol class="fact-cards">' + facts.map(function (f) { return factCard(f, locked); }).join('') + '</ol>' : '<p class="empty">모은 사실이 없어요.</p>') +
+      (deflections.length ? '<h3 class="twin-h">사적인 질문을 넘기는 말</h3>' +
+        '<p class="section-sub">사생활을 물으면 이 말투로 넘겨요. 원문에서 본인이 한 말이에요.</p>' +
+        '<ul class="fact-deflect">' + deflections.map(function (d) {
+          return '<li><q' + (d.msgId ? ' title="' + esc('원문 위치 ' + d.msgId) + '"' : '') + '>' + esc(d.quote) + '</q></li>';
+        }).join('') + '</ul>' : '') +
+      '</section>';
+  }
+  // 원문 표 위의 요약: 종류별·말한 자리별 원문 수와 대상 인물 메시지 비율.
+  function sourceMix(texts) {
+    var kinds = {};
+    var regs = { FORMAL: { n: 0, m: 0 }, CASUAL: { n: 0, m: 0 } };
+    texts.forEach(function (t) {
+      var k = TEXT_KIND_KO[t.kind] || '그 밖';
+      kinds[k] = (kinds[k] || 0) + 1;
+      var r = regs[registerOf(t)];
+      if (r) { r.n += 1; r.m += Number(t.subjectMessages || 0); }
+    });
+    var total = regs.FORMAL.m + regs.CASUAL.m;
+    var share = total ? Math.round(regs.FORMAL.m / total * 100) : 0;
+    return '<div class="src-mix">' +
+      '<p><b>원문 ' + num(texts.length) + '개</b>' + Object.keys(kinds).map(function (k) { return '<span>' + esc(k) + ' ' + num(kinds[k]) + '개</span>'; }).join('') + '</p>' +
+      (total ? '<p><b>말한 자리</b><span>공식 자리 ' + num(regs.FORMAL.n) + '개 · 메시지 ' + num(regs.FORMAL.m) + '개</span><span>캐주얼 자리 ' + num(regs.CASUAL.n) + '개 · 메시지 ' + num(regs.CASUAL.m) + '개</span></p>' +
+        '<div class="src-mix-bar" role="img" aria-label="' + esc('대상 인물 메시지 중 공식 자리 ' + share + '%, 캐주얼 자리 ' + (100 - share) + '%') + '"><i style="width:' + share + '%"></i></div>' +
+        '<p class="src-mix-legend"><span class="is-formal">공식 자리 ' + share + '%</span><span class="is-casual">캐주얼 자리 ' + (100 - share) + '%</span></p>' : '') +
+      '</div>';
+  }
+  function sourceRow(t) {
+    var who = [t.subjectSpeaker, t.userSpeaker].filter(Boolean).join(' · ');
+    var a = String(t.first || '').slice(0, 10);
+    var b = String(t.last || '').slice(0, 10);
+    var period = a || b ? (a === b || !b ? a : !a ? b : a + ' ~ ' + b) : (t.date || '-');
+    var host = hostOf(t.sourceUrl);
+    var reg = registerOf(t);
+    return '<tr><td><span class="src-name">' + esc(t.textId) + '</span>' +
+      (host ? ' <a class="fact-chip" href="' + esc(t.sourceUrl) + '" target="_blank" rel="noopener noreferrer" title="' + esc(host) + '">' + esc(host) + '<span aria-hidden="true">↗</span><span class="sr-only"> (새 탭)</span></a>' : '') + '</td>' +
+      '<td>' + esc(TEXT_KIND_KO[t.kind] || '그 밖') + '</td>' +
+      '<td><span class="src-reg is-' + (reg === 'FORMAL' ? 'formal' : reg === 'CASUAL' ? 'casual' : 'none') + '">' + esc(REGISTER_KO[reg] || '-') + '</span></td>' +
+      '<td>' + esc(who || '-') + '</td>' +
+      '<td class="num">' + num(t.subjectMessages) + ' / ' + num(t.messages) + '</td><td class="num">' + num(t.conversations) + '</td><td class="num">' + esc(period) + '</td></tr>';
+  }
+  function sourceTable(rows) {
+    return '<table class="metric-table src-table"><colgroup><col class="c-name"><col class="c-kind"><col class="c-reg"><col class="c-who"><col class="c-msg"><col class="c-conv"><col class="c-date"></colgroup>' +
+      '<thead><tr><th scope="col">원문</th><th scope="col">종류</th><th scope="col">말한 자리</th><th scope="col">화자 (대상 · 상대)</th><th scope="col" class="num">대상 인물 / 전체 메시지</th><th scope="col" class="num">대화</th><th scope="col" class="num">날짜</th></tr></thead>' +
+      '<tbody>' + rows.map(sourceRow).join('') + '</tbody></table>';
   }
   function renderSourcePack(items) {
     var counts = items.counts || {};
@@ -2878,14 +3038,11 @@
     };
     var photos = items.photos || {};
     var origins = list(photos.origins).filter(Boolean);
-    var texts = list(items.texts).map(function (t) {
-      var who = [t.subjectSpeaker ? '대상 인물 ' + t.subjectSpeaker : '', t.userSpeaker ? '사용자 ' + t.userSpeaker : ''].filter(Boolean).join(' · ');
-      var period = t.first || t.last ? String(t.first || '').slice(0, 10) + ' ~ ' + String(t.last || '').slice(0, 10) : (t.date || '-');
-      return '<tr><td>' + esc(t.textId) + '</td><td>' + esc(TEXT_KIND_KO[t.kind] || t.kind) + '</td><td>' + esc(who || '-') + '</td>' +
-        '<td class="num">' + num(t.subjectMessages) + ' / ' + num(t.messages) + '</td><td class="num">' + num(t.conversations) + '</td><td class="num">' + esc(period) + '</td></tr>';
-    }).join('');
+    var texts = list(items.texts);
+    var head = texts.slice(0, SOURCE_ROWS);
+    var rest = texts.slice(SOURCE_ROWS);
     var reps = list(agent.representative).map(function (r) {
-      return '<li><p class="bubble is-char"><span>' + esc(DIGEST_KO[r.category] || r.category) + '</span>' + esc(r.text || '(메시지를 찾지 못했어요)') + '</p>' +
+      return '<li><p class="bubble is-char"><span>' + esc(DIGEST_KO[r.category] || '기타') + '</span>' + esc(r.text || '(메시지를 찾지 못했어요)') + '</p>' +
         '<p class="src-why">' + esc(r.why) + '</p></li>';
     }).join('');
     var flags = list(agent.piiFlags).map(function (p) {
@@ -2894,35 +3051,31 @@
     var bullets = function (values) {
       return list(values).length ? '<ul class="src-list">' + list(values).map(function (v) { return '<li>' + esc(v) + '</li>'; }).join('') + '</ul>' : '<p class="section-sub">없어요</p>';
     };
+    var notes = String(usage.notes || '');
     return (
       '<section class="gate-section"><h2>승인 전 확인</h2>' +
       '<p class="section-sub">빨간 항목이 있으면 승인할 수 없어요. 출처 묶음을 채워 다시 돌린 뒤 승인해 주세요.</p>' +
       '<ul class="pkg-checks">' + sourceChecks(items).map(checkRow).join('') + '</ul></section>' +
+      (items.publicFacts ? renderFacts(items.publicFacts) : '') +
       '<section class="gate-section"><h2>정리한 자료</h2>' +
       '<div class="kpis">' + kpi('대화', num(counts.conversations) + '개') + kpi('쓸 대상 인물 메시지', num(counts.corpusSubjectMessages) + '개') +
       kpi('가린 개인정보', num(maskedTotal(items)) + '건') +
       kpi('비교 세트로 뗀 대화', num(counts.holdoutConversations) + '개') + kpi('사진', num(photos.count) + '장') + '</div>' +
       '<p class="section-sub">비교 세트로 뗀 대화는 학습과 프롬프트에 넣지 않고, 나중에 실제 답과 생성 답을 비교할 때만 써요.' +
       (counts.otherParticipants ? ' 다른 참여자 ' + num(counts.otherParticipants) + '명의 이름은 참여자 번호로 바꿨어요.' : '') + '</p>' +
-      '<div class="twin-scroll"><table class="metric-table src-table"><thead><tr><th>출처</th><th>종류</th><th>화자</th><th class="num">대상 인물 / 전체 메시지</th><th class="num">대화</th><th class="num">기간</th></tr></thead>' +
-      '<tbody>' + texts + '</tbody></table></div>' +
+      (texts.length ? sourceMix(texts) : '') +
+      '<div class="twin-scroll">' + sourceTable(head) + '</div>' +
+      (rest.length ? '<details class="src-more"><summary>나머지 원문 ' + num(rest.length) + '개 보기</summary><div class="twin-scroll">' + sourceTable(rest) + '</div></details>' : '') +
       '<p class="section-sub">표의 숫자는 비교 세트를 떼기 전 전체예요. 위의 쓸 메시지 수는 비교 세트를 뺀 수예요.</p>' +
       '<p class="section-sub">사진 ' + num(photos.count) + '장' + (origins.length ? ' · 받은 곳: ' + esc(origins.join(', ')) : '') + '. 사진은 다음 관문(기준 사진)에서 크게 보고 골라요.</p></section>' +
-      (items.publicFacts ? '<section class="gate-section"><h2>공개 사실 확인</h2>' +
-        list(items.publicFacts.items).map(function (f) {
-          return '<p><label><input type="checkbox" data-exclude-fact value="' + esc(f.factId) + '"' +
-            (f.excluded ? ' checked disabled' : '') + '> 제외 · ' + esc(f.eventDate) + ' ' + esc(f.text) + '</label><br>' +
-            list(f.sources).map(function (s) { return esc(s.title) + ' ' + esc(s.url); }).join('<br>') +
-            (f.selfView ? '<br>본인 시점: ' + esc(f.selfView.paraphrase) + '<br>원문 ' + esc(f.selfView.msgId) + ': ' + esc(f.selfView.quote) : '') + '</p>';
-        }).join('') + bullets(list(items.publicFacts.deflections).map(function (d) { return '사적인 질문을 넘기는 말: ' + d.quote; })) + '</section>' : '') +
-      '<section class="gate-section"><h2>대상과 사용 근거</h2>' +
+      '<section class="gate-section"><h2>대상과 메모</h2>' +
       facts([
-        ['대상', (subject.displayName || '-') + ' · ' + (SUBJECT_KO[subject.kind] || subject.kind || '-')],
-        ['사용 범위', usage.scope || '비어 있어요'],
-        ['동의한 사람', usage.consentBy || '없음'],
-        ['동의 날짜', usage.consentDate || '없음'],
-        ['메모', usage.notes || '-']
-      ]) + '</section>' +
+        ['대상', (subject.displayName || '-') + ' · ' + (SUBJECT_KO[subject.kind] || '구분 없음')],
+        ['쓰는 곳', usage.scope || '팀 내부 사용']
+      ]) +
+      (notes ? (notes.length > 160
+        ? '<details class="src-notes"><summary>메모 보기 · ' + num(notes.length) + '자</summary><p>' + esc(notes) + '</p></details>'
+        : '<p class="src-notes-text">' + esc(notes) + '</p>') : '') + '</section>' +
       '<section class="gate-section"><h2>출처 정리 에이전트 의견</h2>' +
       '<p class="section-sub">에이전트가 정리한 원문 일부를 읽고 남긴 의견이에요. 참고만 하고 결정은 직접 해 주세요.</p>' +
       '<h3 class="twin-h">대표 메시지 ' + list(agent.representative).length + '개</h3>' +
@@ -2948,23 +3101,25 @@
     var warn = checks.filter(function (c) { return c.tone === 'warn'; });
     var counts = items.counts || {};
     var side = q('[data-side-extra]');
+    var out = qa('[data-exclude-fact]:checked').length;
     if (side) side.innerHTML = '<div class="bg-side"><p class="bg-side-title"><b>출처 확인</b><span>' +
       (checks.length - bad.length - warn.length) + ' / ' + checks.length + ' 통과</span></p>' +
       '<dl class="facts"><dt>대상</dt><dd>' + esc((items.subject || {}).displayName || '-') + '</dd><dt>대화</dt><dd>' + num(counts.conversations) + '개</dd>' +
+      (items.publicFacts ? '<dt>공개 사실</dt><dd>' + list(items.publicFacts.items).length + '개' + (out ? ' · 뺄 사실 ' + out + '개' : '') + '</dd>' : '') +
       '<dt>비교 세트</dt><dd>' + num(counts.holdoutConversations) + '개</dd><dt>확인 필요</dt><dd>' + warn.length + '</dd><dt>막는 문제</dt><dd>' + bad.length + '</dd></dl></div>';
     if (faceLocked()) return;
     var approve = q('[data-decide="APPROVE"]');
     if (approve) approve.disabled = Boolean(state.busy || sourceLocked());
     var hint = q('[data-side-hint]');
     if (hint) hint.textContent = sourceLocked()
-      ? bad.map(function (c) { return c.title; }).join(', ') + '이 비어 승인할 수 없어요. 수정 요청을 보내거나 출처 묶음을 채워 다시 돌려 주세요.'
+      ? '출처 묶음에 막는 문제가 있어 승인할 수 없어요. 본문 아래 상세에서 이유를 보고, 수정 요청을 보내거나 출처 묶음을 채워 다시 돌려 주세요.'
       : warn.length ? '확인할 항목 ' + warn.length + '개가 있지만 승인할 수 있어요. 승인하면 기준 사진과 기획이 이어서 만들어져요.'
       : '모두 갖췄어요. 승인하면 기준 사진과 기획이 이어서 만들어져요.';
   }
   function buildSourcePack(decision) {
     var answer = { decision: decision };
     if (state.items.publicFacts) answer.excludedFactIds = qa('[data-exclude-fact]:checked').map(function (el) { return el.value; });
-    if (decision === 'APPROVE' && sourceLocked()) throw Error('사용 근거가 비어 승인할 수 없어요. 출처 묶음을 채워 다시 돌려 주세요.');
+    if (decision === 'APPROVE' && sourceLocked()) throw Error('출처 묶음에 막는 문제가 있어 승인할 수 없어요. 출처 묶음을 채워 다시 돌려 주세요.');
     if (decision === 'REQUEST_CHANGES') {
       var box = q('[data-source-note]');
       var note = box ? box.value.trim() : '';
@@ -3998,6 +4153,7 @@
       state.planOnlyDiff = event.target.checked;
       paintPlans();
     }
+    if (event.target && event.target.matches && event.target.matches('[data-exclude-fact]')) paintSourceSide();
   });
 
   load().then(watch);

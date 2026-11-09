@@ -24,14 +24,26 @@
     return { cls: noData ? 'tw nt' : 'tw', cell };
   }
   // 갈래·모델 준비 방식 표시(D-0128, D-0118). 코드 값은 화면에 보이지 않는다.
-  const MODE_LABEL = { TRAIN: '학습', BIND_EXISTING: '학습된 모델 연결', PROMPT_ONLY: '긴 프롬프트' };
+  const MODE_LABEL = { TRAIN: '학습', BIND_EXISTING: '학습된 모델 연결', PROMPT_ONLY: '프롬프트만' };
   function trackLabel(c) {
     const x = c || {};
     if (x.origin !== 'SOURCE') return '오리지널';
     return (x.originLabel || '모티브') + ' · ' + (MODE_LABEL[x.modelMode] || MODE_LABEL.TRAIN);
   }
   // 모티브 단계 줄에 붙이는 쉬운 설명. 단계 이름은 서버 그래프를 그대로 쓴다.
-  const TWIN_HINT = { s2: '받은 사진에서 기준 사진 고르기' };
+  const TWIN_HINT = { s2: '받은 사진에서 기준 사진 고르기', s8c: '첫 통화 장면을 정하고 장면마다 대화 표본을 만들어요' };
+  // S8c(챕터 시작 설정)는 사람 검토 없이 도는 단계다. 화면 이름은 시작 장면을 따른다(계획 2차 약속 2).
+  function s8cName(origin, template) {
+    if (template) return template === 'FAN_CALL' ? '팬 통화 장면' : '통화 장면';
+    return origin === 'SOURCE' ? '팬 통화 장면' : '통화 장면';
+  }
+  // 대화 테스트 화면 주소. 모티브이고 프롬프트(S8)가 나왔을 때만 연다. 준비가 덜 됐으면 대화 화면이 이유를 보여 준다.
+  function chatHref(detail) {
+    const d = detail || {};
+    if (d.origin !== 'SOURCE' || !d.id) return '';
+    const s8 = upper((rowsById(d).get('s8') || {}).status);
+    return s8 === 'APPROVED' || s8 === 'AWAITING_HUMAN' ? 'chat.html#c/' + encodeURIComponent(d.id) : '';
+  }
   // 단계 이름 뒤 표시(사람 검토·유료 아이콘)는 마지막 낱말에 붙인다. 칸이 좁아도 아이콘만 다음 줄로 떨어지지 않는다.
   function stageNameHTML(name, marks) {
     const s = String(name == null ? '' : name);
@@ -62,7 +74,8 @@
     expand: '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>',
     shrink: '<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>',
     grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
-    copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'
+    copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+    chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>'
   };
   // 브랜드 마크: 보라 둥근 사각형 안의 F와 불꽃 점(D-0102).
   const MARK = '<svg class="fd-mark" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="var(--fd-accent)"/><path d="M8.5 17V7h7.5M8.5 12h5" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16.4" cy="16.4" r="1.7" fill="#fff"/></svg>';
@@ -618,6 +631,8 @@
       g.layout = layoutOf(g);
       g.origin = raw.origin || 'CREATED';
       g.modelMode = raw.modelMode || 'TRAIN';
+      const s8c = g.byStage.get('s8c');
+      if (s8c) s8c.name = s8cName(g.origin, '');
       state.graphs.set(g.key, g);
       return g;
     }
@@ -808,7 +823,7 @@
         const waiting = s ? s.todo : 0;
         return '<button type="button" class="fd-nav" data-act="pick" data-id="' + E(c.id) + '"' + (!rt.overview && c.id === state.characterId ? ' aria-current="page"' : '') + ' title="' + E(name) + '">' +
           '<span class="fd-av" aria-hidden="true">' + E(Array.from(name)[0] || '?') + '<span class="st ' + (s ? statusDot(s) : '') + '"></span></span>' +
-          '<span class="lbl">' + E(name) + '</span>' +
+          '<span class="lbl">' + E(name) + '</span>' + (c.origin === 'SOURCE' ? '<span class="fd-org" title="' + E(trackLabel(c)) + '">' + E(c.originLabel || '모티브') + '</span>' : '') +
           (waiting ? '<span class="num attn"><span class="sr">할 일 </span>' + waiting + '<span class="u">건</span></span>' : '<span class="num" title="' + (s ? E(s.done + '/' + s.total + '단계 완료') : '') + '">' + (s ? s.done + '/' + s.total : '') + '</span>') + '</button>';
       }).join('');
       const theme = [['system', 'monitor', '시스템 설정 따르기'], ['light', 'sun', '밝은 화면'], ['dark', 'moon', '어두운 화면']]
@@ -898,7 +913,10 @@
         prog = '<span class="fd-prog-wrap"><span class="fd-prog" role="img" aria-label="' + E('전체 ' + s.total + '단계 중 ' + s.done + '단계 완료, ' + pct + '%') + '">' + s.lanes.map((l) => '<span class="seg ' + l.kind + '" title="' + E(l.label + ' ' + l.done + '/' + l.total) + '"></span>').join('') + '</span>' + s.done + '/' + s.total + '단계 · ' + pct + '%</span>';
       }
       const demo = d.origin === 'SOURCE' ? '<span class="fd-demo">' + E(DEMO_NOTE) + '</span>' : '';
-      return '<div class="fd-title"><h1 tabindex="-1">' + E(nameOf(d)) + '</h1>' + trackHTML(d) + (sub ? '<p>' + E(sub) + '</p>' : '') + prog + (nameOf(d) !== d.id ? '<code>' + E(d.id) + '</code>' : '') + demo + '</div>';
+      const href = chatHref(d);
+      const calm = href && !Object.values(views(setupScope())).some((x) => ['wait', 'confirm', 'fail'].includes(x.kind));
+      const chat = href ? '<a class="btn fd-chat' + (calm ? ' pri' : '') + '" href="' + E(href) + '">' + icon('chat') + '대화해 보기</a>' : '';
+      return '<div class="fd-title"><h1 tabindex="-1">' + E(nameOf(d)) + '</h1>' + trackHTML(d) + (sub ? '<p>' + E(sub) + '</p>' : '') + prog + (nameOf(d) !== d.id ? '<code>' + E(d.id) + '</code>' : '') + demo + chat + '</div>';
     }
     function formHTML() {
       const f = state.form;
@@ -1327,6 +1345,8 @@
       if (gate && upper(gate.status) === 'APPROVED') acts.push('<button type="button" class="btn block" data-act="review" data-gate="' + E(def.gate) + '" data-stage="' + E(id) + '" data-readonly="1">결정 기록 보기</button>');
       const mstepOf = { s9s: 'data', s9: 'data', s10t: 'train', s10: 'eval' }[id];
       if (mstepOf) acts.push('<button type="button" class="btn block" data-act="open-model" data-step="' + mstepOf + '">모델 만들기에서 보기</button>');
+      const chat = (id === 's8' || id === 's8c') ? chatHref(d) : '';
+      if (chat) acts.push('<a class="btn block" href="' + E(chat) + '">' + icon('chat') + '대화해 보기</a>');
       if (x.kind === 'todo' && def.implemented && !notStarted() && !mstepOf) acts.push('<button type="button" class="btn block" data-act="run-stage" data-stage="' + E(id) + '"' + (busy ? ' disabled' : '') + '>이 단계까지 실행</button>');
       const pill = '<span class="fl-pill ' + (x.kind === 'retry' ? 'run' : x.kind === 'done' ? 'ok' : ['todo', 'out', 'skip'].includes(x.kind) ? 'muted' : x.kind) + '"><span class="d"></span>' + E(KIND_LABEL[x.kind]) + '</span>';
       return '<div class="ins-head"><span class="ins-kicker">' + E((lane ? lane.label + ' 팀 · ' : '') + def.id) + '</span><div class="ins-title"><h2>' + E(def.name) + '</h2>' + pill + '</div>' + (acts.length ? '<div class="acts" style="flex-direction:column;align-items:stretch">' + acts.join('') + '</div>' : '') + '</div>' +
@@ -1775,6 +1795,8 @@
         return;
       }
       const scope = setupScope();
+      // 시작 장면이 알려지면 S8c 이름을 그 장면에 맞춘다(모티브 기본은 팬 통화).
+      if (state.detail && state.graph.byStage.get('s8c')) state.graph.byStage.get('s8c').name = s8cName(state.detail.origin || state.graph.origin, text(state.detail.chapterTemplate));
       const v = state.detail ? views(scope) : {};
       if (state.detail && !state.sel) {
         const tasks = buildTasks(state.graph, state.detail, v, {});
@@ -2034,7 +2056,7 @@
     };
   }
 
-  const pure = { since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, MARK, mount };
+  const pure = { since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, s8cName, chatHref, MODE_LABEL, MARK, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = pure;
   if (global) global.FactoryFlow = pure;
 })(typeof window !== 'undefined' ? window : null);
