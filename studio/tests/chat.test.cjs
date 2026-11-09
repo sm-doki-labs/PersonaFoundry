@@ -246,7 +246,8 @@ test('loading the meta can fail and be retried', async () => {
   const server = fakeServer({ metaFail: ['network'] });
   const chat = C.createChat({ fetch: server.fetch, characterId: CID });
   const phases = [];
-  chat.subscribe((s) => phases.push(s.phase));
+  // 영상 목록을 받으면 같은 단계로 한 번 더 알린다. 단계가 바뀐 순서만 본다.
+  chat.subscribe((s) => { if (phases[phases.length - 1] !== s.phase) phases.push(s.phase); });
   await chat.load();
   assert.equal(chat.state.phase, 'error');
   assert.match(chat.state.error, /서버에 연결하지 못했어요/);

@@ -22,19 +22,29 @@
     <header class="fd-head" data-top></header>
     <div class="ch-body">
       <main class="ch-stage" data-stage aria-labelledby="ch-title">
-        <div class="ch-call" data-call></div>
-        <div class="ch-state" data-state hidden></div>
-        <div class="ch-bar" data-playbar hidden></div>
-        <ol class="ch-list" data-list aria-label="대화" hidden></ol>
-        <form class="ch-composer" data-composer hidden>
-          <label class="sr" for="ch-input">보낼 말</label>
-          <div class="ch-box">
-            <textarea id="ch-input" data-input rows="1" autocomplete="off" spellcheck="false" aria-describedby="ch-hint"></textarea>
-            <button type="submit" class="btn pri ch-send" data-send data-mode="send" aria-label="보내기" disabled><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><polyline points="13 6 19 12 13 18"/></svg><span>보내기</span></button>
+        <figure class="ch-video" data-video hidden>
+          <div class="ch-screen">
+            <video data-player muted playsinline preload="auto" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1"></video>
+            <video data-player muted playsinline preload="auto" disablepictureinpicture disableremoteplayback aria-hidden="true" tabindex="-1"></video>
+            <button type="button" class="ch-sound" data-act="sound" data-key="sound" data-sound aria-pressed="false" aria-label="소리 켜기" title="소리 켜기" hidden></button>
           </div>
-          <p class="ch-hint" id="ch-hint" data-composer-hint>Enter로 보내고 Shift+Enter로 줄을 바꿔요</p>
-        </form>
-        <p class="sr" data-live aria-live="polite" aria-atomic="true"></p>
+          <figcaption class="sr" data-vcap></figcaption>
+        </figure>
+        <div class="ch-talk">
+          <div class="ch-call" data-call></div>
+          <div class="ch-state" data-state hidden></div>
+          <div class="ch-bar" data-playbar hidden></div>
+          <ol class="ch-list" data-list aria-label="대화" hidden></ol>
+          <form class="ch-composer" data-composer hidden>
+            <label class="sr" for="ch-input">보낼 말</label>
+            <div class="ch-box">
+              <textarea id="ch-input" data-input rows="1" autocomplete="off" spellcheck="false" aria-describedby="ch-hint"></textarea>
+              <button type="submit" class="btn pri ch-send" data-send data-mode="send" aria-label="보내기" disabled><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><polyline points="13 6 19 12 13 18"/></svg><span>보내기</span></button>
+            </div>
+            <p class="ch-hint" id="ch-hint" data-composer-hint>Enter로 보내고 Shift+Enter로 줄을 바꿔요</p>
+          </form>
+          <p class="sr" data-live aria-live="polite" aria-atomic="true"></p>
+        </div>
       </main>
       <aside class="ch-panel" data-panel aria-label="상황 재생과 받아 둔 답" hidden></aside>
     </div>
