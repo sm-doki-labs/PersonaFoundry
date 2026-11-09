@@ -618,11 +618,48 @@ def chat_characters(root):
 
 def job_status(row, job, last):
     status = row["status"]
-    if job and job["status"] == "running":
+    if (
+        job
+        and job["status"] == "running"
+        and not (row.get("chatReady") and job.get("trigger") in {"videos", "videos-with-chat"})
+    ):
         status = "running"
     elif status not in ("needs_review", "chat_ready") and last and last["status"] == "failed":
         status = "failed"
     row.update(status=status, statusLabel=STATUS_LABELS[status])
+
+
+def video_fields(folder, state):
+    from character_factory_poc.pipeline.origin import read_video_tier
+
+    tier = read_video_tier(folder)
+    gate = state.get("gates", {}).get("G5b", {})
+    approved = gate.get("rev") if gate.get("status") == "APPROVED" else None
+    preset = ""
+    if approved:
+        preset = (read_json_file(folder / "s6-actions" / approved / "inputs.json") or {}).get(
+            "preset", ""
+        )
+    job = read_json_file(folder / "video-job.json") or {}
+    status = "none"
+    if tier != "none" and approved and (not tier or preset == f"tier:{tier}"):
+        status = "ready"
+    elif tier and tier == job.get("tier"):
+        if job.get("status") in ("queued", "running"):
+            status = "making"
+        elif job.get("status") == "failed":
+            status = "failed"
+    labels = {
+        "none": "아직 영상이 없어요",
+        "making": "영상을 만들고 있어요",
+        "ready": "영상을 볼 수 있어요",
+        "failed": "영상을 만들지 못했어요",
+    }
+    return dict(
+        videoTier=tier or (preset.removeprefix("tier:") if preset.startswith("tier:") else "none"),
+        videoStatus=status,
+        videoLabel=labels[status],
+    )
 
 
 def character_summary(char_dir: Path) -> dict[str, Any]:
@@ -669,6 +706,7 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
         "status": status,
         "statusLabel": STATUS_LABELS[status],
         "chatReady": chat,
+        **video_fields(char_dir, state),
         "createdAt": created_at(char_dir, intake),
         "archived": read_archived(char_dir),
         "goal": dict(
@@ -757,7 +795,18 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
         "state": state,
         "stateError": error,
         "summary": summary,
-        **{k: summary[k] for k in ("origin", "originLabel", "modelMode", *QA_FIELDS)},
+        **{
+            k: summary[k]
+            for k in (
+                "origin",
+                "originLabel",
+                "modelMode",
+                "videoTier",
+                "videoStatus",
+                "videoLabel",
+                *QA_FIELDS,
+            )
+        },
         "autoReview": read_auto_review(char_dir),
         "persona": summary["persona"],
         "stages": summary["stages"],
@@ -990,6 +1039,9 @@ def list_projects(root: Path, *, include_archived=False) -> dict[str, Any]:
                     "status": "failed",
                     "statusLabel": STATUS_LABELS["failed"],
                     "chatReady": False,
+                    "videoTier": "none",
+                    "videoStatus": "none",
+                    "videoLabel": "아직 영상이 없어요",
                     "goal": dict(label="전체 단계", done=0, total=0),
                     "createdAt": _mtime_iso(folder),
                     "archived": read_archived(folder),

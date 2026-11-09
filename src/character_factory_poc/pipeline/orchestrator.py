@@ -62,6 +62,7 @@ class RunOptions:
     # 모티브 s0 출처 묶음(source-pack-v1, D-0120). 없으면 지난 판을 쓴다
     source_pack: Path | None = None
     # D-0049(LLD §6.6·§6.7)
+    video_only: bool = False  # 영상 요청은 지정한 다섯 단계만 돈다.
     max_parallel: int = 1  # 동시에 돌릴 단계 수. 1이면 순차 훑기
     web: bool = False  # 워크숍이 시작한 실행. 유료 공급자 단계는 확인을 받는다
     confirmed: set[str] = field(default_factory=set)  # 사람이 실행을 확인·허락한 단계
@@ -289,11 +290,15 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
             raise FactoryError("모티브 캐릭터는 --ranking을 받지 않는다(얼굴은 받은 사진에서 온다)")
         for sid in ("s1", "s2", "s3"):
             runners.pop(sid, None)
+        from character_factory_poc.pipeline.origin import read_video_tier
         from character_factory_poc.stages.s0_source.run import run_s0
         from character_factory_poc.stages.s2_hero.twin import run_s2_twin
         from character_factory_poc.stages.s3_plan.twin import run_s3_twin
+        from character_factory_poc.stages.s6_actions.catalog import ALL_CHAPTERS, VIDEO_TIERS
         from character_factory_poc.stages.s8_prompts.chapter_start import run_s8c
 
+        tier = VIDEO_TIERS.get(read_video_tier(ctx.character_dir(cid)))
+        chapters = tier.chapters if tier else ALL_CHAPTERS
         runners.update(
             {
                 "s8c": lambda: run_s8c(ctx, cid),
@@ -301,7 +306,7 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
                 "s2": lambda: run_s2_twin(ctx, cid),
                 "s3": lambda: run_s3_twin(ctx, cid),
                 "s5": lambda: run_s5(ctx, cid),
-                "s4a": lambda: run_s4a(ctx, cid),
+                "s4a": lambda: run_s4a(ctx, cid, chapters=chapters),
                 "s4b": lambda: run_s4b(ctx, cid),
                 "s4": lambda: run_s4(ctx, cid),
                 "s6": lambda: run_s6(ctx, cid),
@@ -385,6 +390,39 @@ def _mark_failed(ctx: Context, cid: str, sid: str, message: str) -> None:
         pass
 
 
+def _matches_video_scope(ctx, cid, sid, rev):
+    """등급이 바뀌면 범위가 같은 승인 결과만 재사용한다."""
+    from character_factory_poc.common.store import read_json
+    from character_factory_poc.pipeline.origin import read_video_tier
+    from character_factory_poc.stages.s6_actions.catalog import VIDEO_TIERS
+
+    folder = ctx.character_dir(cid)
+    tier = read_video_tier(folder)
+    if sid == "s2":
+        return True
+    state = ctx.state(cid)
+    if sid == "s6":
+        data = read_json(folder / "s6-actions" / rev / "inputs.json")
+        return data["preset"] == f"tier:{tier}" and data["frameRev"] == state.gate("G4").rev
+    locations = {
+        "s4a": ("s4a-backgrounds", "background-candidates.json"),
+        "s4b": ("s4b-poses", "scene-plan.json"),
+        "s4": ("s4-frames", "scene-plan.json"),
+    }
+    dirname, filename = locations[sid]
+    data = read_json(folder / dirname / rev / filename)
+    upstream = {
+        "s4a": ("planRev", "G3"),
+        "s4b": ("backgroundRev", "G4a"),
+        "s4": ("sceneRev", "G4b"),
+    }
+    field, gate = upstream[sid]
+    if data[field] != state.gate(gate).rev:
+        return False
+    chapters = data["chapters"]
+    return [ch["chapterId"] for ch in chapters] == list(VIDEO_TIERS[tier].chapters)
+
+
 def _step(
     ctx: Context,
     cid: str,
@@ -406,9 +444,14 @@ def _step(
     st = state.stage(sid)
     gate_ok = stage.gate is None or state.gate(stage.gate).status == "APPROVED"
     ran = False
-    if st.status in {"APPROVED", "SKIPPED"} or (st.status == "AWAITING_HUMAN" and gate_ok):
+    reusable = st.status in {"APPROVED", "SKIPPED"} or (st.status == "AWAITING_HUMAN" and gate_ok)
+    if reusable and (not opt.video_only or _matches_video_scope(ctx, cid, sid, st.currentRev)):
         log.add(f"{sid}: 이미 {st.status}({st.currentRev}) — 건너뜀")
     elif st.status == "AWAITING_HUMAN" and stage.gate:
+        if opt.video_only and not _matches_video_scope(ctx, cid, sid, st.currentRev):
+            raise NeedsInputError(
+                "다른 등급으로 만들던 장면이 있어요. 먼저 기다리는 검토를 마쳐 주세요."
+            )
         log.add(f"{sid}: {stage.gate} 대기 중({st.currentRev})")
     else:
         try:
@@ -490,7 +533,19 @@ def _step(
     if auto_review and sid == "s8c" and state.stage(sid).status == "APPROVED":
         gate = "G6"
     if gate and state.gate(gate).status == "AWAITING_HUMAN":
-        if auto_review and gate in {"G0", "G3", "G6"}:
+        if opt.video_only:
+            approve_gate(
+                ctx,
+                cid,
+                gate,
+                {
+                    "decision": "APPROVE",
+                    "reviewer": "자동 진행",
+                    "reasons": "고른 영상 등급에 맞춰 첫 후보를 선택했어요.",
+                },
+            )
+            log.add(f"{gate}: 자동 진행")
+        elif auto_review and gate in {"G0", "G3", "G6"}:
             approve_text_gate(ctx, cid, gate)
             log.add(f"{gate}: 자동 진행")
         elif gate in opt.auto_approve:
@@ -534,7 +589,7 @@ def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
         # 모티브의 프롬프트 검토에는 첫 장면도 함께 준비한다.
         opt = replace(opt, until="s8c")
     auto_review = read_auto_review(char_dir)
-    if not auto_review and opt.max_parallel > 1:
+    if not opt.video_only and not auto_review and opt.max_parallel > 1:
         # D-0049(LLD §6.6): 의존이 풀린 단계를 동시에 돌린다.
         from character_factory_poc.pipeline.scheduler import run_waves
 
@@ -542,7 +597,9 @@ def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
     log = RunLog()
     runners = _stage_runners(ctx, cid, opt)
     # 자동 진행은 직렬 텍스트 경로만 탄다. 사진·영상·학습·평가는 별도 실행 확인이 필요하다.
-    for sid in graph:
+    from character_factory_poc.pipeline.origin import VIDEO_STAGES
+
+    for sid in VIDEO_STAGES if opt.video_only else graph:
         if auto_review and sid not in {"s0", "s3", "s7", "s8", "s8c"} and sid not in opt.confirmed:
             continue
         note = _skip_note(ctx, cid, sid, runners)
@@ -551,7 +608,7 @@ def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
                 log.add(note)
             continue
         action = _step(ctx, cid, sid, opt, runners, log, auto_review=auto_review)
-        if auto_review and (log.blocked or log.held):
+        if (auto_review or opt.video_only) and (log.blocked or log.held):
             break
         if action == "break":
             break

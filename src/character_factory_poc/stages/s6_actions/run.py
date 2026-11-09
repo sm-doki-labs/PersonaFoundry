@@ -111,8 +111,16 @@ def _resolve_config(settings: dict[str, Any]) -> dict[str, Any]:
     return cfg
 
 
-def s6_config(ctx: Context) -> dict[str, Any]:
-    return _resolve_config(ctx.config.stage("s6"))
+def s6_config(ctx: Context, cid: str | None = None) -> dict[str, Any]:
+    from character_factory_poc.pipeline.origin import read_video_tier
+
+    settings = dict(ctx.config.stage("s6"))
+    tier = read_video_tier(ctx.character_dir(cid)) if cid else None
+    if tier == "none":
+        raise CheckFailed("s6", ["영상 없이 만들기로 정했어요."])
+    if tier:
+        settings["video_tier"] = tier
+    return _resolve_config(settings)
 
 
 def _duration(cfg: dict, key: str) -> int:
@@ -234,11 +242,20 @@ def _pending_rev(ctx: Context, cid: str) -> str | None:
     if stage.status not in {"CHECK_FAILED", "RUNNING"} or not stage.currentRev:
         return None
     path = ctx.character_dir(cid) / "s6-actions" / stage.currentRev / "inputs.json"
-    return stage.currentRev if path.exists() else None
+    if not path.exists():
+        return None
+    from character_factory_poc.pipeline.origin import read_video_tier
+
+    tier = read_video_tier(ctx.character_dir(cid))
+    if tier:
+        inputs = read_inputs(path)
+        if inputs.preset != f"tier:{tier}" or inputs.frameRev != ctx.state(cid).gate("G4").rev:
+            return None
+    return stage.currentRev
 
 
 def run_s6(ctx: Context, cid: str) -> Path:
-    cfg = s6_config(ctx)  # 잘못된 설정은 상태·산출물·공급자를 건드리기 전에 거절한다.
+    cfg = s6_config(ctx, cid)  # 잘못된 설정은 상태·산출물·공급자를 건드리기 전에 거절한다.
     state = ctx.state(cid)
     state.require_deps("s6")
     frames, frame_dir = load_approved_frames(ctx, cid)

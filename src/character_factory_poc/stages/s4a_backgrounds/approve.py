@@ -33,8 +33,8 @@ def validate_choices(answer: dict, options: dict[str, set[str]], gate: str) -> t
     picks, custom = answer.get("picks", {}), answer.get("custom", {})
     if not isinstance(picks, dict) or not isinstance(custom, dict):
         raise FactoryError(f"{gate}: picks·custom은 챕터를 키로 하는 객체다")
-    if set(picks) & set(custom) or set(picks) | set(custom) != set(CHAPTERS):
-        raise FactoryError(f"{gate}: ch1·ch2·ch3 각각 하나씩 picks 또는 custom에 담는다")
+    if set(picks) & set(custom) or set(picks) | set(custom) != set(options):
+        raise FactoryError(f"{gate}: 요청한 장면마다 후보나 직접 정한 장소를 하나씩 골라 주세요.")
     for chapter, value in picks.items():
         if not isinstance(value, str) or value not in options[chapter]:
             raise FactoryError(f"{gate}: {chapter}에 속하지 않는 후보를 골랐다")
@@ -100,7 +100,7 @@ def approve_g4a(ctx: Context, cid: str, answer: dict) -> Path:
             answer
             if decision == "SELECT"
             else {
-                "picks": {ch: f"{ch}-b1" for ch in CHAPTERS},
+                "picks": {ch: f"{ch}-b1" for ch in options},
             }
         )
         picks, custom = validate_choices(choices, options, "G4a")

@@ -35,6 +35,7 @@ MAX_HISTORY = 200
 MAX_CREATOR_BRIEF_CHARS = 20_000
 # D-0130: train = 유료 학습 제출·완료까지(비용 확인 필요).
 # skip-training = 학습 없이 진행을 고르고 이어서 실행한다.
+VIDEO_TRIGGERS = {"videos", "videos-with-chat"}
 ACTIONS = {"run", "train", "skip-training"}
 TRAIN_STARTABLE = {"plan", "stopped", "fail", "hold", "done", "skip"}
 SKIP_ALLOWED = {"plan", "stopped", "fail"}
@@ -363,10 +364,10 @@ class JobManager:
                 router.unregister()
                 job.finished_at = now_iso()
                 stream.flush_lines()
+                self._persist(job)
                 with self._lock:
                     if self._active.get(job.character_id) == job.job_id:
                         del self._active[job.character_id]
-                self._persist(job)
                 self._publish_job(job)
                 self.publish_state(job.character_id, force=True)
 
@@ -470,7 +471,22 @@ class JobManager:
         options = self.run_options(job, stream)
         if brief is not None:
             options = replace(options, brief_text=brief)
+        if job.trigger in VIDEO_TRIGGERS:
+            if job.trigger == "videos-with-chat":
+                chat = run_until(
+                    ctx, job.character_id, replace(options, until="s8c", confirmed=set())
+                )
+                if (
+                    chat.stopped_at != "s8c"
+                    or ctx.state(job.character_id).gate("G6").status != "APPROVED"
+                ):
+                    raise ValueError("대화 준비를 마치지 못했어요.")
+            options = replace(options, video_only=True)
         log = run_until(ctx, job.character_id, options)
+        if job.trigger in VIDEO_TRIGGERS and (
+            log.stopped_at != "G5b" or ctx.state(job.character_id).gate("G5b").status != "APPROVED"
+        ):
+            raise ValueError("영상 만들기를 마치지 못했어요.")
         if job.until == "s8c" and ctx.state(job.character_id).stage("s8c").status != "APPROVED":
             raise ValueError("대화 준비를 마치지 못했어요. 멈춘 단계의 작업 기록을 확인해 주세요.")
         return log
@@ -557,6 +573,13 @@ class JobManager:
     def _persist(self, job: Job) -> None:
         folder = self.settings.jobs_path
         try:
+            if job.trigger in VIDEO_TRIGGERS:
+                from character_factory_poc.common.source_store import atomic_write, inside
+                from character_factory_poc.pipeline.origin import read_video_tier
+
+                char_dir = reads.character_dir(self.root, job.character_id)
+                marker = {"tier": read_video_tier(char_dir), "status": job.status}
+                atomic_write(inside(char_dir, "video-job.json"), json.dumps(marker).encode())
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / f"{job.job_id}.json"
             tmp = path.with_suffix(".json.tmp")
@@ -592,6 +615,11 @@ class JobManager:
                 job.status = "failed"
                 job.error = "서버가 다시 시작되어 작업이 중단됐다"
                 job.finished_at = job.finished_at or now_iso()
+                if (
+                    job.trigger in VIDEO_TRIGGERS
+                    and (self.root / "runs/characters" / job.character_id).is_dir()
+                ):
+                    self._persist(job)
             self._jobs.setdefault(job.job_id, job)
 
 

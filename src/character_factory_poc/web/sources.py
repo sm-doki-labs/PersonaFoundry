@@ -42,9 +42,14 @@ from character_factory_poc.contracts.source import (
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.origin import (
     SOURCE,
+    VIDEO_STAGES,
+    VideoTier,
     read_auto_review,
+    read_origin,
+    read_video_tier,
     write_model_mode,
     write_origin,
+    write_video_tier,
 )
 from character_factory_poc.stages.s0_source import parse
 from character_factory_poc.stages.s3_plan.common import new_character
@@ -64,7 +69,12 @@ class KnownFacts(Strict):
     background: str = Field(default="", max_length=400)
 
 
+class Settings(Strict):
+    videoTier: VideoTier
+
+
 class Draft(Strict):
+    videoTier: VideoTier = "none"
     displayName: str = Field(min_length=1)
     subjectKind: SubjectKind
     usageBasis: UsageBasis = Field(default_factory=UsageBasis)
@@ -103,17 +113,44 @@ def save(path: Path, data: dict) -> None:
     atomic_write(path, (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode())
 
 
+PHOTO_FORMATS = {
+    ".png": b"\x89PNG\r\n\x1a\n",
+    ".jpg": b"\xff\xd8\xff",
+    ".jpeg": b"\xff\xd8\xff",
+    ".webp": b"RIFF",
+}
+PHOTO_LIMIT = 15 * 1024 * 1024
+
+
+def photo_ok(name, data):
+    import cv2
+    import numpy as np
+
+    ext = Path(name).suffix.lower()
+    if not data.startswith(PHOTO_FORMATS[ext]) or (ext == ".webp" and data[8:12] != b"WEBP"):
+        return False
+    try:
+        return cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_REDUCED_COLOR_8) is not None
+    except cv2.error:
+        return False
+
+
 def record(spec: Upload) -> dict:
     name = spec.filename
+    photo = Path(name).suffix.lower() in PHOTO_FORMATS
+    if photo and spec.size > PHOTO_LIMIT:
+        raise WebError(413, "사진은 15MB 이하로 올려 주세요.")
     if (
         Path(name).name != name
         or "\\" in name
         or len(name.encode()) > 255
         or any(ord(c) < 32 for c in name)
         or Path(name).suffix.lower() not in EXTENSIONS
+        and not photo
     ):
         raise WebError(400, "원문 파일 이름과 형식을 확인해 주세요.")
     return dict(
+        fileType="photo" if photo else "text",
         fileId=uuid4().hex,
         filename=name,
         size=spec.size,
@@ -136,6 +173,12 @@ def find_file(draft, fid):
 def summary(draft):
     problems = []
     files = draft["files"]
+    if not any(f.get("fileType", "text") == "text" for f in files):
+        problems.append("대화나 글이 담긴 원문을 하나 이상 올려 주세요.")
+    if draft["videoTier"] != "none" and not any(
+        f["fileType"] == "photo" and f["status"] == "ready" for f in files
+    ):
+        problems.append("영상을 만들려면 인물 사진을 한 장 이상 올려 주세요.")
     ids = [f["textId"] for f in files if f["textId"]]
     if len(ids) != len(set(ids)):
         problems.append("원문 이름이 겹쳐요.")
@@ -218,7 +261,7 @@ def install_source_routes(app, conf, jobs):
     allow_import = not conf.server_mode and conf.source_store == "local"
 
     @contextmanager
-    def opened(cid, *, edit=False, purge=False):
+    def opened(cid, *, edit=False, purge=False, settings=False):
         try:
             folder = reads.character_dir(conf.root, cid)
         except WebError as exc:
@@ -228,11 +271,20 @@ def install_source_routes(app, conf, jobs):
             lock = inside(folder, "s0-source", "intake.lock")
         except ValueError:
             raise WebError(403, "이 위치의 파일은 열 수 없어요.") from None
-        if not folder.is_relative_to(conf.root) or not state.is_file():
+        legacy = (
+            settings
+            and not state.is_file()
+            and lock.parent.is_dir()
+            and read_origin(folder) == SOURCE
+        )
+        if not folder.is_relative_to(conf.root) or not (state.is_file() or legacy):
             raise WebError(404, "만들던 초안을 찾을 수 없어요.")
         with lock.open("a") as fp:
             fcntl.flock(fp, fcntl.LOCK_EX)
-            draft = json.loads(state.read_text("utf-8"))
+            draft = {} if legacy else json.loads(state.read_text("utf-8"))
+            draft["videoTier"] = read_video_tier(folder) or "none"
+            for item in draft.get("files", []):
+                item.setdefault("fileType", "text")
             if edit and (jobs.active_for(cid) or (draft.get("jobId") and not purge)):
                 raise WebError(409, "이미 만들기를 시작해서 원문을 바꿀 수 없어요.")
             yield folder, draft
@@ -246,6 +298,7 @@ def install_source_routes(app, conf, jobs):
         cid = new_character(ctx, f"motif-{uuid4().hex[:16]}")
         folder = ctx.character_dir(cid)
         write_origin(folder, SOURCE, auto_review=body.autoReview)
+        write_video_tier(folder, body.videoTier)
         write_model_mode(folder, body.modelMode)
         subject = SourceSubject(displayName=body.displayName, kind=body.subjectKind)
         save(
@@ -288,6 +341,7 @@ def install_source_routes(app, conf, jobs):
         with opened(cid) as (_, draft):
             problems, ready = summary(draft)
             return {k: draft[k] for k in ("characterId", "subject", "usageBasis", "files")} | {
+                "videoTier": draft["videoTier"],
                 "knownFacts": draft.get("knownFacts", {}),
                 "store": conf.source_store,
                 "allowPathImport": allow_import,
@@ -329,6 +383,22 @@ def install_source_routes(app, conf, jobs):
     def check(folder, draft, item, body):
         if body.keys() - set(FIELDS):
             raise WebError(422, "바꿀 수 없는 항목이 있어요.")
+        if item["fileType"] == "photo":
+            if body:
+                raise WebError(422, "사진에는 화자 정보를 넣지 않아도 돼요.")
+            try:
+                data = store.read(folder, item["fileId"], item["filename"], item["size"])
+                digest = hashlib.sha256(data).hexdigest()
+                if item["sha256"] not in (None, digest) or not photo_ok(item["filename"], data):
+                    raise ValueError
+            except (OSError, ValueError):
+                item.update(
+                    status="problem",
+                    problems=["사진을 열 수 없어요. 원본 사진을 다시 올려 주세요."],
+                )
+            else:
+                item.update(status="ready", sha256=digest, problems=[])
+            return item
         candidate = item | body
         display = draft["subject"]["displayName"]
         problems = []
@@ -437,7 +507,7 @@ def install_source_routes(app, conf, jobs):
             problems, ready = summary(draft)
             if not ready:
                 raise WebError(409, "; ".join(problems) or "올린 원문을 모두 확인해 주세요.")
-            texts = []
+            texts, photos = [], []
             for item in draft["files"]:
                 try:
                     data = store.read(folder, item["fileId"], item["filename"], item["size"])
@@ -450,19 +520,78 @@ def install_source_routes(app, conf, jobs):
                     raise WebError(409, message) from None
                 if conf.source_store == "s3":
                     atomic_write(local_copy(folder, item["fileId"], item["filename"]), data)
-                texts.append(source_text(folder, item))
+                if item["fileType"] == "photo":
+                    photos.append(
+                        {
+                            "path": str(
+                                local_copy(folder, item["fileId"], item["filename"]).relative_to(
+                                    folder
+                                )
+                            )
+                        }
+                    )
+                else:
+                    texts.append(source_text(folder, item))
             opts = {"chapterTemplate": draft["chapterTemplate"]} if draft["chapterTemplate"] else {}
             pack = SourcePack(
                 subject=draft["subject"],
                 knownFacts=draft.get("knownFacts", {}),
                 usageBasis=draft["usageBasis"],
                 texts=texts,
+                photos=photos,
                 **opts,
             )
             save(inside(folder, "source-pack.json"), pack.model_dump(mode="json"))
-            draft["jobId"] = jobs.submit(cid, until="s8c" if read_auto_review(folder) else "G0")[
-                "jobId"
-            ]
+            if read_auto_review(folder) and draft["videoTier"] != "none":
+                job = video_job(cid, prepare_chat=True)
+            else:
+                job = jobs.submit(cid, until="s8c" if read_auto_review(folder) else "G0")
+            draft["jobId"] = job["jobId"]
             return {"jobId": draft["jobId"]}
 
+    def video_job(cid, *, prepare_chat=False):
+        return jobs.submit(
+            cid,
+            until="G5b",
+            confirm=list(VIDEO_STAGES),
+            trigger="videos-with-chat" if prepare_chat else "videos",
+        )
+
+    def change_settings(folder, draft, cid, tier):
+        if jobs.active_for(cid):
+            raise WebError(409, "만들기가 끝난 뒤에 바꿀 수 있어요.")
+        if (draft.get("jobId") or "files" not in draft) and not reads.character_summary(folder)[
+            "chatReady"
+        ]:
+            raise WebError(409, "대화 준비가 끝난 뒤에 바꿀 수 있어요.")
+        write_video_tier(folder, tier)
+
+    @router.patch("/{cid}/settings")
+    def settings(cid: str, body: Settings):
+        with opened(cid, settings=True) as (folder, draft):
+            change_settings(folder, draft, cid, body.videoTier)
+        return {"videoTier": body.videoTier}
+
+    videos = APIRouter(route_class=IntakeRoute)
+
+    @videos.post("/api/characters/{cid}/videos")
+    def start_videos(cid: str, body: Settings):
+        with opened(cid, settings=True) as (folder, draft):
+            row = reads.character_summary(folder)
+            if not row["chatReady"]:
+                raise WebError(409, "대화 준비가 끝나면 영상을 만들 수 있어요.")
+            if body.videoTier == "none":
+                raise WebError(422, "만들 영상의 등급을 골라 주세요.")
+            gate = next(
+                (g for g in row["gates"] if g["id"] == "G0" and g["status"] == "APPROVED"), {}
+            )
+            if not gate.get("rev") or not (
+                reads.read_json_file(inside(folder, "s0-source", gate["rev"], "source-pack.json"))
+                or {}
+            ).get("photos"):
+                raise WebError(409, "영상을 만들려면 사진이 담긴 원문 묶음이 필요해요.")
+            change_settings(folder, draft, cid, body.videoTier)
+            return {"jobId": video_job(cid)["jobId"]}
+
+    app.include_router(videos)
     app.include_router(router)

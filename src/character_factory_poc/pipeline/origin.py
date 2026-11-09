@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 from character_factory_poc.common.errors import FactoryError
 from character_factory_poc.pipeline.graph import (
@@ -42,6 +43,21 @@ __all__ = [
     "write_model_mode",
     "write_origin",
 ]
+
+
+VideoTier = Literal["none", "light", "standard", "pro", "max"]
+VIDEO_STAGES = ("s2", "s4a", "s4b", "s4", "s6")
+
+
+def read_video_tier(char_dir: Path) -> str | None:
+    path = char_dir / "video-settings.json"
+    return json.loads(path.read_text("utf-8"))["videoTier"] if path.exists() else None
+
+
+def write_video_tier(char_dir: Path, tier: VideoTier) -> None:
+    from character_factory_poc.common.source_store import atomic_write, inside
+
+    atomic_write(inside(char_dir, "video-settings.json"), json.dumps({"videoTier": tier}).encode())
 
 
 def origin_label(origin: str) -> str:
