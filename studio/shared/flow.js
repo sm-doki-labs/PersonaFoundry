@@ -814,7 +814,7 @@
       const theme = [['system', 'monitor', '시스템 설정 따르기'], ['light', 'sun', '밝은 화면'], ['dark', 'moon', '어두운 화면']]
         .map((t) => '<button type="button" data-act="theme" data-theme="' + t[0] + '" aria-pressed="' + (state.theme === t[0]) + '" aria-label="' + t[2] + '" title="' + t[2] + '">' + icon(t[1]) + '</button>').join('');
       region.side.innerHTML = '<div class="fd-brand">' + MARK + '<div class="fd-word"><b>Foundry</b><small>캐릭터 공장</small></div></div>' +
-        '<div class="fd-side-actions"><button type="button" class="btn block" data-act="new" title="새 캐릭터">' + icon('plus') + '<span class="lbl">새 캐릭터</span></button></div>' +
+        '<div class="fd-side-actions"><button type="button" class="btn block" data-act="new" title="새 캐릭터">' + icon('plus') + '<span class="lbl">새 캐릭터</span></button><a class="btn block" href="sources.html" title="원문으로 새 캐릭터" style="margin-top:6px;text-decoration:none">' + icon('user') + '<span class="lbl">원문으로 만들기</span></a></div>' +
         '<nav aria-label="캐릭터 탐색"><button type="button" class="fd-nav" data-act="overview" title="전체 캐릭터"' + (rt.overview && rt.filter !== 'mine' ? ' aria-current="page"' : '') + '>' + icon('grid') + '<span class="lbl">전체 캐릭터</span><span class="num">' + list.length + '명</span></button>' +
         '<button type="button" class="fd-nav" data-act="inbox" title="받은 일"' + (rt.overview && rt.filter === 'mine' ? ' aria-current="page"' : '') + '>' + icon('inbox') + '<span class="lbl">받은 일</span>' + (inbox ? '<span class="num attn"><span class="sr">할 일 </span>' + inbox + '<span class="u">건</span></span>' : '<span class="num">0건</span>') + '</button>' +
         '<h2>캐릭터</h2>' + (items || '<p class="hint" style="padding:0 8px">아직 없어요</p>') + '</nav>' +
