@@ -11,6 +11,7 @@ from character_factory_poc.stages.s3_plan.speech_profile import (
     MIN_SENTENCES,
     build_speech_profile,
     render_voice_definition,
+    source_registers,
 )
 from character_factory_poc.stages.s3_plan.twin import _speech_endings
 from character_factory_poc.stages.s7_traits.check import _plan_speech_level
@@ -45,17 +46,19 @@ def approved_voice(ctx: Context, cid: str, plan: CharacterPlanV2) -> dict:
     return {
         "sourceRev": index.sourceRev,
         "speechEndings": _speech_endings(corpus),
-        "speechProfile": build_speech_profile(corpus, kinds),
-        # 예시는 G3 근거와 비교 겹침 검사(s10)에만 쓰고 대화 프롬프트에는 넣지 않는다(D-0145).
+        "speechProfile": build_speech_profile(
+            corpus,
+            kinds,
+            source_registers(index.texts),
+            ctx.config.stage("s8").get("model_habit_words"),
+        ),
+        # G3 인용 근거는 말의 결 견본과 따로 보관한다.
         "examples": examples,
     }
 
 
 def voice_lines(summary: str, voice: dict) -> list[str]:
-    """D-0145: 말투 칸은 원문 통계로 만든 말버릇 정의다. 말투 예시 문장은 넣지 않는다.
-
-    원문 문장이 적어 통계를 낼 수 없으면 원문에서 한 등급만 관측된 말높임과 G3 말투 요약을 쓴다.
-    """
+    """모티브 말투 칸. 표본이 작으면 기존 G3 요약과 말높임을 쓴다."""
     profile = voice["speechProfile"]
     if profile["sentences"] >= MIN_SENTENCES:
         return render_voice_definition(profile, summary)
