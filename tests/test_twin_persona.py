@@ -12,9 +12,9 @@ from character_factory_poc.stages.s7_traits.sheet import run_s7
 from character_factory_poc.stages.s8_prompts.build import run_s8
 from tests.support.synthetic import prompter_output
 from tests.support.web_gates import trait_sheet_for
+from tests.test_motif_choices import demo_ledger
 from tests.test_text_model_deck import configured
-from tests.test_trait_ledger import _ledger
-from tests.test_twin_s3 import CANARY, LINES, _answer, _ready
+from tests.test_twin_s3 import CANARY, LINES, _answer, _input, _ready
 
 
 @pytest.mark.parametrize(
@@ -56,7 +56,9 @@ def test_approved_subject_voice_reaches_both_prompts(tmp_path, monkeypatch, temp
     model.add(
         "AGENT",
         lambda req: (
-            _ledger(characterId=cid).model_dump()
+            demo_ledger(
+                cid, _input(req, "character-plan")["evidence"]["choices"][0]["ref"]
+            ).model_dump()
             if "/ledger" in req.ref
             else trait_sheet_for(ctx, cid)
         ),
@@ -81,6 +83,8 @@ def test_approved_subject_voice_reaches_both_prompts(tmp_path, monkeypatch, temp
         assert "제본사" not in voice
         assert all(q not in voice for q, _ in LINES)
     if deck:
+        assert "INFERRED" in (folder / "gate-G6.html").read_text("utf-8")
+        assert "INFERRED" not in pair["long"]["text"]
         # D-0147: 모티브는 실존 인물 한계를 인물 한계 칸에 둔다.
         limits = pair["long"]["text"].split("[PERSONA / KNOWS_AND_LIMITS]\n")[1].split("\n\n[")[0]
         assert "실존 인물이다" in limits and "정확히 기억나지 않는다고" in limits

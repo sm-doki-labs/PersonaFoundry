@@ -21,6 +21,7 @@ max_cost_usd_per_command = 20.0
 max_check_retries = 3
 
 [stages.s8]
+motif_demo_chat_temperature = 0.8  # 모티브 대화 표본의 발화에만 적용
 long_prompt_max_chars = 8000  # 덱의 무압축 정본 상한
 short_prompt_max_chars = 2400  # 섹션 예산 합계(1550) + 시스템 규칙·출력 규칙·헤더 여유
 # 긴 프롬프트의 시스템 규칙 원문 경로 (Q-0006). 비우면 내장 기본 규칙(resources/system-rules-default-v1.md)을 쓴다.

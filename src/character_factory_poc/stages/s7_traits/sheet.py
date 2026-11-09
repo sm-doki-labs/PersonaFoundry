@@ -192,7 +192,6 @@ def run_s7(
             f"S7 자동 검사 실패({result.attempts}회):\n- " + "\n- ".join(result.problems)
         )
     sheet = result.output
-    write_once_json(rev_dir / "trait-sheet.json", dump(sheet))
     if ctx.text_deck_enabled and ctx.config.stage("s7").get("trait_ledger", True):
         # D-0091: 흩어진 특질을 한 번씩 모은 장부. S8은 이 장부에서 대화 프롬프트를 조립한다.
         from character_factory_poc.stages.s7_traits.ledger import run_ledger
@@ -201,6 +200,13 @@ def run_s7(
             ctx, cid, plan, sheet, rev_dir, budget, ctx.role_model(cid, budget, "trait_ledger")
         )
         write_once_json(rev_dir / "trait-ledger.json", dump(ledger))
+        # G6의 특질 시트 검토란에 추론한 선택을 드러낸다. 대화 프롬프트에는 넣지 않는다.
+        sheet.unresolved.extend(
+            f"원문 경향 없음 · {t.demoSituation} (INFERRED, 참고 {t.sourceRef}): {t.trigger} → {t.behavior}"
+            for t in ledger.traits
+            if t.basis == "INFERRED"
+        )
+    write_once_json(rev_dir / "trait-sheet.json", dump(sheet))
     if ctx.text_deck_enabled:
         calls = [
             c

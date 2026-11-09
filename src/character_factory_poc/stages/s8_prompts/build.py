@@ -379,6 +379,7 @@ def run_probes(
     probes = []
     import secrets
 
+    temperature = ctx.config.demo_chat_temperature(read_origin(ctx.character_dir(cid)) == SOURCE)
     rng = secrets.SystemRandom()
     for i, s in enumerate(sentences):
         responses = {}
@@ -390,7 +391,7 @@ def run_probes(
                     messages=(Message("system", system), Message("user", s)),
                     ref=f"{cid}/probe{i}/{cond}",
                     max_output_tokens=1500,
-                    temperature=0.8,
+                    temperature=temperature,
                 )
             )
             responses[cond] = r.text.strip()

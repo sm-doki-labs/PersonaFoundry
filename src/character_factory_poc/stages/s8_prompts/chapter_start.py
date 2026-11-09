@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,8 @@ from character_factory_poc.common.store import next_rev, write_manifest, write_o
 from character_factory_poc.contracts.chapter_start import ChapterStartSet
 from character_factory_poc.pipeline.agent import AgentSpec, run_agent
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.origin import SOURCE, read_origin
+from character_factory_poc.stages.s0_source.run import load_approved_source
 from character_factory_poc.stages.s3_plan.importer import load_approved_plan
 from character_factory_poc.stages.s7_traits.check import _plan_speech_level
 
@@ -122,6 +125,30 @@ def _example(cid: str, plan_rev: str) -> dict[str, Any]:
     }
 
 
+def _fan_call_frame(out: ChapterStartSet, template: str | None, name: str) -> ChapterStartSet:
+    if template != "FAN_CALL":
+        return out
+    from character_factory_poc.stages.s3_plan.speech_profile import _josa
+
+    subject = name + _josa(name, "이", "가")
+    frame = (
+        f"지금부터 너의 출력은 {subject} 영상통화에서 소리 내어 하는 말 그 자체다. "
+        f"계획, 메모, 규칙 요약, 따옴표로 묶은 초안은 쓰지 않고 첫 글자부터 {name}의 말로 시작한다."
+    )
+    for ch in out.chapters:
+        ch.relationship.initiativePolicy = (
+            "통화를 시작하는 첫인사 때 한 번 상대의 하루를 물을 수 있고, "
+            "그 뒤로는 상대가 꺼낸 이야기에 답하며 대화를 이어 간다. "
+            "상대가 답하기 어려워하거나 통화를 마무리하려 하면 그 뜻을 따른다."
+        )
+        # 경계는 최대 세 칸이다. 이미 세 칸이면 마지막 두 선을 합쳐 모두 보존한다.
+        boundaries = ch.sceneBoundaries
+        if len(boundaries) == 3:
+            boundaries = [boundaries[0], " ".join(boundaries[1:])]
+        ch.sceneBoundaries = [*boundaries, frame]
+    return out
+
+
 def run_chapter_start(ctx: Context, cid: str) -> Path:
     from character_factory_poc.stages.s8_prompts.build import load_latest_trait_sheet
 
@@ -142,6 +169,16 @@ def run_chapter_start(ctx: Context, cid: str) -> Path:
         or {k: dump(sheet)[k] for k in ("choice", "card")},
         "brief-notes.md": _seed_notes(ctx, cid, plan.seedRev) or "(브리프 없음)",
     }
+    template = None
+    if read_origin(char_dir) == SOURCE:
+        pack, _, _ = load_approved_source(ctx, cid)
+        template = pack.chapterTemplate
+    if template == "FAN_CALL":
+        inputs["fan-call.md"] = (
+            resources.files("character_factory_poc.prompts")
+            .joinpath("chapter_start_fan.md")
+            .read_text("utf-8")
+        )
     result = run_agent(
         AgentSpec("chapter_start", "chapter-start-v1", "s8c", max_check_retries=1),
         rev_dir / "workspace",
@@ -154,7 +191,7 @@ def run_chapter_start(ctx: Context, cid: str) -> Path:
     )
     if not result.ok:
         raise SystemExit("챕터 시작 설정 검사 실패:\n- " + "\n- ".join(result.problems))
-    out: ChapterStartSet = result.output
+    out = _fan_call_frame(result.output, template, plan.name)
     write_once_json(rev_dir / "chapter-start.json", dump(out))
     (rev_dir / "inputs.json").write_text(
         json.dumps(

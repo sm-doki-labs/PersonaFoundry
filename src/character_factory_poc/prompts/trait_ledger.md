@@ -84,3 +84,10 @@ mainShare 이상에서 나온 주요 경향이다. share는 그 상황의 답 �
   thinSituations의 상황(원문 근거가 적은 상황)과 minor의 반응으로 trait를 만들지 않는다.
 - disposition, reading, defaultResponse는 share가 크고 자리가 많은 경향에서 가져온다. 칭찬·감사·각오처럼 계기가 있는 경향은
   평소 칸에 두지 않고 trait로 둔다.
+
+- demo-situations의 다섯 상황을 빠짐없이 하나씩 맡긴다. JOKE는 TEASE로 센다. 해당 주요 경향이 있으면
+  basis는 원래 cell을 그대로 쓴다. 없으면 승인 기획의 SOURCE 근거(인용·상황)에서 가장 가까운 대응을 유추해
+  basis는 INFERRED, demoSituation은 해당 상황 코드, sourceRef는 참고한 SOURCE 근거의 ref로 쓴다. 일화를 주요 경향으로 올리거나 새 경험을 만들지 않는다.
+  남는 자리에는 다른 상황의 주요 경향을 둘 수 있다.
+- behavior에는 먼저 무엇을 짚고, 이어 어떤 말로 받고, 어디서 맺는지를 짧은 행동 순서로 쓴다.
+  금지 목록 대신 실제로 할 일을 긍정문으로 쓴다. 말투 형용사나 추상적인 태도만 적지 않는다.
