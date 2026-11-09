@@ -168,7 +168,7 @@ class GeminiFactsProvider:
         rule = (
             "동명이인, 사생활, 추측, 소문을 빼고 확인된 사건마다 한 줄만 쓴다. 머리글 없이 탭으로 "
             "분류(BIO/CAREER/RESULT/AWARD/RECORD/CURRENT_STATUS), 사건 날짜(YYYY-MM-DD), "
-            "중요도(1~3, 3이 가장 중요), 구체적인 한국어 사실 한 문장 순으로 쓴다. "
+            "중요도(1~3, 3이 가장 중요), 구체적인 한국어 사실 한 문장(60자 안팎) 순으로 쓴다. "
             "날짜를 추정하지 않는다. 각 문장에 검색 근거를 연결한다. "
             f"오늘은 {self.today.isoformat()}이다. 대상: "
             + json.dumps({"이름": subject, **self.context}, ensure_ascii=False)
@@ -187,8 +187,8 @@ class GeminiFactsProvider:
             "주요 수상, 이적과 소속 이력, 데뷔를 쓴다. 지금 소속·역할은 쓰지 않는다. "
         )
         rows, cache = [], {}
-        for prompt in (recent + rule, career + rule):
-            rows += grounded_rows(self.generate(prompt, search=True))
+        for pool, prompt in (("recent", recent + rule), ("career", career + rule)):
+            rows += [r | {"pool": pool} for r in grounded_rows(self.generate(prompt, search=True))]
         for row in rows:
             for src in row["sources"]:
                 src["url"] = resolve_url(src["url"], cache)
@@ -222,7 +222,7 @@ def manual_path(value: str, base: Path, char_dir: Path) -> Path:
 
 def rank(rows, count, chars, today=None):
     today = today or date.today()
-    candidates = []
+    candidates, pools = [], {}
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -230,22 +230,37 @@ def rank(rows, count, chars, today=None):
         if not isinstance(text, str) or PRIVATE.search(text):
             continue
         digest = hashlib.sha256((str(row.get("eventDate")) + text).encode()).hexdigest()[:12]
+        fields = {k: v for k, v in row.items() if k != "pool"}
         try:
-            candidates.append(
-                Fact.model_validate(
-                    {**row, "factId": row.get("factId", f"f-{digest}"), "selfView": None}
-                )
+            fact = Fact.model_validate(
+                {**fields, "factId": row.get("factId", f"f-{digest}"), "selfView": None}
             )
         except ValidationError:
             continue
+        candidates.append(fact)
+        pools[fact.factId] = row.get("pool", "")
     # 지금 상태는 1년 안의 자료만 믿는다. 오래된 기사는 옛 소속을 지금 일처럼 말하게 만든다.
     candidates = [
         f
         for f in candidates
         if f.category != "CURRENT_STATUS" or f.eventDate >= today - timedelta(days=365)
     ]
+    ordered = sorted(candidates, key=lambda f: (f.importance, f.eventDate), reverse=True)
+    if {"recent", "career"} <= set(pools.values()):
+        # 최근 일과 경력 대표 장면이 자리를 절반씩 나눠 갖는다. 대화에서 자주 꺼내는 옛 장면이
+        # 최근 기사에 밀려 빠지지 않게 한다. 경력 쪽은 검색이 적은 순서(기억 순)를 지킨다.
+        recent = [f for f in ordered if pools[f.factId] == "recent"]
+        career = sorted(
+            (f for f in candidates if pools[f.factId] == "career"),
+            key=lambda f: -f.importance,
+        )
+        mixed = []
+        for pair in zip(recent, career, strict=False):
+            mixed += pair
+        longer = recent if len(recent) > len(career) else career
+        ordered = mixed + longer[min(len(recent), len(career)) :]
     kept, ids, seen = [], set(), set()
-    for item in sorted(candidates, key=lambda f: (f.importance, f.eventDate), reverse=True):
+    for item in ordered:
         cost = len(item.line()) + 1
         if len(kept) >= count or item.factId in ids or item.text in seen or cost > chars:
             continue
@@ -282,7 +297,8 @@ def candidates_for(items, corpus, held_ids, per_fact=8, deflect_max=30):
         scored = []
         for r, q in pairs:
             hay = r["text"] + " " + (q["text"] if q else "")
-            score = sum(len(w) for w in words if w in hay)
+            # '푸스카스상'처럼 붙은 말은 끝 한 글자를 뗀 형태('푸스카스')로도 찾는다.
+            score = sum(len(w) for w in words if w in hay or (len(w) >= 4 and w[:-1] in hay))
             if score >= 2:
                 scored.append((score, r["msgId"]))
         views[f.factId] = [m for _, m in sorted(scored, key=lambda x: -x[0])[:per_fact]]

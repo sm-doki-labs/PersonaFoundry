@@ -302,3 +302,22 @@ def test_public_facts_and_adjacent_self_view_reach_deck(tmp_path, monkeypatch):
         assert "활동을 이어 간다고 밝혔다.\n본인은 일상에 대해 짧게 말한다." in text
         limits = text.split("[PERSONA / KNOWS_AND_LIMITS]")[1]
         assert all(word in limits for word in ("지난 경기", "활동을 이어", "그런 얘기는"))
+
+
+def test_recent_and_career_pools_share_the_slots():
+    from datetime import date
+
+    def row(pool, d, t):
+        return dict(
+            pool=pool,
+            category="RESULT",
+            eventDate=d,
+            importance=3,
+            text=t,
+            sources=[dict(url="https://example.org/" + t, title="t")],
+        )
+
+    rows = [row("recent", f"2026-0{i}-01", f"최근{i}") for i in range(1, 7)]
+    rows += [row("career", "2018-06-27", "독일전"), row("career", "2020-12-17", "푸스카스")]
+    kept, _ = facts.rank(rows, 4, 700, today=date(2026, 11, 10))
+    assert [f.text for f in kept] == ["최근6", "독일전", "최근5", "푸스카스"]
