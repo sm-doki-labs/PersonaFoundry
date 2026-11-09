@@ -12,6 +12,12 @@
   const REGISTERS = [['FORMAL', '공식 자리'], ['CASUAL', '캐주얼 자리']];
   const SUBJECT_KINDS = [['PUBLIC_FIGURE', '공인'], ['PRIVATE_PERSON', '개인']];
   const CHAPTERS = [['FAN_CALL', '팬과 첫 통화'], ['FAMILY_CALL', '가족과 통화']];
+  // 모델 준비 방식(계획 2차 약속 2). 기본은 프롬프트만이다.
+  const MODES = [['PROMPT_ONLY', '프롬프트만'], ['BIND_EXISTING', '학습된 모델 연결'], ['TRAIN', '학습해서 쓰기']];
+  // 사용 근거는 선택이다. 메모만 받고 쓰는 곳은 팀 내부 사용으로 보낸다(약속 2 기본값과 같다).
+  const DEFAULT_SCOPE = '팀 내부 사용';
+  // 파일이 이보다 많으면 목록을 요약 한 줄로 접는다. 확인할 점이 있는 파일은 접어도 보인다.
+  const FILE_FOLD = 6;
   const KIND_SLUG = { INTERVIEW: 'interview', ARTICLE: 'article', TRANSCRIPT: 'transcript', KAKAO_EXPORT: 'kakao' };
   const TEXT_ID = /^[A-Za-z0-9_-]+$/;
   const META_FIELDS = ['textId', 'kind', 'register', 'subjectSpeaker', 'userSpeaker', 'date', 'sourceUrl'];
@@ -97,6 +103,19 @@
     return body;
   }
   function sameMeta(a, b) { return JSON.stringify(metaBody(a)) === JSON.stringify(metaBody(b)); }
+  // 올린 원문 요약: 종류별·말한 자리별 개수와 준비된 수. 긴 목록을 접을 때 이 한 줄을 보인다.
+  function fileSummary(items) {
+    const list = (items || []).filter((i) => i.phase !== 'rejected');
+    const count = (pairs, key) => pairs.map((p) => [p[1], list.filter((i) => (i.meta || {})[key] === p[0]).length]).filter((x) => x[1] > 0);
+    return {
+      total: list.length,
+      ready: list.filter((i) => i.tone === 'ok').length,
+      attention: list.filter((i) => i.tone !== 'ok').length,
+      kinds: count(KINDS, 'kind'),
+      registers: count(REGISTERS, 'register')
+    };
+  }
+  function modeOf(value) { return MODES.some((m) => m[0] === value) ? value : 'PROMPT_ONLY'; }
   function apiUrl(apiBase, path) {
     const p = text(path);
     if (/^https?:\/\//i.test(p)) return p;
@@ -177,6 +196,10 @@
       error: null,
       notice: null,
       finalized: null,
+      settings: null, // { modelMode, autoReview } 이 화면에서 만든 초안이면 보낸 값, 다시 열면 서버 값
+      character: null, // 시작한 뒤 캐릭터 진행(GET /api/characters/{cid})
+      chat: null, // 대화 준비 상태(GET /api/characters/{cid}/chat/meta, 계획 2차 약속 1)
+      projects: null,
       announce: ''
     };
     let seq = 0;
@@ -245,7 +268,7 @@
     }
 
     async function load(cid) {
-      if (cid !== state.cid) Object.assign(state, { uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {} });
+      if (cid !== state.cid) Object.assign(state, { uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, settings: null, character: null, chat: null });
       state.cid = cid;
       state.loading = true;
       state.loadError = null;
@@ -261,6 +284,51 @@
       }
       state.loading = false;
       emit();
+      if (state.draft) await progress();
+    }
+
+    // 진행과 대화 준비를 함께 읽는다. 아직 없는 API·캐릭터는 조용히 넘긴다(다른 묶음이 머지되기 전에도 화면이 돈다).
+    async function progress() {
+      if (!state.cid) return null;
+      const cid = encodeURIComponent(state.cid);
+      try {
+        const d = await request('GET', '/api/characters/' + cid);
+        const stages = Array.isArray(d && d.stages) ? d.stages : [];
+        state.character = {
+          modelMode: d && d.modelMode ? d.modelMode : null,
+          autoReview: d && typeof d.autoReview === 'boolean' ? d.autoReview : null,
+          progress: (d && d.progress) || null,
+          awaiting: Boolean(d && ((d.pendingGates && d.pendingGates.length) || d.awaitingHuman)),
+          running: Boolean(d && d.job),
+          failed: stages.some((s) => text(s && s.status).toUpperCase() === 'CHECK_FAILED')
+        };
+      } catch (error) { /* 시작 전에는 캐릭터 진행이 없을 수 있다 */ }
+      if (state.finalized) {
+        try {
+          const m = await request('GET', '/api/characters/' + cid + '/chat/meta');
+          state.chat = { ready: m && m.ready === true, reason: text(m && m.reason) };
+        } catch (error) {
+          if (error.status === 404 || error.status === 405) state.chat = { ready: false, unavailable: true, reason: '' };
+        }
+      }
+      emit();
+      return { character: state.character, chat: state.chat };
+    }
+    async function projects() {
+      try {
+        const data = await request('GET', '/api/projects');
+        state.projects = Array.isArray(data && data.characters) ? data.characters : [];
+      } catch (error) { state.projects = state.projects || []; }
+      emit();
+      return state.projects;
+    }
+    // 화면에 보일 생성 설정: 서버 값(초안·캐릭터)이 있으면 그것, 없으면 이 화면에서 보낸 값.
+    function settings() {
+      const d = state.draft || {};
+      const c = state.character || {};
+      const s = state.settings || {};
+      const pick = (k) => (d[k] != null ? d[k] : c[k] != null ? c[k] : s[k] != null ? s[k] : null);
+      return { modelMode: pick('modelMode'), autoReview: pick('autoReview') };
     }
 
     function validateDraft(input) {
@@ -271,7 +339,6 @@
       if (!text(v.age).trim()) errors.age = '나이를 적어 주세요.';
       if (!text(v.gender).trim()) errors.gender = '성별을 골라 주세요.';
       if (!text(v.job).trim()) errors.job = '하는 일을 적어 주세요.';
-      if (!text(v.scope).trim()) errors.scope = '어디에 쓰는지 적어 주세요.';
       return errors;
     }
     async function createDraft(input) {
@@ -281,17 +348,23 @@
       state.error = null;
       emit();
       try {
+        const modelMode = modeOf(input.modelMode);
+        const autoReview = input.autoReview !== false;
         const body = {
           displayName: text(input.displayName).trim(),
           subjectKind: input.subjectKind,
-          usageBasis: { scope: text(input.scope).trim(), notes: text(input.notes).trim() },
-          knownFacts: { age: text(input.age).trim(), gender: text(input.gender).trim(), job: text(input.job).trim(), background: text(input.background).trim() }
+          usageBasis: { scope: text(input.scope).trim() || DEFAULT_SCOPE, notes: text(input.notes).trim() },
+          knownFacts: { age: text(input.age).trim(), gender: text(input.gender).trim(), job: text(input.job).trim(), background: text(input.background).trim() },
+          modelMode,
+          autoReview
         };
         if (input.chapterTemplate) body.chapterTemplate = input.chapterTemplate;
         const data = await request('POST', '/api/sources/drafts', body);
         state.busy = null;
         if (o.onCid) o.onCid(data.characterId);
         await load(data.characterId);
+        state.settings = { modelMode, autoReview };
+        emit();
         return { characterId: data.characterId };
       } catch (error) {
         state.busy = null;
@@ -541,13 +614,13 @@
         const data = await request('POST', '/api/sources/' + encodeURIComponent(state.cid) + '/finalize');
         state.finalized = { jobId: data && data.jobId };
         state.saving = {};
-        state.announce = '출처 정리를 시작했어요.';
+        state.announce = '만들기를 시작했어요.';
       } catch (error) {
-        state.error = '출처 정리를 시작하지 못했어요. ' + errorText(error);
+        state.error = '만들기를 시작하지 못했어요. ' + errorText(error);
       }
       state.busy = null;
       emit();
-      if (!state.finalized) await refresh();
+      if (!state.finalized) await refresh(); else await progress();
       return state.finalized;
     }
 
@@ -565,13 +638,13 @@
         return false;
       }
       Object.keys(aborts).forEach((k) => aborts[k]());
-      Object.assign(state, { cid: null, draft: null, uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, busy: null, finalized: null, loadError: null, announce: '초안과 올린 원문을 지웠어요.' });
+      Object.assign(state, { cid: null, draft: null, uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, busy: null, finalized: null, loadError: null, settings: null, character: null, chat: null, announce: '초안과 올린 원문을 지웠어요.' });
       if (o.onCid) o.onCid(null);
       emit();
       return true;
     }
     function reset() {
-      Object.assign(state, { cid: null, draft: null, uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, busy: null, finalized: null, loadError: null, error: null, notice: null });
+      Object.assign(state, { cid: null, draft: null, uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, busy: null, finalized: null, loadError: null, error: null, notice: null, settings: null, character: null, chat: null });
       emit();
     }
     function dismiss(key) {
@@ -601,7 +674,7 @@
     function uploading() { return state.uploads.some((u) => ACTIVE.indexOf(u.phase) >= 0); }
 
     return {
-      state, load, refresh, createDraft, validateDraft, addFiles, retry, dismiss, editFile, removeFile, importPath, finalize, deleteDraft, reset, startState, items, uploading,
+      state, load, refresh, progress, projects, settings, createDraft, validateDraft, addFiles, retry, dismiss, editFile, removeFile, importPath, finalize, deleteDraft, reset, startState, items, uploading,
       subscribe(fn) { listeners.push(fn); return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); }; }
     };
   }
@@ -613,8 +686,46 @@
     x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
     check: '<polyline points="20 6 9 17 4 12"/>',
     down: '<polyline points="6 9 12 15 18 9"/>',
-    retry: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/>'
+    retry: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/>',
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+    inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+    monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'
   };
+  // 진행 화면(flow.js)과 같은 브랜드 마크.
+  const MARK = '<svg class="fd-mark" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="var(--fd-accent)"/><path d="M8.5 17V7h7.5M8.5 12h5" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16.4" cy="16.4" r="1.7" fill="#fff"/></svg>';
+  const THEMES = [['system', 'monitor', '시스템 설정 따르기'], ['light', 'sun', '밝은 화면'], ['dark', 'moon', '어두운 화면']];
+  // 진행 화면과 같은 이름 규칙: 이름이 없으면 '이름 미정 · slug (11/7)'.
+  function displayName(name, id) {
+    const n = text(name).trim();
+    if (n && n !== text(id)) return n;
+    const m = /^cf-(\d{4})(\d{2})(\d{2})-(.+)$/.exec(text(id));
+    return m ? '이름 미정 · ' + m[4] + ' (' + Number(m[2]) + '/' + Number(m[3]) + ')' : text(id);
+  }
+  // 사이드바 캐릭터 한 줄. 진행 화면 사이드바와 같은 모양이고 누르면 그 캐릭터의 진행 화면으로 간다.
+  function sideItemHTML(c) {
+    const name = displayName(c.name, c.id);
+    const p = c.progress || {};
+    const failed = (c.stages || []).some((s) => text(s && s.status).toUpperCase() === 'CHECK_FAILED');
+    const st = failed ? 'fail' : c.awaitingHuman ? 'wait' : c.job ? 'run' : p.total && p.done >= p.total ? 'ok' : '';
+    const motif = c.origin === 'SOURCE';
+    return '<a class="fd-nav" href="factory.html#c/' + E(encodeURIComponent(text(c.id))) + '" title="' + E(name + (motif ? ' · 모티브' : '')) + '">' +
+      '<span class="fd-av" aria-hidden="true">' + E(Array.from(name)[0] || '?') + '<span class="st ' + st + '"></span></span>' +
+      '<span class="lbl">' + E(name) + '</span>' + (motif ? '<span class="fd-org" aria-label="모티브">모티브</span>' : '') +
+      (p.total ? '<span class="num">' + E(p.done + '/' + p.total) + '</span>' : '') + '</a>';
+  }
+  function sideHTML(list, theme) {
+    const items = (list || []).map(sideItemHTML).join('');
+    const themes = THEMES.map((t) => '<button type="button" data-act="theme" data-theme="' + t[0] + '" aria-pressed="' + (theme === t[0]) + '" aria-label="' + t[2] + '" title="' + t[2] + '">' + icon(t[1]) + '</button>').join('');
+    return '<div class="fd-brand">' + MARK + '<div class="fd-word"><b>Foundry</b><small>캐릭터 공장</small></div></div>' +
+      '<div class="fd-side-actions"><a class="btn block" href="sources.html" aria-current="page" title="원문으로 새 캐릭터" style="text-decoration:none">' + icon('user') + '<span class="lbl">원문으로 만들기</span></a></div>' +
+      '<nav aria-label="캐릭터 탐색"><a class="fd-nav" href="factory.html#all" title="전체 캐릭터">' + icon('grid') + '<span class="lbl">전체 캐릭터</span><span class="num">' + (list ? list.length + '명' : '') + '</span></a>' +
+      '<a class="fd-nav" href="factory.html#all/mine" title="받은 일">' + icon('inbox') + '<span class="lbl">받은 일</span></a>' +
+      '<h2>캐릭터</h2>' + (list ? items || '<p class="hint" style="padding:0 8px">아직 없어요</p>' : '<p class="hint" style="padding:0 8px">불러오는 중이에요</p>') + '</nav>' +
+      '<div class="fd-side-foot"><a class="fd-help" href="help.html" target="_blank" rel="noopener" title="사용 안내" aria-label="사용 안내">?</a><div class="fd-theme" role="group" aria-label="화면 테마">' + themes + '</div><div class="fd-foot-links"><a href="help.html" target="_blank" rel="noopener">사용 안내</a><a href="factory.html#all">진행 화면</a></div></div>';
+  }
   function icon(name) { return '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">' + ICON[name] + '</svg>'; }
   function options(pairs, value) { return pairs.map((p) => '<option value="' + p[0] + '"' + (p[0] === value ? ' selected' : '') + '>' + p[1] + '</option>').join(''); }
 
@@ -668,12 +779,36 @@
       drop: $('[data-drop]'), picker: $('[data-picker]'), list: $('[data-list]'), empty: $('[data-empty]'), count: $('[data-count]'),
       pathRow: $('[data-path]'), pathInput: $('[data-path-input]'), pathBtn: $('[data-path-go]'),
       startBtn: $('[data-start]'), reasons: $('[data-reasons]'), done: $('[data-done]'), doneLink: $('[data-done-link]'),
-      delRow: $('[data-del]'), delConfirm: $('[data-del-confirm]'), publicNote: $('[data-public-note]')
+      delRow: $('[data-del]'), delConfirm: $('[data-del-confirm]'), publicNote: $('[data-public-note]'),
+      side: $('[data-side]'), headTheme: $('[data-head-theme]'), fileSum: $('[data-file-sum]'), startLead: $('[data-start-lead]'),
+      doneTitle: $('[data-done-title]'), doneText: $('[data-done-text]'), prog: $('[data-prog]'), progText: $('[data-prog-text]'), chatLink: $('[data-chat-link]')
     };
     let chapterTouched = false;
     let confirmDelete = false;
+    let listOpen = null; // null이면 파일 수로 정한다(많으면 접는다)
+    let pollTimer = null;
     const open = {}; // key → 정보 칸 펼침
     const cards = new Map();
+    const store = (() => { try { return global && global.localStorage; } catch (error) { return null; } })();
+    let theme = (store && ['light', 'dark'].indexOf(store.getItem('fd-theme')) >= 0) ? store.getItem('fd-theme') : 'system';
+    function setTheme(t) {
+      theme = t;
+      if (store) { try { if (t === 'system') store.removeItem('fd-theme'); else store.setItem('fd-theme', t); } catch (error) { /* 저장 못 해도 이번 화면에는 적용 */ } }
+      const html = doc.documentElement;
+      if (html) { if (t === 'system') html.removeAttribute('data-fd-theme'); else html.setAttribute('data-fd-theme', t); }
+      renderSide();
+    }
+    function renderSide() {
+      if (r.side) r.side.innerHTML = sideHTML(S.projects, theme);
+      if (r.headTheme) {
+        const i = Math.max(0, THEMES.findIndex((t) => t[0] === theme));
+        const cur = THEMES[i];
+        const next = THEMES[(i + 1) % THEMES.length];
+        r.headTheme.innerHTML = icon(cur[1]);
+        r.headTheme.dataset.theme = next[0];
+        r.headTheme.setAttribute('aria-label', '화면 테마: 지금 ' + cur[2] + '. 누르면 ' + next[2]);
+      }
+    }
 
     function setStep(el, st) {
       if (!el) return;
@@ -715,10 +850,15 @@
           const kf = d.knownFacts || {};
           const factsEl = r.summary.querySelector('[data-sum-facts]');
           if (factsEl) factsEl.textContent = [kf.age, kf.gender, kf.job].filter(Boolean).join(' · ') + (kf.background ? ' — ' + kf.background : '');
-          r.summary.querySelector('[data-sum-scope]').textContent = text(basis.scope) || '적지 않았어요';
+          const set = intake.settings();
+          const modeEl = r.summary.querySelector('[data-sum-mode]');
+          if (modeEl) { modeEl.textContent = labelOf(MODES, set.modelMode); modeEl.parentElement.hidden = !set.modelMode; }
+          const autoEl = r.summary.querySelector('[data-sum-auto]');
+          if (autoEl) { autoEl.textContent = set.autoReview === false ? '단계마다 사람이 확인해요' : '사람 확인 없이 대화 테스트까지 가요'; autoEl.parentElement.hidden = set.autoReview == null; }
           const notes = r.summary.querySelector('[data-sum-notes]');
-          notes.textContent = text(basis.notes);
-          notes.parentElement.hidden = !text(basis.notes);
+          const memo = [text(basis.scope) && text(basis.scope) !== DEFAULT_SCOPE ? text(basis.scope) : '', text(basis.notes)].filter(Boolean).join(' · ');
+          notes.textContent = memo;
+          notes.parentElement.hidden = !memo;
         }
       }
       if (r.publicNote) r.publicNote.hidden = !(hasDraft && d.subject && d.subject.kind === 'PUBLIC_FIGURE');
@@ -754,6 +894,8 @@
       q('[data-retry-row]').hidden = !item.retry;
       const x = q('[data-act="remove"]');
       x.disabled = !item.removable;
+      // 만들기를 시작한 뒤에는 지울 수 없으니 버튼을 아예 숨긴다.
+      x.hidden = !!S.finalized;
       x.setAttribute('aria-label', (item.phase && ACTIVE.indexOf(item.phase) > 0 ? '올리기 멈추고 지우기: ' : item.source === 'upload' && item.phase === 'rejected' ? '목록에서 빼기: ' : '지우기: ') + item.filename);
       x.title = item.phase && ACTIVE.indexOf(item.phase) > 0 ? '올리기 멈추기' : '지우기';
       // 저절로 펼친 카드는 문제가 풀려도 접지 않는다(고치던 칸에서 초점을 잃지 않게).
@@ -785,6 +927,24 @@
       save.className = 'src-save' + (item.saving === 'error' ? ' bad' : '');
     }
 
+    // 파일이 많으면 요약 한 줄과 펼치기 버튼만 두고, 확인할 점이 있거나 올리는 중인 파일만 보인다.
+    function quiet(item) { return item.tone === 'ok' && !item.problems.length && !Object.keys(item.fieldErrors).length && open[item.key] !== true && item.saving !== 'saving' && item.saving !== 'error'; }
+    function renderFold(items) {
+      if (!r.fileSum) return false;
+      const sum = fileSummary(items);
+      const fold = sum.total > FILE_FOLD || (!!S.finalized && sum.total > 1);
+      const collapsed = fold && (listOpen === null ? true : !listOpen);
+      r.fileSum.hidden = !fold;
+      if (fold) {
+        const parts = sum.kinds.concat(sum.registers).map((x) => E(x[0]) + ' ' + x[1] + '개').join(' · ');
+        const hidden = items.filter(quiet).length;
+        const html = '<p><b>원문 ' + sum.total + '개</b>' + (parts ? '<span>' + parts + '</span>' : '') +
+          '<span>' + (sum.attention ? '확인할 파일 ' + sum.attention + '개' : '모두 준비됐어요') + '</span></p>' +
+          '<button type="button" class="btn ghost" data-act="fold" aria-expanded="' + !collapsed + '" aria-controls="src-file-list">' + icon('down') + '<span>' + (collapsed ? '목록 펼치기' + (hidden ? ' · ' + hidden + '개' : '') : '목록 접기') + '</span></button>';
+        if (r.fileSum.dataset.html !== html) { r.fileSum.innerHTML = html; r.fileSum.dataset.html = html; }
+      }
+      return collapsed;
+    }
     function renderFiles() {
       const d = S.draft;
       setStep(r.steps.files, !d ? 'todo' : S.finalized ? 'done' : 'active');
@@ -798,6 +958,7 @@
       if (r.empty) r.empty.hidden = !d || items.length > 0;
       const counted = items.filter((i) => i.phase !== 'rejected');
       if (r.count) r.count.textContent = counted.length ? counted.filter((i) => i.tone === 'ok').length + ' / ' + counted.length + '개 준비' : '';
+      const collapsed = renderFold(items);
       const keep = new Set(items.map((i) => i.key));
       cards.forEach((el, key) => { if (!keep.has(key)) { el.remove(); cards.delete(key); } });
       items.forEach((item) => {
@@ -809,8 +970,10 @@
           cards.set(item.key, el);
         }
         syncCard(el, item);
+        el.hidden = collapsed && quiet(item);
       });
       if (r.list) {
+        r.list.id = 'src-file-list';
         const want = items.map((i) => cards.get(i.key));
         const now = Array.from(r.list.children);
         if (want.length !== now.length || want.some((el, i) => el !== now[i])) want.forEach((el) => r.list.appendChild(el));
@@ -824,12 +987,17 @@
     function renderStart() {
       const d = S.draft;
       const st = intake.startState();
+      const set = intake.settings();
+      const auto = set.autoReview !== false;
       setStep(r.steps.info, d ? 'done' : 'active');
       setStep(r.steps.start, !d ? 'todo' : S.finalized ? 'done' : st.ready ? 'active' : 'wait');
+      if (r.startLead) r.startLead.textContent = auto
+        ? '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. 사람 확인 없이 프롬프트와 대화 테스트까지 이어서 만들어요.'
+        : '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. 다 되면 진행 화면에서 출처 확인을 기다려요.';
       if (r.startBtn) {
         r.startBtn.disabled = !st.ready || !!S.busy;
         r.startBtn.hidden = !!S.finalized;
-        r.startBtn.textContent = S.busy === 'finalize' ? '시작하는 중…' : '출처 정리 시작';
+        r.startBtn.textContent = S.busy === 'finalize' ? '시작하는 중…' : '만들기 시작';
       }
       if (r.reasons) {
         const html = d && !S.finalized && st.reasons.length ? '<p>시작하기 전에 봐 주세요</p><ul>' + st.reasons.map((x) => '<li>' + E(x) + '</li>').join('') + '</ul>' : '';
@@ -839,6 +1007,32 @@
       if (r.done) {
         r.done.hidden = !S.finalized;
         if (r.doneLink && S.cid) r.doneLink.href = 'factory.html#c/' + encodeURIComponent(S.cid);
+        const c = S.character || {};
+        const chat = S.chat || {};
+        const p = c.progress || {};
+        let title = '만들기 시작했어요';
+        let body = auto ? '사람 확인 없이 대화 테스트까지 만들어요. 이 화면을 열어 두면 준비됐을 때 대화해 보기 버튼이 생겨요.' : '출처 정리가 끝나면 진행 화면에 출처 확인 차례가 떠요. 그때 원문과 사실 목록을 보고 넘길지 정해요.';
+        if (chat.ready) { title = '대화해 볼 수 있어요'; body = '프롬프트와 첫 장면이 준비됐어요. 대화해 보고 이상하면 진행 화면에서 고쳐 달라고 요청해요.'; }
+        else if (c.failed) { title = '중간에 멈췄어요'; body = '어느 단계에서 멈췄는지 진행 화면에서 보고 다시 실행해 주세요.'; }
+        else if (c.awaiting) { title = '사람 확인을 기다려요'; body = '진행 화면에서 확인할 차례가 있어요. 확인하고 나면 이어서 만들어요.'; }
+        else if (chat.reason && auto) body = chat.reason;
+        if (r.doneTitle) r.doneTitle.textContent = title;
+        if (r.doneText) r.doneText.textContent = body;
+        r.done.dataset.tone = chat.ready ? 'ok' : c.failed ? 'fail' : c.awaiting ? 'wait' : 'run';
+        if (r.prog) {
+          r.prog.hidden = !(S.finalized && p.total);
+          if (p.total) {
+            const pct = Math.round(p.done / p.total * 100);
+            const bar = r.prog.querySelector('[data-prog-bar]');
+            if (bar) { bar.firstChild.style.width = pct + '%'; bar.setAttribute('aria-label', '전체 ' + p.total + '단계 중 ' + p.done + '단계 완료'); }
+            if (r.progText) r.progText.textContent = p.done + '/' + p.total + '단계' + (c.running ? ' · 진행 중' : '');
+          }
+        }
+        if (r.chatLink) {
+          r.chatLink.hidden = !chat.ready;
+          if (S.cid) r.chatLink.href = 'chat.html#c/' + encodeURIComponent(S.cid);
+          if (r.doneLink) r.doneLink.classList.toggle('pri', !chat.ready);
+        }
       }
       if (r.delRow) {
         r.delRow.hidden = !d || !!S.finalized;
@@ -856,7 +1050,14 @@
       if (r.live && S.announce) { r.live.textContent = S.announce; S.announce = ''; }
       if (doc.title !== undefined) doc.title = (d && d.subject ? text(d.subject.displayName) + ' · ' : '') + '원문으로 새 캐릭터 · Foundry';
     }
-    function render() { renderInfo(); renderFiles(); renderStart(); }
+    // 시작한 뒤에는 대화 준비가 될 때까지 진행을 가끔 다시 읽는다. 화면이 숨으면 쉬고, 대화 API가 없으면 멈춘다.
+    function schedule() {
+      const want = !!(S.finalized && S.cid && !(S.chat && (S.chat.ready || S.chat.unavailable)));
+      if (want && !pollTimer && global && global.setInterval) {
+        pollTimer = global.setInterval(() => { if (!(doc.hidden)) intake.progress(); }, 6000);
+      } else if (!want && pollTimer) { global.clearInterval(pollTimer); pollTimer = null; }
+    }
+    function render() { renderInfo(); renderFiles(); renderStart(); renderSide(); schedule(); }
     intake.subscribe(render);
 
     function onSubmit(e) {
@@ -867,9 +1068,11 @@
       e.preventDefault();
       const f = r.form;
       const kind = (f.querySelector('[name="subjectKind"]:checked') || {}).value;
-      const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, scope: f.querySelector('[name="scope"]').value, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined };
+      const mode = (f.querySelector('[name="modelMode"]:checked') || {}).value;
+      const auto = f.querySelector('[name="autoReview"]');
+      const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined, modelMode: mode, autoReview: auto ? auto.checked : true };
       const errors = intake.validateDraft(input);
-      ['displayName', 'subjectKind', 'age', 'gender', 'job', 'scope'].forEach((n) => fieldError(n, errors[n]));
+      ['displayName', 'subjectKind', 'age', 'gender', 'job'].forEach((n) => fieldError(n, errors[n]));
       const first = Object.keys(errors)[0];
       if (first) { const ctl = f.querySelector('[name="' + first + '"]'); if (ctl) ctl.focus(); return; }
       intake.createDraft(input).then((res) => {
@@ -886,6 +1089,8 @@
       const card = el.closest('[data-key]');
       const key = card && card.dataset.key;
       if (act === 'pick' && r.picker) r.picker.click();
+      else if (act === 'theme' || act === 'theme-next') setTheme(el.dataset.theme || 'system');
+      else if (act === 'fold') { listOpen = el.getAttribute('aria-expanded') !== 'true'; render(); }
       else if (act === 'toggle' && key) { open[key] = el.getAttribute('aria-expanded') !== 'true'; render(); }
       else if (act === 'remove' && key) {
         const item = intake.items().find((i) => i.key === key);
@@ -894,7 +1099,7 @@
         setTimeout(() => { const t = next && next.querySelector('[data-act="remove"]'); if (t && doc.contains(t)) t.focus(); else if (r.drop) { const p = r.drop.querySelector('[data-act="pick"]'); if (p) p.focus(); } }, 0);
       }
       else if (act === 'retry' && key) intake.retry(key);
-      else if (act === 'start') intake.finalize().then((done) => { if (done && r.done) { const h = r.done.querySelector('h3'); if (h) h.focus(); } });
+      else if (act === 'start') intake.finalize().then((done) => { if (done) intake.projects(); if (done && r.done) { const h = r.done.querySelector('h3'); if (h) h.focus(); } });
       else if (act === 'ask-delete') { confirmDelete = true; render(); const no = r.delRow.querySelector('[data-act="cancel-delete"]'); if (no) no.focus(); }
       else if (act === 'cancel-delete') { confirmDelete = false; render(); const ask = r.delRow.querySelector('[data-act="ask-delete"]'); if (ask) ask.focus(); }
       else if (act === 'delete') intake.deleteDraft().then((ok) => { if (ok) { confirmDelete = false; chapterTemplateReset(); render(); const n = r.form && r.form.querySelector('[name="displayName"]'); if (n) n.focus(); } });
@@ -952,9 +1157,11 @@
     if (global && global.addEventListener) { global.addEventListener('hashchange', onHash); global.addEventListener('beforeunload', onLeave); }
     const cid = route();
     if (cid) intake.load(cid); else render();
+    intake.projects();
     return {
       intake,
       destroy() {
+        if (pollTimer && global) { global.clearInterval(pollTimer); pollTimer = null; }
         doc.removeEventListener('submit', onSubmit);
         doc.removeEventListener('click', onClick);
         doc.removeEventListener('change', onChange);
@@ -967,7 +1174,7 @@
     };
   }
 
-  const api = { MAX_BYTES, EXTENSIONS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, defaultRegister, nextRegister, guessKind, suggestTextId, checkFile, formatSize, textIdProblem, metaBody, putFile, errorText, createIntake, mount };
+  const api = { MAX_BYTES, EXTENSIONS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, guessKind, suggestTextId, checkFile, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global) global.SourceIntake = api;
 })(typeof window !== 'undefined' ? window : null);
