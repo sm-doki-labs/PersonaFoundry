@@ -26,7 +26,8 @@ from tests.support.web_gates import trait_sheet_for
 from tests.test_source_s0 import _twin, _write_pack
 from tests.test_text_model_deck import configured
 from tests.test_trait_ledger import _ledger
-from tests.test_twin_s3 import CANARY, _ctx, _ready
+from tests.test_motif_choices import demo_ledger
+from tests.test_twin_s3 import CANARY, _ctx, _input, _ready
 
 
 def fact(fid="first", **kw):
@@ -225,7 +226,9 @@ def test_public_facts_and_adjacent_self_view_reach_deck(tmp_path, monkeypatch):
     model.add(
         "AGENT",
         lambda req: (
-            _ledger(characterId=cid).model_dump()
+            demo_ledger(
+                cid, _input(req, "character-plan")["evidence"]["choices"][0]["ref"]
+            ).model_dump()
             if "/ledger" in req.ref
             else trait_sheet_for(ctx, cid)
         ),
