@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass, replace
 from importlib.resources import files
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 
 from character_factory_poc.common.api_routes import billing_for
@@ -247,3 +248,62 @@ def run_samples(ctx: Context, cid: str) -> Path:
     data = dict(promptRev=scene.prompt.name, samples=samples)
     atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2).encode())
     return path
+
+
+def chat_clips(folder: Path, chapter: str, *, for_picker: bool = False) -> dict:
+    """G5b가 확정한 최신 판의 영상만 반환한다. 후보 목록은 승인 증거가 아니다."""
+    from character_factory_poc.stages.s6_actions.catalog import CATALOG
+
+    result = dict(
+        ready=False, chapter=chapter, idle=dict(good=None, bad=None), emotion=[], special=[]
+    )
+    rev = latest(folder / "s6-actions", "va", "approved-actions.json")
+    if not rev or not rev.resolve().is_relative_to(folder.resolve()):
+        return result
+    manifest = rev / "approved-actions.json"
+    if not manifest.resolve().is_relative_to(rev.resolve()):
+        return result
+    taxonomy = resource("clip-pick-use-when-v1.json")
+    rev_root = rev.resolve()
+    seen = set()
+    for row in load_json(manifest)["clips"]:
+        key = row.get("clipKey")
+        if row.get("chapterId") != chapter or not key or key in seen:
+            continue
+        path = (rev / row["video"]["path"]).resolve()
+        if not path.is_relative_to(rev_root) or path.suffix.lower() != ".mp4" or not path.is_file():
+            continue
+        rel = path.relative_to(folder.resolve()).as_posix()
+        url = f"/api/files/{quote(folder.name)}/{quote(rel)}"
+        item = dict(clipKey=key, url=url)
+        raw = re.sub(r"^s\d+__", "", key)
+        defaults = CATALOG.get(raw) or CATALOG.get(re.sub(r"_\d+$", "", raw), {})
+        mood = row.get("mood") or defaults.get("mood")
+        if raw in {"idle_good", "idle_bad"}:
+            result["idle"][raw.removeprefix("idle_")] = item
+        elif raw.startswith(("idle", "speak")) or raw.endswith("_talking"):
+            continue
+        else:
+            base = re.sub(
+                r"_(good|bad)(_\d+|_strong)?$",
+                lambda m: "_strong" if m[2] == "_strong" else "",
+                raw,
+            )
+            role = (
+                row.get("pickRole")
+                or defaults.get("pickRole")
+                or ("emotion" if base in taxonomy else "special")
+            )
+            if for_picker:
+                item["description"] = row.get("description") or defaults.get("description") or ""
+            result["emotion" if role == "emotion" else "special"].append(
+                dict(
+                    **item,
+                    mood=mood,
+                    title=row.get("title") or defaults.get("title") or "몸짓",
+                    useWhen=row.get("useWhen") or defaults.get("useWhen") or taxonomy.get(base, ""),
+                )
+            )
+        seen.add(key)
+    result["ready"] = bool(seen)
+    return result
