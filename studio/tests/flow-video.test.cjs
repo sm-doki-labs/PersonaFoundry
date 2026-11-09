@@ -41,7 +41,7 @@ test('the chooser uses the same tier cards without "영상 없이", posts the ti
   assert.ok(!/\d/.test(html.replace(/<[^>]+>/g, ' ')), 'no counts on the cards');
   assert.ok(src.includes("request('POST', '/api/characters/' + encodeURIComponent(d.id) + '/videos', { videoTier: tier })"));
   assert.ok(src.includes("'sources.html#c/' + encodeURIComponent(d.id)"), 'the no-photo note links to the source page of that character');
-  assert.ok(src.includes('얼굴이 잘 보이는 사진이 1장 이상 있어야 해요'));
+  assert.ok(src.includes('만들 때 사진을 올리지 않아서 영상을 만들 수 없어요'), 'a character without photos is sent to make a new one with photos');
   assert.ok(src.includes('영상 단계는 비용이 들어요'));
   assert.ok(src.includes("data-act=\"video-open\"") && src.includes("act === 'video-go'"));
 });

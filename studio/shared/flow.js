@@ -1353,7 +1353,8 @@
       const photoLink = '<a class="btn" href="' + E(src) + '">원문 화면에서 사진 올리기</a>';
       const close = '<button type="button" class="btn ghost" data-act="video-cancel">닫기</button>';
       if (v.photos == null) return '<div class="fl-vid" role="group" aria-label="영상 만들기"><p>올린 사진을 확인하는 중이에요…</p></div>';
-      if (v.photos === 0) return '<div class="fl-vid" role="group" aria-label="영상 만들기"><p>영상을 만들려면 얼굴이 잘 보이는 사진이 1장 이상 있어야 해요. 원문 화면에서 사진을 올린 뒤 다시 눌러 주세요.</p><div class="acts">' + photoLink + close + '</div></div>';
+      // 사진은 원문과 함께 처음 만들 때 올린다. 이미 만든 캐릭터에는 사진을 덧붙일 수 없어서 새로 만드는 길을 안내한다.
+      if (v.photos === 0) return '<div class="fl-vid" role="group" aria-label="영상 만들기"><p>이 캐릭터는 만들 때 사진을 올리지 않아서 영상을 만들 수 없어요. 원문 화면에서 사진과 원문을 함께 올려 새로 만들어 주세요.</p><div class="acts"><a class="btn" href="sources.html">원문 화면에서 새로 만들기</a>' + close + '</div></div>';
       const busy = Boolean(v.busy || state.busy);
       return '<div class="fl-vid" role="group" aria-label="영상 만들기"><div class="vt-grid" role="radiogroup" aria-label="영상 등급">' + tierCardsHTML('videoTierPick', v.tier, { paidOnly: true, disabled: busy }) + '</div>' +
         '<p>영상 단계는 비용이 들어요. 시작하면 고른 등급의 장면만 이어서 만들고, 다 되면 대화할 때 영상이 나와요.</p>' +

@@ -11,6 +11,9 @@ from character_factory_poc.common import demo_chat as demo
 from character_factory_poc.providers.base import ChatRequest, Message
 
 _RANK = re.compile(r"([1-3])위\s*[:.]?\s*([\w-]+)(?:[ :]+(\d+(?:\.\d+)?))?")
+# api-svc clip_pick 설정과 같은 값: 가벼운 모델, 생각 끔, 2.5초 안에 못 고르면 대기 영상 유지.
+PICK_MODEL = "gemini-3.5-flash"
+PICK_TIMEOUT_S = 2.5
 
 
 def _ranked(text, candidates):
@@ -53,7 +56,17 @@ def pick(ctx, cid, candidates, user, reply, recent):
     )
     try:
         cfg = demo.provider(ctx, "studio")
-        cfg = replace(cfg, extra={**cfg.extra, "timeout_s": 2.5, "max_retries": 0})
+        pick_cfg = ctx.config.providers.get("clip_pick")
+        cfg = replace(
+            cfg,
+            model=(pick_cfg.model if pick_cfg else PICK_MODEL),
+            extra={
+                **cfg.extra,
+                "reasoning_effort": "none",
+                "timeout_s": PICK_TIMEOUT_S,
+                "max_retries": 0,
+            },
+        )
         model = demo.talk_model(ctx, cid, cfg)
         raw = model.complete(request).text
     except Exception:

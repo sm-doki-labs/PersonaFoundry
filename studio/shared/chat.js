@@ -531,7 +531,8 @@
       return true;
     }
 
-    function remember(key) { state.recent = state.recent.filter((k) => k !== key).concat(key).slice(-5); }
+    // 서버의 반복 금지 규칙은 연달아 튼 횟수를 센다. 중복을 지우지 않고 오래된 것부터 그대로 보낸다.
+    function remember(key) { state.recent = state.recent.concat(key).slice(-5); }
 
     // 반응 하나를 한 번 틀고 대기로 돌아간다. 더 새 반응이 오면 그 자리에서 물러난다.
     async function playClip(clip) {
