@@ -36,7 +36,7 @@ class SourceSubject(Strict):
 
 
 class UsageBasis(Strict):
-    scope: str = Field(default="", description="사용 범위. 예: SW마에스트로 최종 발표")
+    scope: str = Field(default="팀 내부 사용", description="사용 범위. 예: SW마에스트로 최종 발표")
     consentBy: str | None = Field(default=None, description="사인은 동의한 사람")
     consentDate: str | None = Field(default=None, description="사인은 동의한 날짜(YYYY-MM-DD)")
     notes: str = ""
@@ -79,7 +79,7 @@ class SourcePack(Strict):
         )
     )
     voiceId: UUID | None = Field(default=None, description="한국어 voice-svc 음성 UUID")
-    usageBasis: UsageBasis
+    usageBasis: UsageBasis = Field(default_factory=UsageBasis)
     photos: list[SourcePhoto] = Field(default_factory=list)
     texts: list[SourceText] = Field(min_length=1)
     holdout: HoldoutPolicy = Field(default_factory=HoldoutPolicy)
@@ -111,9 +111,7 @@ class SourceIndex(Strict):
     holdoutMessages: int
     masked: dict[str, int] = Field(default_factory=dict, description="가린 항목 종류별 개수")
     otherParticipants: int = 0
-    usageProblems: list[str] = Field(
-        default_factory=list, description="비어 있지 않으면 G0 승인을 잠근다(D-0120)"
-    )
+    usageProblems: list[str] = Field(default_factory=list, description="이전 판의 사용 근거 안내")
 
 
 class PiiFlag(Strict):

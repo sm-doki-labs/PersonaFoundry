@@ -31,6 +31,7 @@ def start(client):
         json={
             "displayName": "선수",
             "subjectKind": "PUBLIC_FIGURE",
+            "autoReview": False,
             "usageBasis": {"scope": "시험"},
         },
     )
@@ -123,8 +124,9 @@ def test_validation_and_import(tmp_path):
     target = put(client, url, RAW + "\n무단전재 및 재배포 금지".encode())
     for field, invalid in [("textId", "bad/id"), ("kind", "TV"), ("register", "V")]:
         assert client.post(target + "/complete", json=META | {field: invalid}).status_code == 422
-    assert client.post(target + "/complete", json=META).json()["status"] == "problem"
-    assert client.get(url).json()["problems"] and client.post(url + "/finalize").status_code == 409
+    record = client.post(target + "/complete", json=META).json()
+    assert record["warnings"] and record["status"] == "ready"
+    assert client.get(url).json()["canFinalize"]
     assert client.delete(target).is_success
     original = tmp_path / "외부.txt"
     original.write_bytes(RAW)

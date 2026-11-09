@@ -137,6 +137,20 @@
    "paid": []
   },
   {
+   "id": "s8c",
+   "name": "챕터 시작 설정",
+   "deps": [
+    "G3"
+   ],
+   "needs": [],
+   "after": [
+    "s8"
+   ],
+   "gate": null,
+   "implemented": true,
+   "paid": []
+  },
+  {
    "id": "s9h",
    "name": "비교 세트",
    "deps": [
@@ -294,7 +308,8 @@
    "label": "페르소나",
    "stages": [
     "s7",
-    "s8"
+    "s8",
+    "s8c"
    ]
   },
   {

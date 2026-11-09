@@ -205,6 +205,22 @@ def run_chapter_start(ctx: Context, cid: str) -> Path:
     return rev_dir / "chapter-start.json"
 
 
+def run_s8c(ctx: Context, cid: str) -> Path:
+    state = ctx.state(cid)
+    state.require_deps("s8c")
+    state.transition("s8c", "RUNNING")
+    chapter = run_chapter_start(ctx, cid)
+    try:
+        from character_factory_poc.common.demo_chat import run_samples
+    except ImportError:
+        run_samples = None
+    if run_samples is not None:
+        run_samples(ctx, cid)
+        write_manifest(chapter.parent)
+    state.transition("s8c", "APPROVED", rev=chapter.parent.name)
+    return chapter
+
+
 def load_latest_chapter_start(char_dir: Path) -> dict | None:
     folder = char_dir / "s8-chapters"
     if not folder.exists():

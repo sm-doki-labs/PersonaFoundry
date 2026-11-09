@@ -470,7 +470,10 @@ class JobManager:
         options = self.run_options(job, stream)
         if brief is not None:
             options = replace(options, brief_text=brief)
-        return run_until(ctx, job.character_id, options)
+        log = run_until(ctx, job.character_id, options)
+        if job.until == "s8c" and ctx.state(job.character_id).stage("s8c").status != "APPROVED":
+            raise ValueError("대화 준비를 마치지 못했어요. 멈춘 단계의 작업 기록을 확인해 주세요.")
+        return log
 
     def _creator_brief(self, character_id: str) -> str | None:
         """생성 요청이 고정한 브리프를 읽는다. 없는 파일은 기존 CLI 입력 동작을 지킨다."""

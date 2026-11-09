@@ -9,7 +9,7 @@ D-0035: 한 갈래가 사람 검토(관문)나 사람 입력(기획 씨앗)을 �
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -22,7 +22,7 @@ from character_factory_poc.common.errors import (
     NeedsInputError,
     StateTransitionError,
 )
-from character_factory_poc.pipeline.approve import approve_gate
+from character_factory_poc.pipeline.approve import approve_gate, approve_text_gate
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.graph import (
     ALL_GATES,
@@ -292,9 +292,11 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
         from character_factory_poc.stages.s0_source.run import run_s0
         from character_factory_poc.stages.s2_hero.twin import run_s2_twin
         from character_factory_poc.stages.s3_plan.twin import run_s3_twin
+        from character_factory_poc.stages.s8_prompts.chapter_start import run_s8c
 
         runners.update(
             {
+                "s8c": lambda: run_s8c(ctx, cid),
                 "s0": lambda: run_s0(ctx, cid, opt.source_pack),
                 "s2": lambda: run_s2_twin(ctx, cid),
                 "s3": lambda: run_s3_twin(ctx, cid),
@@ -384,7 +386,14 @@ def _mark_failed(ctx: Context, cid: str, sid: str, message: str) -> None:
 
 
 def _step(
-    ctx: Context, cid: str, sid: str, opt: RunOptions, runners: dict, log: RunLog
+    ctx: Context,
+    cid: str,
+    sid: str,
+    opt: RunOptions,
+    runners: dict,
+    log: RunLog,
+    *,
+    auto_review: bool = False,
 ) -> str | None:
     """단계 하나를 처리한다(D-0035 규칙 그대로). 반환: None(다음 단계로), "break", "return".
 
@@ -475,18 +484,26 @@ def _step(
             log.add(f"{sid}: 완료 → {out}")
     # 관문 처리: 자동 승인 플래그가 없으면 기다리는 관문으로 모으고 다른 갈래를 계속 진행한다
     state = ctx.state(cid)
-    if stage.gate and state.gate(stage.gate).status == "AWAITING_HUMAN":
-        if stage.gate in opt.auto_approve:
-            _auto_approve(ctx, cid, stage.gate)
-            log.add(f"{stage.gate}: 자동 승인(--auto-approve)")
+    gate = stage.gate
+    if auto_review and sid == "s8":
+        gate = None  # 챕터 설정과 대화 표본까지 준비된 뒤 프롬프트를 승인한다.
+    if auto_review and sid == "s8c" and state.stage(sid).status == "APPROVED":
+        gate = "G6"
+    if gate and state.gate(gate).status == "AWAITING_HUMAN":
+        if auto_review and gate in {"G0", "G3", "G6"}:
+            approve_text_gate(ctx, cid, gate)
+            log.add(f"{gate}: 자동 진행")
+        elif gate in opt.auto_approve:
+            _auto_approve(ctx, cid, gate)
+            log.add(f"{gate}: 자동 승인(--auto-approve)")
         else:
             if ran:
                 from character_factory_poc.pipeline.review import review_on_open
 
-                review_on_open(ctx, cid, stage.gate)
-            log.add(f"{stage.gate}: 사람 검토 대기")
-            if stage.gate not in log.waiting:
-                log.waiting.append(stage.gate)
+                review_on_open(ctx, cid, gate)
+            log.add(f"{gate}: 사람 검토 대기")
+            if gate not in log.waiting:
+                log.waiting.append(gate)
     if opt.until in (sid, stage.gate):
         log.add(f"{opt.until}에 도달해 멈춘다")
         log.stopped_at = opt.until
@@ -509,22 +526,33 @@ def _finish(log: RunLog) -> RunLog:
 def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
     validate_until(opt.until)
     validate_auto_approve(opt.auto_approve)
-    if opt.max_parallel > 1:
+    from character_factory_poc.pipeline.origin import graph_for_dir, read_auto_review
+
+    char_dir = ctx.character_dir(cid)
+    graph = graph_for_dir(char_dir)
+    if opt.until == "G6" and "s8c" in graph:
+        # 모티브의 프롬프트 검토에는 첫 장면도 함께 준비한다.
+        opt = replace(opt, until="s8c")
+    auto_review = read_auto_review(char_dir)
+    if not auto_review and opt.max_parallel > 1:
         # D-0049(LLD §6.6): 의존이 풀린 단계를 동시에 돌린다.
         from character_factory_poc.pipeline.scheduler import run_waves
 
         return run_waves(ctx, cid, opt)
     log = RunLog()
     runners = _stage_runners(ctx, cid, opt)
-    from character_factory_poc.pipeline.origin import graph_for_dir
-
-    for sid in graph_for_dir(ctx.character_dir(cid)):
+    # 자동 진행은 직렬 텍스트 경로만 탄다. 사진·영상·학습·평가는 별도 실행 확인이 필요하다.
+    for sid in graph:
+        if auto_review and sid not in {"s0", "s3", "s7", "s8", "s8c"} and sid not in opt.confirmed:
+            continue
         note = _skip_note(ctx, cid, sid, runners)
         if note is not None:
             if note:
                 log.add(note)
             continue
-        action = _step(ctx, cid, sid, opt, runners, log)
+        action = _step(ctx, cid, sid, opt, runners, log, auto_review=auto_review)
+        if auto_review and (log.blocked or log.held):
+            break
         if action == "break":
             break
         if action == "return":
