@@ -268,6 +268,9 @@
       const errors = {};
       if (!text(v.displayName).trim()) errors.displayName = '표시 이름을 적어 주세요.';
       if (!SUBJECT_KINDS.some((k) => k[0] === v.subjectKind)) errors.subjectKind = '공인인지 개인인지 골라 주세요.';
+      if (!text(v.age).trim()) errors.age = '나이를 적어 주세요.';
+      if (!text(v.gender).trim()) errors.gender = '성별을 골라 주세요.';
+      if (!text(v.job).trim()) errors.job = '하는 일을 적어 주세요.';
       if (!text(v.scope).trim()) errors.scope = '어디에 쓰는지 적어 주세요.';
       return errors;
     }
@@ -281,7 +284,8 @@
         const body = {
           displayName: text(input.displayName).trim(),
           subjectKind: input.subjectKind,
-          usageBasis: { scope: text(input.scope).trim(), notes: text(input.notes).trim() }
+          usageBasis: { scope: text(input.scope).trim(), notes: text(input.notes).trim() },
+          knownFacts: { age: text(input.age).trim(), gender: text(input.gender).trim(), job: text(input.job).trim(), background: text(input.background).trim() }
         };
         if (input.chapterTemplate) body.chapterTemplate = input.chapterTemplate;
         const data = await request('POST', '/api/sources/drafts', body);
@@ -708,6 +712,9 @@
           const basis = d.usageBasis || {};
           r.summary.querySelector('[data-sum-name]').textContent = text(sub.displayName);
           r.summary.querySelector('[data-sum-kind]').textContent = labelOf(SUBJECT_KINDS, sub.kind);
+          const kf = d.knownFacts || {};
+          const factsEl = r.summary.querySelector('[data-sum-facts]');
+          if (factsEl) factsEl.textContent = [kf.age, kf.gender, kf.job].filter(Boolean).join(' · ') + (kf.background ? ' — ' + kf.background : '');
           r.summary.querySelector('[data-sum-scope]').textContent = text(basis.scope) || '적지 않았어요';
           const notes = r.summary.querySelector('[data-sum-notes]');
           notes.textContent = text(basis.notes);
@@ -860,9 +867,9 @@
       e.preventDefault();
       const f = r.form;
       const kind = (f.querySelector('[name="subjectKind"]:checked') || {}).value;
-      const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, scope: f.querySelector('[name="scope"]').value, notes: f.querySelector('[name="notes"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined };
+      const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, scope: f.querySelector('[name="scope"]').value, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined };
       const errors = intake.validateDraft(input);
-      ['displayName', 'subjectKind', 'scope'].forEach((n) => fieldError(n, errors[n]));
+      ['displayName', 'subjectKind', 'age', 'gender', 'job', 'scope'].forEach((n) => fieldError(n, errors[n]));
       const first = Object.keys(errors)[0];
       if (first) { const ctl = f.querySelector('[name="' + first + '"]'); if (ctl) ctl.focus(); return; }
       intake.createDraft(input).then((res) => {

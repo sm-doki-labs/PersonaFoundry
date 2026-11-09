@@ -59,6 +59,17 @@
             <p class="src-ferr" id="src-kind-e" data-err="subjectKind" hidden></p>
           </fieldset>
 
+          <fieldset class="src-fld src-facts" aria-describedby="src-facts-h">
+            <legend>기본 정보</legend>
+            <p class="src-fhint" id="src-facts-h">인물 소개 첫 줄로 써요. 원문에 없어도 여기 적은 값을 사실로 봐요.</p>
+            <div class="src-row">
+              <div class="src-fld"><label for="src-age">나이</label><input id="src-age" name="age" autocomplete="off" placeholder="예: 34세" aria-describedby="src-age-e"><p class="src-ferr" id="src-age-e" data-err="age" hidden></p></div>
+              <div class="src-fld"><label for="src-gender">성별</label><select id="src-gender" name="gender" aria-describedby="src-gender-e"><option value="">골라 주세요</option><option value="남성">남성</option><option value="여성">여성</option></select><p class="src-ferr" id="src-gender-e" data-err="gender" hidden></p></div>
+              <div class="src-fld"><label for="src-job">하는 일</label><input id="src-job" name="job" autocomplete="off" placeholder="예: 축구선수" aria-describedby="src-job-e"><p class="src-ferr" id="src-job-e" data-err="job" hidden></p></div>
+            </div>
+            <div class="src-fld"><label for="src-bg">한 줄 배경 <span class="opt">선택</span></label><textarea id="src-bg" name="background" rows="2" placeholder="예: 토트넘에서 10년을 뛰고 2025년 LAFC로 옮겼어요."></textarea></div>
+          </fieldset>
+
           <div class="src-fld">
             <label for="src-scope">어디에 쓰나요</label>
             <input id="src-scope" name="scope" autocomplete="off" aria-describedby="src-scope-h src-scope-e" placeholder="예: SW마에스트로 최종 발표 시연">
@@ -81,6 +92,7 @@
         <dl class="src-card src-summary" data-info-summary hidden>
           <div><dt>표시 이름</dt><dd data-sum-name></dd></div>
           <div><dt>구분</dt><dd data-sum-kind></dd></div>
+          <div><dt>기본 정보</dt><dd data-sum-facts></dd></div>
           <div><dt>쓰는 곳</dt><dd data-sum-scope></dd></div>
           <div><dt>메모</dt><dd data-sum-notes></dd></div>
         </dl>

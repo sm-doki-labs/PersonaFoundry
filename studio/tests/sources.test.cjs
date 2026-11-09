@@ -65,7 +65,7 @@ const file = (name, size, type) => ({ name, size: size == null ? 1200 : size, ty
 async function settle() { for (let i = 0; i < 60; i++) await new Promise((r) => setImmediate(r)); }
 async function ready(server) {
   const intake = S.createIntake({ fetch: server.fetch, origin: ORIGIN, XHR: null });
-  const res = await intake.createDraft({ displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', scope: '최종 발표 시연', notes: '공개 인터뷰만' });
+  const res = await intake.createDraft({ displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', age: '34세', gender: '남성', job: '축구선수', scope: '최종 발표 시연', notes: '공개 인터뷰만' });
   assert.equal(res.characterId, 'cf-son');
   return intake;
 }
@@ -103,7 +103,7 @@ test('text ids are suggested from the file name, fall back to kind-number, and n
 test('local store: draft, then files → PUT with cookies to our server → complete with the suggested meta', async () => {
   const server = fakeServer();
   const intake = await ready(server);
-  assert.deepEqual(server.calls[0].body, { displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', usageBasis: { scope: '최종 발표 시연', notes: '공개 인터뷰만' } });
+  assert.deepEqual(server.calls[0].body, { displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', usageBasis: { scope: '최종 발표 시연', notes: '공개 인터뷰만' }, knownFacts: { age: '34세', gender: '남성', job: '축구선수', background: '' } });
   server.calls.length = 0;
   intake.addFiles([file('KakaoTalk_son.txt', 3000)]);
   await settle();
@@ -277,7 +277,7 @@ test('draft form checks name, kind and scope before calling the server', async (
   const server = fakeServer();
   const intake = S.createIntake({ fetch: server.fetch, origin: ORIGIN, XHR: null });
   const res = await intake.createDraft({ displayName: ' ', subjectKind: '', scope: '' });
-  assert.deepEqual(Object.keys(res.errors).sort(), ['displayName', 'scope', 'subjectKind']);
+  assert.deepEqual(Object.keys(res.errors).sort(), ['age', 'displayName', 'gender', 'job', 'scope', 'subjectKind']);
   assert.equal(server.calls.length, 0);
 });
 

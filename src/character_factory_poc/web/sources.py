@@ -45,11 +45,21 @@ EXTENSIONS = {".txt", ".srt", ".vtt", ".csv", ".json"}
 FIELDS = ("textId", "kind", "register", "subjectSpeaker", "userSpeaker", "date", "sourceUrl")
 
 
+class KnownFacts(Strict):
+    """S3 기획이 인물 소개 첫 줄로 쓰는 기본 정보(source-pack-v1 knownFacts)."""
+
+    age: str = Field(default="", max_length=20)
+    gender: str = Field(default="", max_length=20)
+    job: str = Field(default="", max_length=60)
+    background: str = Field(default="", max_length=400)
+
+
 class Draft(Strict):
     displayName: str = Field(min_length=1)
     subjectKind: SubjectKind
     usageBasis: UsageBasis
     chapterTemplate: Literal["FAN_CALL", "FAMILY_CALL"] | None = None
+    knownFacts: KnownFacts = Field(default_factory=KnownFacts)
 
 
 class Upload(Strict):
@@ -183,6 +193,7 @@ def install_source_routes(app, conf, jobs):
                 subject=subject.model_dump(),
                 usageBasis=body.usageBasis.model_dump(),
                 chapterTemplate=body.chapterTemplate,
+                knownFacts={k: v.strip() for k, v in body.knownFacts.model_dump().items() if v.strip()},
                 files=[],
             ),
         )
@@ -193,6 +204,7 @@ def install_source_routes(app, conf, jobs):
         with opened(cid) as (_, draft):
             problems, ready = summary(draft)
             return {k: draft[k] for k in ("characterId", "subject", "usageBasis", "files")} | {
+                "knownFacts": draft.get("knownFacts", {}),
                 "store": conf.source_store,
                 "allowPathImport": allow_import,
                 "problems": problems,
@@ -319,7 +331,11 @@ def install_source_routes(app, conf, jobs):
                 texts.append(source_text(folder, item))
             opts = {"chapterTemplate": draft["chapterTemplate"]} if draft["chapterTemplate"] else {}
             pack = SourcePack(
-                subject=draft["subject"], usageBasis=draft["usageBasis"], texts=texts, **opts
+                subject=draft["subject"],
+                knownFacts=draft.get("knownFacts", {}),
+                usageBasis=draft["usageBasis"],
+                texts=texts,
+                **opts,
             )
             save(inside(folder, "source-pack.json"), pack.model_dump(mode="json"))
             draft["jobId"] = jobs.submit(cid, until="G0")["jobId"]
