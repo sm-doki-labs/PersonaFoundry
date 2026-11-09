@@ -254,6 +254,8 @@
       emit();
       try {
         state.draft = await request('GET', '/api/sources/' + encodeURIComponent(cid));
+        // 이미 출처 정리를 시작한 초안은 다시 열어도 고치거나 다시 시작하지 못하게 잠근다.
+        if (state.draft && state.draft.jobId) state.finalized = { jobId: state.draft.jobId };
       } catch (error) {
         state.loadError = error.status === 404 ? { missing: true, text: '이 초안을 찾을 수 없어요. 이미 지웠거나 주소가 바뀌었을 수 있어요.' } : { missing: false, text: errorText(error) };
       }

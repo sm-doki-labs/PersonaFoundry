@@ -197,6 +197,7 @@ def install_source_routes(app, conf, jobs):
                 "allowPathImport": allow_import,
                 "problems": problems,
                 "canFinalize": bool(ready),
+                "jobId": draft.get("jobId"),
             }
 
     @router.post("/{cid}/files")
