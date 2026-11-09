@@ -1,0 +1,54 @@
+[web]
+host = "0.0.0.0"
+port = 8080
+studio_dir = "/app/studio"
+default_until = "G6"
+
+[text_pipeline]
+enabled = true
+profile = "basic_test"
+route = "api"
+transport_retries = 1
+
+[text_pipeline.routes.api.families.openai]
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+
+[text_pipeline.routes.api.families.gemini]
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+api_key_env = "GEMINI_API_KEY"
+
+# 내장 덱의 로컬 중계 기본값을 비워 화면에서도 이 경로를 선택할 수 없게 한다.
+[text_pipeline.routes.opencodex]
+base_url = ""
+
+[providers.text]
+adapter = "openai_compat"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+model = "gemini-3.8-flash"
+api_key_env = "GEMINI_API_KEY"
+
+[providers.judge]
+adapter = "openai_compat"
+base_url = "https://api.openai.com/v1"
+model = "gpt-6.1-sol"
+api_key_env = "OPENAI_API_KEY"
+
+# 모티브 경로에서는 이미지와 영상을 생성하지 않는다. 외부 생성기도 연결하지 않는다.
+[providers.image]
+adapter = "fake"
+[providers.video]
+adapter = "fake"
+[stages.image_qa]
+enabled = false
+
+[orchestrator]
+max_parallel = 1
+auto_resume = true
+resume_until = "G6"
+
+[providers.dialogue]
+adapter = "openai_compat"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+model = "gemini-3.8-flash"
+api_key_env = "GEMINI_API_KEY"
