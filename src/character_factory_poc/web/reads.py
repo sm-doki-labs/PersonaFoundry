@@ -646,10 +646,14 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
             ids.update(("s9s", "s9", "s10t"))
         goal_stages = [s for s in stages if s["id"] in ids]
     goal = _progress(goal_stages)
-    if pending:
-        status = "needs_review"
-    elif chat:
+    # 대화가 되면 상태는 "대화 가능" 하나로 보인다.
+    # 남은 사람 확인은 지금 할 일에서 따로 보인다(3차 QA).
+    if chat:
         status = "chat_ready"
+        if meta["origin"] != CREATED:
+            goal = dict(goal, done=goal["total"])
+    elif pending:
+        status = "needs_review"
     elif any(s["status"] in {"CHECK_FAILED", "REJECTED"} for s in stages):
         status = "failed"
     elif is_draft(intake, stages):
