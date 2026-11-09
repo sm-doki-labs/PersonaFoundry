@@ -37,12 +37,116 @@
     if (template) return template === 'FAN_CALL' ? '팬 통화 장면' : '통화 장면';
     return origin === 'SOURCE' ? '팬 통화 장면' : '통화 장면';
   }
-  // 대화 테스트 화면 주소. 모티브이고 프롬프트(S8)가 나왔을 때만 연다. 준비가 덜 됐으면 대화 화면이 이유를 보여 준다.
+  // 대화할 수 있는지(3차 약속 3). 서버가 대화 화면과 같은 함수로 계산한 chatReady를 그대로 따른다.
+  // 서버가 아직 싣지 않으면 대화 화면의 준비 조건(프롬프트 S8과 첫 장면 S8c가 모두 있음)을 단계 기록으로 본다.
+  function isChatReady(detail) {
+    const d = detail || {};
+    if (typeof d.chatReady === 'boolean') return d.chatReady;
+    if (d.origin !== 'SOURCE' || !d.id) return false;
+    const rows = rowsById(d);
+    const made = (id) => ['APPROVED', 'AWAITING_HUMAN'].includes(upper((rows.get(id) || {}).status));
+    return made('s8') && made('s8c');
+  }
+  // 대화해 보기 주소. 대화할 수 있을 때만 연다(대화 화면에서 막히는 버튼을 보이지 않는다).
   function chatHref(detail) {
     const d = detail || {};
-    if (d.origin !== 'SOURCE' || !d.id) return '';
-    const s8 = upper((rowsById(d).get('s8') || {}).status);
-    return s8 === 'APPROVED' || s8 === 'AWAITING_HUMAN' ? 'chat.html#c/' + encodeURIComponent(d.id) : '';
+    return d.id && isChatReady(d) ? 'chat.html#c/' + encodeURIComponent(d.id) : '';
+  }
+  // 캐릭터 상태는 모든 화면이 같은 낱말을 쓴다(3차 약속 3). 서버 status·statusLabel이 먼저이고,
+  // 없을 때만 이 화면이 가진 기록으로 같은 규칙을 따라 정한다. done은 끝까지 마친 오리지널 캐릭터에만 쓴다.
+  const STATUS_LABEL = { draft: '시작 전', running: '만드는 중', needs_review: '확인 필요', chat_ready: '대화 가능', failed: '실패', stopped: '멈춤', done: '완료' };
+  const STATUS_TONE = { draft: 'muted', running: 'run', needs_review: 'wait', chat_ready: 'ok', failed: 'fail', stopped: 'muted', done: 'ok' };
+  const STATUS_RANK = { needs_review: 0, failed: 1, running: 2, chat_ready: 3, draft: 4, stopped: 5, done: 6 };
+  function statusOf(c, sum) {
+    const x = c || {};
+    const s = sum || {};
+    let st = STATUS_LABEL[x.status] ? x.status : '';
+    if (!st) st = s.running ? 'running' : s.fail ? 'failed' : (s.review || s.paid) ? 'needs_review' : isChatReady(x) ? 'chat_ready' : s.complete ? 'done' : s.fresh ? 'draft' : 'stopped';
+    return { status: st, label: text(x.statusLabel).trim() || STATUS_LABEL[st], tone: STATUS_TONE[st] || 'muted', rank: STATUS_RANK[st] == null ? 9 : STATUS_RANK[st] };
+  }
+  // 목표 경로: 모티브는 대화 가능까지 필요한 단계만(첫 장면 S8c, 없으면 프롬프트 S8의 앞 단계들). 학습 방식이면 학습 단계까지 더한다.
+  // 오리지널은 목표 경로를 따로 두지 않는다(null).
+  function goalStages(graph, detail) {
+    const d = detail || {};
+    if (!graph || (d.origin || graph.origin) !== 'SOURCE') return null;
+    const end = graph.byStage.has('s8c') ? 's8c' : graph.byStage.has('s8') ? 's8' : '';
+    if (!end) return null;
+    const set = ancestors(graph, end);
+    if ((d.modelMode || graph.modelMode) === 'TRAIN' && graph.byStage.has('s10t')) ancestors(graph, 's10t').forEach((id) => set.add(id));
+    return set;
+  }
+  // 진행 숫자. 서버 goal {label, done, total}이 있으면 그대로, 없으면 목표 경로(오리지널은 전체 단계)로 센다.
+  function goalOf(graph, detail, views) {
+    const ids = goalStages(graph, detail);
+    const g = detail && detail.goal;
+    if (g && Number(g.total) > 0) return { label: text(g.label).trim() || (ids ? '대화 가능까지' : '전체'), done: Number(g.done) || 0, total: Number(g.total), ids };
+    const list = ids ? Array.from(ids) : (graph ? graph.stages.map((s) => s.id) : []);
+    const done = list.filter((id) => ['done', 'skip'].includes(((views || {})[id] || {}).kind)).length;
+    return { label: ids ? '대화 가능까지' : '전체', done, total: list.length, ids };
+  }
+  // 모티브 그래프 접기: 목표 경로 단계와 지금 일이 걸린(실행·대기·실패·비용 확인) 단계만 남기고 나머지는 숨긴다.
+  // keep이 null이면 전부 보인다(오리지널이거나 사람이 펼쳤을 때). hidden은 접었을 때 숨는 단계 수다.
+  const ACTIVE_KINDS = ['run', 'retry', 'wait', 'confirm', 'fail'];
+  function goalView(graph, detail, views, showOff) {
+    const ids = goalStages(graph, detail);
+    if (!ids) return { ids: null, keep: null, hidden: 0 };
+    const keep = new Set();
+    graph.stages.forEach((s) => { if (ids.has(s.id) || ACTIVE_KINDS.includes(((views || {})[s.id] || {}).kind)) keep.add(s.id); });
+    const hidden = graph.stages.length - keep.size;
+    return { ids, keep: showOff ? null : keep, hidden };
+  }
+  // 이름이 같은 캐릭터는 만든 날짜·시간으로 구분한다. 시간이 없거나 그래도 같으면 짧은 이름을 덧붙인다.
+  function pad2(n) { return String(n).padStart(2, '0'); }
+  // 만든 시각: 서버 createdAt → 첫 실행 시각 → ID의 날짜(시각 없음) 순.
+  function createdOf(c) {
+    const x = c || {};
+    const t = parseTime(x.createdAt);
+    if (t != null) return { t, time: true };
+    const starts = (x.stages || []).map((s) => parseTime(s.startedAt)).filter((v) => v != null);
+    if (starts.length) return { t: Math.min.apply(null, starts), time: true };
+    const m = /^cf-(\d{4})(\d{2})(\d{2})-/.exec(text(x.id));
+    return m ? { t: new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime(), time: false } : { t: 0, time: false };
+  }
+  function createdLabel(c) {
+    const w = createdOf(c);
+    if (!w.t) return '';
+    const d = new Date(w.t);
+    return (d.getMonth() + 1) + '/' + d.getDate() + (w.time ? ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) : '');
+  }
+  function labelOf(c) {
+    const x = c || {};
+    return displayName(x.displayName || (x.persona && x.persona.name) || x.name, x.id);
+  }
+  function nameLabels(list) {
+    const groups = new Map();
+    (list || []).forEach((c) => { const n = labelOf(c); if (!groups.has(n)) groups.set(n, []); groups.get(n).push(c); });
+    const out = new Map();
+    groups.forEach((cs, n) => {
+      const whens = cs.map(createdLabel);
+      cs.forEach((c, i) => {
+        let note = '';
+        if (cs.length > 1) {
+          note = whens[i] ? whens[i] + ' 만듦' : '';
+          if (!whens[i] || whens.filter((w) => w === whens[i]).length > 1) note = (note ? note + ' · ' : '') + text(c.id).replace(/^cf-\d{8}-/, '');
+        }
+        out.set(c.id, { name: n, note });
+      });
+    });
+    return out;
+  }
+  // 새로 지어내는 캐릭터의 짧은 이름은 자동으로 만든다(브리프 속 영문 낱말 + 시각). 직접 정하는 칸은 고급 설정으로 접는다.
+  function autoSlug(brief, now) {
+    const words = (text(brief).toLowerCase().match(/[a-z0-9]+/g) || []).slice(0, 2).join('-').slice(0, 24);
+    return (words ? words : 'char') + '-' + Math.floor(Number(now || Date.now())).toString(36).slice(-5);
+  }
+  // 회차 기록: 마지막에 성공한 단계라면 그 전에 실패한 시도는 따로 접어 둔다.
+  function splitAttempts(hist, succeeded) {
+    const all = Array.isArray(hist) ? hist : [];
+    if (!succeeded) return { shown: all, earlier: [] };
+    const lastOk = all.map((a) => Boolean(a.result) && a.result !== 'CHECK_FAILED' && a.result !== 'RESTARTED').lastIndexOf(true);
+    if (lastOk < 0) return { shown: all, earlier: [] };
+    const earlier = all.filter((a, i) => i < lastOk && (a.result === 'CHECK_FAILED' || a.result === 'RESTARTED'));
+    return { shown: all.filter((a) => earlier.indexOf(a) < 0), earlier };
   }
   // 단계 이름 뒤 표시(사람 검토·유료 아이콘)는 마지막 낱말에 붙인다. 칸이 좁아도 아이콘만 다음 줄로 떨어지지 않는다.
   function stageNameHTML(name, marks) {
@@ -75,7 +179,10 @@
     shrink: '<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>',
     grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
     copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
-    chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>'
+    chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
+    gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+    more: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+    archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><line x1="10" y1="12" x2="14" y2="12"/>'
   };
   // 브랜드 마크: 보라 둥근 사각형 안의 F와 불꽃 점(D-0102).
   const MARK = '<svg class="fd-mark" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="var(--fd-accent)"/><path d="M8.5 17V7h7.5M8.5 12h5" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16.4" cy="16.4" r="1.7" fill="#fff"/></svg>';
@@ -99,6 +206,9 @@
     if (/timeout|timed out|시간 초과/i.test(s)) return { summary: '응답이 제한 시간 안에 오지 않았어요.', detail: s };
     if (/connect|connection|network|연결/i.test(s)) return { summary: '공급자에 연결하지 못했어요.', detail: s };
     if (/budget|예산/i.test(s)) return { summary: '정해 둔 호출 예산을 넘어 멈췄어요.', detail: s };
+    if (/TaintedOutputError|작업 공간 밖/.test(s)) return { summary: '작업 공간 밖의 파일을 건드리려 해서 멈췄어요.', detail: s };
+    // 'SomethingError: …' 같은 개발자용 오류 이름은 그대로 보이지 않는다. 원문은 기술 정보에 남는다.
+    if (/^[A-Za-z_.]*(Error|Exception)\b/.test(s)) return { summary: '실행 중에 오류가 나서 멈췄어요. 자세한 내용은 기술 정보에 있어요.', detail: s };
     const line = s.split('\n')[0];
     return { summary: line.length > 120 ? line.slice(0, 117) + '…' : line, detail: line === s && line.length <= 120 ? '' : s };
   }
@@ -501,7 +611,7 @@
       side: $('[data-side]'), top: $('[data-top]'), banner: $('[data-banner]'), head: $('[data-head]'),
       graph: $('[data-graph]'), grid: $('[data-grid]'), legend: $('[data-legend]'), svg: $('[data-graph] svg.w'),
       view: $('[data-view]'), zoombar: $('[data-zoombar]'), shell: $('.fd-shell'), body: $('.fd-body'),
-      panel: $('[data-panel]'), sheet: $('[data-sheet]'), scrim: $('[data-scrim]')
+      panel: $('[data-panel]'), sheet: $('[data-sheet]'), scrim: $('[data-scrim]'), offgoal: $('[data-offgoal]')
     };
     const store = (() => { try { return global.localStorage; } catch (error) { return null; } })();
     const state = {
@@ -510,6 +620,8 @@
       conn: 'connecting', lastSync: null, busy: false, form: { open: false, slug: '', brief: '', error: '' },
       target: null, sheetKey: '', opener: null, openerGate: '', destroyed: false,
       overview: false, ov: { q: '', gate: '' }, batch: null, pendingReview: null, confirming: null, plans: {}, nextTarget: null, focus: false,
+      // 사이드바 검색어, 보관함 보기, 목표 밖 단계 펼치기(3차 QA)
+      sq: '', showArchived: false, showOff: false,
       // 갈래·모델 준비 방식마다 그래프가 다르다. 'CREATED|TRAIN' 같은 열쇠로 받아 둔 그래프(개요·받은 일이 캐릭터마다 자기 그래프로 센다).
       graphs: new Map(), graphSeq: 0, graphAsk: new Set(),
       theme: (store && ['light', 'dark'].includes(store.getItem('fd-theme'))) ? store.getItem('fd-theme') : 'system'
@@ -561,10 +673,21 @@
       return m ? decodeURIComponent(m[1]) : null;
     }
     function route() {
-      const m = /^#all(?:\/(\w+))?/.exec(text(global.location && global.location.hash));
-      return m ? { overview: true, filter: ['mine', 'run', 'fail', 'done'].includes(m[1]) ? m[1] : 'all' } : { overview: false, filter: '' };
+      const hash = text(global.location && global.location.hash);
+      // 처음 열면(주소에 캐릭터가 없으면) 전체 캐릭터 목록부터 보인다. 오래 멈춘 남의 캐릭터를 먼저 열지 않는다.
+      if (!hash || hash === '#') return { overview: true, filter: 'all' };
+      const m = /^#all(?:\/(\w+))?/.exec(hash);
+      const f = m && m[1] === 'done' ? 'chat' : m && m[1];
+      return m ? { overview: true, filter: ['mine', 'run', 'fail', 'chat'].includes(f) ? f : 'all' } : { overview: false, filter: '' };
     }
     function characters() { return (state.projects && state.projects.characters) || []; }
+    // 보관한 캐릭터는 기본 목록에서 숨긴다(지우지 않는다). 지금 화면에 연 캐릭터는 보관했어도 보인다.
+    function visibleChars() {
+      const open = route().overview || state.form.open ? null : state.characterId;
+      return characters().filter((c) => state.showArchived ? c.archived : (!c.archived || c.id === open));
+    }
+    function archivedCount() { return characters().filter((c) => c.archived).length; }
+    function createdTime(c) { return createdOf(c).t; }
     function graphKey(x) { return text((x && x.origin) || 'CREATED') + '|' + text((x && x.modelMode) || 'TRAIN'); }
     // 그 캐릭터의 그래프. 지금 연 캐릭터는 그 캐릭터로 받은 그래프, 나머지는 같은 갈래·방식으로 받아 둔 그래프다.
     function graphOf(c) {
@@ -603,10 +726,11 @@
       const fail = n('fail');
       const review = n('wait');
       const paid = n('confirm');
-      const rank = fail ? 0 : review ? 1 : paid ? 2 : running ? 3 : isComplete ? 6 : fresh ? 5 : 4;
-      return { c, tasks, fail, review, paid, todo: fail + review + paid, done, total: graph.stages.length, complete: isComplete, fresh, running, oldest: waits.length ? Math.min.apply(null, waits) : null, lanes, rank, top: tasks[0] || null, updated: parseTime(det.updatedAt || c.updatedAt) };
+      const status = statusOf(det, { fail, review, paid, running, complete: isComplete, fresh });
+      const goal = goalOf(graph, det, v);
+      return { c, tasks, fail, review, paid, todo: fail + review + paid, done, total: graph.stages.length, complete: isComplete, fresh, running, oldest: waits.length ? Math.min.apply(null, waits) : null, lanes, rank: status.rank, status, goal, chat: chatHref(det), created: createdTime(c), top: tasks[0] || null, updated: parseTime(det.updatedAt || c.updatedAt) };
     }
-    function statusDot(s) { return s.fail ? 'fail' : s.todo ? 'wait' : s.running ? 'run' : s.complete ? 'ok' : ''; }
+    function statusDot(s) { const t = s.status.tone; return t === 'muted' ? '' : t; }
     function nextInBatch() {
       if (!state.batch || !state.graph) return null;
       const list = characters().filter((c) => c.id !== state.characterId).map(summaryOf)
@@ -614,14 +738,6 @@
       list.sort((a, b) => (a.oldest || Infinity) - (b.oldest || Infinity));
       return list.length ? { next: list[0], left: list.length } : null;
     }
-    function pickDefault() {
-      const list = characters();
-      if (!list.length) return null;
-      const waiting = list.find((c) => c.awaitingHuman);
-      const running = list.find((c) => c.job);
-      return (waiting || running || list.slice().sort((a, b) => text(b.updatedAt).localeCompare(text(a.updatedAt)))[0]).id;
-    }
-
     function adoptGraph(raw) {
       const g = R.buildGraph(raw);
       g.paid = new Map((raw.stages || []).map((s) => [s.id, s.paid || []]));
@@ -706,10 +822,12 @@
         if (!state.graph || full) await loadGraph();
         await loadProjects();
         ensureGraphs();
-        const wanted = routeId() || state.characterId || pickDefault();
+        // 주소에 캐릭터가 없으면 아무 캐릭터도 고르지 않는다(첫 화면은 전체 캐릭터 목록).
+        const wanted = routeId() || state.characterId || null;
         const changed = wanted !== state.characterId;
         if (changed) {
           state.characterId = wanted; state.detail = null; state.sel = null; closeSheet(false); state.notes = []; state.open = new Set(); state.target = null; state.mstep = null; state.mconfirm = null;
+          state.showOff = false; state.menuOpen = false; state.moreOpen = false;
           // 새 그래프가 오기 전에는 받아 둔 같은 갈래 그래프로 그린다(이전 캐릭터의 그래프를 남기지 않는다).
           const entry = characters().find((c) => c.id === wanted);
           state.graph = state.graphs.get(graphKey(entry)) || state.graphs.get('CREATED|TRAIN') || state.graph;
@@ -780,60 +898,90 @@
       const job = jobs.find((j) => !single(j)) || d.lastJob;
       return job ? job.until : '';
     }
-    function elapsed(now) {
-      const hist = (state.detail && state.detail.history) || {};
+    // 마지막 작업 시각과 걸린 시간(첫 시작 → 마지막 끝). 아무것도 돌지 않을 때 시간이 저절로 늘어나지 않는다.
+    function activity() {
+      const d = state.detail || {};
+      const hist = d.history || {};
       let first = null;
       let last = null;
       Object.keys(hist).forEach((id) => (hist[id] || []).forEach((a) => {
         const s = parseTime(a.startedAt);
         const e = parseTime(a.endedAt);
         if (s != null && (first == null || s < first)) first = s;
-        if (e != null && (last == null || e > last)) last = e;
+        const end = e != null ? e : s;
+        if (end != null && (last == null || end > last)) last = end;
       }));
-      if (first == null) return '';
-      return span((complete() && last ? last : now) - first) + (complete() ? ' 걸림' : ' 경과');
+      (d.gates || []).forEach((g) => { const t = parseTime(g.decidedAt); if (t != null && (last == null || t > last)) last = t; });
+      if (last == null) last = parseTime(d.updatedAt);
+      return { last, took: first != null && last != null && last - first >= 60000 ? span(last - first) : '' };
     }
-    function nameOf(d) { return displayName(d && ((d.persona && d.persona.name) || (d.summary && d.summary.name) || d.name), d && d.id); }
-    function charStatus(c) {
-      if (c.awaitingHuman) return 'wait';
-      if ((c.stages || []).some((s) => upper(s.status) === 'CHECK_FAILED')) return 'fail';
-      if (c.job) return 'run';
-      const p = c.progress || {};
-      if (p.total && p.done >= p.total) return 'ok';
-      return '';
+    function whenText(t) {
+      if (t == null) return '';
+      const d = new Date(t);
+      const now = new Date();
+      const hm = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+      return d.toDateString() === now.toDateString() ? hm : (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hm;
+    }
+    function nameOf(d) { return labelOf({ id: d && d.id, displayName: d && d.displayName, persona: d && d.persona, name: d && (d.name || (d.summary && d.summary.name)) }); }
+    function isMotif(d) { return Boolean(d) && (d.origin || (state.graph && state.graph.origin)) === 'SOURCE'; }
+    // 프롬프트만 쓰는 모티브는 학습을 하지 않으므로 모델 만들기 탭이 없다.
+    function promptOnly(d) { return isMotif(d) && (d.modelMode || (state.graph && state.graph.modelMode)) === 'PROMPT_ONLY'; }
+    function currentSummary() {
+      if (!state.detail) return null;
+      return allSums().get(state.detail.id) || summaryOf(Object.assign({}, characters().find((c) => c.id === state.detail.id) || {}, { id: state.detail.id }));
     }
     function counts(v) {
       const c = { run: 0, fail: 0, wait: 0, done: 0 };
       Object.keys(v).forEach((id) => { const k = v[id].kind; if (k === 'run' || k === 'retry') c.run++; if (k === 'fail') c.fail++; if (k === 'wait' || k === 'confirm') c.wait++; if (k === 'done' || k === 'skip') c.done++; });
       return c;
     }
+    // 한 번 그릴 때 캐릭터마다 요약을 한 번만 만든다(사이드바·머리줄·개요가 같은 값을 쓴다).
+    let sumMemo = null;
+    function allSums() {
+      if (!sumMemo) sumMemo = new Map(state.graph ? characters().map((c) => [c.id, summaryOf(c)]) : []);
+      return sumMemo;
+    }
+    function visibleSums() { const m = allSums(); return visibleChars().map((c) => m.get(c.id)).filter(Boolean); }
+    function inboxCount() { let n = 0; allSums().forEach((s) => { if (!s.c.archived) n += s.todo; }); return n; }
+    // 사이드바는 최근에 만든 캐릭터가 위에 온다(상태가 바뀌어도 자리가 흔들리지 않는다). 상태는 줄마다 글자로 보인다.
+    function byNewest(a, b) { return b.created - a.created || (b.updated || 0) - (a.updated || 0) || text(b.c.id).localeCompare(text(a.c.id)); }
 
     // ---- 사이드바 ----
     function renderSide() {
       if (!region.side) return;
-      const list = characters();
-      // 실패·검토·유료 확인을 모든 캐릭터에서 같은 기준으로 센다(받은 일 = 머리줄 = 개요).
-      const sums = state.graph ? list.map(summaryOf) : [];
-      const byId = new Map(sums.map((s) => [s.c.id, s]));
-      const inbox = sums.reduce((n, s) => n + s.todo, 0);
       const rt = route();
-      const items = list.map((c) => {
-        const s = byId.get(c.id);
-        const name = displayName(c.name, c.id);
-        const waiting = s ? s.todo : 0;
-        return '<button type="button" class="fd-nav" data-act="pick" data-id="' + E(c.id) + '"' + (!rt.overview && c.id === state.characterId ? ' aria-current="page"' : '') + ' title="' + E(name) + '">' +
-          '<span class="fd-av" aria-hidden="true">' + E(Array.from(name)[0] || '?') + '<span class="st ' + (s ? statusDot(s) : '') + '"></span></span>' +
-          '<span class="lbl">' + E(name) + '</span>' + (c.origin === 'SOURCE' ? '<span class="fd-org" title="' + E(trackLabel(c)) + '">' + E(c.originLabel || '모티브') + '</span>' : '') +
-          (waiting ? '<span class="num attn"><span class="sr">할 일 </span>' + waiting + '<span class="u">건</span></span>' : '<span class="num" title="' + (s ? E(s.done + '/' + s.total + '단계 완료') : '') + '">' + (s ? s.done + '/' + s.total : '') + '</span>') + '</button>';
+      const labels = nameLabels(characters());
+      const q = state.sq.trim().toLowerCase();
+      const rows = visibleSums().sort(byNewest).filter((s) => {
+        if (!q) return true;
+        const l = labels.get(s.c.id) || {};
+        return (text(l.name) + ' ' + text(l.note) + ' ' + text(s.c.persona && s.c.persona.job)).toLowerCase().indexOf(q) >= 0;
+      });
+      const items = rows.map((s) => {
+        const c = s.c;
+        const l = labels.get(c.id) || { name: labelOf(c), note: '' };
+        const sub = [s.status.label, l.note].filter(Boolean).join(' · ');
+        return '<button type="button" class="fd-nav two" data-act="pick" data-id="' + E(c.id) + '"' + (!rt.overview && c.id === state.characterId ? ' aria-current="page"' : '') + ' title="' + E(l.name + ' · ' + sub) + '">' +
+          '<span class="fd-av" aria-hidden="true">' + E(Array.from(l.name)[0] || '?') + '<span class="st ' + statusDot(s) + '"></span></span>' +
+          '<span class="lbl"><span class="nm"><span class="tx">' + E(l.name) + '</span>' + (c.origin === 'SOURCE' ? '<span class="fd-org" title="' + E(trackLabel(c)) + '">' + E(c.originLabel || '모티브') + '</span>' : '') + '</span><small>' + E(sub) + '</small></span>' +
+          (s.todo ? '<span class="num attn"><span class="sr">할 일 </span>' + s.todo + '<span class="u">건</span></span>' : '') + '</button>';
       }).join('');
+      const inbox = inboxCount();
+      const arch = archivedCount();
+      const empty = q ? '찾는 캐릭터가 없어요' : state.showArchived ? '보관한 캐릭터가 없어요' : '아직 없어요';
       const theme = [['system', 'monitor', '시스템 설정 따르기'], ['light', 'sun', '밝은 화면'], ['dark', 'moon', '어두운 화면']]
         .map((t) => '<button type="button" data-act="theme" data-theme="' + t[0] + '" aria-pressed="' + (state.theme === t[0]) + '" aria-label="' + t[2] + '" title="' + t[2] + '">' + icon(t[1]) + '</button>').join('');
       region.side.innerHTML = '<div class="fd-brand">' + MARK + '<div class="fd-word"><b>Foundry</b><small>캐릭터 공장</small></div></div>' +
-        '<div class="fd-side-actions"><button type="button" class="btn block" data-act="new" title="새 캐릭터">' + icon('plus') + '<span class="lbl">새 캐릭터</span></button><a class="btn block" href="sources.html" title="원문으로 새 캐릭터" style="margin-top:6px;text-decoration:none">' + icon('user') + '<span class="lbl">원문으로 만들기</span></a></div>' +
-        '<nav aria-label="캐릭터 탐색"><button type="button" class="fd-nav" data-act="overview" title="전체 캐릭터"' + (rt.overview && rt.filter !== 'mine' ? ' aria-current="page"' : '') + '>' + icon('grid') + '<span class="lbl">전체 캐릭터</span><span class="num">' + list.length + '명</span></button>' +
+        '<div class="fd-side-actions"><a class="btn block" href="sources.html" title="실존 인물을 원문으로 만들어요" style="text-decoration:none">' + icon('user') + '<span class="lbl">실존 인물 · 원문으로</span></a>' +
+        '<button type="button" class="btn block" data-act="new" title="지어낸 캐릭터를 브리프로 만들어요" style="margin-top:6px">' + icon('plus') + '<span class="lbl">새로 지어내기</span></button></div>' +
+        '<nav aria-label="캐릭터 탐색"><button type="button" class="fd-nav" data-act="overview" title="전체 캐릭터"' + (rt.overview && rt.filter !== 'mine' ? ' aria-current="page"' : '') + '>' + icon('grid') + '<span class="lbl">전체 캐릭터</span><span class="num">' + characters().filter((c) => !c.archived).length + '명</span></button>' +
         '<button type="button" class="fd-nav" data-act="inbox" title="받은 일"' + (rt.overview && rt.filter === 'mine' ? ' aria-current="page"' : '') + '>' + icon('inbox') + '<span class="lbl">받은 일</span>' + (inbox ? '<span class="num attn"><span class="sr">할 일 </span>' + inbox + '<span class="u">건</span></span>' : '<span class="num">0건</span>') + '</button>' +
-        '<h2>캐릭터</h2>' + (items || '<p class="hint" style="padding:0 8px">아직 없어요</p>') + '</nav>' +
-        '<div class="fd-side-foot"><a class="fd-help" href="help.html" target="_blank" rel="noopener" title="사용 안내" aria-label="사용 안내">?</a><div class="fd-theme" role="group" aria-label="화면 테마">' + theme + '</div><div class="fd-foot-links"><a href="help.html" target="_blank" rel="noopener">사용 안내</a><a href="d-ops.html">이전 화면</a><a href="d-ops.html?panel=text">모델 설정</a></div></div>';
+        '<h2>' + (state.showArchived ? '보관함' : '캐릭터') + '</h2>' +
+        '<div class="fd-side-q"><label class="sr" for="fd-side-q">캐릭터 이름으로 찾기</label><input id="fd-side-q" data-side-q type="search" placeholder="이름으로 찾기" value="' + E(state.sq) + '" autocomplete="off"></div>' +
+        (items || '<p class="hint fd-side-empty">' + empty + '</p>') +
+        (arch || state.showArchived ? '<button type="button" class="fd-nav fd-arch" data-act="archived" aria-pressed="' + state.showArchived + '" title="' + (state.showArchived ? '보관함 닫기' : '보관한 캐릭터 보기') + '">' + icon('archive') + '<span class="lbl">' + (state.showArchived ? '보관함 닫기' : '보관함') + '</span><span class="num">' + arch + '명</span></button>' : '') + '</nav>' +
+        '<div class="fd-side-foot"><a class="fd-help" href="help.html" target="_blank" rel="noopener" title="사용 안내" aria-label="사용 안내">?</a><div class="fd-theme" role="group" aria-label="화면 테마">' + theme + '</div>' +
+        '<div class="fd-foot-links"><a href="help.html" target="_blank" rel="noopener">사용 안내</a><a class="fd-ops" href="d-ops.html?panel=text" title="모델 설정 (운영 담당용)" aria-label="모델 설정 (운영 담당용)">' + icon('gear') + '</a></div></div>';
     }
 
     // ---- 머리줄 ----
@@ -845,49 +993,44 @@
       const next = order[(i + 1) % order.length];
       return '<button type="button" class="fd-head-theme" data-act="theme" data-theme="' + next[0] + '" aria-label="화면 테마: 지금 ' + cur[2] + '. 누르면 ' + next[2] + '" title="화면 테마: ' + cur[2] + '">' + icon(cur[1]) + '</button>';
     }
+    // 연결 상태는 끊겼을 때만 보인다.
     function connHTML() {
-      const conn = state.conn === 'offline' ? ['off', '연결 끊김 · 다시 연결하는 중'] : state.conn === 'reconnecting' ? ['wait', '다시 연결하는 중'] : state.conn === 'connecting' ? ['wait', '연결하는 중'] : ['', '연결됨' + (state.lastSync ? ' · 갱신 ' + clock(new Date(state.lastSync).toISOString()) : '')];
-      return '<span class="fd-conn ' + conn[0] + '" role="status"><span class="d"></span>' + conn[1] + '</span>';
+      if (state.conn === 'offline') return '<span class="fd-conn off" role="status"><span class="d"></span>연결 끊김 · 다시 연결하는 중</span>';
+      if (state.conn === 'reconnecting') return '<span class="fd-conn wait" role="status"><span class="d"></span>다시 연결하는 중</span>';
+      return '';
     }
+    function statusPill(st) { return '<span class="fl-pill ' + st.tone + '"><span class="d"></span>' + E(st.label) + '</span>'; }
     function renderTop(v) {
       const d = state.detail;
-      const list = characters();
-      const sums = state.graph ? list.map(summaryOf) : [];
-      const label = (s) => s.fail ? ' · 멈춤' : s.review ? ' · 검토 대기' : s.paid ? ' · 유료 확인' : '';
-      const picker = list.length ? '<label class="sr" for="fl-pick">캐릭터</label><select id="fl-pick" class="fd-pick" data-pick><option value="__all"' + (state.overview ? ' selected' : '') + '>전체 캐릭터</option>' + sums.map((s) => '<option value="' + E(s.c.id) + '"' + (!state.overview && s.c.id === state.characterId ? ' selected' : '') + '>' + E(displayName(s.c.name, s.c.id)) + label(s) + '</option>').join('') + '<option value="__new">+ 새 캐릭터</option></select>' : '';
+      const sums = visibleSums().sort(byNewest);
+      const labels = nameLabels(characters());
+      const optName = (s) => { const l = labels.get(s.c.id) || { name: labelOf(s.c), note: '' }; return l.name + (l.note ? ' (' + l.note + ')' : '') + ' · ' + s.status.label; };
+      const picker = characters().length ? '<label class="sr" for="fl-pick">캐릭터</label><select id="fl-pick" class="fd-pick" data-pick><option value="__all"' + (state.overview ? ' selected' : '') + '>전체 캐릭터</option>' + sums.map((s) => '<option value="' + E(s.c.id) + '"' + (!state.overview && !state.form.open && s.c.id === state.characterId ? ' selected' : '') + '>' + E(optName(s)) + '</option>').join('') + '<option value="__src">+ 실존 인물 · 원문으로</option><option value="__new"' + (state.form.open ? ' selected' : '') + '>+ 새로 지어내기</option></select>' : '';
+      if (state.form.open) {
+        region.top.innerHTML = '<nav class="fd-crumb" aria-label="위치"><a class="up" href="#all">전체 캐릭터</a><span class="sep">/</span><b>새로 지어내기</b></nav>' + picker + '<div class="fd-metrics">' + connHTML() + '</div>' + headThemeHTML();
+        if (doc.title !== undefined) doc.title = '새로 지어내기 · Foundry';
+        return;
+      }
       if (state.overview) {
-        const fail = sums.filter((s) => s.fail).length;
-        const mine = sums.filter((s) => s.todo).length;
-        const run = sums.filter((s) => s.running).length;
-        const pillsO = (fail ? '<span class="fl-pill fail"><span class="d"></span>멈춘 캐릭터 ' + fail + '명</span>' : '') + (mine ? '<span class="fl-pill wait"><span class="d"></span>내 차례 ' + mine + '명</span>' : '') + (run ? '<span class="fl-pill run"><span class="d"></span>진행 중 ' + run + '명</span>' : '');
-        region.top.innerHTML = '<nav class="fd-crumb" aria-label="위치">' + (route().filter === 'mine' ? '<a class="up" href="#all">전체 캐릭터</a><span class="sep">/</span><b>받은 일</b>' : '<b>전체 캐릭터</b>') + '</nav>' + picker + pillsO + '<div class="fd-metrics"><span>캐릭터 <b>' + list.length + '</b>명</span>' + connHTML() + '</div>' + headThemeHTML();
-        const todo = sums.reduce((n, s) => n + s.todo, 0);
+        const n = (st) => sums.filter((s) => s.status.status === st).length;
+        const pillsO = [['failed', '실패'], ['needs_review', '확인 필요'], ['running', '만드는 중']].map((x) => n(x[0]) ? statusPill({ tone: STATUS_TONE[x[0]], label: x[1] + ' ' + n(x[0]) + '명' }) : '').join('');
+        region.top.innerHTML = '<nav class="fd-crumb" aria-label="위치">' + (route().filter === 'mine' ? '<a class="up" href="#all">전체 캐릭터</a><span class="sep">/</span><b>받은 일</b>' : '<b>전체 캐릭터</b>') + '</nav>' + picker + pillsO + '<div class="fd-metrics"><span>캐릭터 <b>' + sums.length + '</b>명</span>' + connHTML() + '</div>' + headThemeHTML();
+        const todo = inboxCount();
         if (doc.title !== undefined) doc.title = (todo ? '(' + todo + ') ' : '') + '전체 캐릭터 · Foundry';
         return;
       }
-      let pills = '';
-      if (d) {
-        if (complete()) pills += '<span class="fl-pill ok"><span class="d"></span>완료</span>';
-        else if (notStarted()) pills += '<span class="fl-pill muted"><span class="d"></span>시작 전</span>';
-        else {
-          const c = counts(v);
-          if (c.run) pills += '<span class="fl-pill run"><span class="d"></span>진행 중 ' + c.run + '단계</span>';
-          else if (d.job) pills += '<span class="fl-pill run"><span class="d"></span>작업 준비 중</span>';
-          else if (!c.fail && !c.wait) pills += '<span class="fl-pill muted"><span class="d"></span>멈춰 있음</span>';
-          if (c.fail) pills += '<span class="fl-pill fail"><span class="d"></span>멈춘 단계 ' + c.fail + '</span>';
-          if (c.wait) pills += '<span class="fl-pill wait"><span class="d"></span>사람 할 일 ' + c.wait + '건</span>';
-        }
-      }
+      const s = d ? currentSummary() : null;
       const meta = [];
       if (d && !notStarted()) {
-        meta.push('<span>완료 <b>' + counts(v).done + '</b>/' + state.graph.stages.length + '단계</span>');
-        const el = elapsed(Date.now());
-        if (el) meta.push('<span>' + E(el) + '</span>');
-        if (d.cost) meta.push('<span>추정 비용 <b>' + (d.cost.estUsd == null ? '—' : '$' + Number(d.cost.estUsd).toFixed(2)) + '</b>' + (d.cost.unpricedCalls ? ' · 단가 미확인 ' + d.cost.unpricedCalls + '건 제외' : '') + '</span>');
+        const a = activity();
+        if (a.last != null) meta.push('<span>마지막 작업 <b>' + E(whenText(a.last)) + '</b></span>');
+        if (a.took && s && s.status.status !== 'running') meta.push('<span>걸린 시간 ' + E(a.took) + '</span>');
+        if (d.cost && d.cost.estUsd != null) meta.push('<span title="지금까지 이 캐릭터에 쓴 추정 비용">비용 <b>$' + Number(d.cost.estUsd).toFixed(2) + '</b></span>');
       }
-      meta.push(connHTML());
+      const conn = connHTML();
+      if (conn) meta.push(conn);
       const crumb = d ? '<a class="up" href="#all">전체 캐릭터</a><span class="sep">/</span><b>' + E(nameOf(d)) + '</b>' : '<b>캐릭터</b>';
-      region.top.innerHTML = '<nav class="fd-crumb" aria-label="위치">' + crumb + '</nav>' + picker + pills + '<div class="fd-metrics">' + meta.join('') + '</div>' + headThemeHTML();
+      region.top.innerHTML = '<nav class="fd-crumb" aria-label="위치">' + crumb + '</nav>' + picker + (s ? statusPill(s.status) : '') + '<div class="fd-metrics">' + meta.join('') + '</div>' + headThemeHTML();
       const waiting = d ? Object.keys(v).filter((id) => ['wait', 'confirm', 'fail'].includes(v[id].kind)).length : 0;
       if (doc.title !== undefined) doc.title = (waiting ? '(' + waiting + ') ' : '') + (d ? nameOf(d) + ' · ' : '') + 'Foundry';
     }
@@ -904,73 +1047,113 @@
     // ---- 캔버스 머리 ----
     function titleHTML() {
       const d = state.detail;
+      const s = currentSummary();
+      const motif = isMotif(d);
       const until = currentUntil();
-      const sub = notStarted() ? '아직 실행하지 않았어요' : (until ? '목표 ' + targetLabel(state.graph, until) : '');
+      const sub = motif ? '' : notStarted() ? '아직 실행하지 않았어요' : (until ? '목표 ' + targetLabel(state.graph, until) : '');
       let prog = '';
-      if (!notStarted()) {
-        const s = summaryOf({ id: d.id });
-        const pct = Math.round(s.done / s.total * 100);
-        prog = '<span class="fd-prog-wrap"><span class="fd-prog" role="img" aria-label="' + E('전체 ' + s.total + '단계 중 ' + s.done + '단계 완료, ' + pct + '%') + '">' + s.lanes.map((l) => '<span class="seg ' + l.kind + '" title="' + E(l.label + ' ' + l.done + '/' + l.total) + '"></span>').join('') + '</span>' + s.done + '/' + s.total + '단계 · ' + pct + '%</span>';
+      if (!notStarted() && s) {
+        const g = s.goal;
+        if (motif) {
+          // 모티브는 대화 가능까지 필요한 단계만 센다(16단계 막대를 쓰지 않는다).
+          prog = '<span class="fd-prog-wrap fd-goal">' + E(g.label) + ' <b>' + g.done + '/' + g.total + '</b>단계</span>';
+        } else {
+          const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
+          prog = '<span class="fd-prog-wrap"><span class="fd-prog" role="img" aria-label="' + E('전체 ' + g.total + '단계 중 ' + g.done + '단계 완료, ' + pct + '%') + '">' + s.lanes.map((l) => '<span class="seg ' + l.kind + '" title="' + E(l.label + ' ' + l.done + '/' + l.total) + '"></span>').join('') + '</span>' + g.done + '/' + g.total + '단계 · ' + pct + '%</span>';
+        }
       }
-      const demo = d.origin === 'SOURCE' ? '<span class="fd-demo">' + E(DEMO_NOTE) + '</span>' : '';
+      const demo = motif ? '<span class="fd-demo">' + E(DEMO_NOTE) + '</span>' : '';
+      // 공정 보기에서는 '대화해 보기'가 지금 할 일 카드의 주 버튼이다. 머리에는 다른 보기(모델 만들기)에서만 둔다.
       const href = chatHref(d);
-      const calm = href && !Object.values(views(setupScope())).some((x) => ['wait', 'confirm', 'fail'].includes(x.kind));
-      const chat = href ? '<a class="btn fd-chat' + (calm ? ' pri' : '') + '" href="' + E(href) + '">' + icon('chat') + '대화해 보기</a>' : '';
-      return '<div class="fd-title"><h1 tabindex="-1">' + E(nameOf(d)) + '</h1>' + trackHTML(d) + (sub ? '<p>' + E(sub) + '</p>' : '') + prog + (nameOf(d) !== d.id ? '<code>' + E(d.id) + '</code>' : '') + demo + chat + '</div>';
+      const chat = href && modelMode() ? '<a class="btn fd-chat" href="' + E(href) + '">' + icon('chat') + '대화해 보기</a>' : '';
+      return '<div class="fd-title"><h1 tabindex="-1">' + E(nameOf(d)) + '</h1>' + trackHTML(d) + (sub ? '<p>' + E(sub) + '</p>' : '') + prog + demo + chat + moreHTML(d) + '</div>';
+    }
+    // 캐릭터 메뉴: 기술 정보(ID)와 보관하기. 다시 그려도 열린 상태를 유지한다.
+    function archivedNow(d) { const c = characters().find((x) => x.id === d.id); return Boolean((c && c.archived) || d.archived); }
+    function moreHTML(d) {
+      const arch = archivedNow(d);
+      return '<div class="fd-more' + (state.menuOpen ? ' open' : '') + '"><button type="button" class="btn ghost fd-more-btn" data-act="menu" aria-expanded="' + Boolean(state.menuOpen) + '" aria-label="캐릭터 메뉴" title="캐릭터 메뉴">' + icon('more') + '</button>' +
+        (state.menuOpen ? '<div class="fd-menu" role="group" aria-label="캐릭터 메뉴"><button type="button" class="btn block" data-act="archive" data-v="' + (arch ? '0' : '1') + '">' + icon('archive') + (arch ? '보관 풀기' : '보관하기') + '</button><p class="hint">' + (arch ? '다시 목록에 보여요.' : '지우지 않고 목록에서만 숨겨요. 보관함에서 다시 찾을 수 있어요.') + '</p>' +
+          '<div class="fd-menu-tech"><span>캐릭터 ID</span><code>' + E(d.id) + '</code></div></div>' : '') + '</div>';
     }
     function formHTML() {
       const f = state.form;
-      return '<form class="fl-form" data-form><h2>새 캐릭터</h2><p class="hint">등록만 하고 바로 실행하지 않아요. 등록한 뒤 어디까지 돌릴지 고르고 시작해요.</p>' +
-        '<label for="fl-slug">짧은 이름 (영문 소문자·숫자·하이픈)</label><input id="fl-slug" data-slug autocomplete="off" value="' + E(f.slug) + '" placeholder="예: cafe-owner">' +
-        '<label for="fl-brief">브리프</label><textarea id="fl-brief" data-brief placeholder="타깃, 분위기, 성격, 챕터 배경 등을 적어 주세요.">' + E(f.brief) + '</textarea>' +
+      return '<form class="fl-form" data-form><h2>새로 지어내기</h2><p class="hint">지어낸 캐릭터를 브리프로 만들어요. 실존 인물이라면 <a href="sources.html">원문으로 만들기</a>를 써 주세요. 등록만 하고 바로 실행하지 않아요.</p>' +
+        '<label for="fl-brief">어떤 캐릭터인가요</label><textarea id="fl-brief" data-brief placeholder="타깃, 분위기, 성격, 챕터 배경 등을 적어 주세요.">' + E(f.brief) + '</textarea>' +
+        '<details class="fl-adv"' + (f.slug ? ' open' : '') + '><summary>짧은 이름 직접 정하기 (선택)</summary><label for="fl-slug">짧은 이름 (영문 소문자·숫자·하이픈)</label><input id="fl-slug" data-slug autocomplete="off" value="' + E(f.slug) + '" placeholder="비워 두면 자동으로 정해요"></details>' +
         (f.error ? '<p class="err" role="alert">' + E(f.error) + '</p>' : '') +
         '<div class="acts"><button type="submit" class="btn pri"' + (state.busy ? ' disabled' : '') + '>등록하기</button>' + (characters().length ? '<button type="button" class="btn ghost" data-act="cancel-form">취소</button>' : '') + '</div></form>';
     }
     function overviewHTML(filter) {
-      const list = characters();
-      if (!list.length) return emptyHTML();
-      const all = list.map(summaryOf);
+      if (!characters().length) return emptyHTML();
+      const all = visibleSums();
+      const labels = nameLabels(characters());
       const gates = new Map();
       all.forEach((s) => s.tasks.filter((x) => x.kind === 'wait').forEach((x) => gates.set(x.gate, (gates.get(x.gate) || 0) + 1)));
       if (state.ov.gate && !gates.has(state.ov.gate)) state.ov.gate = '';
-      const counts = { all: all.length, mine: all.filter((s) => s.todo).length, run: all.filter((s) => s.running && !s.todo).length, fail: all.filter((s) => s.fail).length, done: all.filter((s) => s.complete).length };
+      const is = (s, st) => s.status.status === st;
+      const match = { all: () => true, mine: (s) => s.todo > 0, run: (s) => is(s, 'running'), chat: (s) => is(s, 'chat_ready'), fail: (s) => is(s, 'failed') };
+      const counts = {};
+      Object.keys(match).forEach((k) => { counts[k] = all.filter(match[k]).length; });
       const q = state.ov.q.trim().toLowerCase();
-      let rows = all.filter((s) => (filter === 'mine' ? s.todo > 0 : filter === 'run' ? s.running && !s.todo : filter === 'fail' ? s.fail > 0 : filter === 'done' ? s.complete : true));
+      let rows = all.filter(match[filter] || match.all);
       if (state.ov.gate) rows = rows.filter((s) => s.tasks.some((x) => x.kind === 'wait' && x.gate === state.ov.gate));
-      if (q) rows = rows.filter((s) => (text(s.c.name) + ' ' + s.c.id + ' ' + text(s.c.persona && s.c.persona.job)).toLowerCase().indexOf(q) >= 0);
-      rows.sort((a, b) => a.rank - b.rank || (a.oldest || Infinity) - (b.oldest || Infinity) || (b.updated || 0) - (a.updated || 0));
-      const tabs = [['all', '전체'], ['mine', '내 차례'], ['run', '진행 중'], ['fail', '멈춤'], ['done', '완료']]
+      if (q) rows = rows.filter((s) => { const l = labels.get(s.c.id) || {}; return (text(l.name) + ' ' + text(l.note) + ' ' + text(s.c.persona && s.c.persona.job)).toLowerCase().indexOf(q) >= 0; });
+      rows.sort((a, b) => a.rank - b.rank || (a.oldest || Infinity) - (b.oldest || Infinity) || b.created - a.created);
+      const tabs = [['all', '전체'], ['mine', '확인 필요'], ['run', '만드는 중'], ['chat', '대화 가능'], ['fail', '실패']]
         .map((x) => '<a class="ov-tab" href="#all' + (x[0] === 'all' ? '' : '/' + x[0]) + '"' + (x[0] === filter ? ' aria-current="page"' : '') + '>' + x[1] + '<span class="n">' + counts[x[0]] + '명</span></a>').join('');
       const gateSel = gates.size ? '<label class="sr" for="ov-gate">검토 종류</label><select id="ov-gate" data-ov-gate><option value="">검토 종류 전체</option>' + Array.from(gates).map((x) => '<option value="' + E(x[0]) + '"' + (state.ov.gate === x[0] ? ' selected' : '') + '>' + E(gateTitle(x[0])) + ' · ' + x[1] + '건</option>').join('') + '</select>' : '';
       const search = '<label class="sr" for="ov-q">이름으로 찾기</label><input id="ov-q" data-ov-q type="search" placeholder="이름으로 찾기" value="' + E(state.ov.q) + '" autocomplete="off">';
-      const head = '<div class="fd-title"><h1 tabindex="-1">' + (filter === 'mine' ? '받은 일' : '전체 캐릭터') + '</h1><p>' + (filter === 'mine' ? '모든 캐릭터에서 사람이 할 일(멈춤 · 검토 · 유료 확인)이 있는 캐릭터예요. 검토 종류로 거르면 같은 검토를 이어서 할 수 있어요.' : '캐릭터마다 어디까지 왔고 무엇을 기다리는지 봐요. 내 차례인 캐릭터가 위에 와요.') + '</p></div>';
-      const bar = '<div class="ov-bar"><nav class="ov-tabs" aria-label="상태로 거르기">' + tabs + '</nav><div class="ov-tools">' + gateSel + search + '</div></div>';
+      const arch = archivedCount();
+      const archBtn = arch || state.showArchived ? '<button type="button" class="btn ghost" data-act="archived" aria-pressed="' + state.showArchived + '">' + icon('archive') + (state.showArchived ? '보관함 닫기' : '보관함 ' + arch + '명') + '</button>' : '';
+      const title = state.showArchived ? '보관함' : filter === 'mine' ? '받은 일' : '전체 캐릭터';
+      const lead = state.showArchived ? '보관한 캐릭터예요. 열어서 캐릭터 메뉴에서 보관을 풀 수 있어요.' : filter === 'mine' ? '사람이 확인할 일(검토 · 실패 · 비용 확인)이 있는 캐릭터예요. 검토 종류로 거르면 같은 검토를 이어서 할 수 있어요.' : '캐릭터마다 지금 상태와 할 일을 봐요. 확인이 필요한 캐릭터가 위에 와요.';
+      const head = '<div class="fd-title"><h1 tabindex="-1">' + title + '</h1><p>' + lead + '</p></div>';
+      const bar = '<div class="ov-bar"><nav class="ov-tabs" aria-label="상태로 거르기">' + tabs + '</nav><div class="ov-tools">' + gateSel + search + archBtn + '</div></div>';
       if (!rows.length) return head + bar + '<div class="fl-empty sm"><h2>' + (filter === 'mine' && !q && !state.ov.gate ? '지금 사람이 할 일이 없어요' : '조건에 맞는 캐릭터가 없어요') + '</h2>' + (q || state.ov.gate || filter !== 'all' ? '<div class="acts"><button type="button" class="btn" data-act="ov-clear">거르기 지우기</button></div>' : '') + '</div>';
-      return head + bar + '<div class="ov-wrap"><table class="ov-table"><caption class="sr">캐릭터별 진행</caption><thead><tr><th scope="col">캐릭터</th><th scope="col">사람 할 일</th><th scope="col">지금</th><th scope="col">진행</th><th scope="col">마지막 변화</th><th scope="col"><span class="sr">동작</span></th></tr></thead><tbody>' + rows.map(rowHTML).join('') + '</tbody></table></div>';
+      return head + bar + '<div class="ov-wrap"><table class="ov-table"><caption class="sr">캐릭터별 상태</caption><thead><tr><th scope="col">캐릭터</th><th scope="col">상태 · 지금 할 일</th><th scope="col">진행</th><th scope="col">마지막 변화</th><th scope="col"><span class="sr">동작</span></th></tr></thead><tbody>' + rows.map((s, i) => rowHTML(s, i, labels)).join('') + '</tbody></table></div>';
     }
-    function rowHTML(s, i) {
+    function nowText(s) {
+      const st = s.status.status;
+      if (st === 'chat_ready') return '다 만들었어요 · 대화할 수 있어요';
+      if (st === 'running') return '만드는 중이에요';
+      if (st === 'draft') return s.c.origin === 'SOURCE' ? '원문을 올리는 중이에요' : '아직 실행하지 않았어요';
+      if (st === 'done') return '모든 단계를 마쳤어요';
+      if (s.top) return s.top.title;
+      return '멈춰 있어요';
+    }
+    function rowHTML(s, i, labels) {
       const c = s.c;
-      const name = displayName(c.name, c.id);
+      const l = (labels && labels.get(c.id)) || { name: labelOf(c), note: '' };
       const p = c.persona || {};
       const st = statusDot(s);
-      const badges = (s.fail ? '<span class="fl-pill fail"><span class="d"></span>멈춘 단계 ' + s.fail + '</span>' : '') + (s.review ? '<span class="fl-pill wait"><span class="d"></span>검토 ' + s.review + '건</span>' : '') + (s.paid ? '<span class="fl-pill wait"><span class="d"></span>유료 확인 ' + s.paid + '건</span>' : '') || '<span class="muted">없음</span>';
       const gateTask = state.ov.gate ? s.tasks.find((x) => x.kind === 'wait' && x.gate === state.ov.gate) : null;
-      const top = gateTask || s.top;
-      const now = top ? E(top.title) + (top.age ? '<span class="age"> · ' + E(top.age) + '</span>' : '') : s.complete ? '모든 단계를 마쳤어요' : s.running ? '진행 중이에요' : s.fresh ? '아직 실행하지 않았어요' : '멈춰 있어요 · 이어서 실행할 수 있어요';
-      const pct = Math.round(s.done / s.total * 100);
-      const segs = s.lanes.map((l) => '<span class="seg ' + l.kind + '" title="' + E(l.label + ' ' + l.done + '/' + l.total) + '"></span>').join('');
+      const top = gateTask || (s.todo ? s.top : null);
+      const more = s.todo > 1 ? ' 외 ' + (s.todo - 1) + '건' : '';
+      const now = top ? E(top.title) + (top.age ? '<span class="age"> · ' + E(top.age) + '</span>' : '') + E(more) : E(nowText(s));
+      const g = s.goal;
+      const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
+      const segs = g.ids ? '' : '<span class="segs" role="img" aria-label="' + E('전체 ' + g.total + '단계 중 ' + g.done + '단계 완료, ' + pct + '%') + '">' + s.lanes.map((x) => '<span class="seg ' + x.kind + '" title="' + E(x.label + ' ' + x.done + '/' + x.total) + '"></span>').join('') + '</span>';
       const href = '#c/' + encodeURIComponent(c.id);
-      const act = top && top.kind === 'wait'
-        ? '<button type="button" class="btn' + (i === 0 && s.rank <= 1 ? ' pri' : '') + '" data-act="ov-review" data-id="' + E(c.id) + '" data-gate="' + E(top.gate) + '" data-stage="' + E(top.stage || '') + '">검토하기</button>'
-        : '<a class="btn" href="' + E(href) + '">열기</a>';
-      return '<tr class="' + st + '"><th scope="row"><a class="ov-name" href="' + E(href) + '"><span class="fd-av" aria-hidden="true">' + E(Array.from(name)[0] || '?') + '<span class="st ' + st + '"></span></span><span><b>' + E(name) + trackHTML(c) + '</b><small>' + E([p.job, p.age ? p.age + '세' : ''].filter(Boolean).join(' · ') || '아직 기획 전이에요') + '</small></span></a></th>' +
-        '<td><div class="ov-badges">' + badges + '</div></td><td class="ov-now">' + now + '</td>' +
-        '<td><div class="ov-prog"><span class="segs" role="img" aria-label="' + E('전체 ' + s.total + '단계 중 ' + s.done + '단계 완료, ' + pct + '%') + '">' + segs + '</span><span class="n">' + s.done + '/' + s.total + '단계</span></div></td>' +
-        '<td class="ov-upd">' + (s.updated ? E(clock(new Date(s.updated).toISOString())) : '—') + '</td><td class="ov-act">' + act + '</td></tr>';
+      let act = '<a class="btn" href="' + E(href) + '">열기</a>';
+      if (top && top.kind === 'wait') act = '<button type="button" class="btn' + (i === 0 && s.rank <= 1 ? ' pri' : '') + '" data-act="ov-review" data-id="' + E(c.id) + '" data-gate="' + E(top.gate) + '" data-stage="' + E(top.stage || '') + '">검토하기</button>';
+      else if (s.chat) act = '<a class="btn" href="' + E(s.chat) + '">' + icon('chat') + '대화해 보기</a>';
+      else if (s.status.status === 'draft' && c.origin === 'SOURCE') act = '<a class="btn" href="sources.html#c/' + E(encodeURIComponent(c.id)) + '">이어 하기</a>';
+      const sub = [l.note, [p.job, p.age ? p.age + '세' : ''].filter(Boolean).join(' · ')].filter(Boolean).join(' · ') || (c.origin === 'SOURCE' ? '' : '아직 기획 전이에요');
+      return '<tr class="' + st + '"><th scope="row"><a class="ov-name" href="' + E(href) + '"><span class="fd-av" aria-hidden="true">' + E(Array.from(l.name)[0] || '?') + '<span class="st ' + st + '"></span></span><span><b>' + E(l.name) + trackHTML(c) + '</b>' + (sub ? '<small>' + E(sub) + '</small>' : '') + '</span></a></th>' +
+        '<td class="ov-now">' + statusPill(s.status) + '<span class="ov-now-t">' + now + '</span></td>' +
+        '<td><div class="ov-prog">' + segs + '<span class="n">' + (g.ids ? E(g.label) + ' ' : '') + g.done + '/' + g.total + '단계</span></div></td>' +
+        '<td class="ov-upd">' + (s.updated ? E(whenText(s.updated)) : '—') + '</td><td class="ov-act">' + act + '</td></tr>';
     }
     function emptyHTML() {
-      return '<div class="fl-empty"><span class="ic">' + MARK + '</span><h2>아직 만든 캐릭터가 없어요</h2><p>브리프를 넣으면 기획부터 이미지, 영상, 학습 데이터까지 단계별로 만들어요. 중간중간 사람이 고르는 지점이 있어요.</p>' +
-        '<div class="acts"><button type="button" class="btn pri" data-act="new">새 캐릭터 만들기</button><a href="d-ops.html?mode=demo#job/seoha-new/floor">시연 화면으로 둘러보기</a></div></div>';
+      return '<div class="fl-empty"><span class="ic">' + MARK + '</span><h2>아직 만든 캐릭터가 없어요</h2><p>실존 인물은 인터뷰·대화 원문을 올리면 대화할 수 있는 캐릭터로 만들어요. 지어낸 캐릭터는 브리프로 만들어요.</p>' +
+        '<div class="acts"><a class="btn pri" href="sources.html">실존 인물 · 원문으로</a><button type="button" class="btn" data-act="new">새로 지어내기</button></div></div>';
+    }
+    // 시작하지 않은 모티브 초안: 실행 범위를 고르지 않고 원문 화면으로 보낸다(시작은 원문 화면 한 곳에서만 한다).
+    function draftHTML() {
+      const d = state.detail;
+      return '<section class="fl-tasks" aria-label="지금 할 일"><h2>지금 할 일</h2><div class="fl-item"><span class="mk"></span><div class="tx"><div class="t1">원문을 올리는 중인 초안이에요</div><div class="t2">원문 화면에서 올린 파일을 확인하고 만들기를 시작해요. 시작하면 여기에서 진행을 볼 수 있어요.</div></div>' +
+        '<div class="acts"><a class="btn pri" href="sources.html#c/' + E(encodeURIComponent(d.id)) + '">원문 화면에서 이어 하기</a></div></div></section>';
     }
     function setupHTML() {
       const g = state.graph;
@@ -1054,7 +1237,34 @@
       const now = Date.now();
       const tasks = buildTasks(state.graph, d, v, { now, gateViews: state.gateViews, jobActive: Boolean(d.job) || state.busy, goal: notStarted() ? '' : currentUntil() });
       state.notes = state.notes.filter((n) => now - n.at < 15 * 60000);
+      const sum = currentSummary();
+      const st = sum ? sum.status.status : '';
+      const chat = chatHref(d);
+      // 모티브인데 아직 대화할 수 없고 아무것도 돌지 않으면, 대화까지 남은 단계와 이어서 만들 버튼을 먼저 보인다(QA C1).
+      let goalLeft = null;
+      if (!chat && isMotif(d) && !d.job && !tasks.some((t) => t.kind === 'ready')) {
+        const gs = goalStages(state.graph, d);
+        const preds = predecessors(state.graph);
+        const left = gs ? state.graph.stages.filter((s) => gs.has(s.id) && (v[s.id] || {}).kind === 'todo') : [];
+        // 서버가 마지막 작업에서 시작할 수 없다고 남긴 단계는 권하지 않는다(buildTasks의 '이어서 실행'과 같은 규칙).
+        const blocked = new Set(Array.isArray((d.lastJob || {}).blocked) ? d.lastJob.blocked : []);
+        const canRun = left.some((s) => !blocked.has(s.id) && Array.from(preds.get(s.id) || []).every((p) => ['done', 'skip'].includes((v[p] || {}).kind)));
+        const end = state.graph.byStage.has('s8c') ? 's8c' : 's8';
+        if (canRun) goalLeft = { names: left.map((s) => s.name), end };
+      }
+      // 대화할 수 있으면 '대화해 보기'가 이 화면의 주 버튼이다. 다른 할 일은 그 아래에 보조 버튼으로 남는다.
+      if (chat || goalLeft) tasks.forEach((t) => t.actions.forEach((a) => { a.pri = false; }));
       let html = '<section class="fl-tasks" aria-label="지금 할 일" aria-live="polite"><h2>' + (complete() ? '결과' : '지금 할 일') + (tasks.length ? '<span class="num">' + tasks.length + '</span>' : '') + '</h2>';
+      if (goalLeft) {
+        html += '<div class="fl-item ready"><span class="mk"></span><div class="tx"><div class="t1">대화까지 남은 단계가 있어요</div><div class="t2">' + E(goalLeft.names.join(', ')) + ' 단계가 끝나야 대화해 볼 수 있어요. 이어서 만들면 그 단계까지만 진행해요.</div></div>' +
+          '<div class="acts"><button type="button" class="btn pri" data-act="run-stage" data-stage="' + E(goalLeft.end) + '"' + (state.busy ? ' disabled' : '') + '>대화 준비 이어서 하기</button></div></div>';
+      }
+      if (chat) {
+        const t1 = st === 'chat_ready' ? '다 만들었어요 · 대화할 수 있어요' : '대화할 수 있어요';
+        const t2 = st === 'chat_ready' ? '만든 캐릭터와 바로 대화해 볼 수 있어요.' : st === 'running' ? '그동안 다른 단계를 더 만들고 있어요.' : '아래 할 일을 마치지 않아도 대화해 볼 수 있어요.';
+        html += '<div class="fl-item ok"><span class="mk"></span><div class="tx"><div class="t1">' + E(t1) + '</div><div class="t2">' + E(t2) + '</div></div><div class="acts"><a class="btn pri" href="' + E(chat) + '">' + icon('chat') + '대화해 보기</a></div>' +
+          (st === 'chat_ready' && !tasks.length && !d.job ? moreBuildHTML() : '') + '</div>';
+      }
       // '다음 검토'는 그릴 때마다 새 상태로 다시 고른다(결정 직후 새 검토가 생길 수 있다).
       state.notes.forEach((n) => { if (n.act === 'next-review') { const nr = nextReviewAfter(n.gate); n.label = nr ? nr.label : ''; } });
       const notesHTML = state.notes.map((n) => '<div class="fl-note' + (n.tone === 'bad' ? ' bad' : '') + '">' + icon(n.tone === 'bad' ? 'x' : 'ok') + '<div>' + E(n.t) + (n.s ? ' <span>' + E(n.s) + '</span>' : '') + '</div>' + (n.act && n.label ? '<button type="button" class="btn" data-act="' + E(n.act) + '"' + (n.gate ? ' data-gate="' + E(n.gate) + '"' : '') + '>' + E(n.label) + '</button>' : '') + '<time>' + E(now - n.at < 60000 ? '방금' : clock(new Date(n.at).toISOString())) + '</time></div>').join('');
@@ -1070,33 +1280,56 @@
       });
       if (notesHTML) html += '<div class="fl-recent"><h3>방금 한 일</h3>' + notesHTML + '</div>';
       if (!tasks.length && !complete()) {
-        html += d.job ? '<div class="fl-note">' + icon('ok') + '<div>지금은 기다리면 돼요. <span>사람이 할 일이 생기면 여기에 나타나요.</span></div></div>'
-          : '<div class="fl-item"><span class="mk"></span><div class="tx"><div class="t1">진행 중인 작업이 없어요</div><div class="t2">멈춘 지점부터 이어서 돌릴 수 있어요.</div></div><div class="acts"><button type="button" class="btn pri" data-act="resume"' + (state.busy ? ' disabled' : '') + '>이어서 실행</button></div></div>';
+        if (d.job) html += '<div class="fl-note">' + icon('ok') + '<div>지금은 기다리면 돼요. <span>사람이 할 일이 생기면 여기에 나타나요.</span></div></div>';
+        else if (!chat && !goalLeft) {
+          const goal = currentUntil() || orchestrator().resumeUntil || 'sx';
+          html += '<div class="fl-item"><span class="mk"></span><div class="tx"><div class="t1">진행 중인 작업이 없어요</div><div class="t2">이어서 실행하면 멈춘 지점부터 ' + E(targetLabel(state.graph, goal)) + ' 진행해요.</div></div><div class="acts"><button type="button" class="btn pri" data-act="resume"' + (state.busy ? ' disabled' : '') + '>이어서 실행</button></div></div>';
+        }
       }
       return html + '</section>';
     }
+    // 대화 가능까지 마친 뒤 더 만들 때 갈 목표. 지금 목표와 같으면 끝까지 간다.
+    function nextGoal() {
+      const cur = currentUntil();
+      const next = orchestrator().resumeUntil || 'sx';
+      return next !== cur && (next === 'sx' || state.graph.byGate.has(next)) ? next : 'sx';
+    }
+    function moreBuildHTML() {
+      const next = nextGoal();
+      const v = views(null);
+      const left = Array.from(ancestors(state.graph, next)).filter((id) => !['done', 'skip'].includes((v[id] || {}).kind));
+      const names = state.graph.lanes.filter((lane) => laneIds(lane).some((id) => left.indexOf(id) >= 0)).map((lane) => lane.label);
+      const label = targetLabel(state.graph, next);
+      const open = Boolean(state.moreOpen);
+      return '<div class="fl-more"><button type="button" class="link fl-more-btn" data-act="more" aria-expanded="' + open + '">' + icon(open ? 'up' : 'down') + '더 만들기 (선택)</button>' +
+        (open ? '<div class="fl-more-body"><p>' + E(label) + ' 이어서 만들어요' + (left.length ? ' · 남은 단계 ' + left.length + '개' + (names.length ? '(' + names.join(', ') + ')' : '') : '') + '. 모델을 더 부르기 때문에 비용이 들 수 있어요. 이미지·영상·학습처럼 비용이 큰 단계는 시작하기 전에 한 번 더 물어봐요.</p>' +
+          '<button type="button" class="btn" data-act="resume-more" data-until="' + E(next) + '"' + (state.busy ? ' disabled' : '') + '>' + E(label) + ' 이어서 실행</button></div>' : '') + '</div>';
+    }
 
     // ---- 그래프 ----
-    function cardHTML(lane, v, laneKinds) {
+    function laneIds(lane) { return (lane.stages || []).map((s) => (typeof s === 'string' ? s : s.id)).filter((id) => state.graph.byStage.has(id)); }
+    function cardHTML(lane, v, laneKinds, gv) {
       const area = AREA[lane.id] || lane.id;
-      const ids = (lane.stages || []).map((s) => (typeof s === 'string' ? s : s.id)).filter((id) => state.graph.byStage.has(id));
+      const ids = laneIds(lane).filter((id) => !gv.keep || gv.keep.has(id));
+      if (!ids.length) return '';
       const lk = laneKinds[lane.id];
       const done = ids.filter((id) => v[id].kind === 'done' || v[id].kind === 'skip').length;
       const collapsed = lk === 'done' && !state.open.has(lane.id);
       const outish = lk === 'out' || lk === 'skip';
-      const tag = lk === 'skip' ? '<span class="fl-tag">건너뜀</span>' : lk === 'out' ? '<span class="fl-tag">범위 밖</span>' : '';
+      const tag = lk === 'skip' ? '<span class="fl-tag">건너뜀</span>' : lk === 'out' ? '<span class="fl-tag">' + (gv.ids ? '목표 밖' : '범위 밖') + '</span>' : '';
       let html = '<div class="fl-card' + (collapsed ? ' col' : '') + (outish ? ' out' : '') + '" data-lane="' + E(lane.id) + '" style="grid-area:' + E(area) + '">' +
         '<button type="button" class="fl-ch" data-act="toggle" data-lane="' + E(lane.id) + '" aria-expanded="' + (!collapsed) + '"' + (lk === 'done' ? '' : ' aria-disabled="true"') + '><span class="ld ' + (outish ? 'todo' : lk) + '"></span><span class="ln">' + E(lane.label) + '</span>' + tag +
         '<span class="cnt">' + (outish ? '' : (lk === 'done' ? icon('check') : '') + done + '/' + ids.length + (lk === 'done' ? icon(collapsed ? 'down' : 'up') : '')) + '</span></button>';
       if (!collapsed) {
         ids.forEach((id) => {
           const def = state.graph.byStage.get(id);
-          const x = v[id];
+          // 펼쳐 본 모티브의 목표 밖 단계는 흐리게, 상태 글 없이 보인다.
+          const x = gv.ids && !gv.ids.has(id) && v[id].kind === 'todo' ? { kind: 'out', sub: '' } : v[id];
           const paid = (state.graph.paid.get(id) || []).length;
           const marks = (def.gate ? icon('user', '사람 검토 있음') : '') + (paid && (x.kind === 'todo' || x.kind === 'confirm') ? icon('coins', '유료 단계') : '');
           const sub = x.sub ? '<span class="sb" title="' + E(x.sub) + '">' + (x.retry ? icon('retry') + ' ' : '') + E(x.sub) + '</span>' : '';
           const glyph = x.kind === 'done' ? icon('check') : x.kind === 'fail' ? icon('x') : x.kind === 'confirm' ? icon('coins') : x.kind === 'skip' ? icon('minus') : '';
-          html += '<button type="button" class="fl-row ' + x.kind + '" data-act="select" data-stage="' + E(id) + '" aria-pressed="' + (state.sel === id) + '" aria-label="' + E(def.name + ', ' + KIND_LABEL[x.kind] + (x.sub ? ', ' + x.sub : '') + (def.gate ? ', 사람 검토 있음' : '') + (paid ? ', 유료 단계' : '')) + '">' +
+          html += '<button type="button" class="fl-row ' + x.kind + '" data-act="select" data-stage="' + E(id) + '" aria-pressed="' + (state.sel === id) + '" aria-label="' + E(def.name + ', ' + (x.kind === 'out' && gv.ids ? '목표 밖' : KIND_LABEL[x.kind]) + (x.sub ? ', ' + x.sub : '') + (def.gate ? ', 사람 검토 있음' : '') + (paid ? ', 유료 단계' : '')) + '">' +
             '<span class="si ' + x.kind + '">' + glyph + '</span><span class="nw"><span class="nm">' + stageNameHTML(def.name, marks) + '</span>' + sub + gateSub(def) + '</span></button>';
         });
       }
@@ -1120,11 +1353,32 @@
     function renderGraph(v, scope) {
       if (!state.detail) { region.graph.hidden = true; return; }
       region.graph.hidden = false;
-      const cls = (state.graph.layout || layoutOf(state.graph)).cls;
+      const gv = goalView(state.graph, state.detail, v, state.showOff);
+      let cls = (state.graph.layout || layoutOf(state.graph)).cls;
+      state.goalCell = null;
+      ['--goal-cols', '--goal-areas', '--goal-stack'].forEach((k) => region.grid.style.removeProperty(k));
+      if (gv.keep) {
+        // 접은 그래프는 남은 팀만 한 줄로 순서대로 선다. 휴대폰 폭에서는 한 열로 쌓는다.
+        const areas = state.graph.lanes.filter((lane) => laneIds(lane).some((id) => gv.keep.has(id))).map((lane) => AREA[lane.id] || lane.id);
+        cls += ' goal';
+        region.grid.style.setProperty('--goal-cols', String(Math.max(1, areas.length)));
+        region.grid.style.setProperty('--goal-areas', '"' + areas.join(' ') + '"');
+        region.grid.style.setProperty('--goal-stack', areas.map((a) => '"' + a + '"').join(' '));
+        state.goalCell = {};
+        areas.forEach((a, i) => { state.goalCell[a] = [0, i]; });
+      }
       region.grid.className = 'fl-grid' + (cls ? ' ' + cls : '');
       const laneKinds = {};
-      state.graph.lanes.forEach((lane) => { laneKinds[lane.id] = laneKind((lane.stages || []).map((s) => (typeof s === 'string' ? s : s.id)), v); });
-      region.grid.innerHTML = state.graph.lanes.map((lane) => cardHTML(lane, v, laneKinds)).join('');
+      state.graph.lanes.forEach((lane) => { laneKinds[lane.id] = laneKind(laneIds(lane).filter((id) => !gv.keep || gv.keep.has(id)), v); });
+      region.grid.innerHTML = state.graph.lanes.map((lane) => cardHTML(lane, v, laneKinds, gv)).join('');
+      if (region.offgoal) {
+        const offLanes = gv.ids ? state.graph.lanes.filter((lane) => laneIds(lane).every((id) => !gv.ids.has(id))).map((lane) => lane.label) : [];
+        region.offgoal.innerHTML = gv.ids && gv.hidden ? '<button type="button" class="link" data-act="show-off" aria-expanded="' + Boolean(state.showOff) + '">' + icon(state.showOff ? 'up' : 'down') + (state.showOff ? '목표 밖 단계 접기' : '목표 밖 단계 ' + gv.hidden + '개 보기') + '</button>' + (state.showOff || !offLanes.length ? '' : '<span class="hint">' + E(offLanes.join('·')) + '처럼 대화에 꼭 필요하지 않은 단계예요.</span>') : '';
+        region.offgoal.hidden = !(gv.ids && gv.hidden);
+      }
+      if (region.zoombar) region.zoombar.hidden = Boolean(gv.keep);
+      // 접은 그래프는 팀 몇 개뿐이라 연결선 범례가 필요 없다.
+      region.legend.hidden = Boolean(gv.keep);
       region.legend.innerHTML = scope
         ? '<span><i class="done"></i>이번 실행에 포함</span><span><i class="todo"></i>범위 밖</span><span>' + icon('user') + '사람 검토</span><span>' + icon('coins') + '유료 실행 확인</span>'
         : [['flow', '지금 진행 중'], ['block', '사람을 기다리며 멈춤'], ['stop', '실패로 멈춤']].map((x) => '<span><svg class="lg" viewBox="0 0 24 6" width="24" height="6" aria-hidden="true"><line class="e ' + x[0] + '" x1="1" y1="3" x2="23" y2="3"/></svg>' + x[1] + '</span>').join('') + '<span>' + icon('user') + '사람 검토</span><span>' + icon('coins') + '유료 실행 확인</span>';
@@ -1151,7 +1405,7 @@
       if (!region.zoombar) return;
       const pct = Math.round(zoom.z * 100);
       region.zoombar.innerHTML = '<button type="button" data-act="zoom-out" aria-label="축소" title="축소 (−)"' + (zoom.z <= ZSTEPS[0] ? ' disabled' : '') + '>' + icon('minus') + '</button>' +
-        '<span class="pct" role="status">' + (zoomed() ? pct + '%' : '맞춤') + '</span>' +
+        '<span class="pct" role="status" aria-label="' + pct + '% 크기">' + pct + '%</span>' +
         '<button type="button" data-act="zoom-in" aria-label="확대" title="확대 (+)"' + (zoom.z >= ZSTEPS[ZSTEPS.length - 1] ? ' disabled' : '') + '>' + icon('plus') + '</button>' +
         '<button type="button" data-act="zoom-fit" title="화면에 맞추기 (0)"' + (zoomed() ? '' : ' disabled') + '>맞춤</button><span class="sep" aria-hidden="true"></span>' +
         '<button type="button" data-act="focus" aria-pressed="' + state.focus + '" title="' + (state.focus ? '원래 보기 (Esc)' : '왼쪽 탐색과 할 일을 접고 그래프를 넓게 봐요') + '">' + icon(state.focus ? 'shrink' : 'expand') + (state.focus ? '원래 보기' : '크게 보기') + '</button>';
@@ -1258,7 +1512,7 @@
       svg.setAttribute('width', box.width);
       svg.setAttribute('height', box.height);
       const colour = { flow: 'var(--fd-run-solid)', block: 'var(--fd-attention-solid)', stop: 'var(--fd-danger-solid)', done: 'var(--fd-slate-8)', todo: 'var(--fd-slate-7)', out: 'var(--fd-slate-6)' };
-      const cell = (state.graph.layout || layoutOf(state.graph)).cell;
+      const cell = state.goalCell || (state.graph.layout || layoutOf(state.graph)).cell;
       const cardTop = (lane) => { const el = region.grid.querySelector('.fl-card[data-lane="' + lane + '"]'); return el ? el.getBoundingClientRect().top - box.top : null; };
       let out = '';
       crossLaneEdges(state.graph).forEach(([a, b]) => {
@@ -1293,14 +1547,18 @@
     function historyHTML(id) {
       const hist = (state.detail.history && state.detail.history[id]) || [];
       if (!hist.length) return '';
-      const items = hist.slice().reverse().map((a) => {
+      // 끝내 성공한 단계라면 그 전에 실패한 시도는 '이전 시도 N회' 아래로 접는다.
+      const kind = (views(null)[id] || {}).kind;
+      const parts = splitAttempts(hist, kind === 'done' || kind === 'wait');
+      const item = (a) => {
         const took = parseTime(a.startedAt) != null && parseTime(a.endedAt) != null ? span(parseTime(a.endedAt) - parseTime(a.startedAt)) : '';
         const result = a.result === 'CHECK_FAILED' ? '실패' : a.result === 'AWAITING_HUMAN' ? '검토로 넘김' : a.result === 'APPROVED' ? '완료' : a.result === 'RESTARTED' ? '다시 시작됨' : a.result === 'SKIPPED' ? '건너뜀' : a.result ? a.result : '진행 중';
         const decision = a.decision === 'APPROVED' ? ' → 통과' : a.decision === 'REJECTED' ? ' → 다시 만들기' : '';
         const tone = a.result === 'CHECK_FAILED' ? 'bad' : !a.result ? 'run' : a.decision === 'APPROVED' || a.result === 'APPROVED' ? 'ok' : a.result === 'AWAITING_HUMAN' && !a.decision ? 'wait' : '';
-        return '<li class="' + tone + '"><b>' + E(a.attempt || '?') + '회차</b> · ' + E(result + decision) + '<br>' + E(clock(a.startedAt)) + (took ? ' · ' + E(took) : '') + (a.rev ? ' · ' + E(revLabel(a.rev)) : '') + (a.error ? '<span class="err">' + E(failReason(a.error).summary) + '</span>' : '') + '</li>';
-      });
-      return '<section class="ins-sec"><h3>회차 이력</h3><ul class="fl-hist">' + items.join('') + '</ul></section>';
+        return '<li class="' + tone + '"><b>' + E(a.attempt || '?') + '번째 시도</b> · ' + E(result + decision) + '<br>' + E(clock(a.startedAt)) + (took ? ' · ' + E(took) : '') + (a.rev ? ' · ' + E(revLabel(a.rev)) : '') + (a.error ? '<span class="err">' + E(failReason(a.error).summary) + '</span>' : '') + '</li>';
+      };
+      const earlier = parts.earlier.length ? '<details class="fl-earlier"><summary>이전 시도 ' + parts.earlier.length + '회</summary><ul class="fl-hist">' + parts.earlier.slice().reverse().map(item).join('') + '</ul></details>' : '';
+      return '<section class="ins-sec"><h3>실행 기록</h3><ul class="fl-hist">' + parts.shown.slice().reverse().map(item).join('') + '</ul>' + earlier + '</section>';
     }
     function panelHTML(v) {
       const d = state.detail;
@@ -1315,6 +1573,8 @@
       const prop = (k, val, cls) => { if (val) props.push('<dt>' + E(k) + '</dt><dd' + (cls ? ' class="' + cls + '"' : '') + '>' + val + '</dd>'); };
       if (state.graph.origin === 'SOURCE') prop('하는 일', E(stageHint(def)));
       prop('상태', E(x.sub || KIND_LABEL[x.kind]));
+      const gs = goalStages(state.graph, d);
+      if (gs && !gs.has(id)) prop('목표', '대화하는 데 꼭 필요한 단계는 아니에요');
       prop('버전', row.rev ? E(revLabel(row.rev)) : '');
       prop('시작', row.startedAt ? E(clock(row.startedAt)) : '');
       prop('걸린 시간', row.startedAt && row.endedAt ? E(span(parseTime(row.endedAt) - parseTime(row.startedAt))) : '');
@@ -1349,7 +1609,7 @@
       if (chat) acts.push('<a class="btn block" href="' + E(chat) + '">' + icon('chat') + '대화해 보기</a>');
       if (x.kind === 'todo' && def.implemented && !notStarted() && !mstepOf) acts.push('<button type="button" class="btn block" data-act="run-stage" data-stage="' + E(id) + '"' + (busy ? ' disabled' : '') + '>이 단계까지 실행</button>');
       const pill = '<span class="fl-pill ' + (x.kind === 'retry' ? 'run' : x.kind === 'done' ? 'ok' : ['todo', 'out', 'skip'].includes(x.kind) ? 'muted' : x.kind) + '"><span class="d"></span>' + E(KIND_LABEL[x.kind]) + '</span>';
-      return '<div class="ins-head"><span class="ins-kicker">' + E((lane ? lane.label + ' 팀 · ' : '') + def.id) + '</span><div class="ins-title"><h2>' + E(def.name) + '</h2>' + pill + '</div>' + (acts.length ? '<div class="acts" style="flex-direction:column;align-items:stretch">' + acts.join('') + '</div>' : '') + '</div>' +
+      return '<div class="ins-head">' + (lane ? '<span class="ins-kicker">' + E(lane.label) + '</span>' : '') + '<div class="ins-title"><h2>' + E(def.name) + '</h2>' + pill + '</div>' + (acts.length ? '<div class="acts" style="flex-direction:column;align-items:stretch">' + acts.join('') + '</div>' : '') + '</div>' +
         '<section class="ins-sec"><h3>속성</h3><dl class="ins-props">' + props.join('') + '</dl></section>' +
         (thumbs.length ? '<section class="ins-sec"><h3>산출물 미리보기</h3><div class="fl-thumbs">' + thumbs.map((f) => '<img alt="' + E(f.name) + '" src="' + E(R.safeHref(f.url)) + '" loading="lazy">').join('') + '</div></section>' : '') +
         historyHTML(id);
@@ -1359,6 +1619,8 @@
     // ---- 모델 만들기 보기(D-0130): 재료 → 데이터셋 → 학습 → 평가 ----
     function modelMode() { return /^#c\/[^/]+\/model$/.test(text(global.location && global.location.hash)); }
     function viewTabsHTML() {
+      // 프롬프트만 쓰는 모티브는 학습하지 않는다. 모델 만들기 탭 대신 한 줄로 알린다.
+      if (promptOnly(state.detail)) return '<p class="fl-mode-line">학습 없이 프롬프트로 대화해요</p>';
       const id = encodeURIComponent(state.detail.id);
       const m = modelMode();
       return '<nav class="md-tabs" aria-label="보기"><a href="#c/' + id + '"' + (m ? '' : ' aria-current="page"') + '>공정</a><a href="#c/' + id + '/model"' + (m ? ' aria-current="page"' : '') + '>모델 만들기</a></nav>';
@@ -1774,8 +2036,9 @@
     }
     function renderNow() {
       if (state.destroyed || !region.top) return;
+      sumMemo = null;
       const rt = route();
-      state.overview = rt.overview && Boolean(state.graph);
+      state.overview = rt.overview && Boolean(state.graph) && !state.form.open;
       if (region.shell) region.shell.classList.toggle('is-overview', state.overview);
       renderSide();
       if (!state.graph) {
@@ -1787,7 +2050,18 @@
       if (state.overview) {
         renderTop(null);
         renderBanner();
-        region.head.innerHTML = state.form.open ? formHTML() : overviewHTML(rt.filter);
+        region.head.innerHTML = overviewHTML(rt.filter);
+        region.graph.hidden = true;
+        region.panel.hidden = true;
+        if (region.body) region.body.classList.add('no-panel');
+        renderSheet();
+        return;
+      }
+      // 새로 지어내기 입력은 다른 캐릭터 화면 위에 열리지 않는다. 입력만 보인다.
+      if (state.form.open) {
+        renderTop(null);
+        renderBanner();
+        region.head.innerHTML = formHTML();
         region.graph.hidden = true;
         region.panel.hidden = true;
         if (region.body) region.body.classList.add('no-panel');
@@ -1801,11 +2075,13 @@
       if (state.detail && !state.sel) {
         const tasks = buildTasks(state.graph, state.detail, v, {});
         const running = Object.keys(v).find((id) => v[id].kind === 'run' || v[id].kind === 'retry');
-        const next = state.graph.stages.find((s) => !['done', 'skip', 'out'].includes(v[s.id].kind));
-        state.sel = (tasks[0] && tasks[0].stage) || running || (next && next.id) || 's11';
-        loadGateViews();
+        const goal = goalStages(state.graph, state.detail);
+        // 모티브는 목표 밖 단계(예: 기준 사진의 '이 단계까지 실행')로 시작하지 않는다. 할 일이 없으면 마지막으로 끝난 단계를 보인다.
+        const next = goal ? lastFinished(goal, v) : state.graph.stages.find((s) => !['done', 'skip', 'out'].includes(v[s.id].kind));
+        state.sel = (tasks[0] && tasks[0].stage) || running || (next && next.id) || (goal ? null : 's11');
+        if (state.sel) loadGateViews();
       }
-      if (state.detail && !state.form.open && modelMode()) {
+      if (state.detail && modelMode() && !promptOnly(state.detail)) {
         if (!state.wasModel && !state.keepStep) { state.mstep = null; state.mconfirm = null; }
         state.wasModel = true;
         state.keepStep = false;
@@ -1822,15 +2098,32 @@
       state.wasModel = false;
       renderTop(v);
       renderBanner();
-      if (state.form.open) region.head.innerHTML = formHTML();
-      else if (state.projects && !characters().length) region.head.innerHTML = emptyHTML();
+      const draft = state.detail && notStarted() && isMotif(state.detail);
+      if (state.projects && !characters().length) region.head.innerHTML = emptyHTML();
       else if (!state.detail) region.head.innerHTML = '';
-      else region.head.innerHTML = titleHTML() + viewTabsHTML() + (notStarted() ? setupHTML() : tasksHTML(v));
-      renderGraph(v, scope);
-      region.panel.hidden = !state.detail;
-      if (region.body) region.body.classList.toggle('no-panel', !state.detail);
-      if (state.detail) region.panel.innerHTML = '<div class="fl-panel">' + panelHTML(v) + '</div>';
+      else region.head.innerHTML = titleHTML() + (draft ? '' : viewTabsHTML()) + (draft ? draftHTML() : notStarted() ? setupHTML() : tasksHTML(v));
+      // 시작하지 않은 모티브 초안은 공정 그래프와 단계 패널을 보이지 않는다(원문 화면에서 시작한다).
+      if (draft) region.graph.hidden = true;
+      else renderGraph(v, scope);
+      const panel = Boolean(state.detail) && !draft;
+      region.panel.hidden = !panel;
+      if (region.body) region.body.classList.toggle('no-panel', !panel);
+      if (panel) region.panel.innerHTML = '<div class="fl-panel">' + panelHTML(v) + '</div>';
       renderSheet();
+    }
+    // 목표 경로에서 가장 늦게 끝난 단계.
+    function lastFinished(goal, v) {
+      const rows = rowsById(state.detail);
+      const hist = state.detail.history || {};
+      let best = null;
+      let bestT = -1;
+      state.graph.stages.forEach((s, i) => {
+        if (!goal.has(s.id) || !['done', 'skip'].includes((v[s.id] || {}).kind)) return;
+        const h = hist[s.id] || [];
+        const t = parseTime((rows.get(s.id) || {}).endedAt) || parseTime((h[h.length - 1] || {}).endedAt) || i;
+        if (t >= bestT) { bestT = t; best = s; }
+      });
+      return best;
     }
 
     // ---- 동작 ----
@@ -1849,10 +2142,12 @@
       await refresh(false);
     }
     async function create(form) {
-      state.form.slug = form.querySelector('[data-slug]').value;
+      state.form.slug = form.querySelector('[data-slug]').value.trim();
       state.form.brief = form.querySelector('[data-brief]').value;
+      if (!state.form.brief.trim()) { state.form.error = '어떤 캐릭터인지 적어 주세요.'; render(); return; }
+      if (state.form.slug && !/^[a-z0-9][a-z0-9-]{0,40}$/.test(state.form.slug)) { state.form.error = '짧은 이름은 영문 소문자나 숫자로 시작하고, 영문 소문자·숫자·하이픈만 쓸 수 있어요. 비워 두면 자동으로 정해요.'; render(); return; }
       let payload;
-      try { payload = R.createCharacterRequest(state.form.slug, state.form.brief); } catch (error) { state.form.error = error.message; render(); return; }
+      try { payload = R.createCharacterRequest(state.form.slug || autoSlug(state.form.brief), state.form.brief); } catch (error) { state.form.error = error.message; render(); return; }
       state.busy = true;
       state.form.error = '';
       render();
@@ -1863,6 +2158,25 @@
         global.location.hash = '#c/' + encodeURIComponent(data.characterId);
       } catch (error) {
         state.form.error = error.message;
+      }
+      state.busy = false;
+      await refresh(false);
+    }
+    // 보관하기·보관 풀기(3차 약속 3). 지우지 않고 목록 기본 보기에서만 숨긴다.
+    async function setArchived(on) {
+      const id = state.detail && state.detail.id;
+      if (!id) return;
+      state.menuOpen = false;
+      state.busy = true;
+      render();
+      try {
+        await request('POST', '/api/characters/' + encodeURIComponent(id) + '/archive', { archived: on });
+        const c = characters().find((x) => x.id === id);
+        if (c) c.archived = on;
+        state.feedback = { tone: 'ok', text: on ? '보관했어요. 목록 아래 보관함에서 다시 찾을 수 있어요.' : '보관을 풀었어요. 다시 목록에 보여요.' };
+        if (on) { state.showArchived = false; global.location.hash = '#all'; }
+      } catch (error) {
+        state.feedback = { tone: 'bad', text: error.status === 404 || error.status === 405 ? '이 서버에서는 아직 보관할 수 없어요. 서버를 새 버전으로 올린 뒤 다시 해 주세요.' : error.message };
       }
       state.busy = false;
       await refresh(false);
@@ -1880,11 +2194,18 @@
     function onClick(event) {
       if (swallowClick) { swallowClick = false; if (region.view && region.view.contains(event.target)) { event.preventDefault(); return; } }
       if (event.target === region.scrim) { closeSheet(); return; }
+      if (state.menuOpen && !(event.target.closest && event.target.closest('.fd-more'))) { state.menuOpen = false; render(); }
       const el = event.target.closest('[data-act]');
       if (!el || el.disabled || (el.getAttribute('aria-disabled') === 'true' && el.dataset.act === 'toggle')) return;
       const act = el.dataset.act;
       const id = state.detail && state.detail.id;
       if (act === 'select') { state.sel = el.dataset.stage; const lane = laneMap(state.graph).get(state.sel); if (lane) state.open.add(lane); loadGateViews(); render(); }
+      else if (act === 'menu') { state.menuOpen = !state.menuOpen; render(); }
+      else if (act === 'archive') setArchived(el.dataset.v === '1');
+      else if (act === 'archived') { state.showArchived = !state.showArchived; state.form.open = false; if (route().overview) render(); else global.location.hash = '#all'; }
+      else if (act === 'show-off') { state.showOff = !state.showOff; zoomFit(); render(); }
+      else if (act === 'more') { state.moreOpen = !state.moreOpen; render(); }
+      else if (act === 'resume-more') { state.moreOpen = false; run(R.runRequest(id, el.dataset.until || 'sx', []), '이어서 실행을 요청했어요. 비용이 큰 단계는 시작하기 전에 다시 물어봐요.'); }
       else if (act === 'toggle') { const lane = el.dataset.lane; if (state.open.has(lane)) state.open.delete(lane); else state.open.add(lane); render(); }
       else if (act === 'review') { state.batch = null; state.opener = el; state.review = { gate: el.dataset.gate, stage: el.dataset.stage || (state.graph.byGate.get(el.dataset.gate) || {}).stage, readonly: el.dataset.readonly === '1' }; state.sel = state.review.stage; render(); }
       else if (act === 'close-review') closeSheet();
@@ -1917,7 +2238,7 @@
       else if (act === 'run-stage') run(R.runRequest(id, el.dataset.stage, []), '이 단계까지 실행을 요청했어요.');
       else if (act === 'start') run(R.runRequest(id, state.target || defaultTarget(), []), '실행을 시작했어요. 진행 상황은 서버 기록을 따라요.');
       else if (act === 'resume') run(R.runRequest(id, currentUntil() || orchestrator().resumeUntil || 'sx', []), '이어서 실행을 요청했어요.');
-      else if (act === 'new') { state.form.open = true; render(); const f = doc.querySelector('[data-slug]'); if (f) f.focus(); }
+      else if (act === 'new') { state.form.open = true; render(); const f = doc.querySelector('[data-brief]'); if (f) f.focus(); }
       else if (act === 'cancel-form') { state.form.open = false; render(); }
       else if (act === 'pick') { state.batch = null; state.form.open = false; global.location.hash = '#c/' + encodeURIComponent(el.dataset.id); }
       else if (act === 'inbox') { state.batch = null; state.form.open = false; global.location.hash = '#all/mine'; }
@@ -1954,6 +2275,7 @@
       const el = event.target;
       if (el.matches('[data-pick]')) {
         if (el.value === '__new') { state.form.open = true; render(); return; }
+        if (el.value === '__src') { global.location.href = 'sources.html'; return; }
         if (el.value === '__all') { global.location.hash = '#all'; return; }
         state.form.open = false;
         global.location.hash = '#c/' + encodeURIComponent(el.value);
@@ -1963,8 +2285,13 @@
     function onSubmit(event) {
       if (event.target.matches('[data-form]')) { event.preventDefault(); create(event.target); }
     }
-    function onInput(event) { if (event.target.matches && event.target.matches('[data-ov-q]')) { state.ov.q = event.target.value; render(); } }
+    function onInput(event) {
+      if (!event.target.matches) return;
+      if (event.target.matches('[data-ov-q]')) { state.ov.q = event.target.value; render(); }
+      else if (event.target.matches('[data-side-q]')) { state.sq = event.target.value; render(); }
+    }
     function onKey(event) {
+      if (event.key === 'Escape' && state.menuOpen) { event.preventDefault(); state.menuOpen = false; render(); const b = doc.querySelector('[data-act="menu"]'); if (b) b.focus(); return; }
       if (event.key === 'Escape' && state.review) { event.preventDefault(); closeSheet(); return; }
       if (event.key === 'Escape' && state.confirming) { event.preventDefault(); state.confirming = null; render(); return; }
       if (event.key === 'Escape' && state.focus) { event.preventDefault(); toggleFocus(false); return; }
@@ -2056,7 +2383,7 @@
     };
   }
 
-  const pure = { since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, s8cName, chatHref, MODE_LABEL, MARK, mount };
+  const pure = { since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, s8cName, chatHref, isChatReady, statusOf, STATUS_LABEL, goalStages, goalOf, goalView, nameLabels, labelOf, autoSlug, splitAttempts, MODE_LABEL, MARK, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = pure;
   if (global) global.FactoryFlow = pure;
 })(typeof window !== 'undefined' ? window : null);

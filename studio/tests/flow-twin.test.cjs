@@ -122,15 +122,21 @@ test('track badge text: original, or twin with how the model is prepared', () =>
   assert.equal(Flow.trackLabel({ origin: 'SOURCE', modelMode: 'PROMPT_ONLY' }), '모티브 · 프롬프트만');
 });
 
-test('chat test link opens only for motif characters whose prompt (s8) exists', () => {
-  const row = (status) => ({ id: 's8', status });
+test('chat link opens only when the character can chat: the server chatReady wins, else prompt (s8) and opening scene (s8c) both exist', () => {
+  const rows = (s8, s8c) => [{ id: 's8', status: s8 }].concat(s8c ? [{ id: 's8c', status: s8c }] : []);
   const base = { id: 'cf-son', origin: 'SOURCE' };
-  assert.equal(Flow.chatHref(Object.assign({}, base, { stages: [row('AWAITING_HUMAN')] })), 'chat.html#c/cf-son', 'G6 waiting means the prompt is already written');
-  assert.equal(Flow.chatHref(Object.assign({}, base, { stages: [row('APPROVED')] })), 'chat.html#c/cf-son');
-  assert.equal(Flow.chatHref(Object.assign({}, base, { stages: [row('RUNNING')] })), '');
+  assert.equal(Flow.chatHref(Object.assign({}, base, { stages: rows('AWAITING_HUMAN', 'APPROVED') })), 'chat.html#c/cf-son', 'G6 waiting means the prompt is already written');
+  assert.equal(Flow.chatHref(Object.assign({}, base, { stages: rows('APPROVED', 'APPROVED') })), 'chat.html#c/cf-son');
+  // QA C1: 프롬프트만 있고 첫 장면이 없으면 대화 화면이 막히므로 버튼을 보이지 않는다.
+  assert.equal(Flow.chatHref(Object.assign({}, base, { stages: rows('APPROVED') })), '', 'no opening scene yet');
+  assert.equal(Flow.chatHref(Object.assign({}, base, { stages: rows('APPROVED', 'PENDING') })), '');
+  assert.equal(Flow.chatHref(Object.assign({}, base, { stages: rows('RUNNING', 'APPROVED') })), '');
   assert.equal(Flow.chatHref(Object.assign({}, base, { stages: [] })), '');
-  assert.equal(Flow.chatHref({ id: 'cf-orig', origin: 'CREATED', stages: [row('APPROVED')] }), '', 'original characters have no chat test yet');
-  assert.equal(Flow.chatHref({ id: 'a b', origin: 'SOURCE', stages: [row('APPROVED')] }), 'chat.html#c/a%20b');
+  assert.equal(Flow.chatHref({ id: 'cf-orig', origin: 'CREATED', stages: rows('APPROVED', 'APPROVED') }), '', 'original characters have no chat test yet');
+  assert.equal(Flow.chatHref({ id: 'a b', origin: 'SOURCE', stages: rows('APPROVED', 'APPROVED') }), 'chat.html#c/a%20b');
+  // 서버가 대화 화면과 같은 함수로 계산한 값이 있으면 단계 기록보다 먼저다.
+  assert.equal(Flow.chatHref(Object.assign({}, base, { chatReady: false, stages: rows('APPROVED', 'APPROVED') })), '');
+  assert.equal(Flow.chatHref(Object.assign({}, base, { chatReady: true, stages: [] })), 'chat.html#c/cf-son');
 });
 
 test('the S8c step is named after the opening scene, and mode names match the upload page', () => {
@@ -144,3 +150,113 @@ test('the S8c step is named after the opening scene, and mode names match the up
   assert.ok(src.includes("c.origin === 'SOURCE' ? '<span class=\"fd-org\""), 'the sidebar marks motif characters');
 });
 
+
+// ---- 3차 사용성 QA(K 묶음): 상태 하나, 목표 진행, 목표 밖 단계 접기, 이름 구분 ----
+const DONE5 = { s0: 'APPROVED', s3: 'APPROVED', s7: 'APPROVED', s8: 'APPROVED', s8c: 'APPROVED' };
+
+test('QA F01/C2: one status everywhere; the server status wins, otherwise a finished prompt-only motif reads "대화 가능"', () => {
+  const p = Runtime.buildGraph(PROMPT);
+  const d = detailFor(PROMPT, DONE5, [{ id: 'G0', status: 'APPROVED' }, { id: 'G3', status: 'APPROVED' }, { id: 'G6', status: 'APPROVED' }]);
+  d.id = 'cf-son';
+  const v = Flow.viewsFor(p, d, { now: NOW });
+  assert.equal(Flow.buildTasks(p, d, v, { now: NOW }).length, 0, 'nothing for a person to do');
+  const st = Flow.statusOf(d, { fail: 0, review: 0, paid: 0, running: false, complete: false, fresh: false });
+  assert.deepEqual([st.status, st.label, st.tone], ['chat_ready', '대화 가능', 'ok']);
+  // 서버가 정한 상태와 이름표가 있으면 그대로 쓴다.
+  assert.deepEqual([Flow.statusOf({ status: 'running', statusLabel: '만드는 중' }, {}).label, Flow.statusOf({ status: 'running' }, {}).tone], ['만드는 중', 'run']);
+  // 서버 값이 없을 때의 순서: 만드는 중 → 실패 → 확인 필요 → 대화 가능 → 완료 → 시작 전 → 멈춤
+  const of = (s, c) => Flow.statusOf(c || {}, s).status;
+  assert.equal(of({ running: true, fail: 1 }), 'running');
+  assert.equal(of({ fail: 1, review: 1 }), 'failed');
+  assert.equal(of({ paid: 1 }, d), 'needs_review', 'a paid confirmation is a person\'s decision');
+  assert.equal(of({ fresh: true }), 'draft');
+  assert.equal(of({ complete: true }), 'done');
+  assert.equal(of({}), 'stopped');
+  assert.deepEqual(Object.values(Flow.STATUS_LABEL).slice(0, 6), ['시작 전', '만드는 중', '확인 필요', '대화 가능', '실패', '멈춤']);
+});
+
+test('QA F02/F16: progress counts only the stages needed to chat (motif), uses the server goal when present, originals count every stage', () => {
+  const p = Runtime.buildGraph(PROMPT);
+  assert.deepEqual([...Flow.goalStages(p, { origin: 'SOURCE', modelMode: 'PROMPT_ONLY' })].sort(), ['s0', 's3', 's7', 's8', 's8c']);
+  const d = detailFor(PROMPT, DONE5, []);
+  const g = Flow.goalOf(p, d, Flow.viewsFor(p, d, { now: NOW }));
+  assert.deepEqual([g.label, g.done, g.total], ['대화 가능까지', 5, 5]);
+  const half = detailFor(PROMPT, { s0: 'APPROVED', s3: 'APPROVED' }, []);
+  assert.equal(Flow.goalOf(p, half, Flow.viewsFor(p, half, { now: NOW })).done, 2);
+  assert.deepEqual(Flow.goalOf(p, Object.assign({}, half, { goal: { label: '대화 가능까지', done: 4, total: 5 } }), {}).done, 4, 'server goal wins');
+  // 학습 방식 모티브는 학습 단계까지 센다.
+  const t = Runtime.buildGraph(TRAIN);
+  const tg = Flow.goalStages(t, { origin: 'SOURCE', modelMode: 'TRAIN' });
+  for (const id of ['s0', 's8', 's8c', 's9s', 's9', 's10t']) assert.ok(tg.has(id), id);
+  assert.ok(!tg.has('s2') && !tg.has('s11'));
+  // 오리지널은 목표 경로가 없고 전체 단계를 센다.
+  const o = Runtime.buildGraph(PROMPT);
+  assert.equal(Flow.goalStages(o, { origin: 'CREATED' }), null);
+});
+
+test('QA F03: off-goal stages fold into one row; a stage that needs a person stays visible; unfolding shows everything', () => {
+  const p = Runtime.buildGraph(PROMPT);
+  const d = detailFor(PROMPT, DONE5, []);
+  const gv = Flow.goalView(p, d, Flow.viewsFor(p, d, { now: NOW }), false);
+  assert.equal(gv.hidden, PROMPT.stages.length - 5, '11 stages fold away');
+  assert.ok(!gv.keep.has('s2') && gv.keep.has('s8c'));
+  const busy = detailFor(PROMPT, Object.assign({ s2: 'AWAITING_HUMAN' }, DONE5), [{ id: 'G1s', status: 'AWAITING_HUMAN', rev: 'h1' }]);
+  assert.ok(Flow.goalView(p, busy, Flow.viewsFor(p, busy, { now: NOW }), false).keep.has('s2'), 'a waiting off-goal review is not hidden');
+  assert.equal(Flow.goalView(p, d, {}, true).keep, null);
+  assert.equal(Flow.goalView(p, { origin: 'CREATED' }, {}, false).keep, null, 'original graphs never fold');
+});
+
+test('QA F09/F6: same names are told apart by when they were made; the display name comes from the server first', () => {
+  const list = [
+    { id: 'cf-20261110-motif-aaa', displayName: '손흥민', createdAt: '2026-11-10T04:49:00' },
+    { id: 'cf-20261110-motif-bbb', name: '손흥민', createdAt: '2026-11-10T02:57:00' },
+    { id: 'cf-20261109-son-v2', name: '손흥민' },
+    { id: 'cf-20261109-son-v3', name: '손흥민' },
+    { id: 'cf-20261109-solo', name: '정이환' },
+    { id: 'cf-20261110-motif-ccc', name: 'cf-20261110-motif-ccc', displayName: 'QA테스트 손흥민' }
+  ];
+  const m = Flow.nameLabels(list);
+  assert.deepEqual(m.get('cf-20261110-motif-aaa'), { name: '손흥민', note: '11/10 04:49 만듦' });
+  assert.equal(m.get('cf-20261110-motif-bbb').note, '11/10 02:57 만듦');
+  assert.equal(m.get('cf-20261109-son-v2').note, '11/9 만듦 · son-v2', 'same day without a time falls back to the short name');
+  assert.equal(m.get('cf-20261109-solo').note, '', 'a unique name needs nothing extra');
+  assert.equal(m.get('cf-20261110-motif-ccc').name, 'QA테스트 손흥민');
+  assert.equal(Flow.labelOf({ id: 'cf-20261105-api-cost-argon', name: 'cf-20261105-api-cost-argon' }), '이름 미정 · api-cost-argon (11/5)');
+  // 서버 createdAt이 없으면 첫 실행 시각으로 구분한다.
+  const runs = Flow.nameLabels([{ id: 'cf-20261109-a', name: 'X', stages: [{ startedAt: '2026-11-09T01:03:00' }] }, { id: 'cf-20261109-b', name: 'X', stages: [{ startedAt: '2026-11-09T01:35:00' }] }]);
+  assert.equal(runs.get('cf-20261109-a').note, '11/9 01:03 만듦');
+});
+
+test('QA F11: a made-up character gets its short id automatically and the server accepts it', () => {
+  for (const brief of ['동네 빵집 제빵사, 29세', 'Cafe owner in Seoul', '']) {
+    const slug = Flow.autoSlug(brief, Date.parse('2026-11-10T06:00:00Z'));
+    assert.match(slug, /^[a-z0-9][a-z0-9-]{0,40}$/, slug);
+    assert.doesNotThrow(() => Runtime.createCharacterRequest(slug, '브리프'));
+  }
+  assert.match(Flow.autoSlug('Cafe owner in Seoul', 1), /^cafe-owner-/);
+});
+
+test('QA F08: earlier failed attempts of a stage that later succeeded fold away, and developer errors read as plain Korean', () => {
+  const hist = [{ attempt: 1, result: 'CHECK_FAILED', error: 'TaintedOutputError: 작업 공간 밖 경로에 접근했다: /out' }, { attempt: 2, result: 'APPROVED' }];
+  const ok = Flow.splitAttempts(hist, true);
+  assert.deepEqual([ok.shown.map((a) => a.attempt), ok.earlier.map((a) => a.attempt)], [[2], [1]]);
+  assert.deepEqual(Flow.splitAttempts(hist, false).earlier, [], 'a stage still failing shows every attempt');
+  const why = Flow.failReason(hist[0].error);
+  assert.equal(why.summary, '작업 공간 밖의 파일을 건드리려 해서 멈췄어요.');
+  assert.match(why.detail, /TaintedOutputError/, 'the original stays in the technical details');
+  assert.doesNotMatch(Flow.failReason('KeyError: subjectSpeaker').summary, /KeyError|subjectSpeaker/);
+});
+
+test('QA F20/F09/F7: no link to the old screen, names stay visible on laptops, and a motif draft points to the source page', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'shared', 'flow.css'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'shared', 'flow.js'), 'utf8');
+  const page = fs.readFileSync(path.join(__dirname, '..', 'factory.html'), 'utf8');
+  assert.ok(!src.includes('>이전 화면<'), 'the old-screen link is gone');
+  assert.ok(src.includes('모델 설정 (운영 담당용)'), 'model settings moved to a small operator link');
+  // 첫 글자만 남는 레일은 900px 아래에서만 쓴다(1280px에서도 이름이 보인다).
+  const rail = css.split('@media (max-width:899px){')[1] || '';
+  assert.ok(rail.split('}')[0].includes('grid-template-columns:60px'), 'rail only below 900px');
+  assert.ok(!/@media \(max-width:1439px\)\{[^}]*\.fd-nav \.lbl/.test(css), 'labels are not hidden at 1280px');
+  assert.ok(page.includes('data-offgoal'));
+  assert.ok(/원문 화면에서 이어 하기/.test(src) && /href="sources\.html#c\/'/.test(src), 'drafts continue on the source page');
+});
