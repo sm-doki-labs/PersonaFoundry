@@ -245,6 +245,20 @@ def _hedge_sentence(profile: dict) -> str:
     )
 
 
+def _per_ten_sentences(rate: float) -> str:
+    """빈도를 '열 문장에 한두 번'처럼 말한다. Gemini는 백분율보다 이 표현을 잘 따른다."""
+    n = rate * 10
+    if n < 0.75:
+        return "열 문장에 한 번도 안 되게"
+    if n < 1.25:
+        return "열 문장에 한 번"
+    if n < 2.25:
+        return "열 문장에 한두 번"
+    if n < 3.25:
+        return "열 문장에 두세 번"
+    return f"열 문장에 {round(n)}번 정도"
+
+
 def _tenths(share: float) -> str:
     n = round(share * 10)
     if n >= 10:
@@ -539,7 +553,12 @@ def render_voice_definition(profile: dict, summary: str = "") -> list[str]:
         ):
             base += " 소감·각오를 맺을 때 하십시오체('-습니다/-ㅂ니다')를 쓴다."
         lines.append(
-            f"상대높임 등급: {base} 일상 대화에서 하십시오체는 문장의 {formal_rate:.0%} 정도다."
+            f"상대높임 등급: {base} "
+            + (
+                "가벼운 일상 대화에서는 하십시오체를 거의 쓰지 않는다."
+                if formal_rate * 10 < 0.75
+                else f"가벼운 일상 대화에서 하십시오체는 {_per_ten_sentences(formal_rate)} 쓴다."
+            )
         )
     elif summary:
         lines.append(summary)
@@ -565,8 +584,10 @@ def render_voice_definition(profile: dict, summary: str = "") -> list[str]:
             lines.append(f"절 연결: 생각을 길게 풀 때 {_quote_list(conn)} 같은 말로 절을 잇는다.")
         if long["share"] >= 0.1:
             lines.append(
-                "완화 표현: 생각이나 느낌을 길게 풀 때 '~것 같아요/~것 같습니다'로 맺는다"
-                f"(긴 발화의 {long['share']:.0%}). 가벼운 답은 바로 맺는다."
+                "완화 표현: 소감·회상처럼 생각이나 느낌을 길게 풀 때 "
+                "'~것 같아요/~것 같습니다'로 단정을 누그러뜨린다"
+                f"(긴 발화의 {long['share']:.0%}). "
+                "한두 문장으로 끝나는 가벼운 답에는 대개 쓰지 않고 바로 맺는다."
             )
     fillers = [
         w

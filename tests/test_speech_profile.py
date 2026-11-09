@@ -122,7 +122,7 @@ def test_hedging_is_written_per_length_band():
     bands = profile["hedgeByLength"]
     assert bands["short"]["share"] == 0.0 and bands["long"]["share"] == 1.0
     text = "\n".join(render_voice_definition(profile))
-    assert "완화 표현: 생각이나 느낌을 길게 풀 때" in text
+    assert "완화 표현: 소감·회상처럼 생각이나 느낌을 길게 풀 때" in text
     assert "긴 발화의 100%" in text
 
 
@@ -175,7 +175,7 @@ def test_register_overrides_kind_and_habit_rate_counts_answers():
     assert next(s for s in rendered if s.startswith("강조 부사:")) == (
         "강조 부사: '무척' 가운데 하나를 골라 서너 답에 한 번꼴로, 한 답에 하나까지 쓴다."
     )
-    assert "소감·각오" in rendered[0] and "0%" in rendered[0]
+    assert "소감·각오" in rendered[0] and "거의 쓰지 않는다" in rendered[0]
 
 
 def test_samples_are_distinct_whole_casual_replies():
