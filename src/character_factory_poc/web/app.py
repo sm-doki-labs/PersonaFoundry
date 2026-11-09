@@ -52,6 +52,7 @@ class _StudioStaticFiles(_DevStaticFiles):
             "index.html",
             "factory.html",
             "sources.html",
+            "chat.html",
             "d-ops.html",
             "c-glass.html",
             "a-studio.html",
