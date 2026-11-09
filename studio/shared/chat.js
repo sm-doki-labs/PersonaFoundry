@@ -3,6 +3,8 @@
 
   // 대화해 보기 화면(계획 2차 묶음 H, 3차 묶음 M). 완성된 캐릭터와 팀이 직접 말을 주고받는다.
   // 서버는 약속 1 대화 API만 쓴다: GET /api/characters/{cid}/chat/meta, POST /api/characters/{cid}/chat.
+  // 4차 묶음 P: 영상이 있으면(약속 6 GET chat/clips ready=true) 서비스 앱처럼 영상 통화 화면이 된다.
+  // 답이 오면 POST chat/clip으로 반응 영상을 고르고, 없으면 앱의 옅은 반응 대체 규칙(fallbackClip.ts)을 쓴다.
   // 대화 기록은 서버에 남기지 않고 이 탭의 메모리(sessionStorage)에만 둔다.
   // createChat은 DOM 없이 돌아서 시험이 가짜 fetch로 보내기·재생 순서·준비 안 됨·다시 시도를 확인한다. mount는 그 위에 화면을 그린다.
 
@@ -110,13 +112,18 @@
     const pause = o.pause || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     const storage = o.storage || null;
     const AbortCtl = o.AbortController === undefined ? global.AbortController : o.AbortController;
+    // 답 하나가 끝난 뒤의 반응(영상). 약속을 돌려주면 상황 재생이 그 반응이 끝날 때까지 다음 말을 기다린다.
+    const react = typeof o.react === 'function' ? o.react : null;
+    const reactMaxMs = o.reactMaxMs == null ? 45000 : o.reactMaxMs;
     const listeners = new Set();
     let seq = 0;
     let playSeq = 0;
     let destroyed = false;
+    let reaction = null;
 
     // phase: loading · ready · not-ready(준비 안 됨) · missing(없는 캐릭터) · error(불러오기 실패)
-    const state = { phase: 'loading', meta: null, reason: '', error: '', messages: [], pending: null, play: null, announce: null };
+    // clips: null(아직 모름) · 약속 6 GET chat/clips 응답. 못 받으면 {ready:false}로 두고 글 대화만 한다.
+    const state = { phase: 'loading', meta: null, reason: '', error: '', messages: [], pending: null, play: null, announce: null, clips: null };
 
     function emit() { if (!destroyed) listeners.forEach((fn) => { try { fn(state); } catch (error) { /* 화면 오류가 대화를 멈추지 않게 한다 */ } }); }
     function storeKey() { return STORE_PREFIX + cid; }
@@ -182,7 +189,32 @@
         else { state.phase = 'error'; state.error = error.message; }
       }
       emit();
+      if (state.phase === 'ready' && !destroyed) await loadClips();
       return state;
+    }
+
+    // 영상 목록(약속 6). 대화는 영상 없이도 되므로 실패하면 조용히 '영상 없음'으로 둔다.
+    async function loadClips() {
+      let data = null;
+      try { data = await call('GET', chatPath(cid, '/clips?chapter=ch1')); } catch (error) { data = null; }
+      if (destroyed) return state.clips;
+      state.clips = data && typeof data === 'object' ? data : { ready: false };
+      emit();
+      return state.clips;
+    }
+    // 반응 영상 고르기(약속 6). 대화 내용은 서버에 남지 않는다.
+    function pickClip(body) { return call('POST', chatPath(cid, '/clip'), body || {}); }
+
+    function startReaction(userMessage, replyText) {
+      reaction = null;
+      if (!react || !text(replyText).trim()) return;
+      let r = null;
+      try { r = react({ userMessage: text(userMessage), replyText: text(replyText) }); } catch (error) { r = null; }
+      if (!r || typeof r.then !== 'function') return;
+      // 영상 쪽이 멈춰도 대화가 묶이지 않게 상한을 둔다.
+      let timer = null;
+      const cap = new Promise((resolve) => { timer = setTimeout(resolve, reactMaxMs); });
+      reaction = Promise.race([r.catch(() => {}), cap]).then(() => { clearTimeout(timer); });
     }
 
     function last() { return state.messages[state.messages.length - 1] || null; }
@@ -224,6 +256,7 @@
       state.announce = { id: msg.id, text: msg.content };
       save();
       emit();
+      startReaction(user && user.role === 'user' ? user.content : '', msg.content);
       return true;
     }
 
@@ -259,9 +292,10 @@
     async function loop(token) {
       const live = () => state.play && state.play.token === token && state.play.status === 'running' && !destroyed;
       while (live() && state.play.index < state.play.turns.length) {
-        if (last() && last().role === 'assistant' && gap) {
-          await pause(gap);
-          if (!live()) return false;
+        if (last() && last().role === 'assistant') {
+          // 앞 답의 반응 영상이 끝나야 다음 말을 보낸다(영상이 없으면 바로 지나간다).
+          if (reaction) { await reaction; if (!live()) return false; }
+          if (gap) { await pause(gap); if (!live()) return false; }
         }
         pushUser(state.play.turns[state.play.index]);
         save();
@@ -320,6 +354,7 @@
       state.play = null;
       state.messages = [];
       state.announce = null;
+      reaction = null;
       save();
       emit();
     }
@@ -327,7 +362,255 @@
     function subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
     function destroy() { if (state.pending) state.pending.abort(); destroyed = true; listeners.clear(); }
 
-    return { state, load, send, play, stop, resume, retry, reset, subscribe, destroy, canSend, history, scenarios, characterId: cid };
+    return { state, load, loadClips, pickClip, send, play, stop, resume, retry, reset, subscribe, destroy, canSend, history, scenarios, characterId: cid };
+  }
+
+  // ---------------- 영상 통화 ----------------
+
+  // 서버가 이번 답에 맞는 반응을 못 골랐을 때(none·실패·시간 초과) 대신 틀 한 편. frontend WEB/src/domain/fallbackClip.ts를 옮겼다.
+  // 어떤 말에도 어색하지 않은 옅은 반응을 먼저, 없으면 센 감정이 아닌 것, 그래도 없으면 아무거나. 각 층에서 지금 무드와 같은 것을 먼저 보고,
+  // 직전에 대신 튼 것은 피한다. 앱 목록(smile_soft·nod…)은 공장 영상 목록(stages/s6_actions/app_clips.py)의 이름과 겹치지 않아서
+  // 공장 목록의 옅은 반응(glad·amused·curious·rapport·encouraging)과 센 감정(displeased·hurt·wary·dumbfounded)을 덧붙였다.
+  const GENTLE = ['smile_soft', 'soft_smile', 'smile', 'nod', 'lean_in', 'head_tilt', 'thinking', 'glad', 'amused', 'curious', 'rapport', 'encouraging'];
+  const STRONG = ['angry', 'disgust', 'fear', 'stern', 'sad', 'cross_arms_x', 'disappointed', 'sigh', 'big_laugh', 'laugh', 'displeased', 'hurt', 'wary', 'dumbfounded'];
+  const STAGE_PREFIX = /^s\d+__/;
+  const SLOT_PREFIX = /^(?:reaction|followup|emotion|special|action)-/;
+  const STRUCTURAL = /^(idle|speak)|_talking$/;
+  const VARIANT = /_(?:good|bad)(?:_\d+|_strong)?$|_\d+$/;
+  function clipBareKey(key) { return text(key).replace(STAGE_PREFIX, '').replace(SLOT_PREFIX, ''); }
+  // 단계 접두(s2__)·칸 접두(reaction-)·진입 상태(_good/_bad)·변형 번호(_2, _strong)를 뗀 이름.
+  function clipBaseKey(key) { return clipBareKey(key).replace(VARIANT, ''); }
+  function pickFallbackClip(list, options) {
+    const opt = options || {};
+    const random = opt.random || Math.random;
+    const seen = new Set();
+    const pool = [];
+    (Array.isArray(list) ? list : []).forEach((c) => {
+      if (!c || !c.url || !c.clipKey || seen.has(c.clipKey)) return;
+      if (STRUCTURAL.test(clipBareKey(c.clipKey))) return; // 대기·말하기는 감정이 아니다
+      seen.add(c.clipKey);
+      pool.push(c);
+    });
+    if (!pool.length) return null;
+    const fresh = pool.length > 1 ? pool.filter((c) => c.clipKey !== opt.avoidKey) : pool;
+    const sameMood = (l) => (opt.mood ? l.filter((c) => (c.mood || null) === opt.mood) : l);
+    const gentle = fresh.filter((c) => GENTLE.indexOf(clipBaseKey(c.clipKey)) >= 0);
+    const calm = fresh.filter((c) => STRONG.indexOf(clipBaseKey(c.clipKey)) < 0);
+    for (const tier of [gentle, calm, fresh]) {
+      if (!tier.length) continue;
+      const preferred = sameMood(tier);
+      const pick = preferred.length ? preferred : tier;
+      return pick[Math.floor(random() * pick.length)] || null;
+    }
+    return null;
+  }
+
+  // 약속 6 응답을 화면이 쓰는 모양으로. 대기 영상이 하나도 없으면 영상 통화를 하지 않는다(null).
+  function videoClips(data) {
+    if (!data || data.ready !== true) return null;
+    const idle = data.idle || {};
+    const one = (x) => (x && x.url ? { clipKey: text(x.clipKey), url: text(x.url) } : null);
+    const good = one(idle.good);
+    const bad = one(idle.bad);
+    if (!good && !bad) return null;
+    const emotion = (Array.isArray(data.emotion) ? data.emotion : []).filter((c) => c && c.url && c.clipKey)
+      .map((c) => ({ clipKey: text(c.clipKey), url: text(c.url), mood: c.mood ? text(c.mood) : null, title: text(c.title) }));
+    const audio = typeof data.hasAudio === 'boolean' ? data.hasAudio : (typeof data.audio === 'boolean' ? data.audio : null);
+    return { chapter: text(data.chapter) || 'ch1', idle: { good, bad }, emotion, audio };
+  }
+
+  // 영상 무대. 서비스 앱 CallVideoStage처럼 <video> 두 겹을 겹쳐 두고, 뒤 겹에 다음 영상을 물려 첫 프레임이 나온 뒤에만 앞으로 올린다.
+  // 그래서 바꾸는 순간 검은 화면이 보이지 않는다. 대기 영상(무드 good 기본)이 돌고, 답마다 반응 하나를 한 번 틀고, 끝나면 그 반응의 무드로 대기에 돌아간다.
+  // DOM 없이 돌아서 시험이 가짜 video와 가짜 고르기로 순서(답 → 고르기 → 반응 → 대기)를 확인한다.
+  function createVideoCall(opts) {
+    const o = opts || {};
+    const clips = videoClips(o.clips);
+    const players = Array.isArray(o.players) ? o.players.slice(0, 2) : [];
+    if (!clips || players.length < 2) return null;
+    const reduced = !!o.reducedMotion;
+    const fadeMs = reduced ? 0 : (o.fadeMs == null ? 200 : o.fadeMs);
+    const readyMs = o.readyMs == null ? 8000 : o.readyMs;
+    const pickMs = o.pickMs == null ? 10000 : o.pickMs;
+    const maxClipMs = o.maxClipMs == null ? 30000 : o.maxClipMs;
+    const random = o.random || Math.random;
+    const later = o.setTimeout || ((fn, ms) => setTimeout(fn, ms));
+    const unlater = o.clearTimeout || ((id) => clearTimeout(id));
+    // front: 지금 보이는 겹(-1이면 아직 첫 프레임 전). mode: idle · reaction. clip: 틀고 있는 반응.
+    const state = { front: -1, mode: 'idle', mood: clips.idle.good ? 'good' : 'bad', clip: null, muted: true, hasAudio: clips.audio === true, picking: false, recent: [], lastFallback: null };
+    const loaded = [null, null];
+    let group = new Set(); // 지금 재생 흐름이 기다리는 것들. 새 흐름이 시작되면 모두 풀린다.
+    let turn = 0;
+    let playToken = 0;
+    let dead = false;
+
+    function snapshot() { return { front: state.front, mode: state.mode, mood: state.mood, clip: state.clip, muted: state.muted, hasAudio: state.hasAudio, picking: state.picking }; }
+    function emit() { if (!dead && o.onChange) { try { o.onChange(snapshot()); } catch (error) { /* 화면 오류가 영상을 멈추지 않게 한다 */ } } }
+    function listen(v, type, fn) { v.addEventListener(type, fn); return () => v.removeEventListener(type, fn); }
+    function waitFor(v, okTypes, badTypes, ms, check, set) {
+      return new Promise((resolve) => {
+        let done = false;
+        let timer = null;
+        const offs = [];
+        const finish = (value) => {
+          if (done) return;
+          done = true;
+          offs.forEach((off) => off());
+          set.delete(cancel);
+          if (timer != null) unlater(timer);
+          resolve(value);
+        };
+        const cancel = () => finish(false);
+        set.add(cancel);
+        okTypes.forEach((t) => offs.push(listen(v, t, () => { if (!check || check()) finish(true); })));
+        badTypes.forEach((t) => offs.push(listen(v, t, () => finish(false))));
+        if (ms > 0) timer = later(() => finish(false), ms);
+        if (check && check()) finish(true);
+      });
+    }
+    function newPlay() { group.forEach((cancel) => cancel()); group = new Set(); return ++playToken; }
+    function idleFor(mood) { return clips.idle[mood] || clips.idle.good || clips.idle.bad; }
+    function moodAfter(mood) { return (mood === 'good' || mood === 'bad') && clips.idle[mood] ? mood : state.mood; }
+
+    // 뒤 겹 i에 영상을 물리고 첫 프레임을 그릴 수 있을 때까지 기다린다. 같은 영상이면 처음으로 되감기만 한다.
+    function prime(i, url, loop, set) {
+      const v = players[i];
+      v.muted = state.muted;
+      v.loop = !!loop;
+      if (loaded[i] !== url) {
+        loaded[i] = url;
+        v.src = url;
+        if (typeof v.load === 'function') v.load();
+      } else {
+        try { v.pause(); v.currentTime = 0; } catch (error) { /* 되감기 실패는 재생에 지장이 없다 */ }
+      }
+      return waitFor(v, ['loadeddata', 'canplay', 'seeked'], ['error'], readyMs, () => v.readyState >= 2, set).then((ok) => { if (!ok && !dead) loaded[i] = null; return ok; });
+    }
+    async function run(v) {
+      try { const r = v.play(); if (r && typeof r.then === 'function') await r; return true; } catch (error) {
+        // 소리를 켠 채 자동 재생이 막히면 소리를 끄고 한 번 더 튼다.
+        if (!v.muted) { state.muted = true; players.forEach((p) => { p.muted = true; }); emit(); try { await v.play(); return true; } catch (e) { return false; } }
+        return false;
+      }
+    }
+    function frame(v) {
+      if (typeof v.requestVideoFrameCallback !== 'function') return Promise.resolve();
+      return new Promise((resolve) => { let done = false; const go = () => { if (!done) { done = true; resolve(); } }; v.requestVideoFrameCallback(go); later(go, 250); });
+    }
+    function hasAudioNow(v) { return v.mozHasAudio === true || !!(v.audioTracks && v.audioTracks.length) || Number(v.webkitAudioDecodedByteCount) > 0; }
+    function detectAudio(v) {
+      if (state.hasAudio || clips.audio === false || dead) return;
+      if (hasAudioNow(v)) { state.hasAudio = true; emit(); return; }
+      let n = 0;
+      const off = listen(v, 'timeupdate', () => {
+        if (hasAudioNow(v)) { off(); if (!state.hasAudio && !dead) { state.hasAudio = true; emit(); } } else if (++n > 20) off();
+      });
+    }
+    // 겹 i를 앞으로 올린다(겹치는 동안 CSS가 서서히 바꾼다). 바뀐 뒤 아래 겹은 멈춘다.
+    function show(i) {
+      const prev = state.front;
+      state.front = i;
+      emit();
+      if (prev >= 0 && prev !== i) later(() => { if (state.front !== prev && !dead) { try { players[prev].pause(); } catch (error) { /* 이미 멈춤 */ } } }, fadeMs + 40);
+      detectAudio(players[i]);
+    }
+
+    async function toIdle(p) {
+      const target = idleFor(state.mood);
+      if (state.front >= 0 && state.mode === 'idle' && loaded[state.front] === target.url) return true;
+      const back = state.front === 0 ? 1 : 0;
+      const set = group;
+      const ok = await prime(back, target.url, true, set);
+      if (p !== playToken || dead || !ok) return false;
+      // 움직임 줄이기 설정이면 대기 영상은 첫 화면에 멈춰 두고 반응만 튼다.
+      if (!reduced && !(await run(players[back]))) return false;
+      await frame(players[back]);
+      if (p !== playToken || dead) return false;
+      state.mode = 'idle';
+      state.clip = null;
+      show(back);
+      return true;
+    }
+
+    function remember(key) { state.recent = state.recent.filter((k) => k !== key).concat(key).slice(-5); }
+
+    // 반응 하나를 한 번 틀고 대기로 돌아간다. 더 새 반응이 오면 그 자리에서 물러난다.
+    async function playClip(clip) {
+      const p = newPlay();
+      const set = group;
+      const back = state.front === 0 ? 1 : 0;
+      const v = players[back];
+      const ok = (await prime(back, clip.url, false, set)) && p === playToken && !dead && (await run(v));
+      if (p !== playToken || dead) return;
+      if (!ok) { await toIdle(p); return; } // 못 틀면 대기 영상 그대로(앞 반응이 돌던 중이면 대기로 돌아간다)
+      await frame(v);
+      if (p !== playToken || dead) return;
+      state.mode = 'reaction';
+      state.clip = { clipKey: clip.clipKey, title: clip.title || '', mood: clip.mood || null, kind: clip.kind };
+      remember(clip.clipKey);
+      show(back);
+      const length = Number(v.duration) > 0 && Number.isFinite(Number(v.duration)) ? Math.min(maxClipMs, Number(v.duration) * 1000 + 2000) : maxClipMs;
+      await waitFor(v, ['ended'], ['error'], length, () => v.ended === true, set);
+      if (p !== playToken || dead) return;
+      state.mood = moodAfter(clip.mood);
+      await toIdle(p);
+    }
+
+    function within(promise, ms) {
+      return new Promise((resolve, reject) => {
+        const timer = later(() => reject(new Error('timeout')), ms);
+        promise.then((v) => { unlater(timer); resolve(v); }, (e) => { unlater(timer); reject(e); });
+      });
+    }
+
+    // 캐릭터가 한 마디 하면 부른다. 반응이 끝나 대기로 돌아오면(또는 더 새 답에 밀리면) 풀린다.
+    async function react(input) {
+      const t = input || {};
+      const replyText = text(t.replyText).trim();
+      if (dead || !replyText) return;
+      const mine = ++turn;
+      state.picking = true;
+      emit();
+      let pick = null;
+      try {
+        pick = o.pick ? await within(Promise.resolve(o.pick({ userMessage: text(t.userMessage), replyText, recent: state.recent.slice(), chapter: clips.chapter })), pickMs) : null;
+      } catch (error) { pick = null; }
+      if (mine !== turn || dead) return;
+      state.picking = false;
+      // 앱 규칙(useCallTurn pickFollowupClip): 감정 영상을 골라 오면 그것을, 아니면(none·실패·시간 초과) 늘 옅은 반응을 대신 튼다.
+      // 대신 틀 것도 없을 때만 대기 영상을 그대로 둔다.
+      let chosen = null;
+      const c = pick && pick.clip;
+      if (c && c.url && pick.kind === 'emotion') chosen = { clipKey: text(c.clipKey), url: text(c.url), title: text(c.title), mood: pick.mood || c.mood || null, kind: 'emotion' };
+      else {
+        const fb = pickFallbackClip(clips.emotion, { mood: state.mood, avoidKey: state.lastFallback, random });
+        if (fb) { state.lastFallback = fb.clipKey; chosen = Object.assign({}, fb, { kind: 'fallback' }); }
+      }
+      if (!chosen) { emit(); return; }
+      await playClip(chosen);
+    }
+
+    async function start() { return toIdle(newPlay()); }
+    // 새 대화: 고르던 것을 버리고 무드를 처음(good)으로 되돌려 대기 영상으로 간다.
+    function reset() {
+      if (dead) return Promise.resolve(false);
+      turn++;
+      state.picking = false;
+      state.recent = [];
+      state.lastFallback = null;
+      state.mood = clips.idle.good ? 'good' : 'bad';
+      return toIdle(newPlay());
+    }
+    function setMuted(muted) {
+      state.muted = !!muted;
+      players.forEach((v) => { v.muted = state.muted; });
+      emit();
+    }
+    function destroy() {
+      dead = true;
+      group.forEach((cancel) => cancel());
+      players.forEach((v) => { try { v.pause(); } catch (error) { /* 이미 멈춤 */ } });
+    }
+    return { state, react, start, reset, setMuted, destroy, snapshot, clips };
   }
 
   // ---------------- 화면 ----------------
@@ -343,7 +626,9 @@
     moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
     monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
     check: '<polyline points="20 6 9 17 4 12"/>',
-    alert: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12.5"/><line x1="12" y1="16" x2="12" y2="16"/>'
+    alert: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="12.5"/><line x1="12" y1="16" x2="12" y2="16"/>',
+    sound: '<polygon points="4 9 8 9 13 5 13 19 8 15 4 15 4 9"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/>',
+    muted: '<polygon points="4 9 8 9 13 5 13 19 8 15 4 15 4 9"/><line x1="17" y1="9.5" x2="22" y2="14.5"/><line x1="22" y1="9.5" x2="17" y2="14.5"/>'
   };
   const MARK = '<svg class="fd-mark" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="var(--fd-accent)"/><path d="M8.5 17V7h7.5M8.5 12h5" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16.4" cy="16.4" r="1.7" fill="#fff"/></svg>';
   const THEMES = [['system', 'monitor', '시스템 설정 따르기'], ['light', 'sun', '밝은 화면'], ['dark', 'moon', '어두운 화면']];
@@ -359,16 +644,21 @@
     const R = {
       side: $('[data-side]'), head: $('[data-top]'), call: $('[data-call]'), list: $('[data-list]'), state: $('[data-state]'),
       form: $('[data-composer]'), input: $('[data-input]'), sendBtn: $('[data-send]'), hint: $('[data-composer-hint]'),
-      panel: $('[data-panel]'), live: $('[data-live]'), playbar: $('[data-playbar]'), stage: $('[data-stage]')
+      panel: $('[data-panel]'), live: $('[data-live]'), playbar: $('[data-playbar]'), stage: $('[data-stage]'),
+      video: $('[data-video]'), sound: $('[data-sound]'), vcap: $('[data-vcap]'),
+      players: Array.prototype.slice.call(doc.querySelectorAll('[data-player]'))
     };
     const store = (() => { try { return global.localStorage; } catch (error) { return null; } })();
     const session = o.storage !== undefined ? o.storage : (() => { try { return global.sessionStorage; } catch (error) { return null; } })();
     const media = global.matchMedia ? global.matchMedia('(prefers-color-scheme: dark)') : null;
     const ui = { theme: (store && ['light', 'dark'].includes(store.getItem('fd-theme'))) ? store.getItem('fd-theme') : 'system', chars: null, open: new Set(), lastSeen: '', stick: true, announced: '' };
     const narrow = global.matchMedia ? global.matchMedia('(max-width: 1099px)') : null;
+    const motion = global.matchMedia ? global.matchMedia('(prefers-reduced-motion: reduce)') : null;
     let chat = null;
     let unsub = null;
     let tick = null;
+    let call = null; // 영상 통화(createVideoCall). 영상이 있는 캐릭터에서만 만든다.
+    let callFor = null;
 
     function applyTheme() {
       const html = doc.documentElement;
@@ -464,9 +754,12 @@
       }
       const name = nameOf();
       const hasTalk = !!(s && (s.messages.length || s.pending || s.play));
+      // 영상이 없는 캐릭터는 지금 글 대화 그대로 두고, 영상 만들기로 가는 조용한 안내만 붙인다.
+      const noVideo = ready && s.clips && !videoClips(s.clips);
       R.call.innerHTML = '<div class="ch-av' + (speaking ? ' is-speaking' : '') + '" aria-hidden="true">' + E(initial(name)) + '</div>' +
         '<div class="ch-who"><div class="ch-name"><h1 id="ch-title">' + E(name) + '</h1>' + pill + '</div>' +
         (isMotif(m.origin) ? '<p class="ch-note">' + E(MOTIF_NOTE) + '</p>' : '') +
+        (noVideo ? '<p class="ch-vnote">영상이 아직 없어요 · <a href="' + E(factoryHref(chat.characterId)) + '">영상 만들기</a></p>' : '') +
         (info.length ? '<details class="ch-set" data-open-key="set"' + (ui.open.has('set') ? ' open' : '') + '><summary data-key="sum:set">설정 보기</summary><p class="ch-info" aria-label="대화 설정">' + info.join('<span class="dot" aria-hidden="true">·</span>') + '</p></details>' : '') + '</div>' +
         (ready ? '<div class="ch-acts"><a class="btn" href="' + E(factoryHref(chat.characterId)) + '" title="진행 화면에서 프롬프트에 고칠 점을 적어요">고칠 점 적기</a><button type="button" class="btn" data-act="reset" data-key="reset"' + (hasTalk ? '' : ' disabled') + '>' + icon('refresh') + '새 대화</button></div>' : '');
     }
@@ -657,12 +950,55 @@
       } else if (!(s && s.pending) && tick) { global.clearInterval(tick); tick = null; }
     }
 
+    // 영상 무대: 영상이 준비된 캐릭터면 두 겹 <video>로 영상 통화를 열고, 아니면 닫는다.
+    function stopCall() {
+      if (call) call.destroy();
+      call = null;
+      callFor = null;
+      R.players.forEach((v) => {
+        v.classList.remove('is-front');
+        try { v.pause(); v.removeAttribute('src'); v.load(); } catch (error) { /* 비워 두기만 한다 */ }
+      });
+      if (R.video) R.video.classList.remove('is-live', 'is-react');
+    }
+    function paintVideo(v) {
+      if (!R.video) return;
+      R.players.forEach((el, i) => el.classList.toggle('is-front', i === v.front));
+      R.video.classList.toggle('is-live', v.front >= 0);
+      R.video.classList.toggle('is-react', v.mode === 'reaction');
+      if (R.sound) {
+        R.sound.hidden = !v.hasAudio;
+        const label = v.muted ? '소리 켜기' : '소리 끄기';
+        R.sound.setAttribute('aria-pressed', String(!v.muted));
+        R.sound.setAttribute('aria-label', label);
+        R.sound.title = label;
+        R.sound.innerHTML = icon(v.muted ? 'muted' : 'sound');
+      }
+      // 화면 읽기 프로그램용 설명. 서버가 준 반응 이름은 한국어일 때만 쓴다.
+      const title = v.clip && /[가-힣]/.test(text(v.clip.title)) ? text(v.clip.title) : '';
+      if (R.vcap) R.vcap.textContent = nameOf() + ' 영상 · ' + (v.mode === 'reaction' ? (title ? title + ' 반응을 보이고 있어요' : '반응을 보이고 있어요') : '듣고 있어요');
+    }
+    function renderVideo() {
+      if (!R.video) return;
+      const s = chat ? chat.state : null;
+      const on = !!(s && s.phase === 'ready' && videoClips(s.clips)) && R.players.length >= 2;
+      if (R.stage) R.stage.classList.toggle('has-video', on);
+      R.video.hidden = !on;
+      if (!on) { if (call || callFor) stopCall(); return; }
+      if (call && callFor === s.clips) return;
+      stopCall();
+      callFor = s.clips;
+      const live = chat;
+      call = createVideoCall({ clips: s.clips, players: R.players, pick: (body) => live.pickClip(body), reducedMotion: !!(motion && motion.matches), onChange: paintVideo });
+      if (call) { paintVideo(call.snapshot()); call.start(); }
+    }
+
     // 다시 그려도 키보드 포커스가 같은 단추에 남게 한다. 그 단추가 사라지면 가까운 다음 단추로 옮긴다.
     const FALLBACK = { 'play:': ['stop'], stop: ['resume', 'retry', 'reset'], resume: ['stop'], retry: ['stop'] };
     function render() {
       const active = doc.activeElement;
       const key = active && active.getAttribute ? active.getAttribute('data-key') : null;
-      renderCall(); renderState(); renderList(); renderComposer(); renderPanel(); announce(); syncTick();
+      renderVideo(); renderCall(); renderState(); renderList(); renderComposer(); renderPanel(); announce(); syncTick();
       if (!key) return;
       const find = (k) => { const el = doc.querySelector('[data-key="' + k.replace(/"/g, '') + '"]'); return el && !el.disabled ? el : null; };
       let el = find(key);
@@ -677,9 +1013,11 @@
     function open() {
       if (unsub) unsub();
       if (chat) chat.destroy();
+      stopCall();
       ui.lastSeen = ''; ui.stick = true; ui.announced = '';
       const cid = routeId(global.location && global.location.hash);
-      chat = cid ? createChat({ fetch: o.fetch, apiBase: o.apiBase, characterId: cid, storage: session, gap: o.gap, pause: o.pause }) : null;
+      // 답이 오면 영상 무대가 반응을 고르고 튼다. 상황 재생은 그 반응이 끝나야 다음 말을 보낸다.
+      chat = cid ? createChat({ fetch: o.fetch, apiBase: o.apiBase, characterId: cid, storage: session, gap: o.gap, pause: o.pause, react: (turn) => (call ? call.react(turn) : null) }) : null;
       if (chat) {
         unsub = chat.subscribe(() => {
           if (chat) doc.title = (chat.state.meta ? nameOf() + ' · ' : '') + '대화해 보기 · Foundry';
@@ -711,8 +1049,10 @@
       const act = el.dataset.act;
       if (act === 'theme') { setTheme(el.dataset.theme); return; }
       if (!chat) return;
+      if (act === 'sound') { if (call) call.setMuted(!call.state.muted); return; }
       if (act === 'play') {
         ui.stick = true;
+        if (call) call.reset();
         chat.play(el.dataset.id);
         // 좁은 화면에서는 상황 목록이 대화 아래에 있으므로 재생하는 대화가 보이게 올린다.
         if (R.stage && R.stage.getBoundingClientRect().top < 0 && R.stage.scrollIntoView) R.stage.scrollIntoView({ block: 'start', behavior: 'smooth' });
@@ -721,7 +1061,7 @@
       else if (act === 'resume') { ui.stick = true; chat.resume(); }
       else if (act === 'retry') { ui.stick = true; chat.retry(); }
       else if (act === 'reload') chat.load();
-      else if (act === 'reset') { chat.reset(); if (R.input) { R.input.disabled = false; R.input.focus(); } }
+      else if (act === 'reset') { chat.reset(); if (call) call.reset(); if (R.input) { R.input.disabled = false; R.input.focus(); } }
     });
     doc.addEventListener('toggle', (ev) => {
       const d = ev.target;
@@ -755,7 +1095,7 @@
     return { get chat() { return chat; }, open };
   }
 
-  const api = { createChat, mount, routeId, seconds, revLabel, viaLabel, rejectedCount, isMotif, displayName, createdLabel, chatList, isGeneric, groupScenarios, MOTIF_NOTE };
+  const api = { createChat, createVideoCall, pickFallbackClip, clipBaseKey, videoClips, mount, routeId, seconds, revLabel, viaLabel, rejectedCount, isMotif, displayName, createdLabel, chatList, isGeneric, groupScenarios, MOTIF_NOTE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global) global.CharacterChat = api;
 })(typeof window !== 'undefined' ? window : globalThis);
