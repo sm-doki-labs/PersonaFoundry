@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,13 @@ from character_factory_poc.common.canonical import sha256_file
 from character_factory_poc.common.errors import CheckFailed, FactoryError, NeedsInputError
 from character_factory_poc.common.schema import dump, validate
 from character_factory_poc.common.store import next_rev, read_json, write_manifest
-from character_factory_poc.contracts.source import SourceDigest, SourceIndex, SourcePack, TextStats
+from character_factory_poc.contracts.source import (
+    SourceDigest,
+    SourceIndex,
+    SourcePack,
+    TextStats,
+    default_register,
+)
 from character_factory_poc.pipeline.agent import AgentSpec, run_agent
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.gates import render_gate_page
@@ -58,13 +65,25 @@ def _load_pack(ctx: Context, cid: str, pack_path: Path | None) -> tuple[SourcePa
     """출처 묶음을 읽고 상대 경로를 묶음 파일 기준 절대 경로로 바꾼다."""
     if pack_path is None:
         last = _latest_rev_dir(ctx, cid)
-        if last is None or not (last / "source-pack.json").exists():
+        submitted = ctx.character_dir(cid) / "source-pack.json"
+        if last is not None and (last / "source-pack.json").exists():
+            pack_path = last / "source-pack.json"
+        elif submitted.is_file():
+            pack_path = submitted
+        else:
             raise NeedsInputError(
                 "모티브 s0: 출처 묶음이 필요하다(cfp run ... --source-pack pack.json)"
             )
-        raw = read_json(last / "source-pack.json")
-        return validate("source-pack-v1", raw), raw  # type: ignore[return-value]
     pack_path = Path(pack_path).resolve()
+
+    def guard(path: Path) -> None:
+        if os.getenv("CFP_SERVER_MODE") == "1" and not (
+            path.resolve().is_relative_to(ctx.character_dir(cid).resolve())
+            and path.resolve().is_relative_to(ctx.config.root.resolve())
+        ):
+            raise CheckFailed("s0", ["캐릭터 폴더 밖 출처는 서버에서 읽을 수 없다"])
+
+    guard(pack_path)
     raw = json.loads(pack_path.read_text("utf-8"))
     base = pack_path.parent
     if isinstance(raw.get("factsPath"), str):
@@ -72,6 +91,7 @@ def _load_pack(ctx: Context, cid: str, pack_path: Path | None) -> tuple[SourcePa
     for key in ("photos", "texts"):
         for item in raw.get(key, []):
             p = Path(item.get("path", ""))
+            guard(base / p)
             item["path"] = str(p if p.is_absolute() else (base / p).resolve())
     pack: SourcePack = validate("source-pack-v1", raw)  # type: ignore[assignment]
     ids = [t.textId for t in pack.texts]
@@ -91,15 +111,7 @@ def _read_all(pack: SourcePack) -> tuple[list[parse.Msg], list[TextStats], dict[
     for spec in pack.texts:
         raw = Path(spec.path).read_text("utf-8")
         try:
-            if spec.kind == "KAKAO_EXPORT":
-                part = parse.read_kakao(spec.textId, raw)
-            elif spec.kind == "ARTICLE":
-                part = parse.read_article(spec.textId, raw, spec.date, subject_name)
-            else:
-                part = parse.read_dialogue(spec.textId, raw, spec.date)
-            if not part:
-                raise parse.SourceError(f"{spec.textId}: 읽은 메시지가 없다(형식 확인)")
-            parse.assign_speakers(part, spec, subject_name)
+            part = parse.read_source(spec, raw, subject_name)
         except parse.SourceError as e:
             raise CheckFailed("s0", [str(e)]) from None
         for key, n in parse.mask(part).items():
@@ -110,6 +122,7 @@ def _read_all(pack: SourcePack) -> tuple[list[parse.Msg], list[TextStats], dict[
             TextStats(
                 textId=spec.textId,
                 kind=spec.kind,
+                register=spec.register or default_register(spec.kind),
                 sha256=sha256_file(Path(spec.path)),
                 messages=len(part),
                 subjectMessages=sum(m.speaker == "SUBJECT" for m in part),

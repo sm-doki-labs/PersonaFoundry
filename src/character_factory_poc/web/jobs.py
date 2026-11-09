@@ -228,6 +228,8 @@ class JobManager:
         trigger: str = "manual",
     ) -> dict:
         char_dir = reads.character_dir(self.root, character_id)
+        if self.settings.server_mode and not char_dir.is_relative_to(self.root):
+            raise WebError(403, "공장 루트 밖에서는 작업을 실행할 수 없다")
         state_path = char_dir / "state.json"
         if state_path.is_symlink() or (
             state_path.exists() and not state_path.resolve().is_relative_to(char_dir.resolve())

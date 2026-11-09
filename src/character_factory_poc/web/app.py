@@ -50,6 +50,7 @@ class _StudioStaticFiles(_DevStaticFiles):
             ".",
             "index.html",
             "factory.html",
+            "sources.html",
             "d-ops.html",
             "c-glass.html",
             "a-studio.html",
@@ -69,6 +70,7 @@ def create_app(
     """공장 루트 하나에 붙는 워크숍 앱을 만든다. runner는 시험에서 작업 실행 함수를 바꿀 때 쓴다."""
     root = Path(root).expanduser().resolve()
     conf = load_settings(root, config_path)
+    root = conf.root
     if jobs_dir is not None:
         conf = replace(conf, jobs_dir=Path(jobs_dir))
     hub = EventHub()
@@ -83,6 +85,9 @@ def create_app(
     app.state.settings = conf
     app.state.hub = hub
     app.state.jobs = jobs
+    from character_factory_poc.web.sources import install_source_routes
+
+    install_source_routes(app, conf, jobs)
     from character_factory_poc.web.trait_authoring import install_authoring_routes
 
     install_authoring_routes(app, root, conf, jobs)

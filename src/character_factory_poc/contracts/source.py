@@ -17,6 +17,13 @@ from character_factory_poc.contracts.common import Strict
 
 SubjectKind = Literal["PUBLIC_FIGURE", "PRIVATE_PERSON"]
 TextKind = Literal["KAKAO_EXPORT", "INTERVIEW", "ARTICLE", "TRANSCRIPT"]
+Register = Literal["FORMAL", "CASUAL"]
+
+
+def default_register(kind: TextKind) -> Register:
+    return "FORMAL" if kind in {"INTERVIEW", "ARTICLE"} else "CASUAL"
+
+
 Speaker = Literal["SUBJECT", "USER", "OTHER"]
 DigestCategory = Literal["DAILY", "AFFECTION", "CONFLICT", "ADVICE", "HUMOR", "WORK", "OTHER"]
 
@@ -45,6 +52,8 @@ class SourceText(Strict):
     textId: str = Field(min_length=1, pattern=r"^[A-Za-z0-9_-]+$")
     kind: TextKind
     path: str = Field(min_length=1)
+    register: Register | None = None
+    sourceUrl: str | None = None
     language: str = "ko"
     subjectSpeaker: str | None = Field(
         default=None, description="원문에서 대상 인물의 화자 이름(카톡 표시 이름, 인터뷰 화자)"
@@ -79,6 +88,7 @@ class SourcePack(Strict):
 class TextStats(Strict):
     textId: str
     kind: TextKind
+    register: Register | None = None
     sha256: str
     messages: int
     subjectMessages: int
