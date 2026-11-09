@@ -415,7 +415,8 @@ def run_s0(ctx: Context, cid: str, pack_path: Path | None = None) -> Path:
         cid,
         pack,
         rev_dir,
-        [r for r in sample if r["msgId"] not in flagged],
+        # 본인 발화 대조는 표본이 아니라 승인 대상 원문 전체에서 후보를 추린다.
+        [r for r in corpus_rows if r["msgId"] not in flagged],
         {m.as_row()["msgId"] for m in held},
         budget,
     )

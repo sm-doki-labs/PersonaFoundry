@@ -23,10 +23,10 @@ from character_factory_poc.stages.s8_prompts.build import run_s8
 from character_factory_poc.stages.s8_prompts.twin import approved_facts
 from tests.support.flow import v2_plan
 from tests.support.web_gates import trait_sheet_for
+from tests.test_motif_choices import demo_ledger
 from tests.test_source_s0 import _twin, _write_pack
 from tests.test_text_model_deck import configured
 from tests.test_trait_ledger import _ledger
-from tests.test_motif_choices import demo_ledger
 from tests.test_twin_s3 import CANARY, _ctx, _input, _ready
 
 
@@ -141,7 +141,66 @@ def test_gemini_uses_only_same_line_citations_and_never_searches_corpus(monkeypa
     )
     assert [f.text for f in doc.items] == ["푸른 대회 우승"]
     assert str(doc.items[0].sources[0].url) == "https://example.org/real"
-    assert len(log) == 2 and all(entry["ok"] for entry in log)
+    # 최근 1년 검색, 경력 전체 검색, 본인 발화 대조 세 번이다.
+    assert len(log) == 3 and all(entry["ok"] for entry in log)
+
+
+def test_stale_current_status_is_dropped_and_old_career_kept():
+    from datetime import date
+
+    rows = [
+        dict(
+            category="CURRENT_STATUS",
+            eventDate="2024-11-14",
+            importance=3,
+            text="옛 팀 주장으로 뛰고 있다.",
+            sources=[dict(url="https://example.org/a", title="t")],
+        ),
+        dict(
+            category="CURRENT_STATUS",
+            eventDate="2026-08-01",
+            importance=3,
+            text="새 팀에서 뛰고 있다.",
+            sources=[dict(url="https://example.org/b", title="t")],
+        ),
+        dict(
+            category="CAREER",
+            eventDate="2015-08-28",
+            importance=3,
+            text="옛 팀으로 이적했다.",
+            sources=[dict(url="https://example.org/c", title="t")],
+        ),
+    ]
+    kept, _ = facts.rank(rows, 10, 700, today=date(2026, 11, 10))
+    assert [f.text for f in kept] == ["새 팀에서 뛰고 있다.", "옛 팀으로 이적했다."]
+
+
+def test_self_view_candidates_come_from_matching_words_in_large_corpus():
+    from datetime import date
+
+    corpus = []
+    for i in range(300):
+        corpus.append(dict(msgId=f"u{i}", convId=f"c{i}", speaker="USER", text="요즘 어때요"))
+        corpus.append(dict(msgId=f"s{i}", convId=f"c{i}", speaker="SUBJECT", text="잘 지내요"))
+    corpus += [
+        dict(msgId="u-b", convId="cb", speaker="USER", text="번리전 골 얘기 해 주세요"),
+        dict(msgId="s-b", convId="cb", speaker="SUBJECT", text="그건 운이 좋았던 것 같아요"),
+        dict(msgId="u-p", convId="cp", speaker="USER", text="여자친구 있어요?"),
+        dict(msgId="s-p", convId="cp", speaker="SUBJECT", text="그건 비밀로 할게요"),
+    ]
+    item = facts.Fact.model_validate(
+        dict(
+            factId="f1",
+            category="AWARD",
+            eventDate=date(2020, 12, 17),
+            importance=3,
+            text="번리전 70m 단독 돌파 골로 푸스카스상을 받았다.",
+            sources=[dict(url="https://example.org/p", title="t")],
+        )
+    )
+    views, deflect, _ = facts.candidates_for([item], corpus, set())
+    assert views["f1"] == ["s-b"]
+    assert deflect == ["s-p"]
 
 
 @pytest.mark.parametrize("mode", ["replace", "merge"])
