@@ -2908,6 +2908,13 @@
       '<tbody>' + texts + '</tbody></table></div>' +
       '<p class="section-sub">표의 숫자는 비교 세트를 떼기 전 전체예요. 위의 쓸 메시지 수는 비교 세트를 뺀 수예요.</p>' +
       '<p class="section-sub">사진 ' + num(photos.count) + '장' + (origins.length ? ' · 받은 곳: ' + esc(origins.join(', ')) : '') + '. 사진은 다음 관문(기준 사진)에서 크게 보고 골라요.</p></section>' +
+      (items.publicFacts ? '<section class="gate-section"><h2>공개 사실 확인</h2>' +
+        list(items.publicFacts.items).map(function (f) {
+          return '<p><label><input type="checkbox" data-exclude-fact value="' + esc(f.factId) + '"' +
+            (f.excluded ? ' checked disabled' : '') + '> 제외 · ' + esc(f.eventDate) + ' ' + esc(f.text) + '</label><br>' +
+            list(f.sources).map(function (s) { return esc(s.title) + ' ' + esc(s.url); }).join('<br>') +
+            (f.selfView ? '<br>본인 시점: ' + esc(f.selfView.paraphrase) + '<br>원문 ' + esc(f.selfView.msgId) + ': ' + esc(f.selfView.quote) : '') + '</p>';
+        }).join('') + bullets(list(items.publicFacts.deflections).map(function (d) { return '사적인 질문을 넘기는 말: ' + d.quote; })) + '</section>' : '') +
       '<section class="gate-section"><h2>대상과 사용 근거</h2>' +
       facts([
         ['대상', (subject.displayName || '-') + ' · ' + (SUBJECT_KO[subject.kind] || subject.kind || '-')],
@@ -2956,6 +2963,7 @@
   }
   function buildSourcePack(decision) {
     var answer = { decision: decision };
+    if (state.items.publicFacts) answer.excludedFactIds = qa('[data-exclude-fact]:checked').map(function (el) { return el.value; });
     if (decision === 'APPROVE' && sourceLocked()) throw Error('사용 근거가 비어 승인할 수 없어요. 출처 묶음을 채워 다시 돌려 주세요.');
     if (decision === 'REQUEST_CHANGES') {
       var box = q('[data-source-note]');

@@ -62,6 +62,7 @@ class HoldoutPolicy(Strict):
 class SourcePack(Strict):
     schemaVersion: Literal["source-pack-v1"] = "source-pack-v1"
     subject: SourceSubject
+    factsPath: str | None = Field(default=None, min_length=1, description="공개 사실 JSON 경로")
     knownFacts: dict[str, str] = Field(default_factory=dict)
     chapterTemplate: Literal["FAN_CALL", "FAMILY_CALL"] = Field(
         default_factory=lambda data: (

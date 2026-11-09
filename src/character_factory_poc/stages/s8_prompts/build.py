@@ -34,7 +34,13 @@ from character_factory_poc.stages.s8_prompts.source import (
     project_plan,
     with_creator_traits,
 )
-from character_factory_poc.stages.s8_prompts.twin import approved_voice, motif_limits, voice_lines
+from character_factory_poc.stages.s8_prompts.twin import (
+    approved_facts,
+    approved_voice,
+    motif_facts,
+    motif_limits,
+    voice_lines,
+)
 
 FILLED_BY_FACTORY = ("SYSTEM_RULES", "OUTPUT")
 OUTPUT_RULE = "캐릭터가 실제로 할 말만 출력한다. JSON·라벨·해설·행동 지문은 쓰지 않는다. 보통 짧은 1~3문장으로 답하고 필요하면 말풍선처럼 줄을 나눈다. 답변 틀을 채우려고 이유·대안·질문을 덧붙이지 않는다."
@@ -453,26 +459,30 @@ def run_deck_s8(ctx: Context, cid: str, voice_probes: list[str]) -> Path:
     state.require_deps("s8")
     plan, plan_path = load_approved_plan(ctx, cid)
     sheet, sheet_path = load_latest_trait_sheet(ctx, cid)
-    rules, rules_ref = load_actor_rules(ctx)
     source = project_plan(plan, sha256_file(plan_path))
     voice = None
     limits = None
+    reviewed = None
+    facts = None
     if read_origin(ctx.character_dir(cid)) == SOURCE:
         source["sourceVoice"] = approved_voice(ctx, cid, plan)
         voice = voice_lines(plan.voiceSummary, source["sourceVoice"])
-        limits = motif_limits()
+        reviewed = approved_facts(ctx, cid)
+        facts = motif_facts(reviewed)
+        limits = motif_limits(reviewed)
+    rules, rules_ref = load_actor_rules(ctx, origin=SOURCE if reviewed is not None else None)
     ledger_path = sheet_path.parent / "trait-ledger.json"
     if ledger_path.exists():
         from character_factory_poc.stages.s8_prompts.actor_persona import compose_from_ledger
 
         ledger = validate("trait-ledger-v1", json.loads(ledger_path.read_text("utf-8")))
         text, sections = compose_from_ledger(
-            plan, ledger, rules_text=rules, voice=voice, limits=limits
+            plan, ledger, rules_text=rules, voice=voice, limits=limits, facts=facts
         )
         compiler = "actor-trait-ledger-v1"
     else:
         text, sections = compose_approved_sheet(
-            plan, sheet, rules_text=rules, voice=voice, limits=limits
+            plan, sheet, rules_text=rules, voice=voice, limits=limits, facts=facts
         )
         compiler = "actor-approved-sheet-v1"
     from character_factory_poc.common.errors import NeedsInputError
@@ -498,6 +508,8 @@ def run_deck_s8(ctx: Context, cid: str, voice_probes: list[str]) -> Path:
     ):
         raise ValueError("trait source generation binding hash mismatch")
     limit = int(ctx.config.stage("s8").get("long_prompt_max_chars", 8000))
+    if reviewed is not None:
+        limit = min(limit, 8000)
     if len(text) > limit:
         raise ValueError(f"정본 {len(text)}자가 S8 상한 {limit}자를 넘는다. 내용을 자르지 않는다")
     folder = ctx.character_dir(cid) / "s8-prompts"

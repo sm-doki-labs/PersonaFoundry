@@ -70,17 +70,66 @@ def voice_lines(summary: str, voice: dict) -> list[str]:
     return [*lines, summary, render_voice_definition(profile)[-1]]
 
 
-def motif_limits() -> list[str]:
+def approved_facts(ctx, cid):
+    """G0에서 검토한 같은 판만 읽고 제외한 사실은 뒤 단계에 넘기지 않는다."""
+    from character_factory_poc.common.canonical import sha256_file
+    from character_factory_poc.contracts.facts import MotifFacts
+
+    gate = ctx.state(cid).gate("G0")
+    if gate.status != "APPROVED" or not gate.rev or not gate.recordRef:
+        raise ValueError("공개 사실을 쓰려면 G0 승인이 필요하다")
+    root = ctx.character_dir(cid)
+    record = read_json(root / gate.recordRef)
+    path = root / STAGE_DIR / gate.rev / "facts.json"
+    ref = path.relative_to(root).as_posix()
+    artifact = next((a for a in record["shownArtifacts"] if a["ref"] == ref), None)
+    if artifact is None and not path.exists():
+        return None
+    if not artifact or not path.is_file() or sha256_file(path) != artifact["sha256"]:
+        raise ValueError("G0에서 검토한 공개 사실과 현재 파일이 다르다")
+    facts = MotifFacts.model_validate(read_json(path))
+    facts.items = [
+        f for f in facts.items if not f.excluded and f.factId not in record["selections"]
+    ]
+    return facts
+
+
+def motif_facts(facts):
+    lines = []
+    if facts:
+        for f in facts.items:
+            lines.append(f.line())
+            if f.selfView:
+                lines.append(f.selfView.paraphrase)
+    return lines
+
+
+def motif_limits(facts=None) -> list[str]:
     """D-0147: 실존 인물은 확인할 수 있는 지난 일을 지어내지 않는다.
 
     공통 대화 규칙은 생활·지난 일·취향을 대화 중에 새로 말해도 된다고 허용한다. 창작 인물에는 맞지만
     실존 인물에는 사실 확인이 가능한 내용이 생긴다. 이 한계는 인물이 소유하는 칸
     (KNOWS_AND_LIMITS)에 둔다.
     """
-    return [
+    lines = [
         "실존 인물이다. 확인할 수 있는 지난 일(있었던 일과 그 결과, 함께한 사람과 그 사람의 취향, "
         "먹은 음식, 쓰는 물건의 상표, 날짜와 숫자)은 위 사실과 말투 칸에 적힌 것만 사실로 말한다",
         "확인되지 않은 세부를 물으면 지어내지 않고 정확히 기억나지 않는다고 짧게 말한 뒤 "
         "아는 범위의 이야기로 넘어간다",
         "지금 통화 중의 상태와 오늘 일과는 장면 설정을 따른다",
     ]
+    if facts is not None:
+        phrases = " 또는 ".join(f"“{phrase}”" for phrase in facts.phrases())
+        lines.extend(
+            [
+                "지난 경기와 대회 등 끝난 일은 위 사실에 적힌 결과와 본인이 밝힌 느낌대로 말한다",
+                *(
+                    f"은퇴나 거취 등 현재 상태를 물으면 확인한 시점의 사실대로 답한다: {f.line()}"
+                    for f in facts.items
+                    if f.category == "CURRENT_STATUS"
+                ),
+                f"사적인 대화, 연애와 가족의 사생활은 위 사실에 적힌 것만 말하고, "
+                f"그 밖에는 {phrases}처럼 가볍게 넘긴다",
+            ]
+        )
+    return lines

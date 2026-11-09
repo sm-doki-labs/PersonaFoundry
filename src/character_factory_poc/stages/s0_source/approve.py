@@ -29,13 +29,25 @@ def approve_g0(ctx: Context, cid: str, answer: dict) -> Path:
         raise FactoryError(
             "사용 근거가 비어 G0을 승인할 수 없다: " + "; ".join(index.usageProblems)  # type: ignore[attr-defined]
         )
+    shown = [rev_dir / "source-index.json", rev_dir / "digest.json", rev_dir / "gate-G0.html"]
+    facts = rev_dir / "facts.json"
+    ids = set()
+    if facts.exists():
+        shown.append(facts)
+        ids = {item["factId"] for item in read_json(facts)["items"]}
+    exclusions = answer.get("excludedFactIds", [])
+    if not isinstance(exclusions, list) or any(
+        not isinstance(i, str) or i not in ids for i in exclusions
+    ):
+        raise FactoryError("제외할 사실 ID는 이 G0 목록에서 고른다")
     rec = write_gate_record(
         char_dir,
         state,
         gate="G0",
         rev=gate.rev,
         stage_id="s0",
-        shown=[rev_dir / "source-index.json", rev_dir / "digest.json", rev_dir / "gate-G0.html"],
+        shown=shown,
+        selections=exclusions,
         decision=decision,
         reviewer=answer.get("reviewer", "user"),
         reasons=answer.get("reasons", ""),

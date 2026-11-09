@@ -24,7 +24,7 @@ from character_factory_poc.pipeline.agent import AgentSpec, run_agent
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.gates import render_gate_page
 from character_factory_poc.pipeline.graph import SOURCE
-from character_factory_poc.stages.s0_source import parse
+from character_factory_poc.stages.s0_source import facts, parse
 
 STAGE_DIR = "s0-source"
 SETTINGS = {
@@ -40,10 +40,12 @@ def _settings(ctx: Context) -> dict[str, int]:
     return {k: int(cfg.get(k, v)) for k, v in SETTINGS.items()}
 
 
-def plan_calls(ctx: Context) -> list[CallPlan]:
+def plan_calls(ctx: Context, *, public: bool = True) -> list[CallPlan]:
     cfg = _settings(ctx)
     n = 1 + cfg["max_check_retries"] + cfg["max_format_retries"]
-    return [CallPlan("s0", f"출처 정리 에이전트 (재시도 포함 최대 {n}회)", n)]
+    return [CallPlan("s0", f"출처 정리 에이전트 (재시도 포함 최대 {n}회)", n)] + (
+        [CallPlan("s0", "공인 공개 사실 검색·원문 대조 (최대 2회)", 2, None)] if public else []
+    )
 
 
 def _latest_rev_dir(ctx: Context, cid: str) -> Path | None:
@@ -65,6 +67,8 @@ def _load_pack(ctx: Context, cid: str, pack_path: Path | None) -> tuple[SourcePa
     pack_path = Path(pack_path).resolve()
     raw = json.loads(pack_path.read_text("utf-8"))
     base = pack_path.parent
+    if isinstance(raw.get("factsPath"), str):
+        raw["factsPath"] = str(facts.manual_path(raw["factsPath"], base, ctx.character_dir(cid)))
     for key in ("photos", "texts"):
         for item in raw.get(key, []):
             p = Path(item.get("path", ""))
@@ -213,6 +217,7 @@ def _page(
     index: SourceIndex,
     digest: SourceDigest,
     sample: list[dict],
+    reviewed=None,
 ) -> str:
     by_id = {r["msgId"]: r for r in sample}
     lock = (
@@ -269,7 +274,30 @@ def _page(
         ),
         ("에이전트: 자료 품질", "\n".join(f"- {n}" for n in digest.qualityNotes) or "-"),
     ]
+    if reviewed is not None:
+        for item in reviewed.items:
+            lines = [item.line(), *(f"{s.title} {s.url}" for s in item.sources)]
+            if item.selfView:
+                q = item.selfView
+                lines += [f"본인 시점: {q.paraphrase}", f"원문 {q.msgId}: {q.quote}"]
+            if item.excluded:
+                lines.append("입력에서 제외됨")
+            sections.append((f"공개 사실 · {item.factId}", "\n".join(lines)))
+        sections.append(
+            (
+                "사적인 질문을 넘기는 말",
+                "\n".join(
+                    [f"{q.msgId}: {q.quote}" for q in reviewed.deflections]
+                    + [
+                        f"기본 표현: {s}"
+                        for s in reviewed.phrases()
+                        if s not in {q.quote for q in reviewed.deflections}
+                    ]
+                ),
+            )
+        )
     return render_gate_page(
+        exclude_ids=[f.factId for f in reviewed.items if not f.excluded] if reviewed else [],
         title=f"G0 출처 확인 · {pack.subject.displayName}",
         subject_id=cid,
         gate="G0",
@@ -287,8 +315,8 @@ def run_s0(ctx: Context, cid: str, pack_path: Path | None = None) -> Path:
     state.require_deps("s0")
     cfg = _settings(ctx)
     budget = ctx.budget()
-    budget.check_plan(plan_calls(ctx))
     pack, pack_raw = _load_pack(ctx, cid, pack_path)
+    budget.check_plan(plan_calls(ctx, public=pack.subject.kind == "PUBLIC_FIGURE"))
     rev = next_rev(ctx.character_dir(cid) / STAGE_DIR, "sp")
     rev_dir = ctx.character_dir(cid) / STAGE_DIR / rev
     rev_dir.mkdir(parents=True, exist_ok=True)
@@ -368,8 +396,18 @@ def run_s0(ctx: Context, cid: str, pack_path: Path | None = None) -> Path:
     (rev_dir / "digest.json").write_text(
         json.dumps(dump(digest), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+    flagged = {f.msgId for f in digest.piiFlags}
+    reviewed = facts.collect_for_gate(
+        ctx,
+        cid,
+        pack,
+        rev_dir,
+        [r for r in sample if r["msgId"] not in flagged],
+        {m.as_row()["msgId"] for m in held},
+        budget,
+    )
     (rev_dir / "gate-G0.html").write_text(
-        _page(cid, rev, pack, index, digest, corpus_rows), encoding="utf-8"
+        _page(cid, rev, pack, index, digest, corpus_rows, reviewed), encoding="utf-8"
     )
     write_manifest(rev_dir)
     state.transition("s0", "AWAITING_HUMAN", rev=rev)

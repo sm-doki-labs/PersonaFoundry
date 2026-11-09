@@ -1002,6 +1002,7 @@ def source_pack(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> 
     check = digest.get("speakerCheck") if isinstance(digest.get("speakerCheck"), dict) else {}
     return {
         "kind": "sourcePack",
+        "publicFacts": read_json(folder / "facts.json"),
         "source": "artifacts",
         "problems": problems,
         "sourceRev": index.get("sourceRev"),
