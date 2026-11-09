@@ -1,7 +1,10 @@
-/* 대화 테스트(계획 2차 H). 진행 화면(flow.css)의 셸·사이드바·머리줄·버튼·배지를 그대로 쓰고 이 화면의 배치만 더한다.
+/* 대화해 보기(계획 2차 H, 3차 M). 진행 화면(flow.css)의 셸·사이드바·머리줄·버튼·배지를 그대로 쓰고 이 화면의 배치만 더한다.
    색은 foundry-tokens.css 의미 토큰만 쓴다. 파랑은 "답을 쓰는 중·재생 중", 초록은 "끝남", 주황은 "아직 준비 중", 빨강은 "실패"에만 쓴다.
    가운데는 영상통화처럼 한 사람과 마주 보는 기둥, 오른쪽은 상황 재생과 만들 때 받아 둔 답이다. */
 .ch .fd-nav,.ch a.btn{text-decoration:none!important}
+.ch .fd-side a.fd-nav{color:var(--fd-fg-muted)}
+.ch .fd-side a.fd-nav:hover{color:var(--fd-fg)}
+.ch .fd-side a.fd-nav[aria-current="page"]{color:var(--fd-accent-fg)}
 .ch-skip{position:absolute;left:12px;top:-40px;z-index:10;padding:6px 10px;border-radius:var(--fd-r-2);background:var(--fd-bg-surface);border:1px solid var(--fd-line-strong)}
 .ch-skip:focus{top:10px}
 
@@ -129,6 +132,30 @@
 .ch-sample .u{color:var(--fd-fg-muted)}
 .ch-sample .r{color:var(--fd-fg)}
 .ch-none{margin:0;color:var(--fd-fg-muted)}
+
+/* 3차 QA(묶음 M) */
+.ch-acts{display:flex;align-items:center;gap:8px;flex:none}
+.ch-set{margin-top:2px;font-size:var(--fd-fs-2)}
+.ch-set>summary{cursor:pointer;width:fit-content;color:var(--fd-fg-subtle)}
+.ch-set>summary:hover{color:var(--fd-fg-muted)}
+.ch-set .ch-info{margin-top:4px}
+.ch-basic>summary{cursor:pointer;width:fit-content;padding:4px 10px;color:var(--fd-fg-muted);font-size:var(--fd-fs-2)}
+.ch-basic>summary:hover{color:var(--fd-fg)}
+.ch-basic .n{color:var(--fd-fg-subtle);font-variant-numeric:tabular-nums}
+.ch-basic[open]>summary{margin-bottom:4px}
+/* 직접 멈춘 말은 오류가 아니라 회색 안내다. */
+.ch-fail.is-stopped{color:var(--fd-fg-muted)}
+/* 좁은 화면은 사이드바가 숨으므로 머리줄에 사용 안내 단추를 둔다. */
+.ch-head-help{display:none;place-items:center;width:32px;height:32px;border:1px solid var(--fd-line-strong);border-radius:50%;color:var(--fd-fg-muted)!important;font-weight:700;font-size:13px;text-decoration:none!important}
+.ch-head-help:hover{background:var(--fd-bg-hover);color:var(--fd-fg)!important}
+@media (max-width:1099px){
+  .fd-head .ch-head-help{display:grid;position:absolute;top:10px;right:56px}
+  .fd-head{padding-right:100px}
+  .ch-call{flex-wrap:wrap}
+}
+@media (max-width:640px){.ch-acts{flex-basis:100%;padding-left:62px}}
+/* 터치 기기에는 키보드가 없을 수 있으니 Enter·Esc 안내를 숨긴다. */
+@media (pointer:coarse){.ch-hint{display:none}}
 
 /* 반응형: 사이드바 레일과 숨김은 flow.css 규칙을 따른다. 좁으면 상황 패널이 대화 아래로 간다. */
 @media (max-width:1099px){

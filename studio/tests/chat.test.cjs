@@ -270,3 +270,67 @@ test('page wiring: chat.html loads the shared shell, labels the input, has a liv
   assert.ok(/isComposing/.test(js), 'Enter while composing Hangul does not send');
 });
 
+
+test('names follow the shared rule; the server placeholder and raw ids never show as a name', () => {
+  assert.equal(C.displayName('손흥민', 'cf-20261110-motif-cd9b'), '손흥민');
+  assert.equal(C.displayName('캐릭터', 'cf-20261109-son'), '이름 미정 · son (11/9)');
+  assert.equal(C.displayName('', 'cf-20261105-api-cost-argon'), '이름 미정 · api-cost-argon (11/5)');
+  assert.equal(C.createdLabel('', 'cf-20261110-motif-cd9b'), '11/10', 'the date falls back to the id');
+  assert.equal(C.createdLabel('not a date', 'x'), '');
+});
+
+test('the sidebar list comes from the chat list API, or from projects keeping only chat-ready ones', () => {
+  const api = [{ characterId: 'cf-a', displayName: '손흥민', createdAt: '2026-11-10T05:00:00Z', origin: 'SOURCE' }, { displayName: 'no id' }];
+  assert.deepEqual(C.chatList(api, false).map((c) => c.characterId), ['cf-a']);
+  const projects = { characters: [
+    { id: 'cf-20261110-a', name: '손흥민', chatReady: true },
+    { id: 'cf-20261110-b', name: '손흥민', chatReady: false },
+    { id: 'cf-20261105-api-cost-argon', name: '', chatReady: true, archived: true }
+  ] };
+  assert.deepEqual(C.chatList(projects, true).map((c) => c.characterId), ['cf-20261110-a'], 'not-ready and archived characters stay out');
+  const old = { characters: [{ id: 'cf-20261105-api-cost-argon', name: '' }] };
+  assert.deepEqual(C.chatList(old, true), [{ characterId: 'cf-20261105-api-cost-argon', displayName: '이름 미정 · api-cost-argon (11/5)', createdAt: null, origin: null }], 'an older server keeps every character but never shows a raw id');
+});
+
+test('one scenario list: own scenarios first, generic ones with the same title dropped, the rest kept as 기본', () => {
+  const list = [
+    { id: 'son-sc5-unknown', title: '모르는 것 묻기', turns: ['a'] },
+    { id: 'son-sc6-private', title: '사생활 질문', turns: ['a'] },
+    { id: 'daily', title: '첫인사·일상', turns: ['a'] },
+    { id: 'unknown', title: '모르는 것 묻기', turns: ['a'] },
+    { id: 'private', title: '사생활  질문', turns: ['a'] },
+    { id: 'extra', title: '새 기본', generic: true, turns: ['a'] }
+  ];
+  const g = C.groupScenarios(list);
+  assert.deepEqual(g.mine.map((s) => s.id), ['son-sc5-unknown', 'son-sc6-private']);
+  assert.deepEqual(g.basic.map((s) => s.id), ['daily', 'extra']);
+  assert.deepEqual(g.dropped, ['unknown', 'private']);
+  assert.deepEqual(C.groupScenarios(SCENARIOS.map((s) => Object.assign({}, s, { generic: true }))).basic.length, 2, 'with no own scenarios the generic ones all stay');
+});
+
+test('chat page copy: one name 대화해 보기, settings folded, a fix link, help entry, no collapse-looking back button', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'chat.html'), 'utf8');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'shared', 'chat.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'shared', 'chat.css'), 'utf8');
+  assert.ok(!/대화 테스트/.test(html + js), 'no second name for the page');
+  assert.ok(html.includes('<title>대화해 보기 · Foundry</title>'));
+  assert.ok(js.includes('<summary data-key="sum:set">설정 보기</summary>'), 'model and temperature sit in a folded 설정 보기');
+  assert.ok(js.includes('고칠 점 적기') && js.includes("'factory.html#c/'"));
+  assert.ok(js.includes('class="fd-help"') && js.includes('ch-head-help'), 'the same ? help entry as the factory');
+  assert.ok(!js.includes('ch-sidebtn') && !js.includes("icon('back')"), 'the back button that looked like a sidebar toggle is gone');
+  assert.ok(js.includes('새 대화로 시작해요'), 'scenario buttons say they start a new conversation');
+  assert.ok(js.includes("'아래' : '오른쪽'"), 'narrow screens point down to the scenarios');
+  assert.match(css, /@media \(pointer:coarse\)\{\.ch-hint\{display:none\}\}/);
+  assert.match(css, /\.ch-fail\.is-stopped\{color:var\(--fd-fg-muted\)\}/, 'a stop the person chose is grey, not an error');
+});
+
+test('not ready keeps the server reason and next place; a missing id gives a plain message', async () => {
+  const server = fakeServer({ meta: Object.assign({}, META, { ready: false, reason: '팬 통화 장면이 아직 없어요. 진행 화면에서 만들어 주세요.', missing: ['scene'], nextHref: 'factory.html#c/cf-son', scenarios: [], samples: [] }) });
+  const chat = await open(server);
+  assert.equal(chat.state.phase, 'not-ready');
+  assert.equal(chat.state.reason, '팬 통화 장면이 아직 없어요. 진행 화면에서 만들어 주세요.');
+  assert.equal(chat.state.meta.nextHref, 'factory.html#c/cf-son');
+  const missing = await open(fakeServer({ metaFail: [404] }));
+  assert.equal(missing.state.phase, 'missing');
+  assert.ok(!missing.state.reason.includes(CID), 'the id is not repeated as if it were a name');
+});
