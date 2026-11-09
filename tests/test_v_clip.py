@@ -1,9 +1,19 @@
 """승인 영상만 재생·선택한다. 모델은 테스트 설정의 가짜 공급자만 쓴다."""
 
+import json
+
+import httpx
 import pytest
 
+from character_factory_poc.common import clip_pick
 from tests.test_demo_chat import URL, put
 from tests.test_demo_chat import setup as demo_setup  # noqa: F401
+
+
+@pytest.fixture(autouse=True)
+def no_jev(monkeypatch):
+    for name in ("OPENCODE_API_KEY", "OPENCODE_MODEL", "OPENCODE_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture
@@ -97,3 +107,43 @@ def test_followup(call, text, recent, expected):
     prompt, context = req.messages
     assert "무례한 말을 들었을 때" in prompt.content and "pose" not in prompt.content
     assert context.content == "유저: 왜 그래?\n캐릭터가 방금 한 말: 나 삐졌어."
+
+
+@pytest.mark.parametrize(
+    ("answer", "recent", "expected"),
+    [
+        ({"pouty_good": 0.7, "angry_bad": 0.2, "none": 0.1}, [], "pouty_good"),
+        ({"pouty_good": 0.7, "angry_bad": 0.2}, ["pouty_good"], "angry_bad"),
+        ({"none": 0.6, "pouty_good": 0.4}, [], None),
+        ({"outside": 0.9, "pouty_good": 0.08}, [], "pouty_good"),
+        ({"angry_bad": 0.97, "pouty_good": 0.01}, ["angry_bad"], "angry_bad"),
+        (500, [], None),
+    ],
+)
+def test_jev(call, monkeypatch, answer, recent, expected):
+    client, fake = call
+    seen = []
+
+    def handle(request):
+        seen.append(request)
+        if answer == 500:
+            return httpx.Response(500)
+        return httpx.Response(200, json={"answers": {"clip": {"probabilities": answer}}})
+
+    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
+    monkeypatch.setattr(clip_pick, "_http", httpx.Client(transport=httpx.MockTransport(handle)))
+    result = client.post(
+        URL + "/clip", json=dict(userMessage="왜 그래?", replyText="나 삐졌어.", recent=recent)
+    ).json()
+    assert (result["clip"] or {}).get("clipKey") == expected
+    assert not fake.requests
+    (request,) = seen
+    assert str(request.url) == "https://opencode.ai/zen/v1/systemone"
+    assert request.headers["authorization"] == "Bearer test-key"
+    body = json.loads(request.content)
+    question = body["questions"]["clip"]
+    assert body["model"] == "jev-1.13" and question["type"] == "choice"
+    assert body["state"] == "유저: 왜 그래?\n캐릭터가 방금 한 말: 나 삐졌어."
+    assert "1위" not in question["instructions"] and "속뜻" in question["instructions"]
+    assert "pose" not in question["criteria"] and "none" in question["criteria"]
+    assert "무례한 말을 들었을 때" in question["criteria"]["angry_bad"]
