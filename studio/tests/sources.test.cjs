@@ -481,14 +481,14 @@ test('progress reads the shared status, chat readiness and goal when the server 
   assert.equal(intake.state.character.chatReady, null);
 });
 
-test('the sidebar prefers the shared name, status and goal, and hides archived characters', () => {
+test('the sidebar prefers the shared name and status like the factory list, and hides archived characters', () => {
   const html = S.sideHTML([
     { id: 'cf-20261110-motif-cd9b', name: '', displayName: '손흥민', status: 'chat_ready', statusLabel: '대화 가능', goal: { done: 5, total: 5 }, progress: { done: 5, total: 16 }, origin: 'SOURCE' },
     { id: 'cf-old', name: '테스트', archived: true }
   ], 'system');
   assert.ok(html.includes('>손흥민<'));
   assert.ok(html.includes('<span class="st ok">'));
-  assert.ok(html.includes('>5/5<') && !html.includes('5/16'), 'progress counts toward the goal');
+  assert.ok(html.includes('<small>대화 가능</small>') && !html.includes('5/16'), 'shows the shared status, not a step count');
   assert.ok(!html.includes('테스트'), 'archived characters stay out of the list');
 });
 

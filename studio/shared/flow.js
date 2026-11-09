@@ -1100,7 +1100,7 @@
       if (state.ov.gate) rows = rows.filter((s) => s.tasks.some((x) => x.kind === 'wait' && x.gate === state.ov.gate));
       if (q) rows = rows.filter((s) => { const l = labels.get(s.c.id) || {}; return (text(l.name) + ' ' + text(l.note) + ' ' + text(s.c.persona && s.c.persona.job)).toLowerCase().indexOf(q) >= 0; });
       rows.sort((a, b) => a.rank - b.rank || (a.oldest || Infinity) - (b.oldest || Infinity) || b.created - a.created);
-      const tabs = [['all', '전체'], ['mine', '확인 필요'], ['run', '만드는 중'], ['chat', '대화 가능'], ['fail', '실패']]
+      const tabs = [['all', '전체'], ['mine', '할 일 있음'], ['run', '만드는 중'], ['chat', '대화 가능'], ['fail', '실패']]
         .map((x) => '<a class="ov-tab" href="#all' + (x[0] === 'all' ? '' : '/' + x[0]) + '"' + (x[0] === filter ? ' aria-current="page"' : '') + '>' + x[1] + '<span class="n">' + counts[x[0]] + '명</span></a>').join('');
       const gateSel = gates.size ? '<label class="sr" for="ov-gate">검토 종류</label><select id="ov-gate" data-ov-gate><option value="">검토 종류 전체</option>' + Array.from(gates).map((x) => '<option value="' + E(x[0]) + '"' + (state.ov.gate === x[0] ? ' selected' : '') + '>' + E(gateTitle(x[0])) + ' · ' + x[1] + '건</option>').join('') + '</select>' : '';
       const search = '<label class="sr" for="ov-q">이름으로 찾기</label><input id="ov-q" data-ov-q type="search" placeholder="이름으로 찾기" value="' + E(state.ov.q) + '" autocomplete="off">';

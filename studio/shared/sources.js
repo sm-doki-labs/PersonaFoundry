@@ -778,29 +778,40 @@
   // 사이드바 캐릭터 한 줄. 진행 화면 사이드바와 같은 모양이고 누르면 그 캐릭터의 진행 화면으로 간다.
   // 이름·상태·진행 수는 서버가 정한 값(약속 3 displayName·status·goal)을 먼저 쓰고, 없으면 예전 계산으로 돌아간다.
   const STATUS_DOT = { chat_ready: 'ok', running: 'run', needs_review: 'wait', failed: 'fail' };
-  function sideItemHTML(c) {
+  function createdText(c) {
+    const t = Date.parse(text(c.createdAt));
+    if (!isFinite(t)) return '';
+    const d = new Date(t);
+    const two = (n) => (n < 10 ? '0' : '') + n;
+    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + two(d.getHours()) + ':' + two(d.getMinutes());
+  }
+  // 진행 화면 사이드바와 같은 두 줄 모양: 이름(모티브 표시) 아래에 상태, 이름이 겹치면 만든 시각을 붙인다.
+  function sideItemHTML(c, dup) {
     const name = text(c.displayName).trim() || displayName(c.name, c.id);
-    const p = c.progress || {};
-    const g = c.goal && Number(c.goal.total) > 0 ? c.goal : null;
     const failed = (c.stages || []).some((s) => text(s && s.status).toUpperCase() === 'CHECK_FAILED');
+    const p = c.progress || {};
     const st = c.status ? (STATUS_DOT[c.status] || '') : failed ? 'fail' : c.awaitingHuman ? 'wait' : c.job ? 'run' : p.total && p.done >= p.total ? 'ok' : '';
-    const num = g ? g.done + '/' + g.total : p.total ? p.done + '/' + p.total : '';
+    const when = createdText(c);
+    const sub = [text(c.statusLabel), dup && when ? when + ' 만듦' : ''].filter(Boolean).join(' · ');
     const motif = c.origin === 'SOURCE';
-    return '<a class="fd-nav" href="factory.html#c/' + E(encodeURIComponent(text(c.id))) + '" title="' + E(name + (c.statusLabel ? ' · ' + c.statusLabel : '') + (motif ? ' · 모티브' : '')) + '">' +
+    return '<a class="fd-nav two" href="factory.html#c/' + E(encodeURIComponent(text(c.id))) + '" title="' + E(name + (sub ? ' · ' + sub : '')) + '">' +
       '<span class="fd-av" aria-hidden="true">' + E(Array.from(name)[0] || '?') + '<span class="st ' + st + '"></span></span>' +
-      '<span class="lbl">' + E(name) + '</span>' + (motif ? '<span class="fd-org" aria-label="모티브">모티브</span>' : '') +
-      (num ? '<span class="num">' + E(num) + '</span>' : '') + '</a>';
+      '<span class="lbl"><span class="nm"><span class="tx">' + E(name) + '</span>' + (motif ? '<span class="fd-org">모티브</span>' : '') + '</span>' +
+      (sub ? '<small>' + E(sub) + '</small>' : '') + '</span></a>';
   }
   function sideHTML(list, theme) {
-    const shown = (list || []).filter((c) => !c.archived);
-    const items = shown.map(sideItemHTML).join('');
+    const shown = (list || []).filter((c) => !c.archived)
+      .slice().sort((x, y) => (Date.parse(text(y.createdAt)) || 0) - (Date.parse(text(x.createdAt)) || 0));
+    const counts = {};
+    shown.forEach((c) => { const n = text(c.displayName).trim() || displayName(c.name, c.id); counts[n] = (counts[n] || 0) + 1; });
+    const items = shown.map((c) => sideItemHTML(c, counts[text(c.displayName).trim() || displayName(c.name, c.id)] > 1)).join('');
     const themes = THEMES.map((t) => '<button type="button" data-act="theme" data-theme="' + t[0] + '" aria-pressed="' + (theme === t[0]) + '" aria-label="' + t[2] + '" title="' + t[2] + '">' + icon(t[1]) + '</button>').join('');
     return '<div class="fd-brand">' + MARK + '<div class="fd-word"><b>Foundry</b><small>캐릭터 공장</small></div></div>' +
       '<div class="fd-side-actions"><a class="btn block" href="sources.html" aria-current="page" title="원문으로 새 캐릭터" style="text-decoration:none">' + icon('user') + '<span class="lbl">원문으로 만들기</span></a></div>' +
       '<nav aria-label="캐릭터 탐색"><a class="fd-nav" href="factory.html#all" title="전체 캐릭터">' + icon('grid') + '<span class="lbl">전체 캐릭터</span><span class="num">' + (list ? shown.length + '명' : '') + '</span></a>' +
       '<a class="fd-nav" href="factory.html#all/mine" title="받은 일">' + icon('inbox') + '<span class="lbl">받은 일</span></a>' +
       '<h2>캐릭터</h2>' + (list ? items || '<p class="hint" style="padding:0 8px">아직 없어요</p>' : '<p class="hint" style="padding:0 8px">불러오는 중이에요</p>') + '</nav>' +
-      '<div class="fd-side-foot"><a class="fd-help" href="help.html" target="_blank" rel="noopener" title="사용 안내" aria-label="사용 안내">?</a><div class="fd-theme" role="group" aria-label="화면 테마">' + themes + '</div><div class="fd-foot-links"><a href="help.html" target="_blank" rel="noopener">사용 안내</a><a href="factory.html#all">진행 화면</a></div></div>';
+      '<div class="fd-side-foot"><a class="fd-help" href="help.html" target="_blank" rel="noopener" title="사용 안내" aria-label="사용 안내">?</a><div class="fd-theme" role="group" aria-label="화면 테마">' + themes + '</div><div class="fd-foot-links"><a href="help.html" target="_blank" rel="noopener">사용 안내</a></div></div>';
   }
   function icon(name) { return '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">' + ICON[name] + '</svg>'; }
   function options(pairs, value) { return pairs.map((p) => '<option value="' + p[0] + '"' + (p[0] === value ? ' selected' : '') + '>' + p[1] + '</option>').join(''); }
