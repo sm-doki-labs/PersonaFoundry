@@ -25,6 +25,34 @@ def make_text_model(cfg: ProviderConfig) -> TextModel:
             reasoning_effort=cfg.extra.get("reasoning_effort"),
             stream=bool(cfg.extra.get("stream", False)),
         )
+    if cfg.adapter == "vertex_openai":
+        # D-0149: Vertex AI OpenAI 호환 주소 + gcloud 접근 토큰 자동 갱신.
+        from character_factory_poc.providers.vertex_auth import (
+            DEFAULT_COMMAND,
+            DEFAULT_TTL_S,
+            GcloudToken,
+            vertex_openai_base_url,
+        )
+
+        x = cfg.extra
+        if not cfg.model:
+            raise ValueError(
+                'vertex_openai 어댑터에는 model이 필요하다(예: "google/gemini-3.8-flash")'
+            )
+        base = cfg.base_url or vertex_openai_base_url(
+            str(x.get("project", "")), str(x.get("location", "global"))
+        )
+        return OpenAICompatTextModel(
+            base_url=base,
+            model=cfg.model,
+            timeout=float(x.get("timeout_s", 180)),
+            max_retries=int(x.get("max_retries", 3)),
+            reasoning_effort=x.get("reasoning_effort"),
+            token_provider=GcloudToken(
+                command=tuple(x.get("token_command", DEFAULT_COMMAND)),
+                ttl_s=float(x.get("token_ttl_s", DEFAULT_TTL_S)),
+            ),
+        )
     raise ValueError(f"알 수 없는 텍스트 어댑터: {cfg.adapter}")
 
 

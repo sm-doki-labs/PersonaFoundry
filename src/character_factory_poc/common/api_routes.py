@@ -66,7 +66,7 @@ def billing_for(cfg, route: str | None = None) -> dict:
         kind = "relay_equivalent"
     else:
         host = (urlsplit(cfg.base_url).hostname or "").lower()
-        if host in API_HOSTS:
+        if host in API_HOSTS or host.endswith("aiplatform.googleapis.com"):
             kind = "api_billed"
         elif host in RELAY_HOSTS:
             kind = "relay_equivalent"
