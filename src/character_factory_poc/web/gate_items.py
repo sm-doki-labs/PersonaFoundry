@@ -651,6 +651,54 @@ def _latest_trait_sheet(char_dir: Path, character_id: str) -> dict[str, Any] | N
     }
 
 
+def _motif_review(char_dir: Path, pair: dict, rev: str) -> dict:
+    import re
+
+    from character_factory_poc.common.canonical import sha256_file
+    from character_factory_poc.common.demo_chat import Scene, latest, resource
+    from character_factory_poc.pipeline.origin import is_twin
+
+    if not is_twin(char_dir):
+        return {}
+    scene = Scene.read(char_dir)
+    result = {"inferredTraits": []}
+    if scene.prompt and scene.prompt.name == rev and (samples := scene.samples()):
+        result["samples"] = samples
+    traits = char_dir / "s7-traits"
+    folder = latest(traits, "tr")
+    if digest := pair.get("traitSheetSha256"):
+        # 지금 검토하는 프롬프트에 실제로 쓰인 특질만 보여 준다.
+        folder = next(
+            (p.parent for p in traits.glob("tr*/trait-sheet.json") if sha256_file(p) == digest),
+            None,
+        )
+    if folder is None:
+        return result
+    entries = (read_json(folder / "trait-ledger.json") or {}).get("traits", [])
+    inferred = [t for t in entries if t.get("basis") == "INFERRED"]
+    gate = (read_json(char_dir / "state.json") or {}).get("gates", {}).get("G0", {})
+    rows = {}
+    if gate.get("status") == "APPROVED" and re.fullmatch(r"sp[0-9]+", gate.get("rev") or ""):
+        rows = _corpus_rows(
+            char_dir / "s0-source" / gate["rev"] / "corpus.jsonl",
+            {t.get("sourceRef") for t in inferred},
+        )
+    names = resource("motif-demo-situations-v1.json")
+    for t in inferred:
+        situation = t.get("demoSituation")
+        msg = t.get("sourceRef")
+        refs = [{"msgId": msg, "quote": rows[msg]["text"]}] if msg in rows else []
+        result["inferredTraits"].append(
+            dict(
+                situation=situation,
+                situationKo=names.get(situation, "그 밖의 상황"),
+                behavior=t["behavior"],
+                refs=refs,
+            )
+        )
+    return result
+
+
 def prompts(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[str, Any]:
     """G6: 긴·짧은 프롬프트와 표본 응답."""
     folder = Path(char_dir) / stage_dir / rev
@@ -675,6 +723,7 @@ def prompts(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict
         }
     return {
         **extras,
+        **_motif_review(char_dir, pair, rev),
         "kind": "prompts",
         "source": "artifacts",
         "problems": [] if probe is not None else ["prompt-probe.json이 없다(표본 응답 없음)"],

@@ -288,3 +288,13 @@ untrained = "ask"
 inference = "vast"               # SHORT_GEMMA_SFT 답을 받을 때 GPU를 빌려 어댑터 서버를 띄운다
 gpu_seconds_per_turn = 10
 gpu_budget_usd = 5.0
+
+[providers.demo_chat]
+adapter = "openai_compat"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+model = "gemini-3.8-flash"
+api_key_env = "GEMINI_API_KEY"
+reasoning_effort = "low"
+max_retries = 2
+# 로컬에서 다른 지역을 쓰면 project와 location을 함께 지정한다.
+location = "global"

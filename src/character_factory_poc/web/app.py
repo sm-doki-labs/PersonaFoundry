@@ -21,6 +21,7 @@ from character_factory_poc.common.errors import FactoryError
 from character_factory_poc.pipeline.approve import approve_gate
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.web import reads
+from character_factory_poc.web.demo_chat import install_demo_routes
 from character_factory_poc.web.errors import WebError
 from character_factory_poc.web.events import EventHub, format_sse
 from character_factory_poc.web.jobs import JobManager
@@ -88,6 +89,7 @@ def create_app(
     from character_factory_poc.web.sources import install_source_routes
 
     install_source_routes(app, conf, jobs)
+    install_demo_routes(app, root, conf)
     from character_factory_poc.web.trait_authoring import install_authoring_routes
 
     install_authoring_routes(app, root, conf, jobs)

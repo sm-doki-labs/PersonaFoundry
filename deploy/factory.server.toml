@@ -52,3 +52,13 @@ adapter = "openai_compat"
 base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
 model = "gemini-3.8-flash"
 api_key_env = "GEMINI_API_KEY"
+
+[providers.demo_chat]
+adapter = "openai_compat"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+model = "gemini-3.8-flash"
+api_key_env = "GEMINI_API_KEY"
+reasoning_effort = "low"
+max_retries = 2
+# 로컬에서 다른 지역을 쓰면 project와 location을 함께 지정한다.
+location = "global"
