@@ -103,8 +103,9 @@ resource "aws_ecs_service" "app" {
   deployment_maximum_percent         = 100
   health_check_grace_period_seconds  = 60
   network_configuration {
-    assign_public_ip = false
-    subnets          = values(data.aws_subnet.private)[*].id
+    # 전용 VPC의 공용 서브넷에서 자기 공인 IP로 나간다. 들어오는 길은 보안 그룹이 ALB로만 연다.
+    assign_public_ip = true
+    subnets          = values(aws_subnet.public)[*].id
     security_groups  = [aws_security_group.factory["task"].id]
   }
   load_balancer {

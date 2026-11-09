@@ -41,13 +41,13 @@ resource "aws_cognito_user_pool_client" "alb" {
 }
 resource "aws_lb" "web" {
   name            = local.name
-  subnets         = values(data.aws_subnet.public)[*].id
+  subnets         = values(aws_subnet.public)[*].id
   security_groups = [aws_security_group.factory["alb"].id]
   idle_timeout    = 180
 }
 resource "aws_lb_target_group" "app" {
   name                 = local.name
-  vpc_id               = data.aws_vpc.dev.id
+  vpc_id               = aws_vpc.factory.id
   target_type          = "ip"
   port                 = 8080
   protocol             = "HTTP"

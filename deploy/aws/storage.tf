@@ -3,7 +3,7 @@ resource "aws_efs_file_system" "state" {
   tags      = { Name = local.name }
 }
 resource "aws_efs_mount_target" "state" {
-  for_each        = data.aws_subnet.private
+  for_each        = aws_subnet.public
   file_system_id  = aws_efs_file_system.state.id
   subnet_id       = each.value.id
   security_groups = [aws_security_group.factory["efs"].id]
