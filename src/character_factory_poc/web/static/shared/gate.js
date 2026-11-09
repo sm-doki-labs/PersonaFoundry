@@ -117,6 +117,12 @@
     G0: '출처 확인', G1s: '기준 사진', G1: '얼굴 고르기', G3: '기획안 고르기', G4a: '챕터 배경', G4b: '장면·자세', G4: '완성 이미지',
     G5: '소개 영상', G5b: '동작 영상', G6: '프롬프트', G7a: '데이터 샘플', G7: '학습 데이터', G8: '평가', G9: '패키지'
   };
+  // 에이전트가 쓴 글 속 관문 코드(G0 등)는 화면 이름으로 바꿔 보여 준다.
+  function plainCodes(value) {
+    return String(value == null ? '' : value).replace(/\bG\d+[a-z]?\b/g, function (code) {
+      return GATE_KO[code] ? '\'' + GATE_KO[code] + '\' 검토' : code;
+    });
+  }
 
   // ---------------------------------------------------------------- 도우미
   // 비어 있어 막힌 입력 칸을 보이게 열고 그 자리로 옮긴다(D-0129).
@@ -150,7 +156,11 @@
   }
   function setStatus(message, kind) {
     var out = q('[data-status]');
-    out.textContent = message || '';
+    var text = String(message || '');
+    // 한글이 없는 오류(브라우저·네트워크 영어 문장)는 쉬운 말로 바꾸고 원문은 툴팁에 둔다.
+    var foreign = kind === 'bad' && text && !/[가-힣]/.test(text);
+    out.textContent = foreign ? '서버와 연결하지 못했어요. 잠시 뒤 다시 해 주세요.' : text;
+    if (foreign) out.title = text; else out.removeAttribute('title');
     out.className = 'side-status' + (kind ? ' is-' + kind : '');
   }
   // 검토한 사람 이름은 한 번 적으면 이 브라우저에 기억해 둔다. 비우면 기록에는 'user'로 남는다.
@@ -267,6 +277,75 @@
     return REVIEW_GATES.indexOf(state.gate) >= 0;
   }
 
+  // ---------------------------------------------------------------- 결정 기록(읽기 전용)
+  // 이미 승인·반려한 관문은 기록으로만 보여 준다. 결정 버튼·입력칸·단축키 안내 대신
+  // 누가 · 언제 · 무엇을 골랐는지 요약을 맨 위에 둔다.
+  var AUTO_REVIEWER = '자동 진행';
+  function isRecord() {
+    var v = state.view;
+    return Boolean(v && v.record && (v.status === 'APPROVED' || v.status === 'REJECTED'));
+  }
+  function pad2(n) {
+    return (n < 10 ? '0' : '') + n;
+  }
+  // 기록 시각은 UTC로 저장된다. 보는 사람의 시간대로 '11월 10일 04:55'처럼 보여 준다.
+  function whenKo(value) {
+    var d = new Date(value);
+    if (!value || isNaN(d.getTime())) return String(value || '').slice(0, 16).replace('T', ' ');
+    var year = d.getFullYear() !== new Date().getFullYear() ? d.getFullYear() + '년 ' : '';
+    return year + (d.getMonth() + 1) + '월 ' + d.getDate() + '일 ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+  }
+  var DONE_KO = { SELECT: '골랐어요', APPROVE: '승인했어요', REQUEST_CHANGES: '수정을 요청했어요', REJECT: '반려했어요' };
+  function recordTitle(rec) {
+    if (rec.reviewer === AUTO_REVIEWER) {
+      return (rec.decision === 'SELECT' ? '자동 진행으로 첫 후보를 골랐어요'
+        : rec.decision === 'REJECT' ? '자동 진행으로 반려됐어요' : '자동 진행으로 승인됐어요') + ' · 사람 확인 없음';
+    }
+    return DONE_KO[rec.decision] || '결정했어요';
+  }
+  // 무엇을 골랐는지 한 줄. 따로 정하지 않은 화면은 고른 후보 수만 적는다.
+  function recordPicked(rec) {
+    if (state.kind === 'planVariants') {
+      var plan = planById(list(rec.selections)[0]);
+      return plan ? (planCandidates().length > 1 ? planLabel(plan) + ' · ' : '') + (plan.name || '') : '';
+    }
+    if (state.kind === 'sourcePack') {
+      var out = list((state.items.publicFacts || {}).items).filter(function (f) { return f && f.excluded; }).length;
+      return out ? '빼기로 한 공개 사실 ' + out + '개' : '';
+    }
+    if (state.kind === 'prompts') return state.items.shortAdopted ? '짧은 프롬프트' : '';
+    var n = list(rec.selections).length;
+    return n ? '후보 ' + n + '개' : '';
+  }
+  // 자동 진행이 사람 확인 없이 넘긴 경고. 나중에 볼 수 있게 기록 요약에 남긴다.
+  function recordLater(rec) {
+    if (rec.reviewer !== AUTO_REVIEWER || state.kind !== 'sourcePack') return [];
+    return sourceChecks(state.items)
+      .filter(function (c) { return c.tone === 'warn' || c.tone === 'bad'; })
+      .map(function (c) { return c.title + ': ' + c.detail; });
+  }
+  function recordCard(rec) {
+    var auto = rec.reviewer === AUTO_REVIEWER;
+    var rows = [];
+    if (!auto) rows.push(['누가', rec.reviewer && rec.reviewer !== 'user' ? rec.reviewer : '이름을 남기지 않았어요']);
+    if (rec.decidedAt) rows.push(['언제', whenKo(rec.decidedAt)]);
+    var picked = recordPicked(rec);
+    if (picked) rows.push(['고른 것', picked]);
+    if (!auto && rec.reasons) rows.push(['메모', rec.reasons]);
+    var later = recordLater(rec);
+    return '<div class="gate-banner gate-record-card is-' + (later.length ? 'warn' : 'ok') + '" data-record-card><b>' + esc(recordTitle(rec)) + '</b>' +
+      (rows.length ? '<dl class="record-facts">' + rows.map(function (r) { return '<dt>' + esc(r[0]) + '</dt><dd>' + esc(r[1]) + '</dd>'; }).join('') + '</dl>' : '') +
+      (later.length ? '<p class="record-later-title">나중에 볼 것 ' + later.length + '건</p><ul class="record-later">' +
+        later.map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>' : '') + '</div>';
+  }
+  // 서버가 준 자료 문제 문장에 파일 이름이나 영어가 섞이면 쉬운 말로 보여 주고, 원래 문장은 툴팁에 둔다.
+  function problemBanner(problem) {
+    var s = String(problem || '');
+    var dev = /[A-Za-z]{3,}|\//.test(s);
+    return '<div class="gate-banner is-bad"' + (dev ? ' title="' + esc(s) + '"' : '') + '><b>자료 확인</b>' +
+      esc(dev ? '이 단계의 자료 일부를 찾지 못했어요.' : s) + '</div>';
+  }
+
   // ---------------------------------------------------------------- 화면 정의
   var KINDS = {
     faces: {
@@ -281,6 +360,14 @@
     },
     planVariants: {
       hint: '같은 상황에서 무엇을 먼저 고르는지 비교해요. 고른 안의 내용은 확정 전에 고칠 수 있어요.',
+      // 후보가 하나면 비교할 것이 없다. 그 안을 읽고 확정하거나 고칠 점을 적는다.
+      hintFor: function (items) {
+        return list(items.candidates).length === 1 ? '기획안을 읽어 보고, 괜찮으면 확정해요. 고칠 칸은 확정 전에 바로 고칠 수 있어요.' : null;
+      },
+      actionsFor: function (items) {
+        if (list(items.candidates).length !== 1) return null;
+        return KINDS.planVariants.actions.filter(function (a) { return a[0] !== 'APPROVE'; });
+      },
       actions: [
         ['SELECT', '이 안으로 확정', 'primary'],
         ['APPROVE', '보지 않고 첫 후보로 확정', 'ghost'],
@@ -345,6 +432,15 @@
     },
     prompts: {
       hint: '표본 응답을 먼저 보고, 필요하면 프롬프트 원문을 열어 확인해요. 괜찮으면 승인하고, 아니면 고칠 점을 적어 주세요.',
+      // 표본이 없을 때 '표본 응답을 먼저 보고'라고 하지 않는다. 대신 무엇을 보면 되는지 말한다.
+      hintFor: function (items) {
+        if (list(items.samples).length || list(items.probes).length) {
+          return '대화 표본을 먼저 읽고, 필요하면 프롬프트 원문을 열어 확인해요. 괜찮으면 승인하고, 아니면 고칠 점을 적어 주세요.';
+        }
+        return chatReady()
+          ? '아직 대화 표본이 없어요. 대화해 보기에서 직접 말을 걸어 보고, 괜찮으면 승인하고 아니면 고칠 점을 적어 주세요.'
+          : '아직 대화 표본이 없어요. 프롬프트 원문을 읽어 보고, 괜찮으면 승인하고 아니면 고칠 점을 적어 주세요.';
+      },
       actions: [
         ['APPROVE', '프롬프트 승인', 'primary'],
         ['REQUEST_CHANGES', '수정 요청', 'ghost'],
@@ -400,7 +496,7 @@
       build: buildPromptOnly
     },
     sourcePack: {
-      hint: '출처가 맞게 정리됐는지 확인해요. 승인하면 이 묶음으로 얼굴·기획·말투를 만들어요. 이 관문은 사람만 결정해요.',
+      hint: '출처가 맞게 정리됐는지 확인해요. 승인하면 이 묶음으로 얼굴·기획·말투를 만들어요.',
       actions: [
         ['APPROVE', '출처 승인', 'primary'],
         ['REQUEST_CHANGES', '수정 요청', 'ghost'],
@@ -659,9 +755,26 @@
   function cellHTML(value) {
     var v = cellText(value);
     if (Array.isArray(v)) {
-      return v.length ? '<ul>' + v.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '<span class="plan-none">없음</span>';
+      return v.length ? '<ul>' + v.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '<span class="plan-none">비어 있음</span>';
     }
-    return v ? esc(v) : '<span class="plan-none">없음</span>';
+    return v ? esc(v) : '<span class="plan-none">비어 있음</span>';
+  }
+  function cellEmpty(value) {
+    var v = cellText(value);
+    return Array.isArray(v) ? !v.length : !v;
+  }
+  // 말투 칸에서 원문 통계 문장을 뺀 글(서버 planDisplay). 통계는 '기술 정보'에 접어 둔다.
+  function planVoice(p) {
+    var d = (state.items.planDisplay || {})[p.variantId];
+    return d && typeof d.voiceSummary === 'string' ? d.voiceSummary : p.voiceSummary;
+  }
+  function planStats(plans) {
+    var disp = state.items.planDisplay || {};
+    var parts = plans.filter(function (p) { return disp[p.variantId] && list(disp[p.variantId].voiceStats).length; }).map(function (p) {
+      return (plans.length > 1 ? '<p class="section-sub">' + esc(planLabel(p)) + '</p>' : '') +
+        '<ul class="src-list">' + list(disp[p.variantId].voiceStats).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul>';
+    });
+    return parts.length ? '<details class="gate-more plan-tech"><summary>기술 정보 · 원문 말투 통계</summary>' + parts.join('') + '</details>' : '';
   }
   // 비교표 줄: [묶음, 이름, 후보 → 값]. 같은 상황은 상황 문장을 줄 이름으로 맞춘다.
   function planRows(plans) {
@@ -673,7 +786,7 @@
     add('기본', '배경', function (p) { return p.background; });
     add('성격', '핵심 성격', function (p) { return p.coreTraits; });
     add('성격', '대비되는 면', function (p) { return p.contrastTrait; });
-    add('성격', '말투', function (p) { return p.voiceSummary; });
+    add('성격', '말투', planVoice);
     add('성격', '말투 예시', function (p) { return p.voiceExamples; });
     var situations = [];
     plans.forEach(function (p) {
@@ -710,26 +823,37 @@
     rows.forEach(function (row) {
       var keys = plans.map(function (p) { return JSON.stringify(cellText(row.get(p))); });
       row.diff = keys.some(function (k) { return k !== keys[0]; });
+      // 모든 안에서 빈 칸이면 줄을 보이지 않는다('취미 없음'처럼 읽히지 않게).
+      row.empty = plans.every(function (p) { return cellEmpty(row.get(p)); });
     });
-    return rows;
+    return rows.filter(function (row) { return !row.empty; });
   }
   function renderPlans(items) {
     var plans = planCandidates();
+    var record = isRecord();
     if (!state.planPick && state.view && state.view.record) {
       var chosen = list(state.view.record.selections).filter(function (id) { return planById(id); })[0];
       if (chosen) state.planPick = chosen;
     }
+    // 후보가 하나면 고를 것이 없다. 그 안을 고른 상태로 연다.
+    if (!state.planPick && plans.length === 1 && !planLocked()) state.planPick = plans[0].variantId;
     var rows = planRows(plans);
     var diffs = rows.filter(function (r) { return r.diff; }).length;
     if (state.planOnlyDiff == null) state.planOnlyDiff = diffs > 0 && diffs <= rows.length / 2;
+    var single = plans.length === 1;
+    var top = single
+      ? '<section class="gate-section plan-compare is-single"><h2>기획안</h2>' +
+        '<div class="plan-scroll"><table class="plan-table is-single" data-plan-table></table></div>' + planStats(plans) + '</section>'
+      : '<section class="gate-section plan-compare"><h2>기획 후보 ' + plans.length + '안 나란히 보기</h2>' +
+        '<p class="section-sub">' + esc(String(items.axisNote || '같은 상황에서 고르는 행동이 서로 달라요').replace(/[.。]?\s*$/, '.')) +
+        (record ? ' 고른 안에 표시했어요.' : ' 같은 항목을 가로로 맞췄어요. 열 위의 버튼으로 한 안을 골라 주세요.') + '</p>' +
+        '<div class="plan-bar"><span><b>' + diffs + '</b>개 항목이 서로 달라요 · 같은 항목 ' + (rows.length - diffs) + '개</span>' +
+        '<label class="plan-toggle"><input type="checkbox" data-plan-only-diff' + (state.planOnlyDiff ? ' checked' : '') + '> 다른 항목만 보기</label></div>' +
+        '<div class="plan-scroll"><table class="plan-table" data-plan-table></table></div>' + planStats(plans) + '</section>';
+    if (record) return top;
     return (
-      '<section class="gate-section plan-compare"><h2>기획 후보 ' + plans.length + '안 나란히 보기</h2>' +
-      '<p class="section-sub">' + esc(String(items.axisNote || '같은 상황에서 고르는 행동이 서로 달라요').replace(/[.。]?\s*$/, '.')) +
-      ' 같은 항목을 가로로 맞췄어요. 열 위의 버튼이나 숫자 키(1~' + plans.length + ')로 한 안을 골라 주세요.</p>' +
-      '<div class="plan-bar"><span><b>' + diffs + '</b>개 항목이 서로 달라요 · 같은 항목 ' + (rows.length - diffs) + '개</span>' +
-      '<label class="plan-toggle"><input type="checkbox" data-plan-only-diff' + (state.planOnlyDiff ? ' checked' : '') + '> 다른 항목만 보기</label></div>' +
-      '<div class="plan-scroll"><table class="plan-table" data-plan-table></table></div></section>' +
-      '<section class="gate-section"><details class="gate-more" data-plan-edit><summary>고른 안 고치기 (선택)</summary>' +
+      top +
+      '<section class="gate-section"><details class="gate-more" data-plan-edit><summary>' + (single ? '기획안 고치기 (선택)' : '고른 안 고치기 (선택)') + '</summary>' +
       '<p class="section-sub">고른 안에서 바꿀 칸만 고쳐 주세요. 목록 칸은 한 줄에 하나씩 적어요. ' +
       '바꾼 칸만 결정에 담겨요.</p>' +
       (items.mode === 'own'
@@ -753,10 +877,12 @@
     var plans = planCandidates();
     var rows = planRows(plans);
     var locked = planLocked();
+    var single = plans.length === 1;
     var pickCls = function (p) { return state.planPick === p.variantId ? ' is-picked' : ''; };
-    var head = '<thead><tr><th scope="col" class="plan-corner">항목</th>' + plans.map(function (p, i) {
+    // 후보가 하나면 열 머리(고르기 버튼·번호)가 필요 없다. 항목과 값만 보여 준다.
+    var head = single ? '' : '<thead><tr><th scope="col" class="plan-corner">항목</th>' + plans.map(function (p, i) {
       return '<th scope="col" class="plan-col' + pickCls(p) + '">' +
-        '<span class="plan-col-label">' + esc(planLabel(p)) + (i < 9 ? ' <kbd>' + (i + 1) + '</kbd>' : '') + '</span>' +
+        '<span class="plan-col-label">' + esc(planLabel(p)) + (i < 9 && !locked ? ' <kbd>' + (i + 1) + '</kbd>' : '') + '</span>' +
         '<b>' + esc(p.name || '') + '</b><span class="plan-col-sub">' + esc(p.tagline || '') + '</span>' + reviewLine(p.variantId) +
         (locked ? (state.planPick === p.variantId ? '<span class="badge-chip is-good">고른 안</span>' : '')
           : '<button type="button" class="btn ' + (state.planPick === p.variantId ? 'btn--primary' : 'btn--ghost') + ' plan-pick" data-plan-pick="' + esc(p.variantId) + '" aria-pressed="' + (state.planPick === p.variantId) + '">' +
@@ -767,7 +893,7 @@
     var group = '';
     var hidden = 0;
     rows.forEach(function (row) {
-      if (state.planOnlyDiff && !row.diff) { hidden += 1; return; }
+      if (state.planOnlyDiff && !row.diff && !single) { hidden += 1; return; }
       if (row.group !== group) {
         group = row.group;
         body += '<tr class="plan-group"><th scope="rowgroup" colspan="' + (plans.length + 1) + '">' + esc(group) + '</th></tr>';
@@ -775,7 +901,7 @@
       body += '<tr class="' + (row.diff ? 'is-diff' : 'is-same') + '"><th scope="row">' +
         (row.diff ? '<span class="plan-diff-dot" aria-hidden="true"></span>' : '') + esc(row.label) +
         (row.diff ? '<span class="sr-only"> (안마다 달라요)</span>' : '') + '</th>' +
-        plans.map(function (p) { return '<td class="' + pickCls(p).trim() + '">' + cellHTML(row.get(p)) + '</td>'; }).join('') + '</tr>';
+        plans.map(function (p) { return '<td class="' + (single ? '' : pickCls(p).trim()) + '">' + cellHTML(row.get(p)) + '</td>'; }).join('') + '</tr>';
     });
     if (hidden) {
       body += '<tr class="plan-hidden-note"><td colspan="' + (plans.length + 1) + '">같은 항목 ' + hidden + '개를 접었어요. <button type="button" class="btn btn--ghost" data-plan-show-all>모두 보기</button></td></tr>';
@@ -791,14 +917,16 @@
   function paintPlanSide() {
     var host = q('[data-side-extra]');
     if (!host || state.kind !== 'planVariants') return;
+    // 기록에서는 본문 맨 위 요약이 고른 안을 말한다. 옆 칸은 비운다.
+    if (isRecord()) { host.innerHTML = ''; return; }
     var plan = state.planPick ? planById(state.planPick) : null;
     host.innerHTML = plan
       ? '<div class="plan-side"><p class="plan-side-title"><span class="face-letter">' + esc(planLabel(plan)) + '</span><b>' + esc(plan.name || '') + '</b></p>' +
         '<p class="section-sub">' + esc(plan.tagline || '') + '</p>' +
-        '<dl class="facts"><dt>핵심</dt><dd>' + esc(joinList(plan.coreTraits, ' / ')) + '</dd><dt>말투</dt><dd>' + esc(plan.voiceSummary || '') + '</dd></dl></div>'
+        '<dl class="facts"><dt>핵심</dt><dd>' + esc(joinList(plan.coreTraits, ' / ')) + '</dd><dt>말투</dt><dd>' + esc(planVoice(plan) || '') + '</dd></dl></div>'
       : '<p class="face-side-empty">안을 고르면 여기에 요약이 보여요.</p>';
     var primary = q('[data-decide="SELECT"]');
-    if (primary && !planLocked()) primary.textContent = plan ? ro(planLabel(plan)) + ' 확정' : '이 안으로 확정';
+    if (primary && !planLocked()) primary.textContent = plan && planCandidates().length > 1 ? ro(planLabel(plan)) + ' 확정' : '이 안으로 확정';
     guardQuickApprove(plan ? 1 : 0);
   }
   function pickPlan(id) {
@@ -808,6 +936,7 @@
   }
   function onPlanKey(event) {
     if (state.kind !== 'planVariants' || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (planLocked() || planCandidates().length < 2) return;
     var tag = event.target && event.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
     var n = Number(event.key);
@@ -2055,12 +2184,18 @@
   // ---------------------------------------------------------------- G6
   // 시연 상황 이름(trait_ledger.demoSituation). 코드 값은 화면에 보이지 않는다.
   var SITUATION_KO = { TEASE: '장난·놀림', WORRY: '고민 털어놓기', CRITICISM: '비판', UNKNOWN: '모르는 질문', PRIVATE: '사생활 질문' };
-  // 특질 시트의 빈칸 이름. 모르는 칸 이름은 보이지 않고 개수로만 센다.
-  var UNRESOLVED_KO = { 'card.bigFiveNotes': '성격 5요인 메모' };
   var INFERRED_LINE = /^원문 경향 없음 · ([A-Z_]+) \(INFERRED, 참고 ([^)]*)\): ([\s\S]*?) → ([\s\S]*)$/;
   function charName() {
     var s = (state.character && state.character.summary) || {};
     return s.name && s.name !== state.characterId ? s.name : '캐릭터';
+  }
+  // 대화해 보기로 보낼 수 있는지는 서버 판정(약속 3의 chatReady)만 따른다. 값이 없으면 보내지 않는다.
+  function chatReady() {
+    var c = state.character || {};
+    return c.chatReady === true || (c.summary || {}).chatReady === true;
+  }
+  function chatHref() {
+    return '/studio/chat.html#c/' + encodeURIComponent(state.characterId);
   }
   // 서버가 inferredTraits(약속 1)를 주면 그대로, 없으면 특질 시트 미정 줄에서 같은 모양으로 읽는다.
   function inferredTraits(items) {
@@ -2070,27 +2205,14 @@
       return m ? { situation: m[1], trigger: m[3], behavior: m[4], refs: m[2] ? [{ msgId: m[2] }] : [] } : null;
     }).filter(Boolean);
   }
-  function unresolvedText(sheet) {
-    var names = [];
-    var other = 0;
-    list(sheet && sheet.unresolved).forEach(function (line) {
-      var s = String(line || '');
-      if (INFERRED_LINE.test(s) || s.indexOf('INFERRED') >= 0) return;
-      if (UNRESOLVED_KO[s]) names.push(UNRESOLVED_KO[s]);
-      else if (/^[A-Za-z0-9_.]+$/.test(s)) other += 1;
-      else names.push(s);
-    });
-    if (other) names.push('그 밖의 칸 ' + other + '개');
-    return names.join(', ');
-  }
   function sampleTranscripts(items) {
     var samples = list(items.samples).filter(function (s) { return s && list(s.turns).length; });
     if (!samples.length) return '';
     var who = charName();
-    var chat = state.characterId ? '/studio/chat.html#c/' + encodeURIComponent(state.characterId) : '';
+    var chat = state.characterId ? chatHref() : '';
     return '<section class="gate-section"><div class="chat-samples-head"><h2>대화 표본 ' + samples.length + '개 장면</h2>' +
-      (chat ? '<a class="btn btn--ghost" href="' + esc(chat) + '" target="_blank" rel="noopener">직접 대화해 보기</a>' : '') + '</div>' +
-      '<p class="section-sub">장면마다 이 프롬프트로 한 번씩 대화해 본 결과예요. 이 인물답게 답하는지 읽어 보고 승인해 주세요.</p>' +
+      (chat ? '<a class="btn btn--ghost" href="' + esc(chat) + '" target="_blank" rel="noopener">대화해 보기</a>' : '') + '</div>' +
+      '<p class="section-sub">장면마다 이 프롬프트로 한 번씩 대화해 본 결과예요.' + (isRecord() ? '' : ' 이 인물답게 답하는지 읽어 보고 승인해 주세요.') + '</p>' +
       '<div class="chat-samples">' + samples.map(function (s) {
         return '<article class="chat-sample"><h3>' + esc(s.title || '장면') + '<span>' + list(s.turns).length + '턴</span></h3><div class="chat-log">' +
           list(s.turns).map(function (t) {
@@ -2119,6 +2241,9 @@
   function renderPrompts(items) {
     var long = items.long || {};
     var short = items.short || {};
+    var record = isRecord();
+    // 긴·짧은 프롬프트 글이 같으면 하나만 보여 주고, 어느 쪽을 고칠지 묻지 않는다.
+    var same = Boolean(items.samePrompt || (long.text && long.text === short.text));
     var probes = list(items.probes)
       .map(function (probe) {
         var judge = probe.judge || {};
@@ -2133,23 +2258,31 @@
       .join('');
     var sheet = items.traitSheet;
     var samples = sampleTranscripts(items);
-    var open = unresolvedText(sheet);
+    var noSamples = !probes && !samples
+      ? '<section class="gate-section"><div class="chat-samples-head"><h2>대화 표본</h2>' +
+        (chatReady() ? '<a class="btn btn--ghost" href="' + esc(chatHref()) + '" target="_blank" rel="noopener">대화해 보기</a>' : '') + '</div>' +
+        '<p class="section-sub">' + (chatReady()
+          ? '아직 대화 표본이 없어요. 대화해 보기에서 직접 말을 걸어 볼 수 있어요.'
+          : '아직 대화 표본이 없어요. 아래 프롬프트 원문을 열어 읽어 볼 수 있어요.') + '</p></section>'
+      : '';
+    var doc = function (title, p, key) {
+      return '<div class="doc"><h3>' + title + ' <span class="badge-chip">' + esc(num(p.chars)) + '자</span>' + reviewLine(key) +
+        '</h3><pre>' + esc(p.text || '') + '</pre></div>';
+    };
     return (
       samples + inferredCards(items) +
-      (probes || !samples
+      (probes
         ? '<section class="gate-section"><h2>' + (samples ? '긴·짧은 프롬프트 비교' : '표본 응답') + '</h2>' +
           '<p class="section-sub">검토 모델의 판정은 참고용이에요. 승인은 사람이 해요.</p>' +
-          (probes || '<p class="empty">표본 응답이 아직 없어요.</p>') + '</section>'
-        : '') +
-      '<section class="gate-section"><details class="gate-more"><summary>프롬프트 원문 · 긴 ' + esc(long.chars || 0) +
-      '자 · 짧은 ' + esc(short.chars || 0) + '자' + (items.shortAdopted ? ' · 짧은 프롬프트 채택' : '') +
+          probes + '</section>'
+        : noSamples) +
+      '<section class="gate-section"><details class="gate-more"><summary>' +
+      (same ? '프롬프트 원문 · ' + esc(num(long.chars)) + '자'
+        : '프롬프트 원문 · 긴 ' + esc(num(long.chars)) + '자 · 짧은 ' + esc(num(short.chars)) + '자' + (items.shortAdopted ? ' · 짧은 프롬프트 채택' : '')) +
       '</summary><p class="section-sub">구성: ' + esc(joinList(items.sections, ', ')) + '</p>' +
-      '<div class="doc-block">' +
-      '<div class="doc"><h3>긴 프롬프트 <span class="badge-chip">' + esc(long.chars || 0) +
-      '자</span>' + reviewLine('long') + '</h3><pre>' + esc(long.text || '') + '</pre></div>' +
-      '<div class="doc"><h3>짧은 프롬프트 <span class="badge-chip">' + esc(short.chars || 0) +
-      '자</span>' + reviewLine('short') + '</h3><pre>' + esc(short.text || '') +
-      '</pre></div></div></details></section>' +
+      '<div class="doc-block' + (same ? ' is-single' : '') + '">' +
+      (same ? doc('프롬프트', long, 'long') : doc('긴 프롬프트', long, 'long') + doc('짧은 프롬프트', short, 'short')) +
+      '</div></details></section>' +
       (sheet
         ? '<section class="gate-section"><h2>특질 시트</h2>' +
           (sheet.card
@@ -2158,19 +2291,18 @@
                 ['판단 기준', list(sheet.card.judgmentPriorities)
                   .map(function (p) { return p.dilemma + ' → ' + p.choice; })
                   .join(' / ')],
-                ['말버릇', (sheet.card.dialogueHabits || {}).lexicon],
-                ['아직 비어 있는 칸', open]
+                ['말버릇', (sheet.card.dialogueHabits || {}).lexicon]
               ])
             : '') +
           '<p class="section-sub"><a href="' + esc(sheet.url) +
           '" target="_blank" rel="noopener">특질 시트 원문 열기</a></p></section>'
         : '') +
-      '<section class="gate-section"><h2>수정 요청 (선택)</h2>' +
-      '<div class="field-list"><div class="field"><span>어느 프롬프트</span>' +
-      '<select data-prompt-scope><option value="long">긴 프롬프트</option>' +
-      '<option value="short">짧은 프롬프트</option></select></div></div>' +
-      '<textarea data-prompt-note placeholder="예: 첫 인사를 더 짧게, 감탄사 줄이기"></textarea>' +
-      '</section>'
+      (record ? '' : '<section class="gate-section"><h2>수정 요청 (선택)</h2>' +
+        (same ? '' : '<div class="field-list"><div class="field"><span>어느 프롬프트</span>' +
+          '<select data-prompt-scope><option value="long">긴 프롬프트</option>' +
+          '<option value="short">짧은 프롬프트</option></select></div></div>') +
+        '<textarea data-prompt-note placeholder="예: 첫 인사를 더 짧게, 감탄사 줄이기"></textarea>' +
+        '</section>')
     );
   }
 
@@ -2179,7 +2311,8 @@
     if (decision === 'REQUEST_CHANGES') {
       var note = q('[data-prompt-note]').value.trim();
       if (!note) { focusField(q('[data-prompt-note]')); throw Error('아래 수정 요청 칸에 고칠 점을 적어 주세요.'); }
-      answer.requestedChanges = [{ field: q('[data-prompt-scope]').value, note: note }];
+      var scope = q('[data-prompt-scope]');
+      answer.requestedChanges = [{ field: scope ? scope.value : 'long', note: note }];
     }
     return Object.assign(answer, details());
   }
@@ -2908,8 +3041,8 @@
         title: '화자 지정',
         tone: speaker.confirmed ? 'ok' : 'warn',
         detail: (speaker.confirmed ? '출처 정리 에이전트가 화자를 확인했어요' : '출처 정리 에이전트가 화자를 확인하지 못했어요') +
-          (speaker.note && speaker.note.length <= 90 ? ' · ' + speaker.note : ''),
-        more: speaker.note && speaker.note.length > 90 ? speaker.note : ''
+          (speaker.note && speaker.note.length <= 90 ? ' · ' + plainCodes(speaker.note) : ''),
+        more: speaker.note && speaker.note.length > 90 ? plainCodes(speaker.note) : ''
       },
       {
         title: '개인정보 가림',
@@ -2973,15 +3106,16 @@
       (srcs ? '<div class="fact-srcs"><span class="fact-label">출처</span>' + srcs + '</div>' : '') +
       (self ? '<div class="fact-self"><span class="fact-label">본인 시점</span>' + (self.paraphrase ? '<p>' + esc(self.paraphrase) + '</p>' : '') +
         (self.quote ? '<blockquote' + (self.msgId ? ' title="' + esc('원문 위치 ' + self.msgId) + '"' : '') + '>' + esc(self.quote) + '</blockquote>' : '') + '</div>' : '') +
-      '<label class="fact-toggle"><input type="checkbox" data-exclude-fact value="' + esc(f.factId) + '"' + (out ? ' checked' : '') + (out || locked ? ' disabled' : '') + '>' +
-      '<span>' + (out ? '이미 뺀 사실이에요' : '이 사실 빼기') + '</span></label></li>';
+      // 결정한 관문에서는 빼기 칸을 그리지 않는다. 뺀 사실은 '빼기로 했어요' 표시로 남는다.
+      (locked ? '' : '<label class="fact-toggle"><input type="checkbox" data-exclude-fact value="' + esc(f.factId) + '"' + (out ? ' checked' : '') + (out ? ' disabled' : '') + '>' +
+        '<span>' + (out ? '이미 뺀 사실이에요' : '이 사실 빼기') + '</span></label>') + '</li>';
   }
   function renderFacts(pf) {
     var facts = list(pf.items);
     var locked = faceLocked();
     var deflections = list(pf.deflections).filter(function (d) { return d && d.quote; });
     return '<section class="gate-section"><h2>공개 사실 ' + facts.length + '개</h2>' +
-      '<p class="section-sub">' + (locked ? '공개 기사에서 모은 사실이에요. 이미 결정한 관문이라 고칠 수 없어요.' : '공개 기사에서 모은 사실이에요. 대화에서 이 인물의 사실로 쓰니, 틀렸거나 쓰지 않을 사실은 \'이 사실 빼기\'를 눌러 주세요. 승인할 때 함께 빠져요.') + '</p>' +
+      '<p class="section-sub">' + (locked ? '공개 기사에서 모은 사실이에요. 대화에서 이 인물의 사실로 써요.' : '공개 기사에서 모은 사실이에요. 대화에서 이 인물의 사실로 쓰니, 틀렸거나 쓰지 않을 사실은 \'이 사실 빼기\'를 눌러 주세요. 승인할 때 함께 빠져요.') + '</p>' +
       (facts.length ? '<ol class="fact-cards">' + facts.map(function (f) { return factCard(f, locked); }).join('') + '</ol>' : '<p class="empty">모은 사실이 없어요.</p>') +
       (deflections.length ? '<h3 class="twin-h">사적인 질문을 넘기는 말</h3>' +
         '<p class="section-sub">사생활을 물으면 이 말투로 넘겨요. 원문에서 본인이 한 말이에요.</p>' +
@@ -3049,12 +3183,13 @@
       return '<li><b>' + esc(p.reason) + '</b>' + (p.text ? '<span class="src-why">' + esc(p.text) + '</span>' : '') + '</li>';
     }).join('');
     var bullets = function (values) {
-      return list(values).length ? '<ul class="src-list">' + list(values).map(function (v) { return '<li>' + esc(v) + '</li>'; }).join('') + '</ul>' : '<p class="section-sub">없어요</p>';
+      return list(values).length ? '<ul class="src-list">' + list(values).map(function (v) { return '<li>' + esc(plainCodes(v)) + '</li>'; }).join('') + '</ul>' : '<p class="section-sub">없어요</p>';
     };
     var notes = String(usage.notes || '');
+    var record = isRecord();
     return (
-      '<section class="gate-section"><h2>승인 전 확인</h2>' +
-      '<p class="section-sub">빨간 항목이 있으면 승인할 수 없어요. 출처 묶음을 채워 다시 돌린 뒤 승인해 주세요.</p>' +
+      '<section class="gate-section"><h2>' + (record ? '확인 결과' : '승인 전 확인') + '</h2>' +
+      '<p class="section-sub">' + (record ? '결정할 때의 확인 결과예요.' : '빨간 항목이 있으면 승인할 수 없어요. 출처 묶음을 채워 다시 돌린 뒤 승인해 주세요.') + '</p>' +
       '<ul class="pkg-checks">' + sourceChecks(items).map(checkRow).join('') + '</ul></section>' +
       (items.publicFacts ? renderFacts(items.publicFacts) : '') +
       '<section class="gate-section"><h2>정리한 자료</h2>' +
@@ -3077,17 +3212,17 @@
         ? '<details class="src-notes"><summary>메모 보기 · ' + num(notes.length) + '자</summary><p>' + esc(notes) + '</p></details>'
         : '<p class="src-notes-text">' + esc(notes) + '</p>') : '') + '</section>' +
       '<section class="gate-section"><h2>출처 정리 에이전트 의견</h2>' +
-      '<p class="section-sub">에이전트가 정리한 원문 일부를 읽고 남긴 의견이에요. 참고만 하고 결정은 직접 해 주세요.</p>' +
+      '<p class="section-sub">에이전트가 정리한 원문 일부를 읽고 남긴 의견이에요.' + (record ? '' : ' 참고만 하고 결정은 직접 해 주세요.') + '</p>' +
       '<h3 class="twin-h">대표 메시지 ' + list(agent.representative).length + '개</h3>' +
       (reps ? '<ul class="src-msgs">' + reps + '</ul>' : '<p class="section-sub">없어요</p>') +
       '<h3 class="twin-h">말투 관찰</h3>' + bullets(agent.observations) +
       '<h3 class="twin-h">더 가릴 것</h3>' + (flags ? '<ul class="src-list src-flags">' + flags + '</ul>' : '<p class="section-sub">없어요</p>') +
       '<h3 class="twin-h">자료 품질</h3>' + bullets(agent.qualityNotes) + '</section>' +
-      '<section class="gate-section"><h2>수정 요청할 점</h2>' +
+      (record ? '' : '<section class="gate-section"><h2>수정 요청할 점</h2>' +
       '<p class="section-sub">출처를 고쳐 다시 정리해야 할 때만 적어 주세요. 예: 화자가 바뀌었어요, 이 대화는 빼 주세요.</p>' +
       '<textarea data-source-note placeholder="예: 두 번째 카톡 파일의 화자가 바뀌었어요"></textarea>' +
       '<details class="card-tech"><summary>상세 · 출처 판</summary>출처 판: ' + esc(items.sourceRev || '-') +
-      (list(items.usageProblems).length ? '\n승인 잠김 사유:\n- ' + list(items.usageProblems).map(esc).join('\n- ') : '') + '</details></section>'
+      (list(items.usageProblems).length ? '\n승인 잠김 사유:\n- ' + list(items.usageProblems).map(esc).join('\n- ') : '') + '</details></section>')
     );
   }
   function sourceLocked() {
@@ -3101,6 +3236,8 @@
     var warn = checks.filter(function (c) { return c.tone === 'warn'; });
     var counts = items.counts || {};
     var side = q('[data-side-extra]');
+    // 기록에서는 본문 맨 위 요약과 확인 결과가 같은 내용을 말한다. 옆 칸은 비운다.
+    if (isRecord()) { if (side) side.innerHTML = ''; return; }
     var out = qa('[data-exclude-fact]:checked').length;
     if (side) side.innerHTML = '<div class="bg-side"><p class="bg-side-title"><b>출처 확인</b><span>' +
       (checks.length - bad.length - warn.length) + ' / ' + checks.length + ' 통과</span></p>' +
@@ -3441,16 +3578,18 @@
       out.push(banner('warn', '화면 확인용 예시', '실제 산출물이 아직 없어 예시 자료를 보여 줘요.'));
     }
     list(view.missing).forEach(function (problem) {
-      out.push(banner('bad', '자료 확인', problem));
+      out.push(problemBanner(problem));
     });
-    if (view.record) {
+    if (isRecord()) {
+      out.push(recordCard(view.record));
+    } else if (view.record) {
       out.push(
         banner(
           'ok',
           '이미 결정했어요',
-          (DECISION_KO[view.record.decision] || view.record.decision) +
+          (DECISION_KO[view.record.decision] || '결정') +
             (view.record.reviewer && view.record.reviewer !== 'user' ? ' · ' + view.record.reviewer : '') +
-            (view.record.decidedAt ? ' · ' + String(view.record.decidedAt).slice(0, 16).replace('T', ' ') : '')
+            (view.record.decidedAt ? ' · ' + whenKo(view.record.decidedAt) : '')
         )
       );
     }
@@ -3470,7 +3609,7 @@
         )
       );
     }
-    if (reviewEnabled() && view.status !== 'PENDING') {
+    if (reviewEnabled() && view.status !== 'PENDING' && !isRecord()) {
       if (view.review) {
         var reviewer = view.review.reviewer || {};
         var who = [reviewer.provider, reviewer.model].filter(Boolean).join(' · ');
@@ -3544,10 +3683,12 @@
       : idm ? '이름 미정 · ' + idm[4] + ' (' + Number(idm[2]) + '/' + Number(idm[3]) + ')' : state.characterId;
     var back = 'c-glass.html?character=' + encodeURIComponent(state.characterId) +
       '&gate=' + encodeURIComponent(state.gate);
+    var record = isRecord();
+    document.body.classList.toggle('gate-record', record);
     q('[data-workroom-link]').setAttribute('href', back);
     q('[data-crumbs]').innerHTML =
       '<a href="c-glass.html">작업실</a> › <a href="' + esc(back) + '">' + esc(name) +
-      '</a> › <b>' + esc(state.gate + ' ' + (view.title || '')) + '</b>';
+      '</a> › <b>' + esc(view.title || '검토') + '</b>';
     var status = q('[data-gate-status]');
     status.textContent =
       ((view.status && STATUS_KO[view.status]) || view.status || '-') +
@@ -3559,10 +3700,13 @@
       (view.status === 'APPROVED' ? ' is-approved' : '') +
       (view.status === 'REJECTED' ? ' is-rejected' : '');
     q('[data-kicker]').textContent = name;
-    q('[data-title]').textContent = view.title || state.gate;
+    q('[data-title]').textContent = view.title || '검토';
     var hint = (meta && ((meta.hintFor && meta.hintFor(items)) || meta.hint)) || '';
-    q('[data-desc]').textContent = hint;
-    q('[data-meta]').innerHTML =
+    // 기록에서는 '확인해요·승인하면' 같은 결정 안내와 버전·상태 줄을 감춘다. 요약 카드가 대신 말한다.
+    q('[data-desc]').textContent = record ? '' : hint;
+    q('[data-desc]').hidden = record;
+    q('[data-meta]').hidden = record;
+    q('[data-meta]').innerHTML = record ? '' :
       '<span>' + esc(revLabel(view.rev)) + '</span>' +
       '<span>' + esc(STATUS_KO[view.status] || view.status || '-') + '</span>' +
       (reviewEnabled() && !view.review && view.status === 'AWAITING_HUMAN' ? '<span class="gate-chip" title="미리 검토한 기록이 없어요. 추천 없이 직접 골라 주세요.">검토 모델 의견 없음</span>' : '') +
@@ -3576,6 +3720,8 @@
       ? meta.render(items)
       : '<p class="empty">이 관문 화면을 아직 지원하지 않아요: ' + esc(state.kind) + '</p>';
     q('[data-side-hint]').textContent = hint;
+    var sideTitle = q('.gate-side h2');
+    if (sideTitle) sideTitle.textContent = record ? '고른 것' : '결정';
     if (meta) renderActionsBar(view, meta);
     renderRaw(view);
     setStatus('');
@@ -3593,6 +3739,9 @@
     paintSourceSide();
     paintPhotos();
     if (['faces', 'planVariants', 'backgrounds', 'poses', 'frames', 'intro', 'actions', 'samples', 'dataset', 'package', 'sourcePack', 'sourcePhotos'].indexOf(state.kind) < 0) paintFaceSide();
+    // 기록인데 옆 칸에 보여 줄 것이 없으면 옆 칸을 접고 본문을 넓게 쓴다.
+    var extra = q('[data-side-extra]');
+    document.body.classList.toggle('gate-side-empty', record && !(extra && extra.textContent.trim()));
   }
 
   function bindBody() {
@@ -3714,7 +3863,8 @@
       document.body.appendChild(box);
     }
     if (!open) { box.hidden = true; box.innerHTML = ''; return; }
-    var rows = (KEYS_BY_KIND[state.kind] || []).concat(KEYS_COMMON);
+    var kindKeys = state.kind === 'planVariants' && planCandidates().length < 2 ? [] : KEYS_BY_KIND[state.kind];
+    var rows = (kindKeys || []).concat(KEYS_COMMON);
     box.hidden = false;
     box.innerHTML = '<div class="frame-zoom-inner keys-inner" role="dialog" aria-modal="true" aria-label="단축키"><div class="frame-zoom-head"><b>이 화면의 단축키</b><button type="button" class="btn btn--ghost" data-keys-close>닫기</button></div>' +
       '<dl class="keys-list">' + rows.map(function (r) { return '<dt><kbd>' + esc(r[0]) + '</kbd></dt><dd>' + esc(r[1]) + '</dd>'; }).join('') + '</dl>' +
@@ -3726,6 +3876,8 @@
   function onCommonKey(event) {
     var box = q('[data-keys-box]');
     if (event.key === 'Escape' && box && !box.hidden) { event.preventDefault(); event.stopPropagation(); toggleKeys(false); return; }
+    // 기록은 읽기만 한다. 주 버튼·단축키 창을 열지 않는다.
+    if (isRecord()) return;
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       var primary = qa('[data-decide].btn--primary').filter(function (b) { return !b.hidden && !b.disabled; })[0];
@@ -3891,10 +4043,12 @@
         state.kind = view.kind || (view.items || {}).kind || '';
         restorePicks();
         render();
-        document.title = '캐릭터 공장 · ' + state.gate + ' ' + (view.title || '');
+        document.title = '캐릭터 공장 · ' + (view.title || '검토');
       })
       .catch(function (error) {
-        showEmpty('관문 자료를 읽지 못했어요. 잠시 뒤 다시 열어 주세요. (' + error.message + ')');
+        // 서버·네트워크 오류 원문(영어일 수 있다)은 콘솔에만 남긴다.
+        if (window.console) window.console.warn(error);
+        showEmpty('검토 자료를 읽지 못했어요. 잠시 뒤 다시 열어 주세요.');
       });
   }
 

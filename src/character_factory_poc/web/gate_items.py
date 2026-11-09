@@ -11,6 +11,7 @@ S9~S11(G7a·G7·G8·G9)은 단계 코드가 없어 `reads.GATE_META`가 connecte
 from __future__ import annotations
 
 import json
+import re
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -226,6 +227,41 @@ def _plain_rationale(candidate: dict[str, Any], fallback: str) -> str:
     return text
 
 
+# 기획안 말투 칸에 섞여 들어오는 원문 통계 문장(예: "종결형은 높임 459, 반말 0, 미분류 379였다").
+# 화면에는 캐릭터 설명만 두고, 통계는 접힌 '기술 정보'로 옮긴다. 원래 칸 값은 그대로 둔다.
+_STAT_SENTENCE = re.compile(r"(종결형|미분류|높임\s*\d|반말\s*\d|\d+(?:\.\d+)?\s*%)")
+_SENTENCE_END = re.compile(r"(?<=[.!?。])\s+")
+
+
+def split_stat_sentences(text: Any) -> tuple[str, list[str]]:
+    """글을 문장으로 나눠 통계 문장과 나머지를 가른다. 화면 표시용이다."""
+    if not isinstance(text, str) or not text.strip():
+        return (text if isinstance(text, str) else ""), []
+    keep: list[str] = []
+    stats: list[str] = []
+    for sentence in _SENTENCE_END.split(text.strip()):
+        (stats if _STAT_SENTENCE.search(sentence) else keep).append(sentence)
+    if not keep:
+        # 문장을 나누지 못해 설명까지 통계로 보이면 원래 글을 그대로 둔다.
+        return text, []
+    return " ".join(keep), stats
+
+
+def _plan_display(candidates: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    out = {}
+    for c in candidates:
+        voice, stats = split_stat_sentences(c.get("voiceSummary"))
+        if stats:
+            out[str(c.get("variantId"))] = {"voiceSummary": voice, "voiceStats": stats}
+    return out
+
+
+def _same_prompt(long: Any, short: Any) -> bool:
+    a = long.get("text") if isinstance(long, dict) else None
+    b = short.get("text") if isinstance(short, dict) else None
+    return bool(a) and a == b
+
+
 def plan_variants(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[str, Any]:
     """G3: 변형 3안, 고칠 수 있는 칸, 직접 쓴 안."""
     folder = Path(char_dir) / stage_dir / rev
@@ -283,6 +319,8 @@ def plan_variants(char_dir: Path, character_id: str, stage_dir: str, rev: str) -
         "seedRev": seed_rev,
         "editableFields": list(EDITABLE_FIELDS),
         "candidates": candidates,
+        # 화면 표시용: 말투 칸의 통계 문장을 뺀 글과 뺀 문장(기술 정보로 접는다).
+        "planDisplay": _plan_display(candidates),
         "selection": selection,
         "approvedPlan": plan,
         "helper": (
@@ -731,6 +769,8 @@ def prompts(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict
         "sections": pair.get("sections", []),
         "long": pair.get("long"),
         "short": pair.get("short"),
+        # 화면 표시용: 긴·짧은 프롬프트 글이 같으면 하나만 보여 준다.
+        "samePrompt": _same_prompt(pair.get("long"), pair.get("short")),
         "systemRulesRef": pair.get("systemRulesRef", ""),
         "systemRulesSha256": pair.get("systemRulesSha256", ""),
         "shortAdopted": pair.get("shortAdopted", False),
