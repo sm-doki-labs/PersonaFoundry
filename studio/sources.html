@@ -84,6 +84,13 @@
             <label class="src-opt"><input type="radio" name="modelMode" value="TRAIN"><span><b>학습해서 쓰기</b><small>대화 데이터를 만들어 모델을 새로 학습해요. 시간과 비용이 들고, 학습은 진행 화면에서 비용을 확인한 뒤 시작해요.</small></span></label>
           </fieldset>
 
+          <fieldset class="src-fld src-choice" data-tier-choice aria-describedby="src-tier-h">
+            <legend>영상</legend>
+            <div class="vt-grid" data-tier-cards></div>
+            <p class="src-fhint" id="src-tier-h">영상을 고르면 대화가 된 뒤에 이어서 영상을 만들어요. 영상 단계는 비용이 들어요.</p>
+            <p class="src-fhint" data-tier-hint hidden>다음 단계에서 원문과 함께 얼굴이 잘 보이는 사진을 1장 이상 올려 주세요.</p>
+          </fieldset>
+
           <div class="src-switch">
             <label class="src-switch-row" for="src-auto">
               <span class="src-switch-tx"><b>사람 확인 없이 끝까지 만들기</b><small id="src-auto-h">확인 단계를 자동으로 넘겨요. 돈이 드는 단계는 돌리지 않아요.</small></span>
@@ -108,9 +115,11 @@
           <div><dt>구분</dt><dd data-sum-kind></dd></div>
           <div><dt>기본 정보</dt><dd data-sum-facts></dd></div>
           <div><dt>모델 준비 방식</dt><dd data-sum-mode></dd></div>
+          <div><dt>영상</dt><dd><span data-sum-video></span> <button type="button" class="link src-sum-edit" data-act="tier-edit" aria-expanded="false" aria-controls="src-tier-edit">바꾸기</button></dd></div>
           <div><dt>진행 방식</dt><dd data-sum-auto></dd></div>
           <div><dt>메모</dt><dd data-sum-notes></dd></div>
         </dl>
+        <div class="src-card src-tier-edit" id="src-tier-edit" data-tier-edit hidden></div>
       </section>
     </li>
 
@@ -131,6 +140,16 @@
         <p class="src-empty" data-empty hidden>아직 올린 원문이 없어요.</p>
         <div class="src-fold" data-file-sum hidden></div>
         <div class="src-list" data-list aria-label="올린 원문"></div>
+
+        <section class="src-photos" data-photos aria-labelledby="st-photos" hidden>
+          <div class="src-h"><h3 id="st-photos">영상용 사진</h3><span class="src-count" data-photo-count></span></div>
+          <p class="src-fhint" data-photo-hint>얼굴이 잘 보이는 사진 1장 이상 · jpg, png, webp · 한 장에 15MB까지</p>
+          <div class="src-photo-grid">
+            <div class="src-photo-list" data-photo-list aria-label="올린 사진"></div>
+            <button type="button" class="src-photo-add" data-act="pick-photo"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span>사진 고르기</span><small>끌어다 놓아도 돼요</small></button>
+          </div>
+          <input type="file" data-photo-picker multiple accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" hidden aria-hidden="true" tabindex="-1">
+        </section>
 
         <details class="src-adv" data-adv hidden>
           <summary>고급</summary>
@@ -154,6 +173,7 @@
           <h3 tabindex="-1" data-done-title>만들기 시작했어요</h3>
           <p data-done-text></p>
           <div class="src-prog" data-prog hidden><span class="src-prog-bar" role="img" data-prog-bar><i></i></span><span data-prog-text></span></div>
+          <p class="src-vline" data-video-line hidden><span class="src-spin" aria-hidden="true"></span><span data-video-text></span></p>
           <div class="acts"><a class="btn pri" data-chat-link href="chat.html" hidden>대화해 보기</a><a class="btn" data-done-link href="factory.html">진행 화면 보기</a></div>
         </div>
         <div class="src-del" data-del hidden>

@@ -8,6 +8,19 @@
 
   const MAX_BYTES = 20 * 1024 * 1024;
   const EXTENSIONS = ['.txt', '.srt', '.vtt', '.csv', '.json'];
+  // 영상용 사진(계획 4차 약속 5). 원문과 같은 올리기 순서로 보내고, 서버가 fileType "photo"로 돌려준다.
+  const PHOTO_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
+  const PHOTO_MAX_BYTES = 15 * 1024 * 1024;
+  // 영상 등급(약속 5). 화면에는 개수를 쓰지 않고, 무엇을 받는지와 걸리는 시간·비용을 서로 견줘서만 적는다.
+  // [값, 이름, 한 줄 설명, 시간·비용 칸 수(0~4)]. 진행 화면(flow.js)도 같은 표를 쓴다(시험이 같은지 본다).
+  const VIDEO_TIERS = [
+    ['none', '영상 없이', '대화만 만들어요. 영상 비용이 들지 않아요.', 0],
+    ['light', '라이트', '첫 장면만, 기본 감정으로 가장 빨리 확인해요.', 1],
+    ['standard', '스탠다드', '세 장면 모두, 기본 감정으로 만들어요.', 2],
+    ['pro', '프로', '세 장면 모두, 더 다양한 감정으로 만들어요.', 3],
+    ['max', '맥스', '앱에서 쓰는 반응 전부예요. 가장 오래 걸리고 비용도 가장 커요.', 4]
+  ];
+  const COST_WORD = ['없음', '적음', '보통', '많음', '가장 많음'];
   const KINDS = [['INTERVIEW', '인터뷰'], ['ARTICLE', '기사'], ['TRANSCRIPT', '받아쓰기'], ['KAKAO_EXPORT', '카톡']];
   const REGISTERS = [['FORMAL', '공식 자리'], ['CASUAL', '캐주얼 자리']];
   const SUBJECT_KINDS = [['PUBLIC_FIGURE', '공인'], ['PRIVATE_PERSON', '개인']];
@@ -29,6 +42,84 @@
   }
   const E = escapeHTML;
   function labelOf(pairs, id) { const p = pairs.find((x) => x[0] === id); return p ? p[1] : ''; }
+  function tierOf(value) { return VIDEO_TIERS.some((t) => t[0] === value) ? value : 'none'; }
+  function tierName(value) { return labelOf(VIDEO_TIERS, tierOf(value)); }
+  // 등급 고르기 카드. 원문 화면과 진행 화면의 영상 만들기가 같은 카드를 쓴다. paidOnly면 '영상 없이'를 뺀다.
+  function tierCardsHTML(name, value, opts) {
+    const o = opts || {};
+    const cur = tierOf(value);
+    return VIDEO_TIERS.filter((t) => !(o.paidOnly && t[0] === 'none')).map((t) => {
+      // 시간·비용 네 칸. '영상 없이'는 설명이 비용 없음을 말하므로 칸을 두지 않는다.
+      const meter = t[3] ? '<span class="vt-cost" role="img" aria-label="시간·비용 ' + COST_WORD[t[3]] + '">' + [1, 2, 3, 4].map((n) => '<i' + (n <= t[3] ? ' class="on"' : '') + '></i>').join('') + '</span>' : '';
+      return '<label class="vt-opt"><input type="radio" name="' + escapeHTML(name) + '" value="' + t[0] + '"' + (t[0] === cur ? ' checked' : '') + (o.disabled ? ' disabled' : '') + '><span class="vt-tx"><span class="vt-top"><b>' + t[1] + '</b>' + meter + '</span><small>' + t[2] + '</small></span></label>';
+    }).join('');
+  }
+  // 영상 상태 한 줄(약속 5 videoStatus·videoLabel). 상태를 알면 등급 이름을 붙여 화면마다 같은 말로 쓰고,
+  // 영상이 없으면 빈칸이다(목록마다 '영상 없음'을 붙이지 않는다). 모르는 상태일 때만 서버 videoLabel을 쓴다.
+  function videoText(c) {
+    const x = c || {};
+    const tier = tierOf(x.videoTier);
+    const st = text(x.videoStatus);
+    if (st === 'failed') return '영상을 만들지 못했어요';
+    if (st === 'making') return '영상 만드는 중 · ' + tierName(tier);
+    if (st === 'ready') return '영상 있음 · ' + tierName(tier);
+    if (st === 'none' || !text(x.videoLabel).trim()) return tier === 'none' ? '' : '영상 기다리는 중 · ' + tierName(tier);
+    return text(x.videoLabel).trim();
+  }
+  function isPhotoName(name) { return PHOTO_EXTENSIONS.indexOf(extOf(name)) >= 0; }
+  // 시작한 뒤 진행 카드에 보일 말(약속 3 상태, 약속 5 영상). 대화가 먼저 되고 영상은 그 뒤에 만든다.
+  // c: 캐릭터 진행(createIntake progress), chat: 대화 준비, o: { auto, tier }(이 화면 설정).
+  const DONE_LABEL = { chat_ready: '대화 가능', running: '만드는 중', needs_review: '확인 필요', failed: '실패', stopped: '멈춤', draft: '만드는 중' };
+  function doneView(c0, chat0, o0) {
+    const c = c0 || {};
+    const chat = chat0 || {};
+    const o = o0 || {};
+    const auto = o.auto !== false;
+    // 상태 이름은 모든 화면이 같은 말을 쓴다(약속 3 statusLabel). 서버가 상태를 주지 않으면 예전처럼 진행 기록에서 짐작한다.
+    const ready = c.chatReady === true || chat.ready === true;
+    const st = ready ? 'chat_ready' : c.status || (c.failed ? 'failed' : c.awaiting ? 'needs_review' : 'running');
+    const title = (st !== 'chat_ready' && c.statusLabel) || DONE_LABEL[st] || '만드는 중';
+    let body = '';
+    if (st === 'failed') body = '어느 단계에서 멈췄는지 진행 화면에서 봐 주세요.';
+    else if (st === 'needs_review') body = '진행 화면에서 확인할 차례가 있어요. 확인하면 이어서 만들어요.';
+    else if (st === 'stopped') body = '진행 화면에서 멈춘 까닭을 봐 주세요.';
+    else if (st !== 'chat_ready') body = auto ? (chat.reason && !c.status ? chat.reason : '보통 15~20분 걸려요. 이 화면을 열어 두면 다 됐을 때 대화해 보기 버튼이 생겨요.') : '출처 정리가 끝나면 진행 화면에 확인할 차례가 떠요.';
+    const tier = tierOf(c.videoTier || o.tier);
+    const vs = c.videoStatus;
+    const on = tier !== 'none' || vs === 'making' || vs === 'ready';
+    const vReady = on && vs === 'ready';
+    const vFailed = on && vs === 'failed';
+    // 영상 상태를 주는 서버면 다 되거나 실패할 때까지 '만드는 중'으로 본다. 그 필드가 없는 서버면 기다리는 중으로만 적는다.
+    const making = on && typeof vs === 'string' && !vReady && !vFailed;
+    if (on && st === 'chat_ready') {
+      if (vReady) body = '영상까지 다 만들었어요. 대화해 보기에서 영상과 함께 대화해요.';
+      else if (vFailed) body = '대화는 지금 해 볼 수 있어요. 영상은 만들지 못했어요. 진행 화면에서 까닭을 봐 주세요.';
+      else body = '대화는 지금 해 볼 수 있어요. 영상은 이어서 만들고 있어요. 다 되면 대화할 때 영상이 나와요.';
+    } else if (on && st === 'running' && body) body += ' 영상은 대화가 된 뒤에 이어서 만들어요.';
+    const vText = making ? '영상 만드는 중 · ' + tierName(tier) : videoText({ videoTier: tier, videoStatus: vs, videoLabel: c.videoLabel });
+    return {
+      ready, status: st, title, body,
+      tone: { chat_ready: 'ok', failed: 'fail', needs_review: 'wait', stopped: 'wait' }[st] || 'run',
+      video: { show: ready && on, text: vText, tone: vReady ? 'ok' : vFailed ? 'fail' : 'run', making },
+      chatLabel: vReady ? '영상과 함께 대화해 보기' : '대화해 보기'
+    };
+  }
+  // 시작한 뒤 진행을 다시 읽을지: 대화 준비가 될 때까지, 그리고 영상 등급을 골랐으면 영상이 다 되거나 실패할 때까지.
+  // 대화 API가 없는 서버면 멈추고, 영상 상태를 주지 않는 서버면 대화가 된 뒤에 멈춘다.
+  function wantsPoll(S) {
+    const c = S.character || {};
+    if (!(S.finalized && S.cid)) return false;
+    if (S.chat && S.chat.unavailable) return false;
+    const ready = !!(S.chat && S.chat.ready) || c.chatReady === true;
+    if (!ready) return true;
+    const tier = tierOf(c.videoTier || (S.settings && S.settings.videoTier));
+    return typeof c.videoStatus === 'string' && (c.videoStatus === 'making' || (c.videoStatus === 'none' && tier !== 'none'));
+  }
+  // 서버 기록이 사진인지. fileType을 주지 않는 서버면 확장자로 본다.
+  function isPhotoRecord(rec) {
+    const t = text(rec && rec.fileType);
+    return t ? t === 'photo' : isPhotoName(rec && rec.filename);
+  }
 
   // 계획 §1 default_register와 같은 표: 인터뷰·기사는 공식 자리, 카톡·받아쓰기는 캐주얼 자리.
   function defaultRegister(kind) {
@@ -99,8 +190,13 @@
   }
   function checkFile(file) {
     const name = text(file && file.name);
-    if (EXTENSIONS.indexOf(extOf(name)) < 0) return '이 형식은 받을 수 없어요. txt, srt, vtt, csv, json 파일만 올려 주세요.';
     const size = Number(file && file.size) || 0;
+    if (isPhotoName(name)) {
+      if (size > PHOTO_MAX_BYTES) return '사진이 15MB보다 커요. 더 작은 사진을 올려 주세요.';
+      if (size === 0) return '빈 파일이에요. 다른 사진을 올려 주세요.';
+      return null;
+    }
+    if (EXTENSIONS.indexOf(extOf(name)) < 0) return '이 형식은 받을 수 없어요. 원문은 txt, srt, vtt, csv, json, 사진은 jpg, png, webp로 올려 주세요.';
     if (size > MAX_BYTES) return '파일이 20MB보다 커요. 나눠서 올려 주세요.';
     if (size === 0) return '빈 파일이에요. 내용이 있는 파일을 올려 주세요.';
     return null;
@@ -216,11 +312,12 @@
       fieldErrors: {}, // key → { field: 문구 }
       rawInput: {}, // key → { field: 아직 맞지 않아 보내지 않은 입력값 }. 보내는 값(meta)은 늘 검사를 통과한 값이다.
       cardKey: {}, // fileId → 올릴 때 쓴 카드 key(올린 뒤에도 같은 카드를 쓴다)
+      thumbs: {}, // key → 이 브라우저에서 고른 사진의 미리보기 주소(서버가 주소를 주지 않아도 바로 보인다)
       busy: null, // 'create' | 'import' | 'finalize' | 'delete' | 'remove:<key>'
       error: null,
       notice: null,
       finalized: null,
-      settings: null, // { modelMode, autoReview } 이 화면에서 만든 초안이면 보낸 값, 다시 열면 서버 값
+      settings: null, // { modelMode, autoReview, videoTier } 이 화면에서 만든 초안이면 보낸 값, 다시 열면 서버 값
       character: null, // 시작한 뒤 캐릭터 진행(GET /api/characters/{cid})
       chat: null, // 대화 준비 상태(GET /api/characters/{cid}/chat/meta, 계획 2차 약속 1)
       projects: null,
@@ -234,6 +331,16 @@
     let pendingSaves = 0;
 
     function emit() { listeners.forEach((fn) => { try { fn(state); } catch (error) { /* 화면 오류가 상태를 막지 않게 */ } }); }
+    const URLS = (global && global.URL) || (typeof URL !== 'undefined' ? URL : null);
+    function makeThumb(file) {
+      try { return URLS && typeof URLS.createObjectURL === 'function' && file && typeof file === 'object' && typeof file.slice === 'function' ? URLS.createObjectURL(file) : ''; } catch (error) { return ''; }
+    }
+    function dropThumb(key) {
+      const u = state.thumbs[key];
+      if (u && URLS && typeof URLS.revokeObjectURL === 'function') { try { URLS.revokeObjectURL(u); } catch (error) { /* 이미 풀린 주소 */ } }
+      delete state.thumbs[key];
+    }
+    function dropThumbs() { Object.keys(state.thumbs).forEach(dropThumb); }
     function filesPath(fid) { return '/api/sources/' + encodeURIComponent(state.cid) + '/files' + (fid ? '/' + encodeURIComponent(fid) : ''); }
 
     async function request(method, path, body) {
@@ -262,10 +369,12 @@
     }
 
     function files() { return (state.draft && state.draft.files) || []; }
+    function textFiles() { return files().filter((f) => !isPhotoRecord(f)); }
+    function photoFiles() { return files().filter(isPhotoRecord); }
     function takenIds(exceptKey) {
       const ids = [];
-      files().forEach((f) => { if (keyOf(f.fileId) !== exceptKey) ids.push(metaOfRecord(f).textId); });
-      state.uploads.forEach((u) => { if (u.phase !== 'rejected' && u.key !== exceptKey) ids.push(u.meta.textId); });
+      textFiles().forEach((f) => { if (keyOf(f.fileId) !== exceptKey) ids.push(metaOfRecord(f).textId); });
+      state.uploads.forEach((u) => { if (u.phase !== 'rejected' && u.fileType !== 'photo' && u.key !== exceptKey) ids.push(u.meta.textId); });
       return ids.filter(Boolean);
     }
     function keyOf(fileId) { return state.cardKey[fileId] || 'f-' + fileId; }
@@ -293,7 +402,7 @@
     }
 
     async function load(cid) {
-      if (cid !== state.cid) Object.assign(state, { uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, settings: null, character: null, chat: null });
+      if (cid !== state.cid) { dropThumbs(); Object.assign(state, { uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, settings: null, character: null, chat: null }); }
       state.cid = cid;
       state.loading = true;
       state.loadError = null;
@@ -329,6 +438,10 @@
           chatReady: d && typeof d.chatReady === 'boolean' ? d.chatReady : null,
           goal: d && d.goal && Number(d.goal.total) > 0 ? d.goal : null,
           displayName: d && d.displayName ? text(d.displayName) : '',
+          // 약속 5: 영상 등급과 상태. 그 필드가 없는 서버면 null로 두고 영상 줄을 보이지 않는다.
+          videoTier: d && d.videoTier ? tierOf(d.videoTier) : null,
+          videoStatus: d && typeof d.videoStatus === 'string' ? d.videoStatus : null,
+          videoLabel: d && d.videoLabel ? text(d.videoLabel) : '',
           awaiting: Boolean(d && ((d.pendingGates && d.pendingGates.length) || d.awaitingHuman)),
           running: Boolean(d && d.job),
           failed: stages.some((s) => text(s && s.status).toUpperCase() === 'CHECK_FAILED')
@@ -369,7 +482,31 @@
       const c = state.character || {};
       const s = state.settings || {};
       const pick = (k) => (d[k] != null ? d[k] : c[k] != null ? c[k] : s[k] != null ? s[k] : null);
-      return { modelMode: pick('modelMode'), autoReview: pick('autoReview') };
+      return { modelMode: pick('modelMode'), autoReview: pick('autoReview'), videoTier: tierOf(pick('videoTier')) };
+    }
+    // 시작 전에 영상 등급을 바꾼다(약속 5 PATCH settings). 실패하면 화면 값은 그대로 두고 알린다.
+    async function setTier(value) {
+      const tier = tierOf(value);
+      if (!state.cid || state.finalized || state.busy) return false;
+      state.busy = 'tier';
+      state.error = null;
+      emit();
+      let ok = false;
+      try {
+        const data = await request('PATCH', '/api/sources/' + encodeURIComponent(state.cid) + '/settings', { videoTier: tier });
+        const saved = tierOf((data && data.videoTier) || tier);
+        state.settings = Object.assign({}, state.settings || {}, { videoTier: saved });
+        if (state.draft) state.draft.videoTier = saved;
+        if (state.character) state.character.videoTier = saved;
+        state.announce = '영상을 ' + tierName(saved) + ro(tierName(saved)) + ' 바꿨어요.';
+        ok = true;
+      } catch (error) {
+        state.error = error.status === 404 || error.status === 405 ? '이 서버에서는 아직 영상 등급을 바꿀 수 없어요.' : '영상 등급을 바꾸지 못했어요. ' + errorText(error);
+      }
+      state.busy = null;
+      emit();
+      if (ok) await refresh();
+      return ok;
     }
 
     function validateDraft(input) {
@@ -391,20 +528,22 @@
       try {
         const modelMode = modeOf(input.modelMode);
         const autoReview = input.autoReview !== false;
+        const videoTier = tierOf(input.videoTier);
         const body = {
           displayName: text(input.displayName).trim(),
           subjectKind: input.subjectKind,
           usageBasis: { scope: text(input.scope).trim() || DEFAULT_SCOPE, notes: text(input.notes).trim() },
           knownFacts: { age: text(input.age).trim(), gender: text(input.gender).trim(), job: text(input.job).trim(), background: text(input.background).trim() },
           modelMode,
-          autoReview
+          autoReview,
+          videoTier
         };
         if (input.chapterTemplate) body.chapterTemplate = input.chapterTemplate;
         const data = await request('POST', '/api/sources/drafts', body);
         state.busy = null;
         if (o.onCid) o.onCid(data.characterId);
         await load(data.characterId);
-        state.settings = { modelMode, autoReview };
+        state.settings = { modelMode, autoReview, videoTier };
         emit();
         return { characterId: data.characterId };
       } catch (error) {
@@ -415,17 +554,23 @@
       }
     }
 
-    function addFiles(list) {
-      if (!state.draft || state.finalized) return [];
+    // 원문과 사진을 같은 줄에 세운다. 사진은 확장자로 알아보고, 만들기를 시작한 뒤에도 사진만은 더 올릴 수 있다(나중에 영상 만들기).
+    // photoOnly(사진 칸에서 고르거나 떨어뜨림)면 사진이 아닌 파일은 사진 칸에서 거절한다.
+    function addFiles(list, opts) {
+      if (!state.draft) return [];
+      const photoOnly = !!(opts && opts.photoOnly);
       const added = [];
       Array.from(list || []).forEach((file) => {
+        const photo = photoOnly || isPhotoName(file && file.name);
+        if (state.finalized && !photo) return;
         const key = 'u' + (++seq);
-        const problem = checkFile(file);
-        const hint = kindHint(file.name);
+        const problem = photo && !isPhotoName(file && file.name) ? '사진은 jpg, png, webp 파일로 올려 주세요.' : checkFile(file);
+        const hint = photo ? null : kindHint(file.name);
         const kind = hint || 'INTERVIEW';
         const entry = {
           key,
           file,
+          fileType: photo ? 'photo' : 'text',
           filename: text(file.name),
           size: Number(file.size) || 0,
           contentType: text(file.type) || 'application/octet-stream',
@@ -437,7 +582,8 @@
           kindFromName: !!hint,
           touched: {}, // 올리는 동안 사람이 고친 칸. 서버 제안으로 덮지 않는다.
           // 원문 이름은 보이지 않게 파일 이름으로 정하고, 대상 화자는 비워 보내 서버가 원문에서 찾은 이름을 쓰게 한다(약속 4).
-          meta: {
+          // 사진에는 원문 정보가 없어 모두 빈칸으로 보낸다.
+          meta: photo ? { textId: '', kind: '', register: '', subjectSpeaker: '', userSpeaker: '', date: '', sourceUrl: '' } : {
             textId: problem ? '' : suggestTextId(file.name, kind, takenIds()),
             kind,
             register: defaultRegister(kind),
@@ -447,6 +593,7 @@
             sourceUrl: ''
           }
         };
+        if (photo && !problem) { const u = makeThumb(file); if (u) state.thumbs[key] = u; }
         state.uploads.push(entry);
         added.push(key);
       });
@@ -496,17 +643,21 @@
         entry.phase = 'checking';
         entry.progress = 1;
         emit();
-        const rec = await request('POST', filesPath(entry.fileId) + '/complete', metaBody(entry.meta));
+        // 사진에는 원문 정보가 없어 빈 본문으로 확인만 한다(서버가 사진에 화자 정보를 받지 않는다).
+        const rec = await request('POST', filesPath(entry.fileId) + '/complete', entry.fileType === 'photo' ? {} : metaBody(entry.meta));
         if (entry.cancelled) throw Object.assign(new Error('abort'), { aborted: true });
         state.uploads = state.uploads.filter((u) => u !== entry);
         upsert(rec);
-        state.announce = entry.filename + ' 파일을 올렸어요.';
-        // 확인하는 동안 사람이 고친 값과 서버가 원문에서 짐작한 값을 이어서 저장한다.
-        const next = afterCheck(rec, entry);
-        if (!sameMeta(metaOfRecord(rec), next)) queuePatch(rec.fileId, next);
+        state.announce = entry.filename + (entry.fileType === 'photo' ? ' 사진을 올렸어요.' : ' 파일을 올렸어요.');
+        // 확인하는 동안 사람이 고친 값과 서버가 원문에서 짐작한 값을 이어서 저장한다. 사진은 고칠 칸이 없다.
+        if (entry.fileType !== 'photo') {
+          const next = afterCheck(rec, entry);
+          if (!sameMeta(metaOfRecord(rec), next)) queuePatch(rec.fileId, next);
+        }
       } catch (error) {
         delete aborts[entry.key];
         if (entry.cancelled || error.aborted) {
+          dropThumb(entry.key);
           state.uploads = state.uploads.filter((u) => u !== entry);
           if (entry.fileId) { try { await request('DELETE', filesPath(entry.fileId)); } catch (e) { /* 다음 새로고침에 남은 자리로 보인다 */ } }
         } else {
@@ -613,6 +764,7 @@
           emit();
           return;
         }
+        dropThumb(key);
         state.uploads = state.uploads.filter((u) => u !== entry);
         emit();
         if (entry.fileId) { try { await request('DELETE', filesPath(entry.fileId)); } catch (error) { /* 서버 목록에 남으면 거기서 지운다 */ } await refresh(); }
@@ -626,12 +778,13 @@
       try {
         await request('DELETE', filesPath(rec.fileId));
         state.draft.files = files().filter((f) => f !== rec);
+        dropThumb(key);
         delete state.fieldErrors[key];
         delete state.rawInput[key];
         delete state.overlay[rec.fileId];
-        state.announce = rec.filename + ' 파일을 지웠어요.';
+        state.announce = rec.filename + (isPhotoRecord(rec) ? ' 사진을 지웠어요.' : ' 파일을 지웠어요.');
       } catch (error) {
-        state.error = rec.filename + ' 파일을 지우지 못했어요. ' + errorText(error);
+        state.error = rec.filename + (isPhotoRecord(rec) ? ' 사진을' : ' 파일을') + ' 지우지 못했어요. ' + errorText(error);
       }
       state.busy = null;
       emit();
@@ -655,6 +808,7 @@
     }
 
     // 시작 가능 조건: 서버 canFinalize가 참이고, 화면에 올리는 중·실패한 파일, 저장 중이거나 고칠 곳이 남은 칸이 없어야 한다.
+    // 영상 등급을 골랐으면 준비된 사진이 1장 이상 있어야 한다(약속 5). 서버가 같은 문제를 적어 주면 그 문장만 쓴다.
     function startState() {
       const reasons = [];
       const d = state.draft;
@@ -665,10 +819,15 @@
       if (pendingSaves) reasons.push('고친 내용을 저장하고 있어요.');
       if (Object.keys(state.saveError).length) reasons.push('저장하지 못한 파일 정보가 있어요.');
       if (Object.keys(state.fieldErrors).length) reasons.push('파일 정보에 고칠 곳이 있어요.');
-      if (!(d.files || []).length && !state.uploads.some((u) => u.phase !== 'rejected')) reasons.push('원문 파일을 하나 이상 올려 주세요.');
-      if (d.canFinalize !== true) (d.problems || []).forEach((p) => { if (reasons.indexOf(p) < 0) reasons.push(text(p)); });
+      const serverProblems = d.canFinalize !== true ? (d.problems || []).map(text) : [];
+      // 서버가 같은 뜻을 제 말로 적어 주면(예: '대화나 글이 담긴 원문을 하나 이상 올려 주세요.') 이 화면 문장은 빼서 두 번 보이지 않게 한다.
+      const noText = !textFiles().length && !state.uploads.some((u) => u.phase !== 'rejected' && u.fileType !== 'photo');
+      if (noText && !serverProblems.some((p) => /원문.*하나 이상/.test(p))) reasons.push('원문 파일을 하나 이상 올려 주세요.');
+      const needPhoto = settings().videoTier !== 'none' && !photoFiles().some((f) => f.status === 'ready');
+      if (needPhoto && !serverProblems.some((p) => /사진/.test(p))) reasons.push('영상을 만들려면 얼굴이 잘 보이는 사진을 1장 이상 올려 주세요.');
+      serverProblems.forEach((p) => { if (reasons.indexOf(p) < 0) reasons.push(p); });
       if (d.canFinalize !== true && !reasons.length) reasons.push('아직 시작할 수 없어요. 파일마다 확인할 점을 봐 주세요.');
-      return { ready: d.canFinalize === true && !reasons.length, reasons };
+      return { ready: d.canFinalize === true && !reasons.length, reasons, needPhoto };
     }
 
     async function finalize() {
@@ -704,16 +863,19 @@
         return false;
       }
       Object.keys(aborts).forEach((k) => aborts[k]());
+      dropThumbs();
       Object.assign(state, { cid: null, draft: null, uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, busy: null, finalized: null, loadError: null, settings: null, character: null, chat: null, announce: '초안과 올린 원문을 지웠어요.' });
       if (o.onCid) o.onCid(null);
       emit();
       return true;
     }
     function reset() {
+      dropThumbs();
       Object.assign(state, { cid: null, draft: null, uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, busy: null, finalized: null, loadError: null, error: null, notice: null, settings: null, character: null, chat: null });
       emit();
     }
     function dismiss(key) {
+      dropThumb(key);
       state.uploads = state.uploads.filter((u) => !(u.key === key && u.phase === 'rejected'));
       emit();
     }
@@ -722,7 +884,7 @@
     function items() {
       const uploading = new Set(state.uploads.map((u) => u.fileId).filter(Boolean));
       const out = [];
-      files().forEach((f) => {
+      textFiles().forEach((f) => {
         if (uploading.has(f.fileId)) return;
         const key = keyOf(f.fileId);
         const st = f.status === 'ready' ? ['ok', '준비됐어요'] : f.status === 'problem' ? ['wait', '확인이 필요해요'] : ['muted', '다 올라가지 않았어요'];
@@ -735,17 +897,37 @@
         const speaker = !state.finalized && f.status !== 'pending' && found && found !== text(meta.subjectSpeaker).trim() && (f.status === 'problem' || (names.length && names.indexOf(text(meta.subjectSpeaker).trim()) < 0)) ? found : '';
         out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, speaker, meta, display: Object.assign(metaOfRecord(f), state.rawInput[key] || {}), editable: f.status !== 'pending' && !state.finalized, removable: !state.finalized && state.busy !== 'remove:' + key, retry: false, saving: state.saving[key] || '', saveError: state.saveError[key] || '', fieldErrors: state.fieldErrors[key] || {} });
       });
-      state.uploads.forEach((u) => {
+      state.uploads.filter((u) => u.fileType !== 'photo').forEach((u) => {
         const map = { queued: ['muted', '기다리는 중'], starting: ['run', '준비하는 중'], sending: ['run', '올리는 중 ' + Math.round(u.progress * 100) + '%'], checking: ['run', '확인하는 중'], failed: ['fail', '올리지 못했어요'], rejected: ['fail', '받을 수 없는 파일'] };
         const st = map[u.phase] || ['muted', ''];
         out.push({ key: u.key, source: 'upload', fileId: u.fileId, filename: u.filename, size: u.size, tone: st[0], status: st[1], phase: u.phase, progress: u.phase === 'sending' ? u.progress : null, problems: u.error ? [u.error] : [], speaker: '', meta: u.meta, display: Object.assign({}, u.meta, state.rawInput[u.key] || {}), editable: u.phase !== 'rejected' && !state.finalized, removable: !u.cancelled, retry: u.phase === 'failed', saving: '', saveError: '', fieldErrors: state.fieldErrors[u.key] || {} });
       });
       return out;
     }
+    // 영상용 사진 목록(미리보기 칸). 서버가 미리보기 주소(previewUrl·thumbUrl·url)를 주면 쓰고, 없으면 이 브라우저에서 고른 사진을 보인다.
+    // 만들기를 시작한 뒤에는 이미 쓴 사진을 지우지 못하게 한다.
+    function photoItems() {
+      const uploading = new Set(state.uploads.map((u) => u.fileId).filter(Boolean));
+      const out = [];
+      photoFiles().forEach((f) => {
+        if (uploading.has(f.fileId)) return;
+        const key = keyOf(f.fileId);
+        const st = f.status === 'ready' ? ['ok', '준비됐어요'] : f.status === 'problem' ? ['wait', '확인이 필요해요'] : ['muted', '다 올라가지 않았어요'];
+        const problems = (f.problems || []).map(text);
+        if (f.status === 'pending' && !problems.length) problems.push('끝까지 올라가지 않았어요. 지우고 다시 올려 주세요.');
+        out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, thumb: text(f.previewUrl || f.thumbUrl || f.url) || state.thumbs[key] || '', removable: !state.finalized && state.busy !== 'remove:' + key, retry: false });
+      });
+      state.uploads.filter((u) => u.fileType === 'photo').forEach((u) => {
+        const map = { queued: ['muted', '기다리는 중'], starting: ['run', '준비하는 중'], sending: ['run', '올리는 중 ' + Math.round(u.progress * 100) + '%'], checking: ['run', '확인하는 중'], failed: ['fail', '올리지 못했어요'], rejected: ['fail', '받을 수 없는 사진'] };
+        const st = map[u.phase] || ['muted', ''];
+        out.push({ key: u.key, source: 'upload', fileId: u.fileId, filename: u.filename, size: u.size, tone: st[0], status: st[1], phase: u.phase, progress: u.phase === 'sending' ? u.progress : null, problems: u.error ? [u.error] : [], thumb: state.thumbs[u.key] || '', removable: !u.cancelled, retry: u.phase === 'failed' });
+      });
+      return out;
+    }
     function uploading() { return state.uploads.some((u) => ACTIVE.indexOf(u.phase) >= 0); }
 
     return {
-      state, load, refresh, progress, projects, drafts, settings, createDraft, validateDraft, addFiles, retry, dismiss, editFile, removeFile, importPath, finalize, deleteDraft, reset, startState, items, uploading,
+      state, load, refresh, progress, projects, drafts, settings, setTier, createDraft, validateDraft, addFiles, retry, dismiss, editFile, removeFile, importPath, finalize, deleteDraft, reset, startState, items, photoItems, uploading,
       subscribe(fn) { listeners.push(fn); return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); }; }
     };
   }
@@ -763,7 +945,9 @@
     inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5h13L22 12v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-6z"/>',
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
     moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
-    monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'
+    monitor: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+    photo: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 8"/>',
+    plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'
   };
   // 진행 화면(flow.js)과 같은 브랜드 마크.
   const MARK = '<svg class="fd-mark" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="var(--fd-accent)"/><path d="M8.5 17V7h7.5M8.5 12h5" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16.4" cy="16.4" r="1.7" fill="#fff"/></svg>';
@@ -869,8 +1053,14 @@
       delRow: $('[data-del]'), delConfirm: $('[data-del-confirm]'), publicNote: $('[data-public-note]'),
       side: $('[data-side]'), headTheme: $('[data-head-theme]'), fileSum: $('[data-file-sum]'), startLead: $('[data-start-lead]'),
       doneTitle: $('[data-done-title]'), doneText: $('[data-done-text]'), prog: $('[data-prog]'), progText: $('[data-prog-text]'), chatLink: $('[data-chat-link]'),
-      title: $('[data-title]'), intro: $('[data-intro]'), crumb: $('[data-crumb]'), resume: $('[data-resume]'), adv: $('[data-adv]'), startNote: $('[data-start-note]')
+      title: $('[data-title]'), intro: $('[data-intro]'), crumb: $('[data-crumb]'), resume: $('[data-resume]'), adv: $('[data-adv]'), startNote: $('[data-start-note]'),
+      tierCards: $('[data-tier-cards]'), tierHint: $('[data-tier-hint]'), sumVideo: $('[data-sum-video]'), tierEdit: $('[data-tier-edit]'),
+      photos: $('[data-photos]'), photoList: $('[data-photo-list]'), photoPicker: $('[data-photo-picker]'), photoCount: $('[data-photo-count]'), photoHint: $('[data-photo-hint]'),
+      videoLine: $('[data-video-line]'), videoText: $('[data-video-text]')
     };
+    if (r.tierCards) r.tierCards.innerHTML = tierCardsHTML('videoTier', 'none');
+    let tierEditOpen = false;
+    const tiles = new Map();
     let chapterTouched = false;
     let confirmDelete = false;
     let listOpen = null; // null이면 파일 수로 정한다(많으면 접는다)
@@ -943,6 +1133,11 @@
           if (modeEl) { modeEl.textContent = labelOf(MODES, set.modelMode); modeEl.parentElement.hidden = !set.modelMode; }
           const autoEl = r.summary.querySelector('[data-sum-auto]');
           if (autoEl) { autoEl.textContent = set.autoReview === false ? '단계마다 사람이 확인해요' : '사람 확인 없이 대화해 보기까지 가요'; autoEl.parentElement.hidden = set.autoReview == null; }
+          if (r.sumVideo) {
+            r.sumVideo.textContent = tierName(set.videoTier);
+            const edit = r.summary.querySelector('[data-act="tier-edit"]');
+            if (edit) { edit.hidden = !!S.finalized; edit.disabled = S.busy === 'tier'; edit.setAttribute('aria-expanded', String(tierEditOpen && !S.finalized)); edit.textContent = tierEditOpen ? '닫기' : '바꾸기'; }
+          }
           const notes = r.summary.querySelector('[data-sum-notes]');
           const memo = [text(basis.scope) && text(basis.scope) !== DEFAULT_SCOPE ? text(basis.scope) : '', text(basis.notes)].filter(Boolean).join(' · ');
           notes.textContent = memo;
@@ -950,6 +1145,12 @@
         }
       }
       if (r.publicNote) r.publicNote.hidden = !(hasDraft && d.subject && d.subject.kind === 'PUBLIC_FIGURE');
+      if (r.tierEdit) {
+        const show = hasDraft && tierEditOpen && !S.finalized;
+        r.tierEdit.hidden = !show;
+        const html = show ? '<div class="vt-grid" role="radiogroup" aria-label="영상 등급 바꾸기">' + tierCardsHTML('videoTierEdit', intake.settings().videoTier, { disabled: S.busy === 'tier' }) + '</div><p class="src-fhint">영상 단계는 비용이 들어요. 고르면 바로 저장해요.</p>' : '';
+        if (r.tierEdit.dataset.html !== html) { r.tierEdit.innerHTML = html; r.tierEdit.dataset.html = html; }
+      }
       renderTitle();
     }
     // 이미 있는 초안·캐릭터면 제목과 위치 표시를 그 이름으로 바꾼다. 새로 만들 때만 소개 문장과 만들던 초안 목록을 보인다.
@@ -1104,6 +1305,66 @@
         if (r.adv) r.adv.hidden = !(d && d.allowPathImport && !S.finalized);
         if (r.pathBtn) { r.pathBtn.disabled = S.busy === 'import'; r.pathBtn.textContent = S.busy === 'import' ? '가져오는 중…' : '가져오기'; }
       }
+      renderPhotos();
+    }
+    // 영상용 사진: 영상 등급을 골랐거나 이미 올린 사진이 있으면 보인다. 시작한 뒤에도 대화가 되면 영상 만들기용 사진을 더 올릴 수 있다.
+    function photoOpen() {
+      const d = S.draft;
+      if (!d) return { show: false, add: false };
+      const c = S.character || {};
+      const tier = intake.settings().videoTier;
+      const has = intake.photoItems().length > 0;
+      const ready = c.chatReady === true || !!(S.chat && S.chat.ready);
+      const show = tier !== 'none' || has || (!!S.finalized && ready);
+      return { show, add: show && c.videoStatus !== 'making', tier };
+    }
+    function syncTile(el, it) {
+      const q = (s) => el.querySelector(s);
+      el.dataset.tone = it.tone;
+      const box = q('.src-photo-img');
+      const want = it.thumb ? '<img alt="" src="' + E(it.thumb) + '">' : icon('photo');
+      if (box.dataset.html !== want) { box.innerHTML = want; box.dataset.html = want; }
+      q('.nm').textContent = it.filename;
+      q('[data-status-text]').textContent = it.problems.length ? it.problems[0] : it.status;
+      const bar = q('[data-bar]');
+      bar.hidden = it.progress == null;
+      if (it.progress != null) bar.firstChild.style.width = Math.round(it.progress * 100) + '%';
+      const x = q('[data-act="remove"]');
+      x.hidden = !it.removable && !!S.finalized;
+      x.disabled = !it.removable;
+      x.setAttribute('aria-label', (it.source === 'upload' && it.phase === 'rejected' ? '목록에서 빼기: ' : '지우기: ') + it.filename);
+      q('[data-act="retry"]').hidden = !it.retry;
+    }
+    function renderPhotos() {
+      if (!r.photos) return;
+      const po = photoOpen();
+      r.photos.hidden = !po.show;
+      const list = po.show ? intake.photoItems() : [];
+      const ready = list.filter((i) => i.tone === 'ok').length;
+      if (r.photoCount) r.photoCount.textContent = list.length ? ready + '장 준비' : '';
+      if (r.photoHint) r.photoHint.textContent = S.finalized && po.tier === 'none' ? '얼굴이 잘 보이는 사진 1장 이상 · 진행 화면에서 영상을 만들 때 이 사진을 써요.' : '얼굴이 잘 보이는 사진 1장 이상 · jpg, png, webp · 한 장에 15MB까지';
+      const add = r.photos.querySelector('[data-act="pick-photo"]');
+      if (add) { add.hidden = !po.add; add.disabled = !po.add; }
+      if (!r.photoList) return;
+      const keep = new Set(list.map((i) => i.key));
+      tiles.forEach((el, key) => { if (!keep.has(key)) { el.remove(); tiles.delete(key); } });
+      list.forEach((it) => {
+        let el = tiles.get(it.key);
+        if (!el) {
+          const holder = doc.createElement('div');
+          holder.innerHTML = '<figure class="src-photo" data-key="' + E(it.key) + '"><span class="src-photo-img" aria-hidden="true"></span>' +
+            '<span class="src-bar" data-bar hidden><span></span></span>' +
+            '<figcaption><span class="nm"></span><span class="st" data-status-text></span></figcaption>' +
+            '<button type="button" class="btn ghost src-photo-x" data-act="remove" aria-label="">' + icon('x') + '</button>' +
+            '<button type="button" class="btn src-photo-retry" data-act="retry" hidden>' + icon('retry') + '다시 올리기</button></figure>';
+          el = holder.firstChild;
+          tiles.set(it.key, el);
+        }
+        syncTile(el, it);
+      });
+      const want = list.map((i) => tiles.get(i.key));
+      const now = Array.from(r.photoList.children);
+      if (want.length !== now.length || want.some((el, i) => el !== now[i])) want.forEach((el) => r.photoList.appendChild(el));
     }
 
     function renderStart() {
@@ -1111,14 +1372,17 @@
       const st = intake.startState();
       const set = intake.settings();
       const auto = set.autoReview !== false;
+      const tier = set.videoTier;
+      const vName = tierName(tier);
       setStep(r.steps.info, d ? 'done' : 'active');
       setStep(r.steps.start, !d ? 'todo' : S.finalized ? 'done' : st.ready ? 'active' : 'wait');
       if (r.startLead) r.startLead.hidden = !!S.finalized;
-      if (r.startLead) r.startLead.textContent = auto
+      if (r.startLead) r.startLead.textContent = (auto
         ? '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. 사람 확인 없이 대화해 보기까지 이어서 만들어요.'
-        : '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. 다 되면 진행 화면에서 출처 확인을 기다려요.';
+        : '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. 다 되면 진행 화면에서 출처 확인을 기다려요.') +
+        (tier !== 'none' ? ' 대화가 되면 이어서 ' + vName + ' 영상을 만들어요.' : '');
       if (r.startNote) {
-        r.startNote.textContent = (auto ? '보통 15~20분 걸려요' : '단계마다 진행 화면에서 확인해요') + ' · 이미지·영상·학습은 하지 않아요';
+        r.startNote.textContent = (auto ? '보통 15~20분 걸려요' : '단계마다 진행 화면에서 확인해요') + (tier !== 'none' ? ' · 영상은 대화가 된 뒤에 만들고 비용이 들어요' : ' · 이미지·영상·학습은 하지 않아요');
         r.startNote.hidden = !!S.finalized;
       }
       if (r.startBtn) {
@@ -1135,22 +1399,20 @@
         r.done.hidden = !S.finalized;
         if (r.doneLink && S.cid) r.doneLink.href = 'factory.html#c/' + encodeURIComponent(S.cid);
         const c = S.character || {};
-        const chat = S.chat || {};
         const p = c.progress || {};
-        // 상태 이름은 모든 화면이 같은 말을 쓴다(약속 3 statusLabel): 만드는 중 · 확인 필요 · 대화 가능 · 실패 · 멈춤.
-        // 서버가 상태를 주지 않으면 예전처럼 진행 기록에서 짐작한다.
-        const ready = c.chatReady === true || chat.ready === true;
-        const st = ready ? 'chat_ready' : c.status || (c.failed ? 'failed' : c.awaiting ? 'needs_review' : 'running');
-        const LABEL = { chat_ready: '대화 가능', running: '만드는 중', needs_review: '확인 필요', failed: '실패', stopped: '멈춤', draft: '만드는 중' };
-        const title = (st !== 'chat_ready' && c.statusLabel) || LABEL[st] || '만드는 중';
-        let body = '';
-        if (st === 'failed') body = '어느 단계에서 멈췄는지 진행 화면에서 봐 주세요.';
-        else if (st === 'needs_review') body = '진행 화면에서 확인할 차례가 있어요. 확인하면 이어서 만들어요.';
-        else if (st === 'stopped') body = '진행 화면에서 멈춘 까닭을 봐 주세요.';
-        else if (st !== 'chat_ready') body = auto ? (chat.reason && !c.status ? chat.reason : '보통 15~20분 걸려요. 이 화면을 열어 두면 다 됐을 때 대화해 보기 버튼이 생겨요.') : '출처 정리가 끝나면 진행 화면에 확인할 차례가 떠요.';
-        if (r.doneTitle) r.doneTitle.textContent = title;
-        if (r.doneText) { r.doneText.textContent = body; r.doneText.hidden = !body; }
-        r.done.dataset.tone = { chat_ready: 'ok', failed: 'fail', needs_review: 'wait', stopped: 'wait' }[st] || 'run';
+        const view = doneView(c, S.chat, { auto, tier });
+        const ready = view.ready;
+        if (r.doneTitle) r.doneTitle.textContent = view.title;
+        if (r.doneText) { r.doneText.textContent = view.body; r.doneText.hidden = !view.body; }
+        r.done.dataset.tone = view.tone;
+        // 영상 줄은 대화가 된 뒤에만 보인다(대화가 먼저, 영상은 그다음).
+        if (r.videoLine) {
+          r.videoLine.hidden = !(S.finalized && view.video.show);
+          r.videoLine.dataset.tone = view.video.tone;
+          if (r.videoText) r.videoText.textContent = view.video.text;
+          const spin = r.videoLine.querySelector('.src-spin');
+          if (spin) spin.hidden = !view.video.making;
+        }
         if (r.prog) {
           // 진행 막대는 만드는 동안만 보인다. 대화 가능이면 다 된 것이라 숨긴다. 단계 수는 목표까지 필요한 단계로 센다(약속 3 goal).
           const g = c.goal || (p.total ? { done: p.done, total: p.total } : null);
@@ -1164,6 +1426,7 @@
         }
         if (r.chatLink) {
           r.chatLink.hidden = !ready;
+          if (r.chatLink.textContent !== view.chatLabel) r.chatLink.textContent = view.chatLabel;
           if (S.cid) r.chatLink.href = 'chat.html#c/' + encodeURIComponent(S.cid);
           if (r.doneLink) r.doneLink.classList.toggle('pri', !ready);
         }
@@ -1185,8 +1448,9 @@
       if (doc.title !== undefined) doc.title = (S.cid && nameNow() ? nameNow() : '원문으로 새 캐릭터') + ' · Foundry';
     }
     // 시작한 뒤에는 대화 준비가 될 때까지 진행을 가끔 다시 읽는다. 화면이 숨으면 쉬고, 대화 API가 없으면 멈춘다.
+    // 영상 등급을 골랐으면 대화가 된 뒤에도 영상이 다 되거나 실패할 때까지 읽는다(영상 상태를 주지 않는 서버면 거기서 멈춘다).
     function schedule() {
-      const want = !!(S.finalized && S.cid && !(S.chat && (S.chat.ready || S.chat.unavailable)) && !(S.character && S.character.chatReady === true));
+      const want = wantsPoll(S);
       if (want && !pollTimer && global && global.setInterval) {
         pollTimer = global.setInterval(() => { if (!(doc.hidden)) intake.progress(); }, 6000);
       } else if (!want && pollTimer) { global.clearInterval(pollTimer); pollTimer = null; }
@@ -1203,8 +1467,9 @@
       const f = r.form;
       const kind = (f.querySelector('[name="subjectKind"]:checked') || {}).value;
       const mode = (f.querySelector('[name="modelMode"]:checked') || {}).value;
+      const tier = (f.querySelector('[name="videoTier"]:checked') || {}).value;
       const auto = f.querySelector('[name="autoReview"]');
-      const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined, modelMode: mode, autoReview: auto ? auto.checked : true };
+      const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined, modelMode: mode, autoReview: auto ? auto.checked : true, videoTier: tier };
       const errors = intake.validateDraft(input);
       ['displayName', 'subjectKind', 'age', 'gender', 'job'].forEach((n) => fieldError(n, errors[n]));
       const first = Object.keys(errors)[0];
@@ -1223,14 +1488,17 @@
       const card = el.closest('[data-key]');
       const key = card && card.dataset.key;
       if (act === 'pick' && r.picker) r.picker.click();
+      else if (act === 'pick-photo' && r.photoPicker) r.photoPicker.click();
+      else if (act === 'tier-edit') { tierEditOpen = !tierEditOpen; render(); if (tierEditOpen && r.tierEdit) { const cur = r.tierEdit.querySelector('input:checked'); if (cur) cur.focus(); } }
       else if (act === 'theme' || act === 'theme-next') setTheme(el.dataset.theme || 'system');
       else if (act === 'fold') { listOpen = el.getAttribute('aria-expanded') !== 'true'; render(); }
       else if (act === 'toggle' && key) { open[key] = el.getAttribute('aria-expanded') !== 'true'; render(); }
       else if (act === 'remove' && key) {
-        const item = intake.items().find((i) => i.key === key);
+        const item = intake.items().concat(intake.photoItems()).find((i) => i.key === key);
         if (item && item.source === 'upload' && item.phase === 'rejected') intake.dismiss(key); else intake.removeFile(key);
         const next = card.nextElementSibling || card.previousElementSibling;
-        setTimeout(() => { const t = next && next.querySelector('[data-act="remove"]'); if (t && doc.contains(t)) t.focus(); else if (r.drop) { const p = r.drop.querySelector('[data-act="pick"]'); if (p) p.focus(); } }, 0);
+        const photo = r.photos && r.photos.contains(card);
+        setTimeout(() => { const t = next && next.querySelector('[data-act="remove"]'); if (t && doc.contains(t)) t.focus(); else { const p = photo ? r.photos.querySelector('[data-act="pick-photo"]') : r.drop && r.drop.querySelector('[data-act="pick"]'); if (p) p.focus(); } }, 0);
       }
       else if (act === 'retry' && key) intake.retry(key);
       else if (act === 'use-speaker' && key) intake.editFile(key, 'subjectSpeaker', el.dataset.name);
@@ -1243,12 +1511,17 @@
     }
     function chapterTemplateReset() {
       chapterTouched = false;
+      tierEditOpen = false;
       if (r.form) r.form.reset();
+      if (r.tierHint) r.tierHint.hidden = true;
     }
     function onChange(e) {
       const t = e.target;
       if (t === r.picker) { intake.addFiles(t.files); t.value = ''; return; }
+      if (t === r.photoPicker) { intake.addFiles(t.files, { photoOnly: true }); t.value = ''; return; }
+      if (t.name === 'videoTierEdit') { intake.setTier(t.value).then((ok) => { if (ok) { tierEditOpen = false; render(); const b = r.summary && r.summary.querySelector('[data-act="tier-edit"]'); if (b) b.focus(); } }); return; }
       if (r.form && r.form.contains(t)) {
+        if (t.name === 'videoTier' && r.tierHint) { r.tierHint.hidden = t.value === 'none'; return; }
         if (t.name === 'chapterTemplate') chapterTouched = true;
         if (t.name === 'subjectKind') {
           fieldError('subjectKind', '');
@@ -1268,16 +1541,23 @@
     function onDragOver(e) {
       if (!hasFiles(e)) return;
       e.preventDefault();
-      const inside = r.drop && r.drop.contains(e.target) && S.draft && !S.finalized;
+      const onPhotos = !!(r.photos && !r.photos.hidden && r.photos.contains(e.target) && photoOpen().add);
+      const inside = onPhotos || (r.drop && r.drop.contains(e.target) && S.draft && !S.finalized);
       if (e.dataTransfer) e.dataTransfer.dropEffect = inside ? 'copy' : 'none';
-      if (r.drop) r.drop.classList.toggle('is-over', !!inside);
+      if (r.drop) r.drop.classList.toggle('is-over', !!inside && !onPhotos);
+      if (r.photos) r.photos.classList.toggle('is-over', onPhotos);
     }
-    function onDragLeave(e) { if (r.drop && (!e.relatedTarget || !r.drop.contains(e.relatedTarget))) r.drop.classList.remove('is-over'); }
+    function onDragLeave(e) {
+      if (r.drop && (!e.relatedTarget || !r.drop.contains(e.relatedTarget))) r.drop.classList.remove('is-over');
+      if (r.photos && (!e.relatedTarget || !r.photos.contains(e.relatedTarget))) r.photos.classList.remove('is-over');
+    }
     function onDrop(e) {
       if (!hasFiles(e)) return;
       e.preventDefault(); // 화면 밖에 떨어뜨려도 브라우저가 파일을 열며 화면을 떠나지 않게 한다.
       if (r.drop) r.drop.classList.remove('is-over');
-      if (r.drop && r.drop.contains(e.target)) intake.addFiles(e.dataTransfer.files);
+      if (r.photos) r.photos.classList.remove('is-over');
+      if (r.photos && !r.photos.hidden && r.photos.contains(e.target) && photoOpen().add) intake.addFiles(e.dataTransfer.files, { photoOnly: true });
+      else if (r.drop && r.drop.contains(e.target)) intake.addFiles(e.dataTransfer.files);
     }
     function onHash() { const cid = route(); if (cid && cid !== S.cid) intake.load(cid); else if (!cid && S.cid) { intake.reset(); intake.drafts(); } }
     function onLeave(e) { if (intake.uploading()) { e.preventDefault(); e.returnValue = ''; } }
@@ -1309,7 +1589,7 @@
     };
   }
 
-  const api = { MAX_BYTES, EXTENSIONS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, ro, shortDate, suggestTextId, checkFile, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
+  const api = { MAX_BYTES, EXTENSIONS, PHOTO_EXTENSIONS, PHOTO_MAX_BYTES, VIDEO_TIERS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, ro, shortDate, suggestTextId, checkFile, isPhotoName, isPhotoRecord, tierOf, tierName, tierCardsHTML, videoText, doneView, wantsPoll, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global) global.SourceIntake = api;
 })(typeof window !== 'undefined' ? window : null);

@@ -31,3 +31,12 @@ test('there is a way back to the app, anchors other screens link to still exist,
   ['start', 'cost', 'stuck', 'keys'].forEach((id) => assert.ok(html.includes('id="' + id + '"'), id));
   assert.match(html, /<link rel="icon" href="data:image\/svg\+xml/, 'no /favicon.ico request that ends in 404');
 });
+
+test('one short paragraph explains the video tiers by what you get, without clip counts', () => {
+  const sec = /<h2 id="video">영상<\/h2>\s*<p>([\s\S]*?)<\/p>/.exec(html);
+  assert.ok(sec, 'a 영상 section with one paragraph');
+  const p = sec[1].replace(/<[^>]+>/g, '');
+  ['라이트', '스탠다드', '프로', '맥스', '비용', '사진'].forEach((w) => assert.ok(p.includes(w), w));
+  assert.ok(!/\d+\s*개|클립/.test(p), 'no clip counts (the one-photo rule is fine)');
+  assert.ok(!/소개 영상·동작 영상·학습은 돈이 드는 단계라 자동으로 돌리지 않아요/.test(html), 'the cost note no longer says video never runs by itself');
+});
