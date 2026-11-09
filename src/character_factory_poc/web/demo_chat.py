@@ -19,6 +19,7 @@ from character_factory_poc.common.errors import (
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.origin import read_origin
 from character_factory_poc.providers.base import Message
+from character_factory_poc.web import reads
 from character_factory_poc.web.errors import WebError
 from character_factory_poc.web.reads import character_dir
 
@@ -41,25 +42,30 @@ def install_demo_routes(app, root, conf):
             folder = character_dir(root, cid)
         except WebError as exc:
             raise WebError(exc.status, "캐릭터를 찾을 수 없어요.") from exc
-        return demo.Scene.read(folder), Context(
+        intake = reads.read_json_file(folder / "s0-source/intake.json")
+        name = reads.display_name(reads._persona(folder), intake)
+        return demo.Scene.read(folder, name=name), Context(
             config=load_config(root, conf.config_path), execute=True
         )
+
+    @app.get("/api/chat/characters")
+    def chat_characters():
+        return reads.chat_characters(root)
 
     @app.get("/api/characters/{cid}/chat/meta")
     def meta(cid: str):
         scene, ctx = setup(cid)
-        reason = ""
-        try:
-            scene.compose()
-        except demo.NotReady as exc:
-            reason = str(exc)
+        active = app.state.jobs.active_for(cid) or {}
+        intake = reads.read_json_file(scene.folder / "s0-source/intake.json")
+        stages = reads.read_state(scene.folder)[0].get("stages", {}).values()
+        draft = reads.is_draft(intake, stages)
+        readiness = scene.readiness(running=active.get("status") == "running", draft=draft)
         cfg = ctx.config.providers.get("demo_chat", demo.DEFAULT)
         return dict(
             characterId=cid,
             name=scene.name,
             origin=read_origin(scene.folder),
-            ready=not reason,
-            reason=reason,
+            **readiness,
             promptRev=scene.prompt.name if scene.prompt else None,
             chapterRev=scene.chapter.name if scene.chapter else None,
             model=dict(via="studio", model=cfg.model),

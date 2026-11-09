@@ -59,6 +59,18 @@ def read_origin(char_dir: Path) -> str:
     return origin
 
 
+def read_archived(char_dir: Path) -> bool:
+    return (char_dir / ".archived").is_file()
+
+
+def set_archived(char_dir: Path, archived: bool) -> None:
+    marker = char_dir / ".archived"
+    if archived:
+        marker.touch(exist_ok=True)
+    else:
+        marker.unlink(missing_ok=True)
+
+
 def is_twin(char_dir: Path) -> bool:
     """모티브(실존 인물 기반) 캐릭터인가. 이미지·영상 프롬프트가 '가상 인물' 문구를 뺄 때 쓴다."""
     return read_origin(char_dir) == SOURCE

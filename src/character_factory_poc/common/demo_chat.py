@@ -66,11 +66,14 @@ class Scene:
     name: str
 
     @classmethod
-    def read(cls, folder: Path) -> Scene:
-        plan = latest(folder / "s3-plan", "pr", "plan.json")
-        name = (load_json(plan / "plan.json", {}) if plan else {}).get("name")
-        if not name:
-            name = load_json(folder / "source-pack.json", {}).get("subject", {}).get("displayName")
+    def read(cls, folder: Path, *, name: str | None = None) -> Scene:
+        if name is None:
+            plan = latest(folder / "s3-plan", "pr", "plan.json")
+            name = (load_json(plan / "plan.json", {}) if plan else {}).get("name")
+            if not name:
+                name = (
+                    load_json(folder / "source-pack.json", {}).get("subject", {}).get("displayName")
+                )
         return cls(
             folder,
             latest(folder / "s8-prompts", "pv", "long.md"),
@@ -78,11 +81,18 @@ class Scene:
             name or "캐릭터",
         )
 
-    def compose(self) -> str:
-        if not self.prompt or not (self.prompt / "long.md").is_file():
-            raise NotReady("캐릭터의 말투와 성격을 아직 준비하고 있어요.")
-        if not self.chapter or not (self.chapter / "chapter-start.json").is_file():
-            raise NotReady("첫 대화 장면을 아직 준비하고 있어요.")
+    def _voice(self):
+        try:
+            voice = (self.prompt / "long.md").read_text("utf-8").rstrip("\n") if self.prompt else ""
+        except (UnicodeError, OSError):
+            voice = ""
+        if not voice.strip():
+            raise NotReady("캐릭터의 말투와 성격이 아직 없어요.")
+        return voice
+
+    def _scene(self):
+        if not self.chapter:
+            raise NotReady("팬 통화 장면이 아직 없어요.")
         try:
             ch = next(
                 c
@@ -95,11 +105,8 @@ class Scene:
             def bullets(lines):
                 return "\n".join("- " + line for line in lines)
 
-            long = (self.prompt / "long.md").read_text("utf-8").rstrip("\n")
-            if not long.strip():
-                raise NotReady("캐릭터의 말투와 성격을 아직 준비하고 있어요.")
             return (
-                f"{long}\n\n[CURRENT_RELATIONSHIP: {self.chapter.name}-ch1]\n\n"
+                f"[CURRENT_RELATIONSHIP: {self.chapter.name}-ch1]\n\n"
                 f"발화자: {self.name}\n이 장면에서는 끝까지 {speech}을 쓴다. "
                 f"호칭과 거리감: {r['addresseeStance']}\n"
                 f"entry_posture:\n{bullets(r['entryPosture'])}\nwhy_here={r['presenceReason']}\n"
@@ -108,8 +115,31 @@ class Scene:
                 "[CURRENT_SCENE]\n\nchapter=ch1; scene=first-call\n\n"
                 f"{bullets(ch['sceneFacts'])}\n\n\n[SCENE_BOUNDARIES]\n\n{bullets(ch['sceneBoundaries'])}\n"
             )
-        except (StopIteration, KeyError, TypeError, json.JSONDecodeError) as exc:
+        except (StopIteration, KeyError, TypeError, OSError, ValueError) as exc:
             raise NotReady("첫 대화 장면을 읽을 수 없어요. 장면 설정을 확인해 주세요.") from exc
+
+    def compose(self):
+        return self._voice() + "\n\n" + self._scene()
+
+    def readiness(self, *, running=False, draft=False):
+        missing, reasons = [], []
+        for key, read in (("prompt", self._voice), ("scene", self._scene)):
+            try:
+                read()
+            except NotReady as exc:
+                missing.append(key)
+                reasons.append(str(exc))
+        page = "sources" if draft else "factory"
+        if missing:
+            reasons.append(
+                "원문 화면에서 만들기를 시작해 주세요." if draft else "진행 화면에서 확인해 주세요."
+            )
+        return dict(
+            ready=not missing,
+            missing=missing,
+            reason="만드는 중이에요" if missing and running else " ".join(reasons),
+            nextHref=f"{page}.html#c/{self.folder.name}" if missing else None,
+        )
 
     def samples(self):
         data = load_json(self.chapter / "samples.json") if self.chapter else None

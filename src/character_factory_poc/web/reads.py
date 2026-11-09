@@ -13,11 +13,13 @@ from pathlib import Path
 from typing import Any
 
 from character_factory_poc.common.config import load_config
+from character_factory_poc.common.demo_chat import Scene
 from character_factory_poc.common.ledger import Ledger
 from character_factory_poc.pipeline.graph import CREATED, GATES, STAGES, gates_for
 from character_factory_poc.pipeline.origin import (
     graph_for_dir,
     origin_label,
+    read_archived,
     read_auto_review,
     read_model_mode,
     read_origin,
@@ -546,6 +548,83 @@ def _persona(char_dir: Path) -> dict[str, Any] | None:
     return None
 
 
+QA_FIELDS = ("displayName", "status", "statusLabel", "chatReady", "goal", "createdAt", "archived")
+STATUS_LABELS = dict(
+    draft="시작 전",
+    running="만드는 중",
+    needs_review="확인 필요",
+    chat_ready="대화 가능",
+    failed="실패",
+    stopped="멈춤",
+)
+
+
+def display_name(persona, intake):
+    return (
+        (persona or {}).get("name")
+        or (intake or {}).get("subject", {}).get("displayName")
+        or "이름 미정"
+    )
+
+
+def created_at(folder, intake):
+    intake = intake or {}
+    origin = read_json_file(folder / "origin.json") or {}
+    stat = folder.stat()
+    return (
+        intake.get("createdAt")
+        or origin.get("setAt")
+        or datetime.fromtimestamp(getattr(stat, "st_birthtime", stat.st_mtime), UTC).isoformat()
+    )
+
+
+def is_draft(intake, stages):
+    return bool(
+        intake
+        and not intake.get("jobId")
+        and all(s.get("status", "PENDING") == "PENDING" for s in stages if isinstance(s, dict))
+    )
+
+
+def visible_folders(root, *, include_archived=False):
+    base = characters_root(root)
+    if base.is_dir():
+        for folder in sorted(base.iterdir()):
+            if (
+                _ID_RE.fullmatch(folder.name)
+                and not folder.is_symlink()
+                and folder.is_dir()
+                and (include_archived or not read_archived(folder))
+            ):
+                yield folder
+
+
+def chat_characters(root):
+    items = []
+    for folder in visible_folders(root):
+        intake = read_json_file(folder / "s0-source/intake.json")
+        name = display_name(_persona(folder), intake)
+        if Scene.read(folder, name=name).readiness()["ready"]:
+            items.append(
+                dict(
+                    characterId=folder.name,
+                    displayName=name,
+                    createdAt=created_at(folder, intake),
+                    origin=read_origin(folder),
+                )
+            )
+    return sorted(items, key=lambda r: r["createdAt"], reverse=True)
+
+
+def job_status(row, job, last):
+    status = row["status"]
+    if job and job["status"] == "running":
+        status = "running"
+    elif status not in ("needs_review", "chat_ready") and last and last["status"] == "failed":
+        status = "failed"
+    row.update(status=status, statusLabel=STATUS_LABELS[status])
+
+
 def character_summary(char_dir: Path) -> dict[str, Any]:
     """캐릭터 한 명의 목록용 요약. 단계·관문 상태와 지금 기다리는 관문을 담는다."""
     char_dir = Path(char_dir)
@@ -557,11 +636,42 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
     _add_times(char_dir, stages, gates)
     persona = _persona(char_dir)
     pending = [g for g in gates if g["status"] == "AWAITING_HUMAN"]
+    intake = read_json_file(char_dir / "s0-source/intake.json")
+    display = display_name(persona, intake)
+    chat = Scene.read(char_dir, name=display).readiness()["ready"]
+    goal_stages = stages
+    if meta["origin"] != CREATED:
+        ids = {"s0", "s3", "s7", "s8", "s8c"}
+        if meta["modelMode"] == "TRAIN":
+            ids.update(("s9s", "s9", "s10t"))
+        goal_stages = [s for s in stages if s["id"] in ids]
+    goal = _progress(goal_stages)
+    if pending:
+        status = "needs_review"
+    elif chat:
+        status = "chat_ready"
+    elif any(s["status"] in {"CHECK_FAILED", "REJECTED"} for s in stages):
+        status = "failed"
+    elif is_draft(intake, stages):
+        status = "draft"
+    else:
+        status = "stopped"
     return {
         "id": cid,
         "kind": "character",
         **meta,
         "name": (persona or {}).get("name") or cid,
+        "displayName": display,
+        "status": status,
+        "statusLabel": STATUS_LABELS[status],
+        "chatReady": chat,
+        "createdAt": created_at(char_dir, intake),
+        "archived": read_archived(char_dir),
+        "goal": dict(
+            label="전체 단계" if meta["origin"] == CREATED else "대화 가능까지",
+            done=goal["done"],
+            total=goal["total"],
+        ),
         "persona": persona,
         "dir": f"{CHARACTERS_DIR}/{cid}",
         "stateError": error,
@@ -643,7 +753,7 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
         "state": state,
         "stateError": error,
         "summary": summary,
-        **{k: summary[k] for k in ("origin", "originLabel", "modelMode")},
+        **{k: summary[k] for k in ("origin", "originLabel", "modelMode", *QA_FIELDS)},
         "autoReview": read_auto_review(char_dir),
         "persona": summary["persona"],
         "stages": summary["stages"],
@@ -858,36 +968,39 @@ def _brief_summary(folder: Path) -> dict[str, Any]:
     }
 
 
-def list_projects(root: Path) -> dict[str, Any]:
+def list_projects(root: Path, *, include_archived=False) -> dict[str, Any]:
     """runs/characters/* 와 runs/briefs/* 목록 (GET /api/projects)."""
     root = Path(root)
-    chars_dir = characters_root(root)
     briefs_dir = briefs_root(root)
     characters: list[dict[str, Any]] = []
-    if chars_dir.is_dir():
-        for folder in sorted(chars_dir.iterdir()):
-            if not folder.is_dir() or folder.name.startswith("."):
-                continue
-            try:
-                characters.append(character_summary(folder))
-            except OSError as exc:  # 권한 등으로 읽지 못한 폴더는 목록에 사유만 남긴다
-                characters.append(
-                    {
-                        "id": folder.name,
-                        "kind": "character",
-                        "name": folder.name,
-                        "persona": None,
-                        "dir": f"{CHARACTERS_DIR}/{folder.name}",
-                        "stateError": f"폴더를 읽지 못했다: {exc}",
-                        "stages": [],
-                        "gates": [],
-                        "pendingGates": [],
-                        "queue": [],
-                        "progress": {"done": 0, "total": 0, "percent": 0, "currentStage": None},
-                        "awaitingHuman": False,
-                        "updatedAt": None,
-                    }
-                )
+    for folder in visible_folders(root, include_archived=include_archived):
+        try:
+            characters.append(character_summary(folder))
+        except OSError as exc:  # 권한 등으로 읽지 못한 폴더는 목록에 사유만 남긴다
+            characters.append(
+                {
+                    "id": folder.name,
+                    "kind": "character",
+                    "name": folder.name,
+                    "displayName": "이름 미정",
+                    "status": "failed",
+                    "statusLabel": STATUS_LABELS["failed"],
+                    "chatReady": False,
+                    "goal": dict(label="전체 단계", done=0, total=0),
+                    "createdAt": _mtime_iso(folder),
+                    "archived": read_archived(folder),
+                    "persona": None,
+                    "dir": f"{CHARACTERS_DIR}/{folder.name}",
+                    "stateError": f"폴더를 읽지 못했다: {exc}",
+                    "stages": [],
+                    "gates": [],
+                    "pendingGates": [],
+                    "queue": [],
+                    "progress": {"done": 0, "total": 0, "percent": 0, "currentStage": None},
+                    "awaitingHuman": False,
+                    "updatedAt": None,
+                }
+            )
     briefs: list[dict[str, Any]] = []
     if briefs_dir.is_dir():
         for folder in sorted(briefs_dir.iterdir()):

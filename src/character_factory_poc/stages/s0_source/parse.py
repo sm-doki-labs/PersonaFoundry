@@ -271,7 +271,7 @@ def restriction_problems(raw: str) -> list[str]:
     return [f"원문 이용 제한: {m}" for m in dict.fromkeys(re.findall(pattern, raw, re.I))]
 
 
-def read_source(spec: SourceText, raw: str, subject_name: str) -> list[Msg]:
+def source_messages(spec: SourceText, raw: str, subject_name: str) -> list[Msg]:
     suffix = Path(spec.path).suffix.lower()
     if suffix in {".srt", ".vtt"}:
         if spec.kind != "TRANSCRIPT":
@@ -306,6 +306,11 @@ def read_source(spec: SourceText, raw: str, subject_name: str) -> list[Msg]:
         part = read_dialogue(spec.textId, raw, spec.date)
     if not part:
         raise SourceError(f"{spec.textId}: 읽은 메시지가 없다(형식 확인)")
+    return part
+
+
+def read_source(spec: SourceText, raw: str, subject_name: str) -> list[Msg]:
+    part = source_messages(spec, raw, subject_name)
     assign_speakers(part, spec, subject_name)
     return part
 

@@ -15,11 +15,13 @@ from typing import Annotated, Any
 from fastapi import Body, FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import StrictBool
 
 from character_factory_poc.common.config import load_config
 from character_factory_poc.common.errors import FactoryError
 from character_factory_poc.pipeline.approve import approve_gate
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.origin import set_archived
 from character_factory_poc.web import reads
 from character_factory_poc.web.demo_chat import install_demo_routes
 from character_factory_poc.web.errors import WebError
@@ -120,12 +122,13 @@ def create_app(
         }
 
     @app.get("/api/projects")
-    def projects() -> dict[str, Any]:
-        data = reads.list_projects(root)
+    def projects(includeArchived: bool = False) -> dict[str, Any]:
+        data = reads.list_projects(root, include_archived=includeArchived)
         for character in data["characters"]:
             character["job"] = jobs.active_for(character["id"])
             recent = jobs.list(character_id=character["id"], limit=1)
             character["lastJob"] = recent[0] if recent else None
+            reads.job_status(character, character["job"], character["lastJob"])
             # 개요·받은 일이 모든 캐릭터의 유료 확인 대기를 상세 화면과 같은 기준으로 센다.
             character["held"] = _held(character["id"], character["lastJob"])
         data["totals"]["runningJobs"] = len(jobs.active_jobs())
@@ -139,8 +142,15 @@ def create_app(
         data["jobs"] = jobs.list(character_id=character_id, limit=10)
         data["lastJob"] = data["jobs"][0] if data["jobs"] else None
         data["held"] = _held(character_id, data["lastJob"])
+        reads.job_status(data["summary"], data["job"], data["lastJob"])
+        data.update({k: data["summary"][k] for k in ("status", "statusLabel")})
         data["modelPath"] = _model_path(character_id)
         return data
+
+    @app.post("/api/characters/{character_id}/archive")
+    def archive(character_id: str, archived: Annotated[StrictBool, Body(embed=True)]):
+        set_archived(reads.character_dir(root, character_id), archived)
+        return {"archived": archived}
 
     def _model_path(character_id: str) -> dict[str, Any]:
         from character_factory_poc.web.model_path import model_path

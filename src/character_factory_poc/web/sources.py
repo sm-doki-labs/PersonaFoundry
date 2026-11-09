@@ -5,7 +5,11 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import re
+from collections import Counter
 from contextlib import contextmanager
+from datetime import UTC, datetime
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
@@ -33,6 +37,7 @@ from character_factory_poc.contracts.source import (
     SourceText,
     SubjectKind,
     UsageBasis,
+    default_register,
 )
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.origin import (
@@ -86,11 +91,10 @@ class IntakeRoute(APIRoute):
         async def checked(request):
             try:
                 return await handler(request)
-            except SourcePathError as exc:
-                raise WebError(403, str(exc)) from None
-            except RequestValidationError as exc:
-                names = ", ".join(str(e["loc"][-1]) for e in exc.errors())
-                raise WebError(422, f"입력 형식을 확인한다: {names}") from None
+            except SourcePathError:
+                raise WebError(403, "이 위치의 파일은 열 수 없어요.") from None
+            except RequestValidationError:
+                raise WebError(422, "입력한 내용과 파일 크기를 확인해 주세요.") from None
 
         return checked
 
@@ -108,13 +112,15 @@ def record(spec: Upload) -> dict:
         or any(ord(c) < 32 for c in name)
         or Path(name).suffix.lower() not in EXTENSIONS
     ):
-        raise WebError(400, "원문 파일 이름이나 확장자를 확인한다")
+        raise WebError(400, "원문 파일 이름과 형식을 확인해 주세요.")
     return dict(
         fileId=uuid4().hex,
         filename=name,
         size=spec.size,
         sha256=None,
         status="pending",
+        detectedSpeakers=[],
+        suggested=dict(subjectSpeaker=None, userSpeaker=None, kind=None, register=None),
         problems=[],
         **dict.fromkeys(FIELDS),
     )
@@ -124,7 +130,7 @@ def find_file(draft, fid):
     for item in draft["files"]:
         if item["fileId"] == fid:
             return item
-    raise WebError(404, "등록한 파일이 없다")
+    raise WebError(404, "등록한 파일을 찾을 수 없어요.")
 
 
 def summary(draft):
@@ -132,7 +138,7 @@ def summary(draft):
     files = draft["files"]
     ids = [f["textId"] for f in files if f["textId"]]
     if len(ids) != len(set(ids)):
-        problems.append("textId가 겹친다")
+        problems.append("원문 이름이 겹쳐요.")
     for f in files:
         problems.extend(f"{f['filename']}: {p}" for p in f["problems"])
     ready = bool(files) and all(f["status"] == "ready" for f in files)
@@ -144,6 +150,53 @@ def source_text(folder, item):
         **{k: item[k] for k in FIELDS},
         path=str(local_copy(folder, item["fileId"], item["filename"]).relative_to(folder)),
     )
+
+
+def suggested_kind(filename, raw):
+    hint = filename.lower() + " " + raw[:180].lower()
+    if re.search(
+        r"카카오톡|카톡|kakao|date,\s*user,\s*message|\[(?:오전|오후) \d|오[전후] \d+:\d+,", hint
+    ):
+        return "KAKAO_EXPORT"
+    if Path(filename).suffix.lower() in {".vtt", ".srt"} or re.search(
+        r"브이로그|vlog|녹취|자막|일상", hint
+    ):
+        return "TRANSCRIPT"
+    if re.search(r"기사|article|보도자료", hint):
+        return "ARTICLE"
+    return "INTERVIEW"
+
+
+def auto_text_id(item, files):
+    stem = Path(item["filename"]).stem
+    base = (
+        re.sub(r"[^a-zA-Z0-9_-]+", "-", stem).strip("-")
+        or "source-" + hashlib.sha256(stem.encode()).hexdigest()[:8]
+    )
+    taken = {f.get("textId") for f in files if f["fileId"] != item["fileId"]}
+    result, n = base, 1
+    while result in taken:
+        n += 1
+        result = f"{base}-{n}"
+    return result
+
+
+def speaker_suggestions(messages, display):
+    counts = Counter(m.name for m in messages)
+    ranked = counts.most_common()
+
+    def score(name):
+        similarity = SequenceMatcher(None, display, name).ratio()
+        return (
+            name == display,
+            name in display or display in name,
+            similarity if similarity >= 0.5 else 0,
+            counts[name],
+        )
+
+    subject = max(counts, key=score, default=None)
+    user = next((name for name, _ in ranked if name != subject), None)
+    return [dict(name=name, lines=n) for name, n in ranked], subject, user
 
 
 def install_source_routes(app, conf, jobs):
@@ -158,7 +211,7 @@ def install_source_routes(app, conf, jobs):
         from fastapi.responses import JSONResponse
 
         async def storage_error(request, exc):
-            return JSONResponse({"detail": "원본 저장소 요청에 실패했다"}, status_code=502)
+            return JSONResponse({"detail": "원문 저장소에 연결하지 못했어요."}, status_code=502)
 
         for error in (BotoCoreError, ClientError):
             app.add_exception_handler(error, storage_error)
@@ -166,19 +219,22 @@ def install_source_routes(app, conf, jobs):
 
     @contextmanager
     def opened(cid, *, edit=False, purge=False):
-        folder = reads.character_dir(conf.root, cid)
+        try:
+            folder = reads.character_dir(conf.root, cid)
+        except WebError as exc:
+            raise WebError(exc.status, "만들던 초안을 찾을 수 없어요.") from None
         try:
             state = inside(folder, "s0-source", "intake.json")
             lock = inside(folder, "s0-source", "intake.lock")
-        except ValueError as exc:
-            raise WebError(403, str(exc)) from None
+        except ValueError:
+            raise WebError(403, "이 위치의 파일은 열 수 없어요.") from None
         if not folder.is_relative_to(conf.root) or not state.is_file():
-            raise WebError(404, "출처 초안이 없다")
+            raise WebError(404, "만들던 초안을 찾을 수 없어요.")
         with lock.open("a") as fp:
             fcntl.flock(fp, fcntl.LOCK_EX)
             draft = json.loads(state.read_text("utf-8"))
             if edit and (jobs.active_for(cid) or (draft.get("jobId") and not purge)):
-                raise WebError(409, "이미 확정했거나 작업 중인 출처다")
+                raise WebError(409, "이미 만들기를 시작해서 원문을 바꿀 수 없어요.")
             yield folder, draft
             if edit:
                 save(state, draft)
@@ -196,6 +252,7 @@ def install_source_routes(app, conf, jobs):
             inside(folder, "s0-source", "intake.json"),
             dict(
                 characterId=cid,
+                createdAt=datetime.now(UTC).isoformat(),
                 subject=subject.model_dump(),
                 usageBasis=body.usageBasis.model_dump(),
                 chapterTemplate=body.chapterTemplate,
@@ -206,6 +263,25 @@ def install_source_routes(app, conf, jobs):
             ),
         )
         return {"characterId": cid}
+
+    @router.get("/drafts")
+    def drafts():
+        result = []
+        for folder in reads.visible_folders(conf.root):
+            draft = reads.read_json_file(folder / "s0-source/intake.json")
+            if not draft or draft.get("jobId") or jobs.active_for(folder.name):
+                continue
+            state, _ = reads.read_state(folder)
+            if reads.is_draft(draft, state.get("stages", {}).values()):
+                result.append(
+                    dict(
+                        characterId=folder.name,
+                        displayName=reads.display_name(reads._persona(folder), draft),
+                        createdAt=reads.created_at(folder, draft),
+                        files=len(draft["files"]),
+                    )
+                )
+        return sorted(result, key=lambda r: r["createdAt"], reverse=True)
 
     @router.get("/{cid}")
     def detail(cid: str):
@@ -231,50 +307,87 @@ def install_source_routes(app, conf, jobs):
     @router.put("/{cid}/files/{fid}/content")
     async def content(cid: str, fid: str, request: Request):
         if conf.source_store != "local":
-            raise WebError(403, "원본 저장소의 업로드 주소를 사용한다")
+            raise WebError(403, "파일을 올릴 때 받은 주소를 이용해 주세요.")
         with opened(cid) as (_, draft):
             size = find_file(draft, fid)["size"]
         data = bytearray()
         async for chunk in request.stream():
             if len(data) + len(chunk) > size:
-                raise WebError(413, "등록한 파일 크기를 넘었다")
+                raise WebError(413, "처음 고른 파일보다 크기가 커요.")
             data.extend(chunk)
         if len(data) != size:
-            raise WebError(400, "등록한 파일 크기와 다르다")
+            raise WebError(400, "처음 고른 파일과 크기가 달라요.")
         with opened(cid, edit=True) as (folder, draft):
             item = find_file(draft, fid)
             path = local_copy(folder, fid, item["filename"])
             if path.exists():
-                raise WebError(409, "이미 업로드한 파일이다")
+                raise WebError(409, "이미 올린 파일이에요.")
             atomic_write(path, data)
             item["sha256"] = hashlib.sha256(data).hexdigest()
         return {"fileId": fid}
 
     def check(folder, draft, item, body):
         if body.keys() - set(FIELDS):
-            raise WebError(422, "알 수 없는 원문 항목이다")
+            raise WebError(422, "바꿀 수 없는 항목이 있어요.")
         candidate = item | body
-        try:
-            spec = source_text(folder, candidate)
-        except ValidationError as exc:
-            names = ", ".join(str(e["loc"][-1]) for e in exc.errors())
-            raise WebError(422, f"원문 항목 형식을 확인한다: {names}") from None
-        item.update(body)
+        display = draft["subject"]["displayName"]
         problems = []
+        raw = ""
         try:
             data = store.read(folder, item["fileId"], item["filename"], item["size"])
             digest = hashlib.sha256(data).hexdigest()
             if item["sha256"] and item["sha256"] != digest:
-                raise ValueError("원본 해시가 다르다")
-            item["sha256"] = digest
+                raise ValueError
             raw = data.decode("utf-8-sig")
-            item["warnings"] = parse.restriction_problems(raw)
-            parse.read_source(spec, raw, draft["subject"]["displayName"])
+            candidate["sha256"] = digest
         except UnicodeError:
-            problems.append("원문은 UTF-8로 저장해야 한다")
-        except (ValueError, OSError) as exc:
-            problems.append(str(exc))
-        item.update(status="problem" if problems else "ready", problems=problems)
+            problems.append("한글을 읽을 수 있도록 파일을 UTF-8로 저장해 주세요.")
+        except (ValueError, OSError):
+            problems.append("원문을 확인할 수 없어 파일을 다시 올려야 해요.")
+
+        kind = suggested_kind(item["filename"], raw)
+        candidate["kind"] = candidate["kind"] or kind
+
+        if (
+            not candidate["textId"]
+            or isinstance(candidate["textId"], str)
+            and not candidate["textId"].strip()
+        ):
+            candidate["textId"] = auto_text_id(item, draft["files"])
+        try:
+            spec = source_text(folder, candidate)
+        except ValidationError:
+            raise WebError(422, "원문 이름과 선택한 종류, 말한 자리를 확인해 주세요.") from None
+        if spec.register is None:
+            candidate["register"] = default_register(spec.kind)
+        detected, subject, user = [], None, None
+        if not problems:
+            try:
+                messages = parse.source_messages(spec, raw, display)
+                detected, subject, user = speaker_suggestions(messages, display)
+                if not (spec.subjectSpeaker or "").strip():
+                    spec.subjectSpeaker = candidate["subjectSpeaker"] = subject
+                names = [s["name"] for s in detected]
+                if not subject and spec.kind != "ARTICLE":
+                    problems.append("원문에 누가 말했는지 이름을 적어 주세요.")
+                for name in (spec.subjectSpeaker, spec.userSpeaker):
+                    if spec.kind != "ARTICLE" and name and name not in names:
+                        problems.append(
+                            f"‘{name}’ 대신 원문에 있는 이름({', '.join(names)})을 골라 주세요."
+                        )
+            except (ValueError, KeyError, TypeError):
+                problems.append("원문을 읽을 수 없어 날짜와 파일 종류, 화자 표기를 확인해 주세요.")
+        candidate.update(
+            detectedSpeakers=detected,
+            suggested=dict(
+                subjectSpeaker=subject, userSpeaker=user, kind=kind, register=default_register(kind)
+            ),
+            warnings=[
+                f"원문에 ‘{warning.split(': ', 1)[-1]}’ 안내가 있어요."
+                for warning in parse.restriction_problems(raw)
+            ],
+        )
+        item.update(candidate, status="problem" if problems else "ready", problems=problems)
         return item
 
     @router.post("/{cid}/files/{fid}/complete")
@@ -286,10 +399,10 @@ def install_source_routes(app, conf, jobs):
     @router.post("/{cid}/import-path")
     def import_path(cid: str, body: ImportPath):
         if not allow_import:
-            raise WebError(403, "경로 가져오기는 로컬 저장소에서만 허용한다")
+            raise WebError(403, "이 컴퓨터에 저장할 때만 파일 위치로 가져올 수 있어요.")
         path = Path(body.path).expanduser()
         if not path.is_file() or not 0 < path.stat().st_size <= MAX_BYTES:
-            raise WebError(400, "가져올 원문의 경로와 크기를 확인한다")
+            raise WebError(400, "가져올 파일의 위치와 크기를 확인해 주세요.")
         item = record(
             Upload(filename=path.name, size=path.stat().st_size, contentType="text/plain")
         )
@@ -297,7 +410,7 @@ def install_source_routes(app, conf, jobs):
             with path.open("rb") as fp:
                 data = fp.read(item["size"] + 1)
             if len(data) != item["size"]:
-                raise WebError(409, "원본 크기가 바뀌었다")
+                raise WebError(409, "원문 파일의 크기가 바뀌었어요.")
             atomic_write(local_copy(folder, item["fileId"], path.name), data)
             item["sha256"] = hashlib.sha256(data).hexdigest()
             draft["files"].append(item)
@@ -323,17 +436,18 @@ def install_source_routes(app, conf, jobs):
         with opened(cid, edit=True) as (folder, draft):
             problems, ready = summary(draft)
             if not ready:
-                raise WebError(409, "; ".join(problems) or "모든 원문을 먼저 확인한다")
+                raise WebError(409, "; ".join(problems) or "올린 원문을 모두 확인해 주세요.")
             texts = []
             for item in draft["files"]:
                 try:
                     data = store.read(folder, item["fileId"], item["filename"], item["size"])
                     if hashlib.sha256(data).hexdigest() != item["sha256"]:
                         raise ValueError("확인한 원본 해시와 다르다")
-                except (ValueError, OSError) as exc:
-                    item.update(status="problem", problems=[str(exc)])
+                except (ValueError, OSError):
+                    message = "확인한 원문과 달라서 파일을 다시 올려야 해요."
+                    item.update(status="problem", problems=[message])
                     save(inside(folder, "s0-source", "intake.json"), draft)
-                    raise WebError(409, str(exc)) from None
+                    raise WebError(409, message) from None
                 if conf.source_store == "s3":
                     atomic_write(local_copy(folder, item["fileId"], item["filename"]), data)
                 texts.append(source_text(folder, item))
