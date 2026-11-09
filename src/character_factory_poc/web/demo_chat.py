@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 from fastapi import Body
 from pydantic import BaseModel, Field, StringConstraints, ValidationError
 
+from character_factory_poc.common import clip_pick
 from character_factory_poc.common import demo_chat as demo
 from character_factory_poc.common.config import load_config
 from character_factory_poc.common.errors import (
@@ -36,12 +37,24 @@ class Conversation(BaseModel):
     via: Literal["studio", "vertex"] = "studio"
 
 
+class ClipTurn(BaseModel):
+    userMessage: Annotated[str, StringConstraints(strip_whitespace=True, max_length=16000)]
+    replyText: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=16000)
+    ]
+    recent: list[str] = Field(default_factory=list, max_length=100)
+    chapter: str = "ch1"
+
+
 def install_demo_routes(app, root, conf):
-    def setup(cid):
+    def folder_for(cid):
         try:
-            folder = character_dir(root, cid)
+            return character_dir(root, cid)
         except WebError as exc:
             raise WebError(exc.status, "캐릭터를 찾을 수 없어요.") from exc
+
+    def setup(cid):
+        folder = folder_for(cid)
         intake = reads.read_json_file(folder / "s0-source/intake.json")
         name = reads.display_name(reads._persona(folder), intake)
         return demo.Scene.read(folder, name=name), Context(
@@ -119,3 +132,24 @@ def install_demo_routes(app, root, conf):
             )
         except TimeoutError as exc:
             raise WebError(504, "답변이 늦어지고 있어요. 잠시 후 다시 시도해 주세요.") from exc
+
+    @app.get("/api/characters/{cid}/chat/clips")
+    def clips(cid: str, chapter: str = "ch1"):
+        return demo.chat_clips(folder_for(cid), chapter)
+
+    @app.post("/api/characters/{cid}/chat/clip")
+    def clip(cid: str, body: Annotated[object, Body()] = None):
+        try:
+            turn = ClipTurn.model_validate(body)
+        except ValidationError as exc:
+            raise WebError(422, "방금 나눈 말과 재생한 영상을 확인해 주세요.") from exc
+        pool = demo.chat_clips(folder_for(cid), turn.chapter, for_picker=True)["emotion"]
+        ctx = Context(config=load_config(root, conf.config_path), execute=True)
+        chosen = clip_pick.pick(ctx, cid, pool, turn.userMessage, turn.replyText, turn.recent)
+        if not chosen:
+            return dict(clip=None, kind="none", mood=None)
+        return dict(
+            clip={k: chosen[k] for k in ("clipKey", "url", "mood", "title")},
+            kind="emotion",
+            mood=chosen["mood"],
+        )
