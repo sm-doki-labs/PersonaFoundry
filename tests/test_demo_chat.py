@@ -28,7 +28,7 @@ def test_real_layout():
     actual = re.sub(
         rb"(?m)^\[CURRENT_RELATIONSHIP: [^\]]+\]$",
         b"[CURRENT_RELATIONSHIP: oc3-ch1]",
-        scene.compose().encode(),
+        scene.compose(for_review=True).encode(),
         count=1,
     )
     assert actual == reference.read_bytes()
@@ -55,6 +55,7 @@ def setup(tmp_path, monkeypatch):
 
 
 def ready(folder):
+    put(folder / "state.json", {"gates": {"G6": {"status": "APPROVED", "rev": "pv10"}}})
     put(folder / "s8-prompts/pv10/prompt-pair.json", {})
     (folder / "s8-prompts/pv10/long.md").write_text("유리의 말투")
     put(
@@ -109,6 +110,21 @@ def test_http_contract(setup):
     )
 
 
+def test_chat_uses_approved_revision_and_waits_for_rework(setup):
+    _, folder, fake, client = setup
+    ready(folder)
+    put(folder / "s8-prompts/pv11/prompt-pair.json", {})
+    (folder / "s8-prompts/pv11/long.md").write_text("아직 승인하지 않은 말투")
+    body = dict(messages=[dict(role="user", content="안녕")])
+    assert client.post(URL, json=body).is_success
+    assert fake.requests[-1].messages[0].content.startswith("유리의 말투")
+    for status in ("AWAITING_HUMAN", "REJECTED"):
+        put(folder / "state.json", {"gates": {"G6": {"status": status, "rev": "pv11"}}})
+        assert not client.get(URL + "/meta").json()["ready"]
+        assert client.post(URL, json=body).status_code == 409
+    assert len(fake.requests) == 1
+
+
 def test_samples_and_approved_refs(setup):
     ctx, folder, fake, client = setup
     ready(folder)
@@ -135,7 +151,14 @@ def test_samples_and_approved_refs(setup):
             ]
         ),
     )
-    put(folder / "state.json", dict(gates=dict(G0=dict(status="APPROVED", rev="sp1"))))
+    put(
+        folder / "state.json",
+        dict(
+            gates=dict(
+                G0=dict(status="APPROVED", rev="sp1"), G6=dict(status="AWAITING_HUMAN", rev="pv10")
+            )
+        ),
+    )
     for rev, quote in [("sp1", "승인한 원문"), ("sp2", "미승인 원문")]:
         put(folder / f"s0-source/{rev}/corpus.jsonl", dict(msgId="m", text=quote))
     gate = prompts(folder, CID, "s8-prompts", "pv10")

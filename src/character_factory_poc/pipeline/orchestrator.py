@@ -591,7 +591,7 @@ def _step(
 
 
 def _finish(log: RunLog) -> RunLog:
-    log.stopped_at = (log.waiting or log.blocked or ["end"])[0]
+    log.stopped_at = (log.held or log.waiting or log.blocked or ["end"])[0]
     if log.waiting or log.blocked:
         log.add(
             "더 진행할 단계가 없다. 기다리는 관문: "
@@ -620,11 +620,29 @@ def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
         return run_waves(ctx, cid, opt)
     log = RunLog()
     runners = _stage_runners(ctx, cid, opt)
-    # 자동 진행은 직렬 텍스트 경로만 탄다. 사진·영상·학습·평가는 별도 실행 확인이 필요하다.
     from character_factory_poc.pipeline.origin import VIDEO_STAGES
 
-    for sid in VIDEO_STAGES if opt.video_only else graph:
-        if auto_review and sid not in {"s0", "s3", "s7", "s8", "s8c"} and sid not in opt.confirmed:
+    scope = graph
+    if opt.video_only:
+        scope = VIDEO_STAGES
+    elif auto_review:
+        scope = {"s0", "s3", "s7", "s8", "s8c"} | opt.confirmed
+        if opt.web:
+            # 버튼의 목표에 필요한 단계만 연다. 유료 확인은 _step에서 그대로 받는다.
+            owners = {s.gate: sid for sid, s in graph.items() if s.gate}
+            todo = [owners.get(opt.until, opt.until)]
+            scope = set()
+            while todo:
+                sid = todo.pop()
+                if sid in scope:
+                    continue
+                scope.add(sid)
+                stage = graph[sid]
+                todo.extend(stage.needs | stage.after | {owners[g] for g in stage.deps})
+                if "G6" in stage.deps:
+                    todo.append("s8c")  # 자동 승인은 첫 장면이 준비된 뒤에 한다.
+    for sid in graph:
+        if sid not in scope:
             continue
         note = _skip_note(ctx, cid, sid, runners)
         if note is not None:
@@ -632,7 +650,9 @@ def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
                 log.add(note)
             continue
         action = _step(ctx, cid, sid, opt, runners, log, auto_review=auto_review)
-        if (auto_review or opt.video_only) and (log.blocked or log.held):
+        if (auto_review and log.held) or (
+            (opt.video_only or (auto_review and not opt.web)) and (log.blocked or log.held)
+        ):
             break
         if action == "break":
             break
