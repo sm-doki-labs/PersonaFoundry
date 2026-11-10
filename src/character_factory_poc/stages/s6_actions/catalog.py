@@ -58,7 +58,6 @@ VIDEO_TIERS = {
     "max": VideoTier(ALL_CHAPTERS, tuple(CATALOG)),
 }
 # 모티브는 배경 하나·같은 옷으로 몸짓만 늘린다(D-0163). 등급은 장면 수가 아니라 몸짓 수로 갈린다.
-# 앱은 단계당 10편 미만이면 단계를 열지 않으므로 라이트도 10편이다(D-0119).
 _MOTIF_PRO = _PRO + (
     "amused_good_strong",
     "expectant_good",
@@ -69,8 +68,12 @@ _MOTIF_PRO = _PRO + (
     "wistful_good",
     "dumbfounded_good",
 )
+# 라이트는 가장 빨리 확인하는 판이다. 몸짓 5개 + 시그니처 포즈 1개 = 6편(D-0167).
+# 무표정 대기가 없어 무표정 첫 화면도 만들지 않는다. 앱은 단계당 10편 미만이면 단계를 열지 않으니
+# 앱 내보내기에서는 경고가 난다(D-0119). 대화해 보기의 옅은 반응 대체(반가움·피식)는 남는다.
+_MOTIF_LIGHT = ("idle_good", "glad_good", "amused_good", "shy_good", "pouty_good")
 MOTIF_VIDEO_TIERS = {
-    "light": VideoTier(("ch1",), _CORE),
+    "light": VideoTier(("ch1",), _MOTIF_LIGHT),
     "standard": VideoTier(("ch1",), _PRO),
     "pro": VideoTier(("ch1",), _MOTIF_PRO),
     "max": VideoTier(("ch1",), tuple(CATALOG)),

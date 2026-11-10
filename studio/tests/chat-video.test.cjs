@@ -331,3 +331,10 @@ test('page wiring: two muted inline players, a hidden sound toggle, screen reade
   assert.match(css, /prefers-reduced-motion:reduce\)\{\s*\.ch-screen video/);
 });
 
+
+test('the signature pose is never a stand-in reaction (D-0167)', () => {
+  const sig = { clipKey: 'signature_good', url: '/v/sig.mp4', mood: 'good' };
+  assert.equal(C.pickFallbackClip([sig]), null, 'only a signature pose means no stand-in');
+  const glad = { clipKey: 'glad_good', url: '/v/glad.mp4', mood: 'good' };
+  for (let i = 0; i < 5; i += 1) assert.equal(C.pickFallbackClip([sig, glad], { random: () => i / 5 }).clipKey, 'glad_good');
+});

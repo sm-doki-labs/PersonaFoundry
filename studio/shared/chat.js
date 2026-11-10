@@ -388,6 +388,7 @@
     (Array.isArray(list) ? list : []).forEach((c) => {
       if (!c || !c.url || !c.clipKey || seen.has(c.clipKey)) return;
       if (STRUCTURAL.test(clipBareKey(c.clipKey))) return; // 대기·말하기는 감정이 아니다
+      if (clipBaseKey(c.clipKey) === 'signature') return; // 시그니처 포즈는 아무 말에나 대신 틀지 않는다(D-0167)
       seen.add(c.clipKey);
       pool.push(c);
     });
