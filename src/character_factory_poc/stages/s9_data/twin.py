@@ -309,8 +309,8 @@ def run_s9_twin(ctx: Context, cid: str) -> Path:
         if train < 50:
             warnings.insert(
                 0,
-                f"학습 예시가 {train}개로 50개 미만이다. "
-                "원문을 외워 되풀이할 위험이 커서 PROMPT_ONLY를 권장한다.",
+                f"학습 예시가 {train}개로 50개보다 적어요. "
+                "원문을 외워 그대로 되풀이할 위험이 커서 학습 대신 '프롬프트만' 방식을 권해요.",
             )
         write_once_json(folder / "plan.json", dump(plan))
         for conv in convs:
