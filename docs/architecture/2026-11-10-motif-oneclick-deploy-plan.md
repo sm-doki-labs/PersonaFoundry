@@ -168,6 +168,6 @@ QA 원문: ~/Documents/Codex/2026-11-07/new-chat/ux-qa/{create,review,chat}/ (�
 ### 약속 6. 대화 중 영상 고르기 (O가 만들고 P가 부른다)
 
 - GET /api/characters/{cid}/chat/clips?chapter=ch1 → {ready, chapter, idle:{good:{clipKey,url}, bad:{clipKey,url}}, emotion:[{clipKey, url, mood, title, useWhen}], special:[...]}. 승인된 S6 영상(최신 승인 판)만 쓴다. 영상이 없으면 ready=false.
-- POST /api/characters/{cid}/chat/clip 본문 {userMessage, replyText, recent:[clipKey], chapter?} → {clip:{clipKey,url,mood,title}|null, kind:"emotion"|"none", mood}. api-svc app/services/character/clip_picker.py의 고르기(상위 3개 점수, 반복 회피, none 허용)를 옮긴다. 키와 주소는 [providers.demo_chat]을 쓰고, 모델은 api-svc 기본값과 같은 gemini-3.5-flash·생각 끔·2.5초다([providers.clip_pick].model로 바꿀 수 있다, D-0160). 루트 .env에 OPENCODE_API_KEY가 있으면 api-svc처럼 jev-1.13(OpenCode /systemone, 선택지 확률 상위 3개, 0.05 미만 버림)로 고른다(D-0161).
+- POST /api/characters/{cid}/chat/clip 본문 {userMessage, replyText, recent:[clipKey], chapter?} → {clip:{clipKey,url,mood,title}|null, kind:"emotion"|"none", mood}. api-svc app/services/character/clip_picker.py의 고르기(상위 3개 점수, 반복 회피, none 허용)를 옮긴다. 키와 주소는 [providers.demo_chat]을 쓰고, 모델은 api-svc 기본값과 같은 gemini-3.5-flash·생각 끔·2.5초다([providers.clip_pick].model로 바꿀 수 있다, D-0160). 루트 .env에 TYPESAFE_API_KEY가 있으면 api-svc처럼 jev-latest(TypeSafe /systemone, 선택지 확률 상위 3개, 0.05 미만 버림)로 고른다(D-0161).
 - 화면(P)은 none이면 api-svc 앱과 같은 옅은 반응 대체 규칙(fallbackClip.ts)을 쓴다. 대화 내용은 저장하지 않는다.
 

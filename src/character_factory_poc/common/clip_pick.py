@@ -18,11 +18,12 @@ _RANK = re.compile(r"([1-3])위\s*[:.]?\s*([\w-]+)(?:[ :]+(\d+(?:\.\d+)?))?")
 PICK_MODEL = "gemini-3.5-flash"
 PICK_TIMEOUT_S = 2.5
 
-# jev(OpenCode /systemone). api-svc SystemOneChoiceClient와 같은 요청·같은 순위 규칙이다.
-# 루트 .env에 OPENCODE_API_KEY가 있으면 jev로 고르고, 비어 있으면 위의 글 모델로 고른다.
-JEV_KEY_ENV = "OPENCODE_API_KEY"
-JEV_MODEL = "jev-1.13"
-JEV_BASE_URL = "https://opencode.ai/zen/v1"
+# jev(TypeSafe System One /systemone). api-svc SystemOneChoiceClient와 같은 요청·같은 순위 규칙이다.
+# 루트 .env에 TYPESAFE_API_KEY가 있으면 jev로 고르고, 비어 있으면 위의 글 모델로 고른다.
+# 모델·주소는 voice-service·chat-svc와 같다(TypeSafe에는 jev-1.13이 없다).
+JEV_KEY_ENV = "TYPESAFE_API_KEY"
+JEV_MODEL = "jev-latest"
+JEV_BASE_URL = "https://api.typesafe.ai/v1"
 JEV_MIN_PROB = 0.05
 _NONE_CRITERION = "딱 맞는 몸짓이 하나도 없는 평범한 말이면 몸짓 없이 가만히 있는다."
 # 턴마다 부르므로 연결을 60초 이어 쓴다(api-svc #128과 같은 이유: 새 TLS 연결이 0.25~0.3초 더 든다).
@@ -60,7 +61,7 @@ def _jev_ranked(guide, candidates, state):
     criteria = {c["clipKey"]: _describe(c) for c in candidates}
     criteria["none"] = _NONE_CRITERION
     body = {
-        "model": os.environ.get("OPENCODE_MODEL") or JEV_MODEL,
+        "model": os.environ.get("JEV_MODEL") or JEV_MODEL,
         "state": state,
         "questions": {
             "clip": {
@@ -71,7 +72,7 @@ def _jev_ranked(guide, candidates, state):
             }
         },
     }
-    base = (os.environ.get("OPENCODE_BASE_URL") or JEV_BASE_URL).rstrip("/")
+    base = (os.environ.get("JEV_BASE_URL") or JEV_BASE_URL).rstrip("/")
     response = _http.post(
         base + "/systemone",
         json=body,

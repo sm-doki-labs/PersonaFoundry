@@ -12,7 +12,7 @@ from tests.test_demo_chat import setup as demo_setup  # noqa: F401
 
 @pytest.fixture(autouse=True)
 def no_jev(monkeypatch):
-    for name in ("OPENCODE_API_KEY", "OPENCODE_MODEL", "OPENCODE_BASE_URL"):
+    for name in ("TYPESAFE_API_KEY", "JEV_MODEL", "JEV_BASE_URL"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -130,7 +130,7 @@ def test_jev(call, monkeypatch, answer, recent, expected):
             return httpx.Response(500)
         return httpx.Response(200, json={"answers": {"clip": {"probabilities": answer}}})
 
-    monkeypatch.setenv("OPENCODE_API_KEY", "test-key")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
     monkeypatch.setattr(clip_pick, "_http", httpx.Client(transport=httpx.MockTransport(handle)))
     result = client.post(
         URL + "/clip", json=dict(userMessage="왜 그래?", replyText="나 삐졌어.", recent=recent)
@@ -138,11 +138,11 @@ def test_jev(call, monkeypatch, answer, recent, expected):
     assert (result["clip"] or {}).get("clipKey") == expected
     assert not fake.requests
     (request,) = seen
-    assert str(request.url) == "https://opencode.ai/zen/v1/systemone"
+    assert str(request.url) == "https://api.typesafe.ai/v1/systemone"
     assert request.headers["authorization"] == "Bearer test-key"
     body = json.loads(request.content)
     question = body["questions"]["clip"]
-    assert body["model"] == "jev-1.13" and question["type"] == "choice"
+    assert body["model"] == "jev-latest" and question["type"] == "choice"
     assert body["state"] == "유저: 왜 그래?\n캐릭터가 방금 한 말: 나 삐졌어."
     assert "1위" not in question["instructions"] and "속뜻" in question["instructions"]
     assert "pose" not in question["criteria"] and "none" in question["criteria"]
