@@ -35,10 +35,10 @@ from character_factory_poc.stages.s6_actions.catalog import (
     CATALOG,
     NEUTRAL_NEGATIVE,
     PRESETS,
-    STAGE_NOTES,
-    VIDEO_TIERS,
     build_prompt,
     neutral_prompt,
+    stage_note,
+    video_tiers,
 )
 from character_factory_poc.stages.s6_actions.light import LIGHT_INPUTS, read_inputs
 from character_factory_poc.stages.s6_actions.page import render_g5b_page
@@ -60,10 +60,11 @@ def _resolve_config(settings: dict[str, Any]) -> dict[str, Any]:
     preset, actions = cfg["preset"], cfg["actions"]
     if "video_tier" in cfg:
         tier = cfg["video_tier"]
-        if not isinstance(tier, str) or tier not in VIDEO_TIERS:
+        tiers = video_tiers(bool(cfg.get("motif")))
+        if not isinstance(tier, str) or tier not in tiers:
             raise CheckFailed("s6", ["video_tier는 light·standard·pro·max 중 하나다"])
-        cfg["chapters"] = VIDEO_TIERS[tier].chapters
-        cfg["actions"] = list(VIDEO_TIERS[tier].actions)
+        cfg["chapters"] = tiers[tier].chapters
+        cfg["actions"] = list(tiers[tier].actions)
         cfg["preset"] = f"tier:{tier}"
     else:
         if preset == "standard":
@@ -120,6 +121,7 @@ def s6_config(ctx: Context, cid: str | None = None) -> dict[str, Any]:
         raise CheckFailed("s6", ["영상 없이 만들기로 정했어요."])
     if tier:
         settings["video_tier"] = tier
+        settings["motif"] = is_twin(ctx.character_dir(cid))
     return _resolve_config(settings)
 
 
@@ -393,7 +395,9 @@ def _make_inputs(ctx, cid, rev, rev_dir, frames, frame_dir, cfg, video, budget, 
                     "useWhen": clip["useWhen"],
                     "duration": _duration(cfg, key),
                     "reviewNote": note,
-                    "prompt": build_prompt(key, frame.chapterId, note),
+                    "prompt": build_prompt(
+                        key, frame.chapterId, note, motif=bool(cfg.get("motif"))
+                    ),
                 }
             )
         good, bad, source = _first_frames(
@@ -412,7 +416,7 @@ def _make_inputs(ctx, cid, rev, rev_dir, frames, frame_dir, cfg, video, budget, 
             {
                 "chapterId": frame.chapterId,
                 "frameId": frame.frameId,
-                "stageNote": STAGE_NOTES[frame.chapterId],
+                "stageNote": stage_note(frame.chapterId, motif=bool(cfg.get("motif"))),
                 "goodFrame": good,
                 "badFrame": bad,
                 "badFrameSource": source,
@@ -420,7 +424,9 @@ def _make_inputs(ctx, cid, rev, rev_dir, frames, frame_dir, cfg, video, budget, 
             }
         )
     return validate(
-        LIGHT_INPUTS if cfg.get("video_tier") == "light" else "action-inputs-v2",
+        LIGHT_INPUTS
+        if cfg.get("video_tier") and tuple(cfg["chapters"]) == ("ch1",)
+        else "action-inputs-v2",
         {
             "frameRev": frames.frameRev,
             "appearanceRev": frames.appearanceRev,

@@ -58,6 +58,36 @@ def test_old_standard_is_a_preset_only(tmp_path):
         s6_config(ctx)
 
 
+@pytest.mark.parametrize(
+    ("tier", "total", "seconds"),
+    [("light", 10, 110), ("standard", 20, 210), ("pro", 28, 290), ("max", 37, 380)],
+)
+def test_motif_tiers_are_one_scene(tmp_path, tier, total, seconds):
+    """D-0164: 모티브는 배경 하나·같은 옷. 등급은 몸짓 수로만 갈리고 단계당 최소 10편을 지킨다."""
+    from character_factory_poc.stages.s6_actions.catalog import MOTIF_VIDEO_TIERS
+    from character_factory_poc.stages.s6_actions.run import _resolve_config
+
+    ctx, _ = make_ctx(tmp_path)
+    cfg = _resolve_config({"video_tier": tier, "motif": True})
+    assert cfg["chapters"] == ("ch1",) and len(cfg["actions"]) == total
+    assert set(MOTIF_VIDEO_TIERS["light"].actions) <= set(cfg["actions"]) <= set(APP_KEYS)
+    assert len(set(cfg["actions"])) == total
+    image, video = plan_calls(ctx, cfg)
+    assert image.calls == 1 and video.calls == total
+    assert (
+        sum(cfg["durations"]["idle" if k.startswith("idle") else "emotion"] for k in cfg["actions"])
+        == seconds
+    )
+
+
+def test_motif_prompt_drops_relationship_stage():
+    from character_factory_poc.stages.s6_actions.catalog import MOTIF_STAGE_NOTE, build_prompt
+
+    prompt = build_prompt("glad_good", "ch1", motif=True)
+    assert MOTIF_STAGE_NOTE in prompt and "Relationship stage" not in prompt
+    assert "Relationship stage 1" in build_prompt("glad_good", "ch1")
+
+
 def test_light_generates_and_approves_only_ch1(flow):  # noqa: F811
     ctx, cid, video = flow
     ctx.config.stages["s6"] = {"video_tier": "light"}

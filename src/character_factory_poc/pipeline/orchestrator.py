@@ -294,10 +294,14 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
         from character_factory_poc.stages.s0_source.run import run_s0
         from character_factory_poc.stages.s2_hero.twin import run_s2_twin
         from character_factory_poc.stages.s3_plan.twin import run_s3_twin
-        from character_factory_poc.stages.s6_actions.catalog import ALL_CHAPTERS, VIDEO_TIERS
+        from character_factory_poc.stages.s6_actions.catalog import (
+            ALL_CHAPTERS,
+            MOTIF_VIDEO_TIERS,
+        )
         from character_factory_poc.stages.s8_prompts.chapter_start import run_s8c
 
-        tier = VIDEO_TIERS.get(read_video_tier(ctx.character_dir(cid)))
+        # D-0163: 모티브는 등급과 상관없이 배경 하나·장면 이미지 하나만 만든다.
+        tier = MOTIF_VIDEO_TIERS.get(read_video_tier(ctx.character_dir(cid)))
         chapters = tier.chapters if tier else ALL_CHAPTERS
         runners.update(
             {
@@ -393,8 +397,8 @@ def _mark_failed(ctx: Context, cid: str, sid: str, message: str) -> None:
 def _matches_video_scope(ctx, cid, sid, rev):
     """등급이 바뀌면 범위가 같은 승인 결과만 재사용한다."""
     from character_factory_poc.common.store import read_json
-    from character_factory_poc.pipeline.origin import read_video_tier
-    from character_factory_poc.stages.s6_actions.catalog import VIDEO_TIERS
+    from character_factory_poc.pipeline.origin import is_twin, read_video_tier
+    from character_factory_poc.stages.s6_actions.catalog import video_tiers
 
     folder = ctx.character_dir(cid)
     tier = read_video_tier(folder)
@@ -420,7 +424,7 @@ def _matches_video_scope(ctx, cid, sid, rev):
     if data[field] != state.gate(gate).rev:
         return False
     chapters = data["chapters"]
-    return [ch["chapterId"] for ch in chapters] == list(VIDEO_TIERS[tier].chapters)
+    return [ch["chapterId"] for ch in chapters] == list(video_tiers(is_twin(folder))[tier].chapters)
 
 
 def _step(

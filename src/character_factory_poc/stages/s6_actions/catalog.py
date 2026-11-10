@@ -57,6 +57,29 @@ VIDEO_TIERS = {
     "pro": VideoTier(ALL_CHAPTERS, _PRO),
     "max": VideoTier(ALL_CHAPTERS, tuple(CATALOG)),
 }
+# 모티브는 배경 하나·같은 옷으로 몸짓만 늘린다(D-0163). 등급은 장면 수가 아니라 몸짓 수로 갈린다.
+# 앱은 단계당 10편 미만이면 단계를 열지 않으므로 라이트도 10편이다(D-0119).
+_MOTIF_PRO = _PRO + (
+    "amused_good_strong",
+    "expectant_good",
+    "admiring_good",
+    "grateful_good",
+    "rapport_good",
+    "surprised_good_strong",
+    "wistful_good",
+    "dumbfounded_good",
+)
+MOTIF_VIDEO_TIERS = {
+    "light": VideoTier(("ch1",), _CORE),
+    "standard": VideoTier(("ch1",), _PRO),
+    "pro": VideoTier(("ch1",), _MOTIF_PRO),
+    "max": VideoTier(("ch1",), tuple(CATALOG)),
+}
+
+
+def video_tiers(motif: bool) -> dict[str, VideoTier]:
+    return MOTIF_VIDEO_TIERS if motif else VIDEO_TIERS
+
 
 STAGE_NOTES = {
     "ch1": "Relationship stage 1, getting to know each other: keep the reaction polite, "
@@ -64,6 +87,16 @@ STAGE_NOTES = {
     "ch2": "Relationship stage 2, flirting: let a little shy warmth show.",
     "ch3": "Relationship stage 3, dating: warm, relaxed and close.",
 }
+# 모티브 영상은 연애 단계 문장 대신 일대일 통화 분위기만 붙인다.
+MOTIF_STAGE_NOTE = (
+    "A friendly one-on-one video call: natural, warm and composed, with small realistic movements."
+)
+
+
+def stage_note(chapter_id: str, *, motif: bool = False) -> str:
+    return MOTIF_STAGE_NOTE if motif else STAGE_NOTES[chapter_id]
+
+
 NEUTRAL_PROMPT = (
     "Make the same photo as the attached reference — same person, face, hair, pose, hands, "
     "outfit, background, light and framing. Change only the facial expression to a calm neutral "
@@ -83,10 +116,10 @@ def neutral_prompt(*, twin: bool = False) -> str:
     )
 
 
-def build_prompt(key: str, chapter_id: str, review_note: str = "") -> str:
+def build_prompt(key: str, chapter_id: str, review_note: str = "", *, motif: bool = False) -> str:
     """앱 움직임 원문에 관계 단계·외형 유지 조건과 사람 수정 메모만 덧붙인다."""
     prompt = (
-        f"{CATALOG[key]['motion']} {STAGE_NOTES[chapter_id]} "
+        f"{CATALOG[key]['motion']} {stage_note(chapter_id, motif=motif)} "
         "Keep the same person, face, outfit and background as the first frame. "
         "No text, logos or extra people."
     )

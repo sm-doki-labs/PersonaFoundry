@@ -55,9 +55,9 @@
   // 영상 등급(계획 4차 약속 5). 원문 화면(sources.js)과 같은 표·같은 카드다(시험이 같은지 본다). 화면에는 개수를 쓰지 않는다.
   const VIDEO_TIERS = [
     ['none', '영상 없이', '대화만 만들어요. 영상 비용이 들지 않아요.', 0],
-    ['light', '라이트', '첫 장면만, 기본 감정으로 가장 빨리 확인해요.', 1],
-    ['standard', '스탠다드', '세 장면 모두, 기본 감정으로 만들어요.', 2],
-    ['pro', '프로', '세 장면 모두, 더 다양한 감정으로 만들어요.', 3],
+    ['light', '라이트', '자주 쓰는 기본 감정만, 가장 빨리 확인해요.', 1],
+    ['standard', '스탠다드', '대화에서 자주 쓰는 감정까지 만들어요.', 2],
+    ['pro', '프로', '더 섬세한 감정까지 만들어요.', 3],
     ['max', '맥스', '앱에서 쓰는 반응 전부예요. 가장 오래 걸리고 비용도 가장 커요.', 4]
   ];
   const COST_WORD = ['없음', '적음', '보통', '많음', '가장 많음'];
@@ -1357,7 +1357,7 @@
       if (v.photos === 0) return '<div class="fl-vid" role="group" aria-label="영상 만들기"><p>이 캐릭터는 만들 때 사진을 올리지 않아서 영상을 만들 수 없어요. 원문 화면에서 사진과 원문을 함께 올려 새로 만들어 주세요.</p><div class="acts"><a class="btn" href="sources.html">원문 화면에서 새로 만들기</a>' + close + '</div></div>';
       const busy = Boolean(v.busy || state.busy);
       return '<div class="fl-vid" role="group" aria-label="영상 만들기"><div class="vt-grid" role="radiogroup" aria-label="영상 등급">' + tierCardsHTML('videoTierPick', v.tier, { paidOnly: true, disabled: busy }) + '</div>' +
-        '<p>영상 단계는 비용이 들어요. 시작하면 고른 등급의 장면만 이어서 만들고, 다 되면 대화할 때 영상이 나와요.</p>' +
+        '<p>영상 단계는 비용이 들어요. 시작하면 배경 하나·같은 옷으로 고른 등급의 몸짓 영상을 만들고, 다 되면 대화할 때 영상이 나와요.</p>' +
         (v.error ? '<p class="err" role="alert">' + E(v.error) + '</p>' : '') +
         '<div class="acts"><button type="button" class="btn" data-act="video-go"' + (busy ? ' disabled' : '') + '>' + (v.busy ? '시작하는 중…' : E(tierName(v.tier)) + ' 영상 만들기 시작') + '</button>' + (v.noPhoto ? photoLink : '') + '<button type="button" class="btn ghost" data-act="video-cancel">취소</button></div></div>';
     }

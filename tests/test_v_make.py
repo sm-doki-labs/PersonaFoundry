@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from character_factory_poc.common.store import read_json
 from character_factory_poc.providers.fake_vision import FakeVisionModel, all_pass
-from character_factory_poc.stages.s6_actions.catalog import VIDEO_TIERS
+from character_factory_poc.stages.s6_actions.catalog import MOTIF_STAGE_NOTE, MOTIF_VIDEO_TIERS
 from character_factory_poc.web.app import create_app
 from tests.support.flow import make_ctx
 from tests.support.synthetic import prompter_output
@@ -138,8 +138,10 @@ def test_light(tmp_path, monkeypatch):
     inputs = read_json(folder / "s6-actions/va1/inputs.json")
     assert [ch["chapterId"] for ch in inputs["chapters"]] == ["ch1"]
     assert [a["actionKey"] for a in inputs["chapters"][0]["actions"]] == list(
-        VIDEO_TIERS["light"].actions
+        MOTIF_VIDEO_TIERS["light"].actions
     )
+    assert inputs["chapters"][0]["stageNote"] == MOTIF_STAGE_NOTE
+    assert all("Relationship stage" not in a["prompt"] for a in inputs["chapters"][0]["actions"])
     state = ctx.state(cid)
     assert state.gate("G5b").status == "APPROVED"
     assert all(state.stage(s).status == "PENDING" for s in ("s5", "s10", "s10t"))
@@ -164,7 +166,15 @@ def test_light(tmp_path, monkeypatch):
     assert failed["chatReady"] and failed["videoStatus"] == "failed"
     wait(client, client.post(detail + "/videos", json={"videoTier": "standard"}).json()["jobId"])
     upgraded = read_json(folder / "s6-actions/va2/inputs.json")
-    assert [ch["chapterId"] for ch in upgraded["chapters"]] == ["ch1", "ch2", "ch3"]
+    # D-0164: 등급을 올려도 배경 하나·장면 하나다. 몸짓만 늘어난다.
+    assert [ch["chapterId"] for ch in upgraded["chapters"]] == ["ch1"]
+    assert [a["actionKey"] for a in upgraded["chapters"][0]["actions"]] == list(
+        MOTIF_VIDEO_TIERS["standard"].actions
+    )
+    assert upgraded["schemaVersion"] == "action-inputs-light-v1"
     assert ctx.state(cid).gate("G1s").rev == "ar1"
-    assert ctx.state(cid).gate("G4").rev == "fr2"
+    # 장면이 같으므로 배경·장면 이미지를 다시 만들지 않고 같은 첫 화면에 몸짓만 더한다.
+    assert ctx.state(cid).gate("G4").rev == "fr1"
+    assert upgraded["frameRev"] == "fr1"
+    assert not (folder / "s4a-backgrounds/bg2").exists()
     assert client.get(detail).json()["videoStatus"] == "ready"

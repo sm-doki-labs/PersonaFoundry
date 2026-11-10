@@ -548,7 +548,7 @@ test('five video tiers with plain names, no clip counts, and the same cards on b
   assert.ok(!/\d+\s*개|클립/.test(html), 'no clip counts anywhere, not even in labels');
   assert.equal((html.match(/type="radio"/g) || []).length, 5);
   assert.match(html, /value="none" checked/, 'no video is the default');
-  assert.match(visible, /첫 장면만, 기본 감정으로 가장 빨리 확인해요/);
+  assert.match(visible, /자주 쓰는 기본 감정만, 가장 빨리 확인해요/);
   assert.match(visible, /가장 오래 걸리고 비용도 가장 커요/);
   assert.ok(!S.tierCardsHTML('x', 'light', { paidOnly: true }).includes('value="none"'));
   assert.equal(S.tierOf('ultra'), 'none');
