@@ -93,9 +93,17 @@ function fakeServer(opts) {
       if (method === 'DELETE') { db.files = db.files.filter((x) => x !== f); if (!db.files.length) { db.canFinalize = false; db.problems = ['원문 파일을 하나 이상 올려 주세요.']; } return { ok: true, status: 204, json: async () => null }; }
     }
     if (method === 'POST' && u.pathname === '/api/sources/cf-son/finalize') { db.finalized = true; return json(200, { jobId: 'job-1' }); }
+    if (method === 'POST' && u.pathname === '/api/sources/cf-son/import-path') {
+      const f = { fileId: 'f' + (++db.seq), filename: body.path.replace(/^.*\//, ''), size: 100, sha256: 'h', fileType: 'text', textId: 'imported', kind: 'TRANSCRIPT', register: 'CASUAL', subjectSpeaker: null, userSpeaker: null, date: null, sourceUrl: null, problems: [] };
+      check(f);
+      db.files.push(f);
+      db.canFinalize = f.status === 'ready';
+      return json(200, Object.assign({}, f));
+    }
+    if (method === 'GET' && u.pathname === '/api/projects') return json(200, { characters: (db.projects || []).slice() });
     if (method === 'GET' && u.pathname === '/api/characters/cf-son') return json(200, Object.assign({ id: 'cf-son', origin: 'SOURCE', modelMode: db.draft && db.draft.modelMode, autoReview: db.draft && db.draft.autoReview, progress: { done: db.done || 0, total: 12 }, pendingGates: [], stages: [], job: (db.done || 0) < 12 ? { id: 'job-1' } : null }, db.detail || {}));
     if (method === 'GET' && u.pathname === '/api/characters/cf-son/chat/meta') return db.noChat ? json(404, { detail: 'Not Found' }) : json(200, { characterId: 'cf-son', ready: !!db.chatReady, reason: db.chatReady ? '' : '프롬프트를 아직 만들고 있어요.' });
-    if (method === 'DELETE' && u.pathname === '/api/sources/cf-son') { db.draft = null; db.files = []; return { ok: true, status: 204, json: async () => null }; }
+    if (method === 'DELETE' && u.pathname === '/api/sources/cf-son') { db.draft = null; db.files = []; if (db.drafts) db.drafts = db.drafts.filter((d) => d.characterId !== 'cf-son'); if (db.projects) db.projects = db.projects.filter((c) => c.id !== 'cf-son'); return { ok: true, status: 204, json: async () => null }; }
     return json(404, { detail: 'Not Found' });
   }
   return { fetch, calls, db };
@@ -452,6 +460,9 @@ test('server guesses fill kind and register only when the file name gave no hint
   server.calls.length = 0;
   intake.addFiles([file('notes.txt')]);
   await settle();
+  const complete = server.calls.find((c) => c.path.endsWith('/complete'));
+  assert.equal(complete.body.kind, null, 'with no hint in the name the server reads the content first');
+  assert.equal(complete.body.register, null);
   const patch = server.calls.find((c) => c.method === 'PATCH');
   assert.ok(patch, 'the content guess is saved');
   assert.equal(patch.body.kind, 'TRANSCRIPT');
@@ -755,4 +766,70 @@ test('when no speaker matches the display name, nobody is picked: the card lists
   assert.equal(item.meta.userSpeaker, '나');
   assert.equal(intake.startState().ready, true);
   assert.equal(S.suggestedSpeaker({ detectedSpeakers: [{ name: '나', lines: 9 }], suggested: { subjectSpeaker: null } }), '', 'the busiest speaker is never a fallback');
+});
+test('deleting a draft re-reads the resume list and the sidebar so it disappears from both (A-04)', async () => {
+  const server = fakeServer();
+  const intake = await ready(server);
+  server.db.drafts = [{ characterId: 'cf-son', displayName: '손흥민', createdAt: '2026-11-10T05:10:00+09:00', files: 0 }];
+  server.db.projects = [{ id: 'cf-son', displayName: '손흥민', status: 'draft', origin: 'SOURCE' }];
+  await intake.drafts();
+  await intake.projects();
+  assert.equal(await intake.deleteDraft(), true);
+  assert.deepEqual(intake.state.drafts, []);
+  assert.deepEqual(intake.state.projects, []);
+  assert.equal(intake.state.cid, null);
+});
+
+test('a path import comes back checked like an upload, and the partner speaker is filled (A-05)', async () => {
+  const server = fakeServer({ allowPathImport: true });
+  const intake = await ready(server);
+  await intake.importPath('/tmp/qa/son-vlog.vtt');
+  await settle();
+  const item = intake.items()[0];
+  assert.equal(item.status, '준비됐어요', 'no longer stuck on "다 올라가지 않았어요"');
+  assert.equal(item.editable, true);
+  assert.equal(item.meta.subjectSpeaker, '손흥민');
+  assert.equal(item.meta.userSpeaker, '기자');
+  assert.equal(intake.startState().ready, true);
+});
+
+test('long basic facts are caught per field, and an old server error does not linger (A-06)', async () => {
+  const server = fakeServer();
+  const intake = S.createIntake({ fetch: server.fetch, origin: ORIGIN, XHR: null });
+  const base = { displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', age: '34세', gender: '남성', job: '축구선수' };
+  intake.state.error = '입력한 내용을 확인해 주세요.';
+  const res = await intake.createDraft(Object.assign({}, base, { age: '서른넷 그리고 몇 달 지났고 생일은 칠월이에요', job: '가'.repeat(61), background: '가'.repeat(401) }));
+  assert.deepEqual(res.errors, { age: '나이는 20자까지 적을 수 있어요.', job: '하는 일은 60자까지 적을 수 있어요.', background: '한 줄 배경은 400자까지 적을 수 있어요.' });
+  assert.equal(intake.state.error, null);
+  assert.equal(server.calls.length, 0);
+  const html = fs.readFileSync(path.join(__dirname, '..', 'sources.html'), 'utf8');
+  assert.match(html, /name="age" maxlength="20"/);
+  assert.match(html, /name="job" maxlength="60"/);
+  assert.match(html, /name="background" rows="2" maxlength="400"/);
+  assert.match(html, /data-err="background"/);
+});
+
+test('when progress changes state the sidebar is read again, and not on every unchanged poll (A-07)', async () => {
+  const server = fakeServer();
+  const intake = await ready(server);
+  await intake.projects();
+  server.db.detail = { status: 'running', chatReady: false };
+  await intake.progress();
+  const reads = () => server.calls.filter((c) => c.path === '/api/projects').length;
+  const before = reads();
+  await intake.progress();
+  assert.equal(reads(), before, 'same state, no extra read');
+  server.db.detail = { status: 'chat_ready', chatReady: true };
+  await intake.progress();
+  assert.equal(reads(), before + 1);
+});
+
+test('a photo the server cannot open shows an icon instead of a broken image (A-14)', async () => {
+  const server = fakeServer();
+  const intake = await ready(server);
+  intake.state.draft.files = [{ fileId: 'p1', filename: 'broken.jpg', fileType: 'photo', status: 'problem', problems: ['열 수 없는 사진이에요. 이 사진을 지우고 다른 사진을 올려 주세요.'], url: '/x/broken.jpg' }];
+  const [ph] = intake.photoItems();
+  assert.equal(ph.thumb, '');
+  assert.match(ph.problems[0], /지우고/);
+  assert.equal(ph.removable, true);
 });

@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import re
+import shutil
 from collections import Counter
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -111,6 +112,35 @@ class ImportPath(Strict):
     path: str
 
 
+# 초안 칸 이름(오류가 난 칸을 쉬운 말로 알린다, QA v5 A-06).
+DRAFT_LABELS = {
+    "displayName": "표시 이름",
+    "age": "나이",
+    "gender": "성별",
+    "job": "하는 일",
+    "background": "한 줄 배경",
+    "title": "시그니처 포즈 이름",
+    "motion": "시그니처 동작",
+    "useWhen": "나오는 때",
+}
+
+
+def _topic(word):
+    code = ord(word[-1]) - 0xAC00
+    return "은" if 0 <= code < 11172 and code % 28 else "는"
+
+
+def draft_problem(errors):
+    """초안 422를 칸 이름과 한도가 담긴 한 문장으로 바꾼다. 모르는 오류면 공통 문장."""
+    for error in errors:
+        field = next((str(x) for x in reversed(error.get("loc", ())) if x in DRAFT_LABELS), None)
+        limit = (error.get("ctx") or {}).get("max_length")
+        if field and limit:
+            label = DRAFT_LABELS[field]
+            return f"{label}{_topic(label)} {limit}자까지 적을 수 있어요."
+    return "입력한 내용을 확인해 주세요."
+
+
 class IntakeRoute(APIRoute):
     def get_route_handler(self):
         handler = super().get_route_handler()
@@ -120,7 +150,7 @@ class IntakeRoute(APIRoute):
                 return await handler(request)
             except SourcePathError:
                 raise WebError(403, "이 위치의 파일은 열 수 없어요.") from None
-            except RequestValidationError:
+            except RequestValidationError as exc:
                 path = request.url.path
                 if path.endswith(("/settings", "/videos")):
                     raise WebError(
@@ -129,7 +159,7 @@ class IntakeRoute(APIRoute):
                         "나오는 때는 200자까지 적을 수 있어요.",
                     ) from None
                 if path.endswith("/drafts"):
-                    raise WebError(422, "입력한 내용을 확인해 주세요.") from None
+                    raise WebError(422, draft_problem(exc.errors())) from None
                 raise WebError(422, "입력한 내용과 파일 크기를 확인해 주세요.") from None
 
         return checked
@@ -295,6 +325,36 @@ def user_suggestion(names, subject, kind):
     return others[0] if subject and others else None
 
 
+READ_HINT = {
+    "KAKAO_EXPORT": (
+        "카톡 대화로 읽지 못했어요. 카톡의 ‘대화 내보내기’로 받은 파일을 그대로 올려 주세요."
+    ),
+    "ARTICLE": "기사 문단을 찾지 못했어요. 본문이 담긴 글 파일인지 확인해 주세요.",
+}
+
+
+def read_problem(spec, exc):
+    """원문을 읽지 못한 까닭을 쉬운 말 한 문장으로 알린다(QA v5 A-09)."""
+    suffix = Path(spec.path).suffix.lower()
+    if suffix in {".srt", ".vtt"} and spec.kind != "TRANSCRIPT":
+        return "자막 파일(srt·vtt)은 종류를 ‘받아쓰기’로 골라 주세요."
+    if suffix == ".json":
+        return (
+            "json 파일은 글줄을 담은 목록이어야 해요. "
+            '예: ["기자: 오늘 어땠어요?", "손흥민: 재미있었어요."]'
+        )
+    if "CSV" in str(exc):
+        return "카톡 csv의 날짜를 읽지 못했어요. 카톡에서 내보낸 파일을 그대로 올려 주세요."
+    if spec.date and isinstance(exc, ValueError) and "isoformat" in str(exc):
+        return "날짜를 읽지 못했어요. 날짜 칸을 다시 골라 주세요."
+    if spec.kind in READ_HINT:
+        return READ_HINT[spec.kind]
+    return (
+        "말한 사람이 적힌 줄을 찾지 못했어요. 줄마다 ‘이름: 한 말’처럼 적어 주세요. "
+        "예: 기자: 오늘 어땠어요?"
+    )
+
+
 def install_source_routes(app, conf, jobs):
     router = APIRouter(prefix="/api/sources", route_class=IntakeRoute)
     store: SourceStore = (
@@ -334,6 +394,8 @@ def install_source_routes(app, conf, jobs):
             raise WebError(404, "만들던 초안을 찾을 수 없어요.")
         with lock.open("a") as fp:
             fcntl.flock(fp, fcntl.LOCK_EX)
+            if not (state.is_file() or legacy):
+                raise WebError(404, "만들던 초안을 찾을 수 없어요.")  # 기다리는 사이 지운 초안
             draft = {} if legacy else json.loads(state.read_text("utf-8"))
             draft["videoTier"] = read_video_tier(folder) or "none"
             draft["signaturePose"] = read_signature(folder)
@@ -342,7 +404,7 @@ def install_source_routes(app, conf, jobs):
             if edit and (jobs.active_for(cid) or (draft.get("jobId") and not purge)):
                 raise WebError(409, "이미 만들기를 시작해서 원문을 바꿀 수 없어요.")
             yield folder, draft
-            if edit:
+            if edit and not draft.get("_removed"):
                 save(state, {k: v for k, v in draft.items() if k != "signaturePose"})
 
     @router.post("/drafts")
@@ -451,7 +513,7 @@ def install_source_routes(app, conf, jobs):
             except (OSError, ValueError):
                 item.update(
                     status="problem",
-                    problems=["사진을 열 수 없어요. 원본 사진을 다시 올려 주세요."],
+                    problems=["열 수 없는 사진이에요. 이 사진을 지우고 다른 사진을 올려 주세요."],
                 )
             else:
                 item.update(status="ready", sha256=digest, problems=[])
@@ -512,8 +574,8 @@ def install_source_routes(app, conf, jobs):
                 same = spec.subjectSpeaker and spec.subjectSpeaker == spec.userSpeaker
                 if spec.kind != "ARTICLE" and same:
                     problems.append("대상 화자와 상대 화자를 다른 사람으로 골라 주세요.")
-            except (ValueError, KeyError, TypeError):
-                problems.append("원문을 읽을 수 없어 날짜와 파일 종류, 화자 표기를 확인해 주세요.")
+            except (ValueError, KeyError, TypeError) as exc:
+                problems.append(read_problem(spec, exc))
         candidate.update(
             detectedSpeakers=detected,
             suggested=dict(
@@ -555,7 +617,8 @@ def install_source_routes(app, conf, jobs):
             atomic_write(local_copy(folder, item["fileId"], path.name), data)
             item["sha256"] = hashlib.sha256(data).hexdigest()
             draft["files"].append(item)
-            return item
+            # 올린 파일과 같은 확인을 거쳐 준비됨·확인 필요로 바로 둔다(QA v5 A-05).
+            return check(folder, draft, item, {})
 
     @router.delete("/{cid}/files/{fid}")
     def remove(cid: str, fid: str):
@@ -567,10 +630,19 @@ def install_source_routes(app, conf, jobs):
 
     @router.delete("/{cid}")
     def purge(cid: str):
+        """원본을 지운다. 시작하지 않은 초안이면 캐릭터 폴더까지 지운다(QA v5 A-04).
+
+        그래야 목록에서 사라진다. 이미 시작한 캐릭터는 원본만 지우고 캐릭터는 남긴다.
+        """
         with opened(cid, edit=True, purge=True) as (folder, draft):
             store.delete(folder)
             draft["files"].clear()
-        return {"characterId": cid}
+            state, _ = reads.read_state(folder)
+            unstarted = reads.is_draft(draft, state.get("stages", {}).values())
+            if unstarted:
+                shutil.rmtree(folder)
+                draft["_removed"] = True
+        return {"characterId": cid, "removed": unstarted}
 
     @router.post("/{cid}/finalize")
     def finalize(cid: str):

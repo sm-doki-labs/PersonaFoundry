@@ -340,6 +340,7 @@
     };
     let seq = 0;
     let active = 0;
+    let lastStatus = null; // 왼쪽 목록을 다시 읽을지 견줄 직전 진행 상태
     const aborts = {};
     const chains = {};
     let pendingSaves = 0;
@@ -470,6 +471,11 @@
         }
       }
       emit();
+      // 상태가 바뀌면 왼쪽 캐릭터 목록도 다시 읽는다(본문은 대화 가능인데 목록만 만드는 중으로 남지 않게, QA v5 A-07).
+      const c = state.character || {};
+      const now = [c.status, c.chatReady, c.videoStatus, state.chat && state.chat.ready].join('|');
+      if (lastStatus !== null && now !== lastStatus && state.projects) await projects();
+      lastStatus = now;
       return { character: state.character, chat: state.chat };
     }
     async function projects() {
@@ -550,11 +556,16 @@
     function validateDraft(input) {
       const v = input || {};
       const errors = {};
+      const tooLong = (name, label, n) => { if (!errors[name] && text(v[name]).trim().length > n) errors[name] = label + ' ' + n + '자까지 적을 수 있어요.'; };
       if (!text(v.displayName).trim()) errors.displayName = '표시 이름을 적어 주세요.';
       if (!SUBJECT_KINDS.some((k) => k[0] === v.subjectKind)) errors.subjectKind = '공인인지 개인인지 골라 주세요.';
       if (!text(v.age).trim()) errors.age = '나이를 적어 주세요.';
       if (!text(v.gender).trim()) errors.gender = '성별을 골라 주세요.';
       if (!text(v.job).trim()) errors.job = '하는 일을 적어 주세요.';
+      // 서버 한도와 같다(KnownFacts). 넘으면 그 칸 옆에 알린다(QA v5 A-06).
+      tooLong('age', '나이는', 20);
+      tooLong('job', '하는 일은', 60);
+      tooLong('background', '한 줄 배경은', 400);
       if (tierOf(v.videoTier) !== 'none') {
         if (!text(v.sigTitle).trim()) errors.sigTitle = '시그니처 포즈 이름을 적어 주세요.';
         if (!text(v.sigMotion).trim()) errors.sigMotion = '어떤 동작인지 적어 주세요.';
@@ -563,7 +574,11 @@
     }
     async function createDraft(input) {
       const errors = validateDraft(input);
-      if (Object.keys(errors).length) return { errors };
+      if (Object.keys(errors).length) {
+        // 칸 오류를 보일 때는 지난번 서버 오류 문장을 지운다(고친 뒤 다른 칸 오류가 나도 옛 문장이 남지 않게).
+        if (state.error) { state.error = null; emit(); }
+        return { errors };
+      }
       state.busy = 'create';
       state.error = null;
       emit();
@@ -629,8 +644,10 @@
           // 사진에는 원문 정보가 없어 모두 빈칸으로 보낸다.
           meta: photo ? { textId: '', kind: '', register: '', subjectSpeaker: '', userSpeaker: '', date: '', sourceUrl: '' } : {
             textId: problem ? '' : suggestTextId(file.name, kind, takenIds()),
-            kind,
-            register: defaultRegister(kind),
+            // 이름에 실마리가 없으면 종류와 자리를 비워 보내 서버가 내용으로 정하게 한다. 인터뷰로 먼저 읽으면
+            // 이름 없는 카톡 파일에서 '[엄마] [오전 9' 같은 화자가 잡힌다.
+            kind: hint || '',
+            register: hint ? defaultRegister(kind) : '',
             subjectSpeaker: '',
             userSpeaker: '',
             date: '',
@@ -856,8 +873,16 @@
       state.error = null;
       emit();
       try {
-        await request('POST', '/api/sources/' + encodeURIComponent(state.cid) + '/import-path', { path: p });
+        const rec = await request('POST', '/api/sources/' + encodeURIComponent(state.cid) + '/import-path', { path: p });
         state.announce = '경로에서 원문을 가져왔어요.';
+        // 서버가 올린 파일과 같은 확인을 마친 기록을 준다. 찾은 화자·상대를 올린 파일처럼 채운다(QA v5 A-05).
+        if (rec && rec.fileId) {
+          upsert(rec);
+          if (!isPhotoRecord(rec)) {
+            const next = afterCheck(rec, { touched: {}, kindFromName: false, meta: {} });
+            if (!sameMeta(metaOfRecord(rec), next)) queuePatch(rec.fileId, next);
+          }
+        }
       } catch (error) {
         state.error = '가져오지 못했어요. ' + errorText(error);
       }
@@ -925,6 +950,8 @@
       Object.assign(state, { cid: null, draft: null, uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, busy: null, finalized: null, loadError: null, settings: null, character: null, chat: null, announce: '초안과 올린 원문을 지웠어요.' });
       if (o.onCid) o.onCid(null);
       emit();
+      // 지운 초안이 만들던 초안 목록과 왼쪽 캐릭터 목록에서도 빠지게 둘 다 다시 읽는다(QA v5 A-04).
+      await Promise.all([drafts(), projects()]);
       return true;
     }
     function reset() {
@@ -978,7 +1005,9 @@
         const st = f.status === 'ready' ? ['ok', '준비됐어요'] : f.status === 'problem' ? ['wait', '확인이 필요해요'] : ['muted', '다 올라가지 않았어요'];
         const problems = (f.problems || []).map(text);
         if (f.status === 'pending' && !problems.length) problems.push('끝까지 올라가지 않았어요. 지우고 다시 올려 주세요.');
-        out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, thumb: text(f.previewUrl || f.thumbUrl || f.url) || state.thumbs[key] || '', removable: !state.finalized && state.busy !== 'remove:' + key, retry: false });
+        // 열 수 없는 사진은 브라우저 깨진 그림 대신 사진 아이콘을 둔다(QA v5 A-14).
+        const thumb = f.status === 'problem' ? '' : text(f.previewUrl || f.thumbUrl || f.url) || state.thumbs[key] || '';
+        out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, thumb, removable: !state.finalized && state.busy !== 'remove:' + key, retry: false });
       });
       state.uploads.filter((u) => u.fileType === 'photo').forEach((u) => {
         const map = { queued: ['muted', '기다리는 중'], starting: ['run', '준비하는 중'], sending: ['run', '올리는 중 ' + Math.round(u.progress * 100) + '%'], checking: ['run', '확인하는 중'], failed: ['fail', '올리지 못했어요'], rejected: ['fail', '받을 수 없는 사진'] };
@@ -1541,9 +1570,9 @@
       const auto = f.querySelector('[name="autoReview"]');
       const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined, modelMode: mode, autoReview: auto ? auto.checked : true, videoTier: tier, sigTitle: f.querySelector('[name="sigTitle"]').value, sigMotion: f.querySelector('[name="sigMotion"]').value, sigWhen: f.querySelector('[name="sigWhen"]').value };
       const errors = intake.validateDraft(input);
-      ['displayName', 'subjectKind', 'age', 'gender', 'job', 'sigTitle', 'sigMotion'].forEach((n) => fieldError(n, errors[n]));
+      ['displayName', 'subjectKind', 'age', 'gender', 'job', 'background', 'sigTitle', 'sigMotion'].forEach((n) => fieldError(n, errors[n]));
       const first = Object.keys(errors)[0];
-      if (first) { const ctl = f.querySelector('[name="' + first + '"]'); if (ctl) ctl.focus(); return; }
+      if (first) { if (S.error) { S.error = null; render(); } const ctl = f.querySelector('[name="' + first + '"]'); if (ctl) ctl.focus(); return; }
       intake.createDraft(input).then((res) => {
         if (res && res.characterId) {
           const h = r.steps.files && r.steps.files.querySelector('h2');
@@ -1581,7 +1610,7 @@
       else if (act === 'start') intake.finalize().then((done) => { if (done) intake.projects(); if (done && r.done) { const h = r.done.querySelector('h3'); if (h) h.focus(); } });
       else if (act === 'ask-delete') { confirmDelete = true; render(); const no = r.delRow.querySelector('[data-act="cancel-delete"]'); if (no) no.focus(); }
       else if (act === 'cancel-delete') { confirmDelete = false; render(); const ask = r.delRow.querySelector('[data-act="ask-delete"]'); if (ask) ask.focus(); }
-      else if (act === 'delete') intake.deleteDraft().then((ok) => { if (ok) { confirmDelete = false; chapterTemplateReset(); render(); intake.drafts(); const n = r.form && r.form.querySelector('[name="displayName"]'); if (n) n.focus(); } });
+      else if (act === 'delete') intake.deleteDraft().then((ok) => { if (ok) { confirmDelete = false; chapterTemplateReset(); render(); const n = r.form && r.form.querySelector('[name="displayName"]'); if (n) n.focus(); } });
       else if (act === 'reload') { const cid = route(); if (cid) intake.load(cid); }
       else if (act === 'restart') { intake.reset(); clearHash(); render(); intake.drafts(); }
     }

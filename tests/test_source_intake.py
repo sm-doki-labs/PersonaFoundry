@@ -91,7 +91,9 @@ def test_round_trip(tmp_path):
     )
     assert not Path(spec["path"]).is_absolute()
     assert client.post(url + "/finalize").status_code == 409
-    assert client.delete(url).is_success and not (folder / spec["path"]).exists()
+    removed = client.delete(url)
+    assert removed.is_success and not (folder / spec["path"]).exists()
+    assert not removed.json()["removed"] and folder.is_dir(), "a started character stays"
 
 
 @pytest.mark.parametrize(
@@ -131,6 +133,9 @@ def test_validation_and_import(tmp_path):
     original = tmp_path / "외부.txt"
     original.write_bytes(RAW)
     item = client.post(url + "/import-path", json={"path": str(original)}).json()
+    assert item["status"] == "ready" and item["subjectSpeaker"] == "선수", (
+        "imports are checked (A-05)"
+    )
     target = url + "/files/" + item["fileId"]
     assert client.post(target + "/complete", json=META).json()["status"] == "ready"
     folder = tmp_path / "runs/characters" / url.split("/")[-1]
@@ -306,3 +311,62 @@ def test_kakao_never_picks_the_exporter_or_the_busiest_speaker(tmp_path):
     assert item["suggested"]["subjectChoices"] == ["기자", "선수"]
     picked = client.patch(target, json={"subjectSpeaker": "선수"}).json()
     assert picked["status"] == "ready" and picked["suggested"]["userSpeaker"] == "기자"
+
+
+def test_deleting_an_unstarted_draft_removes_it_everywhere(tmp_path):
+    """QA v5 A-04: 시작 전 초안은 목록·초안 API·캐릭터 목록에서 사라진다."""
+    client = TestClient(create_app(tmp_path))
+    url = start(client)
+    put(client, url)
+    cid = url.split("/")[-1]
+    assert [d["characterId"] for d in client.get("/api/sources/drafts").json()] == [cid]
+    response = client.delete(url)
+    assert response.is_success and response.json()["removed"]
+    assert client.get("/api/sources/drafts").json() == []
+    assert cid not in [c["id"] for c in client.get("/api/projects").json()["characters"]]
+    assert client.get(url).status_code == 404 and client.delete(url).status_code == 404
+    assert not (tmp_path / "runs/characters" / cid).exists()
+
+
+@pytest.mark.parametrize(
+    "facts,message",
+    [
+        ({"age": "서른넷 그리고 몇 달 지났고 생일은 칠월이에요"}, "나이는 20자까지"),
+        ({"job": "가" * 61}, "하는 일은 60자까지"),
+        ({"background": "가" * 401}, "한 줄 배경은 400자까지"),
+    ],
+)
+def test_long_draft_values_name_the_field(tmp_path, facts, message):
+    """QA v5 A-06: 긴 값은 어느 칸인지와 한도를 말하고 파일 크기를 말하지 않는다."""
+    client = TestClient(create_app(tmp_path))
+    response = client.post(
+        "/api/sources/drafts",
+        json={"displayName": "선수", "subjectKind": "PUBLIC_FIGURE", "knownFacts": facts},
+    )
+    assert response.status_code == 422 and message in response.json()["detail"]
+    assert "파일" not in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "filename,data,meta,expected",
+    [
+        ("notes.json", b'{"a": 1}', {"kind": "INTERVIEW"}, "목록이어야"),
+        ("notes.txt", "화자 표시가 없는 글이에요.".encode(), {"kind": "INTERVIEW"}, "이름: 한 말"),
+        ("live.srt", b"1\n00:00:01,000 --> 00:00:02,000\nhi\n", {"kind": "INTERVIEW"}, "받아쓰기"),
+        ("kakao.txt", "그냥 글".encode(), {"kind": "KAKAO_EXPORT"}, "대화 내보내기"),
+    ],
+)
+def test_unreadable_sources_say_why(tmp_path, filename, data, meta, expected):
+    """QA v5 A-09: 원문을 읽지 못한 구체 까닭을 쉬운 말로 알린다."""
+    client = TestClient(create_app(tmp_path))
+    _, target = upload_as(client, "선수", data, filename)
+    item = client.post(target + "/complete", json=meta).json()
+    assert item["status"] == "problem" and expected in item["problems"][0], item["problems"]
+
+
+def test_broken_photo_asks_to_remove_it(tmp_path):
+    """QA v5 A-14: 열 수 없는 사진은 지우라고 분명히 말한다."""
+    client = TestClient(create_app(tmp_path))
+    _, target = upload_as(client, "선수", b"\xff\xd8\xff", "broken.jpg")
+    item = client.post(target + "/complete", json={}).json()
+    assert item["status"] == "problem" and "지우고" in item["problems"][0]
