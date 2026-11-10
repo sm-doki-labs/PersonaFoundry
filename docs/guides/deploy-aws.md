@@ -17,7 +17,7 @@ tofu -chdir=deploy/aws apply -target=aws_ecr_repository.app -target=aws_secretsm
 scripts/deploy_factory.sh bootstrap
 ```
 
-3. 서울 리전 Secrets Manager에서 `persona-factory-dev/OPENAI_API_KEY`, `persona-factory-dev/GEMINI_API_KEY` 각각에 키 문자열만 **일반 텍스트**로 저장한다(JSON 객체 아님). 설정 파일·명령줄·상태에는 값을 넣지 않는다. ECS 실행 역할이 시작할 때 환경변수로 주입한다. 키를 교체하면 재배포해야 반영된다.
+3. 서울 리전 Secrets Manager에서 `persona-factory-dev/OPENAI_API_KEY`, `persona-factory-dev/GEMINI_API_KEY`, `persona-factory-dev/TYPESAFE_API_KEY` 각각에 키 문자열만 **일반 텍스트**로 저장한다(JSON 객체 아님). 설정 파일·명령줄·상태에는 값을 넣지 않는다. ECS 실행 역할이 시작할 때 환경변수로 주입한다. 키를 교체하면 재배포해야 반영된다.
 4. `tofu -chdir=deploy/aws apply`로 남은 자원을 만든다. 인증서 검증에는 시간이 걸릴 수 있다. 서비스가 안정되면 Cognito 사용자를 초대한다. 아래 메일 주소는 실제 팀원 주소로 바꾼다.
 
 ```sh

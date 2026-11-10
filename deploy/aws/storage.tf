@@ -52,6 +52,6 @@ resource "aws_s3_bucket_cors_configuration" "sources" {
   }
 }
 resource "aws_secretsmanager_secret" "key" {
-  for_each = toset(["OPENAI_API_KEY", "GEMINI_API_KEY"])
+  for_each = toset(["OPENAI_API_KEY", "GEMINI_API_KEY", "TYPESAFE_API_KEY"])
   name     = "${local.name}/${each.key}"
 }

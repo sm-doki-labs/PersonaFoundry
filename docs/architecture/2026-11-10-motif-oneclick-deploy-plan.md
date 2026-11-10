@@ -51,7 +51,7 @@
 - `CFP_SERVER_MODE=1`: 경로 가져오기를 끄고(`allowPathImport=false`), `--source-pack` 외부 경로도 막는다.
 - `CFP_SOURCE_STORE=local|s3`(기본 local), `CFP_SOURCE_BUCKET`, `CFP_SOURCE_PREFIX`(기본 `sources/`), 지역은 `AWS_REGION`.
 - `CFP_ROOT`: 공장 루트(서버에서는 EFS `/data/factory`). `CFP_CONFIG`: 서버용 factory.toml 경로.
-- 키: `OPENAI_API_KEY`, `GEMINI_API_KEY` (Secrets Manager → 환경변수).
+- 키: `OPENAI_API_KEY`, `GEMINI_API_KEY`, `TYPESAFE_API_KEY` (Secrets Manager → 환경변수). TYPESAFE는 대화해 보기의 반응 고르기(jev)용이다(D-0162).
 
 ### 4. 사실 목록 (B)
 
