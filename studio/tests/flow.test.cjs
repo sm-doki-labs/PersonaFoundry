@@ -172,3 +172,20 @@ test('training state comes from the training record: a plan waits for cost confi
   // 학습 기록이 없는 옛 캐릭터는 예전처럼 state.json을 따른다.
   assert.equal(Flow.viewsFor(graph, base, { now: NOW }).s10t.kind, 'done');
 });
+
+test('resume keeps an unfinished stage goal and retry always covers the failed stage', () => {
+  const d = detail(rows({s1: 'APPROVED', s7: 'CHECK_FAILED'}), [{id: 'G1', status: 'APPROVED'}],
+    {jobs: [{until: 'G1'}, {until: 's8'}]});
+  assert.equal(Flow.runGoal(graph, d, 'G1'), 's8');
+  assert.equal(Flow.runGoal(graph, d, 'G1', 's7'), 's8');
+  assert.equal(Flow.runGoal(graph, d, 'G1', 's5'), 's5');
+});
+
+test('a completed request explains why no new stage started', () => {
+  const job = {status: 'succeeded', ranStages: []};
+  assert.match(Flow.runFeedback(job), /이미 마쳐/);
+  assert.match(Flow.runFeedback({...job, waiting: ['G3']}), /검토/);
+  assert.match(Flow.runFeedback({...job, held: ['s5']}), /비용/);
+  assert.match(Flow.runFeedback({...job, blocked: ['s7']}), /입력/);
+  assert.equal(Flow.runFeedback({...job, status: 'running'}), '');
+});

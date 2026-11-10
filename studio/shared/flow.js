@@ -657,6 +657,28 @@
     return notes.map((n) => Object.assign(n, { at: now }));
   }
 
+  function unfinishedGoal(graph, detail, target) {
+    const gate = graph.byGate.get(target);
+    const row = gate ? gatesById(detail).get(target) : rowsById(detail).get(target);
+    return (gate || graph.byStage.has(target)) && !['APPROVED', 'SKIPPED'].includes(upper((row || {}).status));
+  }
+  function runGoal(graph, detail, fallback, retryStage) {
+    const d = detail || {};
+    const goals = [d.job, ...(d.jobs || []), d.lastJob]
+      .filter((j) => j && (!j.action || j.action === 'run') && !(j.confirm || []).length && !['videos', 'videos-with-chat'].includes(j.trigger))
+      .map((j) => j.until);
+    goals.push(fallback);
+    const goal = goals.find((g) => unfinishedGoal(graph, d, g) && (!retryStage || ancestors(graph, g).has(retryStage)));
+    return goal || retryStage || (d.origin === 'SOURCE' && unfinishedGoal(graph, d, 's8c') ? 's8c' : 'sx');
+  }
+  function runFeedback(job) {
+    if (!job || job.status !== 'succeeded' || !Array.isArray(job.ranStages)) return '';
+    if ((job.held || []).length) return '비용 확인을 기다리고 있어요. 예상 비용을 보고 실행할지 골라 주세요.';
+    if ((job.waiting || []).length) return '검토를 기다리고 있어요. 결과를 확인하면 이어서 만들 수 있어요.';
+    if ((job.blocked || []).length) return '아직 시작할 수 없는 단계가 있어요. 앞 단계의 결과와 필요한 입력을 확인해 주세요.';
+    return job.ranStages.length ? '이번 실행을 마쳤어요.' : '목표까지 이미 마쳐서 새로 실행할 단계가 없어요.';
+  }
+
   function targetLabel(graph, until) {
     const id = text(until).trim();
     if (!id) return '';
@@ -862,6 +884,10 @@
       const recent = Object.keys(state.decided).filter((g) => Date.now() - state.decided[g] < 60000).map((g) => ((state.graph.byGate.get(g) || {}).title || g) + ':');
       const fresh = diffNotes(state.graph, prev, next, Date.now()).filter((n) => !recent.some((prefix) => n.t.indexOf(prefix) === 0));
       if (fresh.length) state.notes = fresh.concat(state.notes).slice(0, 3);
+      const tracked = (next.jobs || []).find((j) => j.jobId === (state.feedback || {}).jobId);
+      const result = runFeedback(tracked);
+      if (result) state.feedback = { tone: 'ok', text: result };
+      else if (tracked && tracked.status === 'failed') state.feedback = { tone: 'bad', text: '작업이 멈췄어요. 지금 할 일에서 이유를 확인해 주세요.' };
       state.detail = next;
       if (state.review && !state.review.readonly) {
         const g = gatesById(next).get(state.review.gate);
@@ -962,12 +988,7 @@
     function orchestrator() { return (state.rawGraph && state.rawGraph.orchestrator) || {}; }
     function setupScope() { return notStarted() ? ancestors(state.graph, state.target || defaultTarget()) : null; }
     function currentUntil() {
-      const d = state.detail || {};
-      // 실행 확인·다시 실행 작업은 그 단계까지만 돈다. 전체 목표는 그런 작업이 아닌 가장 최근 작업에서 읽는다.
-      const jobs = [d.job].concat(Array.isArray(d.jobs) ? d.jobs : []).filter(Boolean);
-      const single = (j) => (Array.isArray(j.confirm) && j.confirm.length) || (j.until && j.until !== 'sx' && state.graph && state.graph.byStage && state.graph.byStage.has(j.until));
-      const job = jobs.find((j) => !single(j)) || d.lastJob;
-      return job ? job.until : '';
+      return runGoal(state.graph, state.detail, orchestrator().resumeUntil);
     }
     // 마지막 작업 시각과 걸린 시간(첫 시작 → 마지막 끝). 아무것도 돌지 않을 때 시간이 저절로 늘어나지 않는다.
     function activity() {
@@ -1306,7 +1327,7 @@
     function tasksHTML(v) {
       const d = state.detail;
       const now = Date.now();
-      const tasks = buildTasks(state.graph, d, v, { now, gateViews: state.gateViews, jobActive: Boolean(d.job) || state.busy, goal: notStarted() ? '' : currentUntil() });
+      const tasks = buildTasks(state.graph, d, v, { now, gateViews: state.gateViews, jobActive: Boolean(d.job) || state.busy, goal: notStarted() || (isChatReady(d) && currentUntil() === 'sx' && !(d.lastJob && d.lastJob.until === 'sx')) ? '' : currentUntil() });
       state.notes = state.notes.filter((n) => now - n.at < 15 * 60000);
       const sum = currentSummary();
       const st = sum ? sum.status.status : '';
@@ -1972,7 +1993,7 @@
       const busy = Boolean(state.detail.job) || state.busy;
       const fake = p0.provider === 'fake';
       if (tr.state === 'locked') return '<div class="md-pane"><div class="md-h"><h3>학습</h3>' + pill('muted', '아직 열리지 않았어요') + '</div><p class="lead">데이터셋을 승인하면 학습 계획(예상 비용·시간)을 세워요.</p></div>';
-      if (tr.state === 'pending') return '<div class="md-pane"><div class="md-h"><h3>학습</h3>' + pill('muted', '계획 전') + '</div><div class="md-note"><div><b>학습 계획을 세울 차례예요</b><p>계획은 비용이 들지 않아요. 계획을 세우면 예상 비용을 보고 시작할지 골라요.</p></div><button type="button" class="btn pri" data-act="resume"' + (busy ? ' disabled' : '') + '>이어서 실행</button></div></div>';
+      if (tr.state === 'pending') return '<div class="md-pane"><div class="md-h"><h3>학습</h3>' + pill('muted', '계획 전') + '</div><div class="md-note"><div><b>학습 계획을 세울 차례예요</b><p>계획은 비용이 들지 않아요. 계획을 세우면 예상 비용을 보고 시작할지 골라요.</p></div><button type="button" class="btn pri" data-act="resume" data-stage="s10t"' + (busy ? ' disabled' : '') + '>이어서 실행</button></div></div>';
       const confirm = mConfirmHTML(tr);
       if (tr.state === 'skip') {
         const g8 = upper(((mp().eval || {}).gate || {}).status);
@@ -2040,7 +2061,7 @@
       else if (v.kind === 'confirm') act = state.confirming === 's10' ? confirmHTML('s10') : '<div class="md-note wait"><div><b>학습 모델 답을 받으려면 GPU를 다시 빌려요</b><p>예상 비용을 확인한 뒤 평가를 시작해요.</p></div><button type="button" class="btn pri" data-act="confirm" data-stage="s10"' + (busy ? ' disabled' : '') + '>비용 확인</button></div>';
       else if (['run', 'retry'].includes(v.kind)) act = '<div class="md-note run"><div><b>답을 모으는 중이에요</b><p>끝나면 블라인드 20쌍 고르기가 열려요.</p></div></div>';
       else if (v.kind === 'fail') act = '<div class="md-note bad"><div><b>평가가 멈췄어요</b><p>' + E(failReason((rowsById(state.detail).get('s10') || {}).lastError).summary) + '</p></div><button type="button" class="btn pri" data-act="retry" data-stage="s10"' + (busy ? ' disabled' : '') + '>다시 실행</button></div>';
-      else act = '<div class="md-note"><div><b>평가를 시작할 수 있어요</b><p>이어서 실행하면 평가부터 진행해요.</p></div><button type="button" class="btn pri" data-act="resume"' + (busy ? ' disabled' : '') + '>이어서 실행</button></div>';
+      else act = '<div class="md-note"><div><b>평가를 시작할 수 있어요</b><p>이어서 실행하면 평가부터 진행해요.</p></div><button type="button" class="btn pri" data-act="resume" data-stage="s10"' + (busy ? ' disabled' : '') + '>이어서 실행</button></div>';
       return '<div class="md-pane"><div class="md-h"><h3>비교할 두 가지</h3>' + (gs === 'APPROVED' ? roChip() : '') + '</div>' + arms + act + '</div><div class="md-pane">' + sets + '</div>';
     }
     function modelHTML() {
@@ -2272,8 +2293,8 @@
       state.feedback = null;
       render();
       try {
-        await request('POST', '/api/jobs', payload);
-        state.feedback = okText ? { tone: 'ok', text: okText } : null;
+        const job = await request('POST', '/api/jobs', payload);
+        state.feedback = okText ? { tone: 'ok', text: okText, jobId: payload.action === 'run' ? job.jobId : null } : null;
       } catch (error) {
         state.feedback = { tone: 'bad', text: error.message };
         if (error.network) state.conn = 'offline';
@@ -2377,10 +2398,10 @@
       else if (act === 'ov-clear') { state.ov = { q: '', gate: '' }; if (route().filter !== 'all') global.location.hash = '#all'; else render(); }
       else if (act === 'ov-review') { state.batch = el.dataset.gate; state.pendingReview = { id: el.dataset.id, gate: el.dataset.gate, stage: el.dataset.stage }; global.location.hash = '#c/' + encodeURIComponent(el.dataset.id); }
       else if (act === 'next-batch') { const nb = nextInBatch(); if (nb) { const t = nb.next.tasks.find((x) => x.kind === 'wait' && x.gate === state.batch) || {}; state.pendingReview = { id: nb.next.c.id, gate: state.batch, stage: t.stage }; closeSheet(false); global.location.hash = '#c/' + encodeURIComponent(nb.next.c.id); } }
-      else if (act === 'retry') run(R.runRequest(id, currentUntil() || orchestrator().resumeUntil || el.dataset.stage, []), '다시 실행을 요청했어요. 통과하면 목표까지 이어서 진행해요.');
+      else if (act === 'retry') run(R.runRequest(id, runGoal(state.graph, state.detail, orchestrator().resumeUntil, el.dataset.stage), []), '다시 실행을 요청했어요. 통과하면 목표까지 이어서 진행해요.');
       else if (act === 'run-stage') run(R.runRequest(id, el.dataset.stage, []), '이 단계까지 실행을 요청했어요.');
       else if (act === 'start') run(R.runRequest(id, state.target || defaultTarget(), []), '실행을 시작했어요. 진행 상황은 서버 기록을 따라요.');
-      else if (act === 'resume') run(R.runRequest(id, currentUntil() || orchestrator().resumeUntil || 'sx', []), '이어서 실행을 요청했어요.');
+      else if (act === 'resume') run(R.runRequest(id, el.dataset.stage || currentUntil(), []), '이어서 실행을 요청했어요.');
       else if (act === 'new') { state.form.open = true; render(); const f = doc.querySelector('[data-brief]'); if (f) f.focus(); }
       else if (act === 'cancel-form') { state.form.open = false; render(); }
       else if (act === 'pick') { state.batch = null; state.form.open = false; global.location.hash = '#c/' + encodeURIComponent(el.dataset.id); }
@@ -2528,7 +2549,7 @@
     };
   }
 
-  const pure = { plainError, since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, s8cName, chatHref, isChatReady, statusOf, STATUS_LABEL, goalStages, goalOf, goalView, nameLabels, labelOf, autoSlug, splitAttempts, MODE_LABEL, MARK, VIDEO_TIERS, tierOf, tierName, tierCardsHTML, videoText, videoTone, canMakeVideo, readyPhotos, mount };
+  const pure = { runGoal, runFeedback, plainError, since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, s8cName, chatHref, isChatReady, statusOf, STATUS_LABEL, goalStages, goalOf, goalView, nameLabels, labelOf, autoSlug, splitAttempts, MODE_LABEL, MARK, VIDEO_TIERS, tierOf, tierName, tierCardsHTML, videoText, videoTone, canMakeVideo, readyPhotos, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = pure;
   if (global) global.FactoryFlow = pure;
 })(typeof window !== 'undefined' ? window : null);
