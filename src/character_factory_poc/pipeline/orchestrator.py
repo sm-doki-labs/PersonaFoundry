@@ -202,6 +202,10 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
         # 씨앗은 다른 단계가 돌기 전에 먼저 고정한다. 외모 축은 그 뒤 s2 승인을 기다린다.
         if appearance and ctx.state(cid).stage("s2").status != "APPROVED":
             raise GateNotApprovedError(f"{cid}: 외모 축 캐릭터는 s2 승인 뒤 기획한다(D-0042)")
+        if opt.brief_text and load_latest_seed(ctx, cid) is None:
+            # 얼굴부터 고른 캐릭터도 등록한 브리프를 씨앗으로 쓴다. s2 승인 뒤라 비운 성별은
+            # 승인한 외모에서 채운다(QA v5 C-13). 씨앗 없이 기획을 멈추지 않는다.
+            return run_s3_from_brief(ctx, cid, opt.brief_text)
         return run_s3_variants(ctx, cid)
 
     def s10t():

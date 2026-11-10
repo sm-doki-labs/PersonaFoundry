@@ -217,3 +217,20 @@ def test_guard_exhaustion_and_atomic_samples(setup):
         demo.run_samples(ctx, CID)
     assert len(fake.requests) == 6
     assert not (folder / "s8-chapters/cs2/samples.json").exists()
+
+
+def test_meta_says_whether_a_video_can_be_made(setup):
+    """사진 없이 만든 모티브는 영상 만들기 링크를 걸지 않도록 meta가 알린다(QA v5 D-04)."""
+    ctx, folder, fake, client = setup
+    ready(folder)
+    # 출처 묶음이 아직 승인되지 않았으면 영상을 만들 수 없다.
+    assert client.get(URL + "/meta").json()["canMakeVideo"] is False
+    ctx.state(CID).set_gate("G0", "APPROVED", "sp1", None)
+    put(folder / "s0-source/sp1/source-pack.json", dict(texts=[{"ref": "a"}], photos=[]))
+    assert client.get(URL + "/meta").json()["canMakeVideo"] is False
+    put(folder / "s0-source/sp1/source-pack.json", dict(photos=[{"ref": "p1"}]))
+    assert client.get(URL + "/meta").json()["canMakeVideo"] is True
+    # 오리지널은 받은 사진과 상관없다.
+    put(folder / "origin.json", dict(schemaVersion="character-origin-v1", origin="CREATED"))
+    put(folder / "s0-source/sp1/source-pack.json", dict(photos=[]))
+    assert client.get(URL + "/meta").json()["canMakeVideo"] is True
