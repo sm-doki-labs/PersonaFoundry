@@ -55,7 +55,10 @@ def setup(tmp_path, monkeypatch):
 
 
 def ready(folder):
-    put(folder / "state.json", {"gates": {"G6": {"status": "APPROVED", "rev": "pv10"}}})
+    put(
+        folder / "state.json",
+        {"subjectId": folder.name, "gates": {"G6": {"status": "APPROVED", "rev": "pv10"}}},
+    )
     put(folder / "s8-prompts/pv10/prompt-pair.json", {})
     (folder / "s8-prompts/pv10/long.md").write_text("유리의 말투")
     put(
