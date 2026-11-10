@@ -331,3 +331,19 @@ test('page wiring: two muted inline players, a hidden sound toggle, screen reade
   assert.match(css, /prefers-reduced-motion:reduce\)\{\s*\.ch-screen video/);
 });
 
+
+test('no video: a character made without photos gets a plain note instead of a dead-end 영상 만들기 link (QA v5 D-04)', () => {
+  const none = { ready: false };
+  const href = 'factory.html#c/cf-son';
+  const linked = C.videoNote({ canMakeVideo: true }, none, href);
+  assert.match(linked, /영상 만들기<\/a>/);
+  assert.ok(linked.includes('href="' + href + '"'));
+  const noPhoto = C.videoNote({ canMakeVideo: false }, none, href);
+  assert.ok(noPhoto.includes('영상은 만들 때 사진을 올린 캐릭터만 만들 수 있어요'));
+  assert.ok(!noPhoto.includes('<a '), 'no link to a screen that cannot make it');
+  // 예전 서버처럼 값이 없으면 지금처럼 링크를 둔다. 영상이 있으면 안내가 없다.
+  assert.match(C.videoNote({}, none, href), /영상 만들기<\/a>/);
+  const clips = { ready: true, idle: { good: { clipKey: 'idle_good', url: '/v.mp4' } } };
+  assert.equal(C.videoNote({ canMakeVideo: false }, clips, href), '');
+});
+

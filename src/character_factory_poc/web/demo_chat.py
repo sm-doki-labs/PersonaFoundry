@@ -18,6 +18,7 @@ from character_factory_poc.common.errors import (
     ProviderTransportError,
 )
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.graph import SOURCE
 from character_factory_poc.pipeline.origin import read_origin
 from character_factory_poc.providers.base import Message
 from character_factory_poc.web import reads
@@ -44,6 +45,21 @@ class ClipTurn(BaseModel):
     ]
     recent: list[str] = Field(default_factory=list, max_length=100)
     chapter: str = "ch1"
+
+
+def can_make_video(folder, origin: str) -> bool:
+    """영상 만들기를 시작할 수 있는 캐릭터인가(QA v5 D-04).
+
+    모티브 영상은 승인한 출처 묶음의 사진이 있어야 만든다(영상 시작 API와 같은 조건).
+    오리지널은 이 조건이 없다.
+    """
+    if origin != SOURCE:
+        return True
+    gate = (reads.read_state(folder)[0].get("gates") or {}).get("G0") or {}
+    if gate.get("status") != "APPROVED" or not gate.get("rev"):
+        return False
+    pack = reads.read_json_file(folder / "s0-source" / str(gate["rev"]) / "source-pack.json")
+    return bool((pack or {}).get("photos"))
 
 
 def install_demo_routes(app, root, conf):
@@ -74,10 +90,12 @@ def install_demo_routes(app, root, conf):
         draft = reads.is_draft(intake, stages)
         readiness = scene.readiness(running=active.get("status") == "running", draft=draft)
         cfg = ctx.config.providers.get("demo_chat", demo.DEFAULT)
+        origin = read_origin(scene.folder)
         return dict(
             characterId=cid,
             name=scene.name,
-            origin=read_origin(scene.folder),
+            origin=origin,
+            canMakeVideo=can_make_video(scene.folder, origin),
             **readiness,
             promptRev=scene.prompt.name if scene.prompt else None,
             chapterRev=scene.chapter.name if scene.chapter else None,
