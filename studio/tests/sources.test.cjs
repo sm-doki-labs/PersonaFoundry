@@ -15,16 +15,18 @@ function fakeServer(opts) {
   const calls = [];
   const db = { draft: null, files: [], seq: 0, canFinalize: false, problems: ['원문 파일을 하나 이상 올려 주세요.'], fail: {}, speakers: [{ name: '손흥민', lines: 12 }, { name: '기자', lines: 4 }], suggest: {}, drafts: null };
   const json = (status, body) => ({ ok: status >= 200 && status < 300, status, headers: { get: () => 'application/json' }, json: async () => body });
-  // 약속 4: 비운 대상 화자는 원문에서 가장 많이 말한 화자로 채우고, 원문에 없는 이름이면 해요체 한 문장으로 알린다.
+  // 약속 4: 비운 대상 화자는 서버가 표시 이름과 맞춘 화자로 채우고, 원문에 없는 이름이면 해요체 한 문장으로 알린다.
+  // 맞는 화자가 없으면(suggest.subjectSpeaker null) 비워 두고 고르라고 알린다(QA v5 A-03).
   function check(f) {
     if (o.legacy) { f.status = 'ready'; f.problems = []; return; }
     const names = db.speakers.map((s) => s.name);
-    if (!f.subjectSpeaker) f.subjectSpeaker = names[0];
+    const sug = Object.assign({ subjectSpeaker: names[0], userSpeaker: names[1] || null }, db.suggest);
+    if (!f.subjectSpeaker) f.subjectSpeaker = sug.subjectSpeaker;
     f.detectedSpeakers = db.speakers;
-    f.suggested = Object.assign({ subjectSpeaker: names[0], userSpeaker: names[1] || null }, db.suggest);
+    f.suggested = sug;
     const ok = names.indexOf(f.subjectSpeaker) >= 0;
     f.status = ok ? 'ready' : 'problem';
-    f.problems = ok ? [] : ["원문에서 '" + f.subjectSpeaker + "'이라는 화자를 찾지 못했어요. 원문에 있는 이름: " + names.join(', ')];
+    f.problems = ok ? [] : !f.subjectSpeaker ? ['누가 이 사람인지 골라 주세요. 원문에 있는 이름: ' + names.join(', ')] : ["원문에서 '" + f.subjectSpeaker + "'이라는 화자를 찾지 못했어요. 원문에 있는 이름: " + names.join(', ')];
   }
   // 4차 약속 5: 사진은 fileType "photo"로 같은 줄에 선다. photoRule을 켜면 서버도 영상 등급이 있는데 사진이 없으면 시작을 막는다.
   const isPhoto = (name) => /\.(jpe?g|png|webp)$/i.test(name);
@@ -80,14 +82,14 @@ function fakeServer(opts) {
       if (f.fileType === 'photo' && Object.keys(body || {}).length) return json(422, { detail: '사진에는 화자 정보를 넣지 않아도 돼요.' });
       Object.assign(f, body, { sha256: 'h' + m[1] });
       if (f.fileType === 'photo') { f.status = 'ready'; f.problems = []; } else check(f);
-      db.canFinalize = true;
+      db.canFinalize = f.status === 'ready';
       db.problems = [];
       photoGate();
       return json(200, Object.assign({}, f));
     }
     if ((m = /^\/api\/sources\/cf-son\/files\/(f\d+)$/.exec(u.pathname))) {
       const f = db.files.find((x) => x.fileId === m[1]);
-      if (method === 'PATCH') { Object.assign(f, body); check(f); return json(200, Object.assign({}, f)); }
+      if (method === 'PATCH') { Object.assign(f, body); check(f); db.canFinalize = f.status === 'ready'; return json(200, Object.assign({}, f)); }
       if (method === 'DELETE') { db.files = db.files.filter((x) => x !== f); if (!db.files.length) { db.canFinalize = false; db.problems = ['원문 파일을 하나 이상 올려 주세요.']; } return { ok: true, status: 204, json: async () => null }; }
     }
     if (method === 'POST' && u.pathname === '/api/sources/cf-son/finalize') { db.finalized = true; return json(200, { jobId: 'job-1' }); }
@@ -151,7 +153,7 @@ test('local store: draft, then files → PUT with cookies to our server → comp
   server.calls.length = 0;
   intake.addFiles([file('KakaoTalk_son.txt', 3000)]);
   await settle();
-  assert.deepEqual(seq(server.calls).filter((s) => !s.includes('/api/characters/')), ['POST /api/sources/cf-son/files', 'PUT /api/sources/cf-son/files/f1/content', 'POST /api/sources/cf-son/files/f1/complete', 'GET /api/sources/cf-son']);
+  assert.deepEqual(seq(server.calls).filter((s) => !s.includes('/api/characters/')), ['POST /api/sources/cf-son/files', 'PUT /api/sources/cf-son/files/f1/content', 'POST /api/sources/cf-son/files/f1/complete', 'GET /api/sources/cf-son', 'PATCH /api/sources/cf-son/files/f1', 'GET /api/sources/cf-son']);
   assert.deepEqual(server.calls[0].body, { filename: 'KakaoTalk_son.txt', size: 3000, contentType: 'text/plain' });
   const put = server.calls[1];
   assert.equal(put.url, '/api/sources/cf-son/files/f1/content');
@@ -159,6 +161,7 @@ test('local store: draft, then files → PUT with cookies to our server → comp
   assert.deepEqual(put.headers, { 'Content-Type': 'application/octet-stream' });
   assert.deepEqual(server.calls[2].body, { textId: 'kakaotalk_son', kind: 'KAKAO_EXPORT', register: 'CASUAL', subjectSpeaker: null, userSpeaker: null, date: null, sourceUrl: null }, 'the subject speaker is left blank so the server picks it from the source');
   assert.equal(intake.state.draft.files[0].subjectSpeaker, '손흥민');
+  assert.equal(server.calls.find((c) => c.method === 'PATCH').body.userSpeaker, '기자', 'the partner the server found fills the empty partner field (A-23)');
   const items = intake.items();
   assert.equal(items.length, 1);
   assert.equal(items[0].status, '준비됐어요');
@@ -461,7 +464,7 @@ test('server guesses fill kind and register only when the file name gave no hint
   named.calls.length = 0;
   b.addFiles([file('interview_press.txt')]);
   await settle();
-  assert.ok(!named.calls.some((c) => c.method === 'PATCH'), 'a hint in the file name wins');
+  assert.ok(!named.calls.some((c) => c.method === 'PATCH' && c.body.kind !== 'INTERVIEW'), 'a hint in the file name wins');
   assert.equal(b.items()[0].meta.kind, 'INTERVIEW');
 });
 
@@ -726,3 +729,30 @@ test('video text names the tier for known states, stays empty without video, and
   cases.forEach((c) => assert.equal(Flow.videoText(c), S.videoText(c)));
 });
 
+test('when no speaker matches the display name, nobody is picked: the card lists names to choose and the start waits (A-03)', async () => {
+  const server = fakeServer();
+  server.db.speakers = [{ name: '엄마', lines: 4 }, { name: '나', lines: 4 }];
+  server.db.suggest = { subjectSpeaker: null, userSpeaker: '나', subjectChoices: ['엄마'] };
+  const intake = await ready(server);
+  server.calls.length = 0;
+  const [key] = intake.addFiles([file('kakao-mom.txt')]);
+  await settle();
+  const patch = server.calls.find((c) => c.method === 'PATCH');
+  assert.equal(patch.body.subjectSpeaker, null, 'no speaker is chosen by line count or as the exporter');
+  assert.equal(patch.body.userSpeaker, '나', 'the exporter is offered as the partner');
+  let item = intake.items()[0];
+  assert.equal(item.status, '확인이 필요해요');
+  assert.equal(item.speaker, '', 'no one-tap chip suggests a guess');
+  assert.deepEqual(item.choices, ['엄마']);
+  assert.match(item.problems[0], /누가 이 사람인지 골라 주세요/);
+  assert.equal(intake.startState().ready, false);
+  await intake.pickSpeaker(key, '엄마');
+  await settle();
+  item = intake.items()[0];
+  assert.equal(item.status, '준비됐어요');
+  assert.deepEqual(item.choices, []);
+  assert.equal(item.meta.subjectSpeaker, '엄마');
+  assert.equal(item.meta.userSpeaker, '나');
+  assert.equal(intake.startState().ready, true);
+  assert.equal(S.suggestedSpeaker({ detectedSpeakers: [{ name: '나', lines: 9 }], suggested: { subjectSpeaker: null } }), '', 'the busiest speaker is never a fallback');
+});

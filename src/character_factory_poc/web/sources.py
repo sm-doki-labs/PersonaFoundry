@@ -183,7 +183,9 @@ def record(spec: Upload) -> dict:
         sha256=None,
         status="pending",
         detectedSpeakers=[],
-        suggested=dict(subjectSpeaker=None, userSpeaker=None, kind=None, register=None),
+        suggested=dict(
+            subjectSpeaker=None, userSpeaker=None, subjectChoices=[], kind=None, register=None
+        ),
         problems=[],
         **dict.fromkeys(FIELDS),
     )
@@ -252,22 +254,45 @@ def auto_text_id(item, files):
     return result
 
 
+# 카톡을 내보낸 본인은 파일에 "나"로 적힌다. 대상 인물 후보에서는 맨 뒤로 미루고 권하지 않는다.
+# 1:1 카톡에서는 내보낸 본인이 대화 상대라 상대 화자로 먼저 권한다(QA v5 A-03·A-23).
+SELF_NAMES = {"나", "me"}
+
+
+def is_self(name):
+    return name.strip().lower() in SELF_NAMES
+
+
 def speaker_suggestions(messages, display):
+    """원문 화자 목록(본인은 뒤로), 표시 이름과 맞는 대상 화자, 고를 후보를 돌려준다.
+
+    표시 이름과 맞는 화자가 없으면 줄 수로 아무나 고르지 않고 대상 화자를 비워 둔다.
+    """
     counts = Counter(m.name for m in messages)
-    ranked = counts.most_common()
+    ranked = [name for name, _ in counts.most_common()]
+    ranked = [n for n in ranked if not is_self(n)] + [n for n in ranked if is_self(n)]
 
     def score(name):
+        if name == display:
+            return (1, 1, 1.0, counts[name])
+        if is_self(name):
+            return (0, 0, 0.0, 0)
         similarity = SequenceMatcher(None, display, name).ratio()
-        return (
-            name == display,
-            name in display or display in name,
-            similarity if similarity >= 0.5 else 0,
-            counts[name],
-        )
+        return (0, int(name in display or display in name), similarity, counts[name])
 
-    subject = max(counts, key=score, default=None)
-    user = next((name for name, _ in ranked if name != subject), None)
-    return [dict(name=name, lines=n) for name, n in ranked], subject, user
+    best = max(ranked, key=score, default=None)
+    matched = best is not None and (score(best)[1] or score(best)[2] >= 0.5)
+    choices = [n for n in ranked if not is_self(n)]
+    return [dict(name=n, lines=counts[n]) for n in ranked], best if matched else None, choices
+
+
+def user_suggestion(names, subject, kind):
+    others = [n for n in names if n != subject]
+    if kind == "KAKAO_EXPORT":
+        me = next((n for n in others if is_self(n)), None)
+        if me or not subject:
+            return me
+    return others[0] if subject and others else None
 
 
 def install_source_routes(app, conf, jobs):
@@ -462,27 +487,41 @@ def install_source_routes(app, conf, jobs):
             raise WebError(422, "원문 이름과 선택한 종류, 말한 자리를 확인해 주세요.") from None
         if spec.register is None:
             candidate["register"] = default_register(spec.kind)
-        detected, subject, user = [], None, None
+        detected, subject, user, choices = [], None, None, []
         if not problems:
             try:
                 messages = parse.source_messages(spec, raw, display)
-                detected, subject, user = speaker_suggestions(messages, display)
+                detected, subject, choices = speaker_suggestions(messages, display)
                 if not (spec.subjectSpeaker or "").strip():
                     spec.subjectSpeaker = candidate["subjectSpeaker"] = subject
                 names = [s["name"] for s in detected]
-                if not subject and spec.kind != "ARTICLE":
-                    problems.append("원문에 누가 말했는지 이름을 적어 주세요.")
+                chosen = spec.subjectSpeaker if spec.subjectSpeaker in names else subject
+                user = user_suggestion(names, chosen, spec.kind)
+                if not spec.subjectSpeaker and spec.kind != "ARTICLE":
+                    problems.append(
+                        f"원문에 ‘{display}’ 이름이 없어요. 누가 이 사람인지 골라 주세요. "
+                        f"원문에 있는 이름: {', '.join(names)}"
+                        if names
+                        else "원문에 누가 말했는지 이름을 적어 주세요."
+                    )
                 for name in (spec.subjectSpeaker, spec.userSpeaker):
                     if spec.kind != "ARTICLE" and name and name not in names:
                         problems.append(
                             f"‘{name}’ 대신 원문에 있는 이름({', '.join(names)})을 골라 주세요."
                         )
+                same = spec.subjectSpeaker and spec.subjectSpeaker == spec.userSpeaker
+                if spec.kind != "ARTICLE" and same:
+                    problems.append("대상 화자와 상대 화자를 다른 사람으로 골라 주세요.")
             except (ValueError, KeyError, TypeError):
                 problems.append("원문을 읽을 수 없어 날짜와 파일 종류, 화자 표기를 확인해 주세요.")
         candidate.update(
             detectedSpeakers=detected,
             suggested=dict(
-                subjectSpeaker=subject, userSpeaker=user, kind=kind, register=default_register(kind)
+                subjectSpeaker=subject,
+                userSpeaker=user,
+                subjectChoices=choices,
+                kind=kind,
+                register=default_register(kind),
             ),
             warnings=[
                 f"원문에 ‘{warning.split(': ', 1)[-1]}’ 안내가 있어요."

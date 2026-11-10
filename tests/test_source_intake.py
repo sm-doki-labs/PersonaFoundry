@@ -255,3 +255,54 @@ def test_pending_files_duplicate_ids_and_short_upload(tmp_path):
     assert not client.get(url).json()["canFinalize"]
     assert client.patch(second, json={"textId": "a2"}).is_success
     assert client.get(url).json()["canFinalize"]
+
+
+KAKAO = (
+    "--------------- 2026년 11월 1일 토요일 ---------------\n"
+    + "[나] [오전 9:12] 밥은?\n[엄마] [오전 9:13] 먹었지\n" * 3
+    + "[나] [오전 9:14] 응\n[나] [오전 9:15] 알겠어\n"
+).encode()
+
+
+def upload_as(client, display, data, filename="kakao-mom.txt"):
+    response = client.post(
+        "/api/sources/drafts",
+        json={"displayName": display, "subjectKind": "PRIVATE_PERSON", "autoReview": False},
+    )
+    url = "/api/sources/" + response.json()["characterId"]
+    record = client.post(
+        url + "/files", json={"filename": filename, "size": len(data), "contentType": "text/plain"}
+    ).json()
+    assert client.put(record["upload"]["url"], content=data).is_success
+    return url, url + "/files/" + record["fileId"]
+
+
+def test_kakao_never_picks_the_exporter_or_the_busiest_speaker(tmp_path):
+    """QA v5 A-03·A-23: 표시 이름과 맞는 화자가 없으면 고르게 하고, 카톡의 '나'는 상대로 권한다."""
+    client = TestClient(create_app(tmp_path))
+    url, target = upload_as(client, "손흥민", KAKAO)
+    item = client.post(target + "/complete", json={}).json()
+    assert item["subjectSpeaker"] is None and item["status"] == "problem"
+    assert "누가 이 사람인지 골라 주세요" in item["problems"][0] and "엄마" in item["problems"][0]
+    assert [s["name"] for s in item["detectedSpeakers"]] == ["엄마", "나"], "the exporter goes last"
+    assert item["suggested"]["subjectSpeaker"] is None
+    assert item["suggested"]["subjectChoices"] == ["엄마"], "'나' is never offered as the subject"
+    assert item["suggested"]["userSpeaker"] == "나"
+    assert not client.get(url).json()["canFinalize"]
+    same = client.patch(target, json={"subjectSpeaker": "엄마", "userSpeaker": "엄마"}).json()
+    assert same["status"] == "problem" and "다른 사람" in same["problems"][-1]
+    fixed = client.patch(target, json={"subjectSpeaker": "엄마", "userSpeaker": "나"}).json()
+    assert fixed["status"] == "ready" and client.get(url).json()["canFinalize"]
+
+    _, target = upload_as(client, "엄마", KAKAO)
+    item = client.post(target + "/complete", json={}).json()
+    assert item["status"] == "ready" and item["subjectSpeaker"] == "엄마"
+    assert item["suggested"]["userSpeaker"] == "나"
+
+    raw = "기자: 하나\n기자: 둘\n선수: 셋".encode()
+    _, target = upload_as(client, "손흥민", raw, "interview.txt")
+    item = client.post(target + "/complete", json={}).json()
+    assert item["subjectSpeaker"] is None and item["status"] == "problem", "no pick by line count"
+    assert item["suggested"]["subjectChoices"] == ["기자", "선수"]
+    picked = client.patch(target, json={"subjectSpeaker": "선수"}).json()
+    assert picked["status"] == "ready" and picked["suggested"]["userSpeaker"] == "기자"

@@ -169,10 +169,14 @@
   function speakersOf(rec) {
     return (Array.isArray(rec && rec.detectedSpeakers) ? rec.detectedSpeakers : []).map((s) => text(s && typeof s === 'object' ? s.name : s).trim()).filter(Boolean);
   }
-  // 원문에서 찾은 대상 화자 제안: 서버 제안 → 가장 많이 말한 화자.
+  // 원문에서 찾은 대상 화자 제안: 서버가 표시 이름과 맞춘 화자만 쓴다. 줄 수만으로 고르지 않는다(QA v5 A-03).
   function suggestedSpeaker(rec) {
-    const s = rec && rec.suggested && text(rec.suggested.subjectSpeaker).trim();
-    return s || speakersOf(rec)[0] || '';
+    return text(rec && rec.suggested && rec.suggested.subjectSpeaker).trim();
+  }
+  // 표시 이름과 맞는 화자가 없을 때 고를 후보. 서버가 카톡을 내보낸 본인('나')은 뺀다.
+  function speakerChoices(rec) {
+    const list = rec && rec.suggested && Array.isArray(rec.suggested.subjectChoices) ? rec.suggested.subjectChoices : [];
+    return list.map((s) => text(s).trim()).filter(Boolean);
   }
   // 조사 '으로/로': 받침이 있으면(ㄹ 받침 빼고) '으로'. 한글이 아니면 '(으)로'.
   function ro(word) {
@@ -725,6 +729,9 @@
         const old = rec && rec.suggested === undefined && rec.detectedSpeakers === undefined;
         next.subjectSpeaker = suggestedSpeaker(rec) || (old ? text(state.draft && state.draft.subject && state.draft.subject.displayName) : '');
       }
+      // 상대 화자도 서버가 찾은 값으로 채운다(QA v5 A-23). 대상 화자와 같은 이름은 넣지 않는다.
+      const partner = text(sug.userSpeaker).trim();
+      if (!entry.touched.userSpeaker && !next.userSpeaker.trim() && partner && partner !== next.subjectSpeaker.trim()) next.userSpeaker = partner;
       return next;
     }
 
@@ -790,6 +797,17 @@
         emit();
         return Promise.resolve();
       }
+      return queuePatch(rec.fileId, meta);
+    }
+    // 원문에서 찾은 이름 단추로 대상 화자를 정한다. 상대 화자가 비었거나 같은 이름이면 서버가 권한 상대로 바꾼다.
+    function pickSpeaker(key, name) {
+      const rec = files().find((f) => keyOf(f.fileId) === key);
+      const who = text(name).trim();
+      if (!rec || !who || state.finalized) return null;
+      const meta = Object.assign({}, metaOfRecord(rec), { subjectSpeaker: who });
+      const partner = text(rec.suggested && rec.suggested.userSpeaker).trim();
+      const others = speakersOf(rec).filter((n) => n !== who);
+      if (!text(meta.userSpeaker).trim() || text(meta.userSpeaker).trim() === who) meta.userSpeaker = partner && partner !== who ? partner : others.length === 1 ? others[0] : '';
       return queuePatch(rec.fileId, meta);
     }
 
@@ -931,16 +949,21 @@
         const problems = (f.problems || []).map(text);
         if (f.status === 'pending' && !problems.length) problems.push('이 파일은 끝까지 올라가지 않았어요. 지우고 다시 올려 주세요.');
         // 원문에서 찾은 화자가 지금 대상 화자와 다르면 한 번에 바꾸는 단추를 건넨다(약속 4 suggested·detectedSpeakers).
+        // 표시 이름과 맞는 화자를 찾지 못했으면 후보 이름을 단추로 늘어놓고 고르게 한다(QA v5 A-03).
         const meta = metaOfRecord(f);
         const found = suggestedSpeaker(f);
         const names = speakersOf(f);
-        const speaker = !state.finalized && f.status !== 'pending' && found && found !== text(meta.subjectSpeaker).trim() && (f.status === 'problem' || (names.length && names.indexOf(text(meta.subjectSpeaker).trim()) < 0)) ? found : '';
-        out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, speaker, meta, display: Object.assign(metaOfRecord(f), state.rawInput[key] || {}), editable: f.status !== 'pending' && !state.finalized, removable: !state.finalized && state.busy !== 'remove:' + key, retry: false, saving: state.saving[key] || '', saveError: state.saveError[key] || '', fieldErrors: state.fieldErrors[key] || {} });
+        const cur = text(meta.subjectSpeaker).trim();
+        const off = !cur || (names.length > 0 && names.indexOf(cur) < 0);
+        const look = !state.finalized && f.status !== 'pending' && (f.status === 'problem' || off);
+        const speaker = look && found && found !== cur ? found : '';
+        const choices = look && !speaker && off ? speakerChoices(f).filter((n) => n !== cur) : [];
+        out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, speaker, choices, meta, display: Object.assign(metaOfRecord(f), state.rawInput[key] || {}), editable: f.status !== 'pending' && !state.finalized, removable: !state.finalized && state.busy !== 'remove:' + key, retry: false, saving: state.saving[key] || '', saveError: state.saveError[key] || '', fieldErrors: state.fieldErrors[key] || {} });
       });
       state.uploads.filter((u) => u.fileType !== 'photo').forEach((u) => {
         const map = { queued: ['muted', '기다리는 중'], starting: ['run', '준비하는 중'], sending: ['run', '올리는 중 ' + Math.round(u.progress * 100) + '%'], checking: ['run', '확인하는 중'], failed: ['fail', '올리지 못했어요'], rejected: ['fail', '받을 수 없는 파일'] };
         const st = map[u.phase] || ['muted', ''];
-        out.push({ key: u.key, source: 'upload', fileId: u.fileId, filename: u.filename, size: u.size, tone: st[0], status: st[1], phase: u.phase, progress: u.phase === 'sending' ? u.progress : null, problems: u.error ? [u.error] : [], speaker: '', meta: u.meta, display: Object.assign({}, u.meta, state.rawInput[u.key] || {}), editable: u.phase !== 'rejected' && !state.finalized, removable: !u.cancelled, retry: u.phase === 'failed', saving: '', saveError: '', fieldErrors: state.fieldErrors[u.key] || {} });
+        out.push({ key: u.key, source: 'upload', fileId: u.fileId, filename: u.filename, size: u.size, tone: st[0], status: st[1], phase: u.phase, progress: u.phase === 'sending' ? u.progress : null, problems: u.error ? [u.error] : [], speaker: '', choices: [], meta: u.meta, display: Object.assign({}, u.meta, state.rawInput[u.key] || {}), editable: u.phase !== 'rejected' && !state.finalized, removable: !u.cancelled, retry: u.phase === 'failed', saving: '', saveError: '', fieldErrors: state.fieldErrors[u.key] || {} });
       });
       return out;
     }
@@ -967,7 +990,7 @@
     function uploading() { return state.uploads.some((u) => ACTIVE.indexOf(u.phase) >= 0); }
 
     return {
-      state, load, refresh, progress, projects, drafts, settings, setTier, setSignature, createDraft, validateDraft, addFiles, retry, dismiss, editFile, removeFile, importPath, finalize, deleteDraft, reset, startState, items, photoItems, uploading,
+      state, load, refresh, progress, projects, drafts, settings, setTier, setSignature, createDraft, validateDraft, addFiles, retry, dismiss, editFile, pickSpeaker, removeFile, importPath, finalize, deleteDraft, reset, startState, items, photoItems, uploading,
       subscribe(fn) { listeners.push(fn); return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); }; }
     };
   }
@@ -1055,7 +1078,7 @@
       '</div>' +
       '<div class="src-bar" data-bar role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden><span></span></div>' +
       '<ul class="src-problems" data-problems hidden></ul>' +
-      '<div class="src-file-acts" data-speaker-row hidden><button type="button" class="btn src-chip" data-act="use-speaker"></button></div>' +
+      '<div class="src-file-acts" data-speaker-row hidden></div>' +
       '<div class="src-file-acts" data-retry-row hidden><button type="button" class="btn" data-act="retry">' + icon('retry') + '다시 올리기</button></div>' +
       '<div class="src-fields" id="' + id('body') + '" data-body>' +
         fld('kind', '종류', '<select id="' + id('kind') + '" data-field="kind" aria-describedby="' + id('kind') + '-h">' + options(KINDS, item.meta.kind) + '</select>', '') +
@@ -1251,14 +1274,14 @@
       if (probs.dataset.html !== ph) { probs.innerHTML = ph; probs.dataset.html = ph; }
       probs.hidden = !item.problems.length;
       probs.classList.toggle('bad', item.tone === 'fail');
+      // 서버가 이름을 맞춘 화자가 있으면 그 한 사람, 없으면 고를 후보 이름마다 단추를 둔다.
       const sp = q('[data-speaker-row]');
-      sp.hidden = !item.speaker;
-      if (item.speaker) {
-        const chip = sp.firstChild;
-        chip.dataset.name = item.speaker;
-        chip.textContent = "원문에서 찾은 '" + item.speaker + "'" + ro(item.speaker);
-        chip.setAttribute('aria-label', '대상 화자를 원문에서 찾은 ' + item.speaker + ro(item.speaker) + ' 바꾸기: ' + item.filename);
-      }
+      const chips = item.speaker
+        ? [[item.speaker, "원문에서 찾은 '" + item.speaker + "'" + ro(item.speaker), '대상 화자를 원문에서 찾은 ' + item.speaker + ro(item.speaker) + ' 바꾸기: ' + item.filename]]
+        : (item.choices || []).map((n) => [n, n, '대상 화자를 ' + n + ro(n) + ' 정하기: ' + item.filename]);
+      const sh = chips.map((c) => '<button type="button" class="btn src-chip" data-act="use-speaker" data-name="' + E(c[0]) + '" aria-label="' + E(c[2]) + '">' + E(c[1]) + '</button>').join('');
+      if (sp.dataset.html !== sh) { sp.innerHTML = sh; sp.dataset.html = sh; }
+      sp.hidden = !sh;
       q('[data-retry-row]').hidden = !item.retry;
       const x = q('[data-act="remove"]');
       x.disabled = !item.removable;
@@ -1554,7 +1577,7 @@
         setTimeout(() => { const t = next && next.querySelector('[data-act="remove"]'); if (t && doc.contains(t)) t.focus(); else { const p = photo ? r.photos.querySelector('[data-act="pick-photo"]') : r.drop && r.drop.querySelector('[data-act="pick"]'); if (p) p.focus(); } }, 0);
       }
       else if (act === 'retry' && key) intake.retry(key);
-      else if (act === 'use-speaker' && key) intake.editFile(key, 'subjectSpeaker', el.dataset.name);
+      else if (act === 'use-speaker' && key) intake.pickSpeaker(key, el.dataset.name);
       else if (act === 'start') intake.finalize().then((done) => { if (done) intake.projects(); if (done && r.done) { const h = r.done.querySelector('h3'); if (h) h.focus(); } });
       else if (act === 'ask-delete') { confirmDelete = true; render(); const no = r.delRow.querySelector('[data-act="cancel-delete"]'); if (no) no.focus(); }
       else if (act === 'cancel-delete') { confirmDelete = false; render(); const ask = r.delRow.querySelector('[data-act="ask-delete"]'); if (ask) ask.focus(); }
@@ -1659,7 +1682,7 @@
     };
   }
 
-  const api = { sigOf, MAX_BYTES, EXTENSIONS, PHOTO_EXTENSIONS, PHOTO_MAX_BYTES, VIDEO_TIERS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, ro, shortDate, suggestTextId, checkFile, isPhotoName, isPhotoRecord, tierOf, tierName, tierCardsHTML, videoText, doneView, wantsPoll, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
+  const api = { sigOf, MAX_BYTES, EXTENSIONS, PHOTO_EXTENSIONS, PHOTO_MAX_BYTES, VIDEO_TIERS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, speakerChoices, ro, shortDate, suggestTextId, checkFile, isPhotoName, isPhotoRecord, tierOf, tierName, tierCardsHTML, videoText, doneView, wantsPoll, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global) global.SourceIntake = api;
 })(typeof window !== 'undefined' ? window : null);
