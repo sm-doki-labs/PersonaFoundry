@@ -11,13 +11,13 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
-from pydantic import Field, ValidationError
+from pydantic import Field, StringConstraints, ValidationError
 
 from character_factory_poc.common.config import load_config
 from character_factory_poc.common.source_store import (
@@ -74,9 +74,10 @@ class KnownFacts(Strict):
 class SignaturePose(Strict):
     """유저가 정하는 시그니처 포즈(D-0165). 모든 영상 등급에 한 편씩 들어간다."""
 
-    title: str = Field(min_length=1, max_length=30)
-    motion: str = Field(min_length=1, max_length=400)
-    useWhen: str = Field(default="", max_length=200)
+    # 앞뒤 공백을 뗀 뒤 길이를 본다(공백만 적은 이름·동작은 받지 않는다).
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)]
+    motion: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=400)]
+    useWhen: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] = ""
 
 
 class Settings(Strict):
@@ -120,6 +121,15 @@ class IntakeRoute(APIRoute):
             except SourcePathError:
                 raise WebError(403, "이 위치의 파일은 열 수 없어요.") from None
             except RequestValidationError:
+                path = request.url.path
+                if path.endswith(("/settings", "/videos")):
+                    raise WebError(
+                        422,
+                        "입력한 내용을 확인해 주세요. 시그니처 이름은 30자, 동작은 400자, "
+                        "나오는 때는 200자까지 적을 수 있어요.",
+                    ) from None
+                if path.endswith("/drafts"):
+                    raise WebError(422, "입력한 내용을 확인해 주세요.") from None
                 raise WebError(422, "입력한 내용과 파일 크기를 확인해 주세요.") from None
 
         return checked

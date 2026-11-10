@@ -93,7 +93,7 @@ class Scene:
 
     def _scene(self):
         if not self.chapter:
-            raise NotReady("팬 통화 장면이 아직 없어요.")
+            raise NotReady("첫 통화 장면이 아직 없어요.")
         try:
             ch = next(
                 c
@@ -131,9 +131,30 @@ class Scene:
                 missing.append(key)
                 reasons.append(str(exc))
         page = "sources" if draft else "factory"
+        from character_factory_poc.pipeline.origin import SOURCE, read_origin
+
+        if missing and read_origin(self.folder) != SOURCE:
+            # 오리지널에는 첫 통화 장면(S8c) 단계가 없다(QA v5 C-05).
+            # 막다른 안내 대신 쓸 수 없다고 말한다.
+            reasons = [
+                "지어낸 캐릭터는 아직 대화해 보기를 쓸 수 없어요. "
+                "실존 인물로 만든 캐릭터에서 써 보세요."
+            ]
+            return dict(ready=False, missing=missing, reason=reasons[0], nextHref=None)
         if missing:
+            waiting = [
+                g
+                for g, v in (load_json(self.folder / "state.json", {}) or {})
+                .get("gates", {})
+                .items()
+                if isinstance(v, dict) and v.get("status") == "AWAITING_HUMAN"
+            ]
             reasons.append(
-                "원문 화면에서 만들기를 시작해 주세요." if draft else "진행 화면에서 확인해 주세요."
+                "원문 화면에서 만들기를 시작해 주세요."
+                if draft
+                else "진행 화면에서 기다리는 확인을 마치면 이어서 만들어요."
+                if waiting
+                else "진행 화면에서 확인해 주세요."
             )
         return dict(
             ready=not missing,

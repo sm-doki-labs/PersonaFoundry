@@ -579,6 +579,8 @@ class JobManager:
 
                 char_dir = reads.character_dir(self.root, job.character_id)
                 marker = {"tier": read_video_tier(char_dir), "status": job.status}
+                if job.error:
+                    marker["error"] = job.error
                 atomic_write(inside(char_dir, "video-job.json"), json.dumps(marker).encode())
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / f"{job.job_id}.json"

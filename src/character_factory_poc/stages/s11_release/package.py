@@ -524,7 +524,8 @@ def _consistency(
         problems.append("동작 영상의 외모 revision이 다르다")
     if actions.frameRev != frames.frameRev:
         problems.append("동작 영상의 프레임 revision이 다르다")
-    for chapter_id in CHAPTERS:
+    # 모티브는 한 장면(ch1)만 만든다(D-0164). 승인 프레임에 있는 장면만 본다.
+    for chapter_id in scene_ids(frames):
         frame = next(f for f in frames.frames if f.chapterId == chapter_id)
         if not (frames_dir / frame.path).is_file():
             problems.append(f"{chapter_id}: 승인 프레임 파일이 없다")
@@ -557,6 +558,12 @@ def _facts(chapter) -> dict:
     for key in ("plate", "qa"):
         payload.pop(key, None)
     return payload
+
+
+def scene_ids(frames) -> tuple[str, ...]:
+    """승인 프레임이 있는 장면만, ch1→ch3 순서로. 오리지널은 세 장면, 모티브는 ch1 하나다."""
+    have = {f.chapterId for f in frames.frames}
+    return tuple(ch for ch in CHAPTERS if ch in have)
 
 
 def build_package(ctx: Context, cid: str) -> Path:
@@ -641,7 +648,7 @@ def build_package(ctx: Context, cid: str) -> Path:
     by_frame = {frame.chapterId: frame for frame in frames.frames}
     arc = {chapter.chapterId: chapter for chapter in plan.chapterArc}
     chapters: list[Chapter] = []
-    for chapter_no, chapter_id in enumerate(CHAPTERS, start=1):
+    for chapter_no, chapter_id in enumerate(scene_ids(frames), start=1):
         scene_chapter, frame = by_scene[chapter_id], by_frame[chapter_id]
         plate = scene_chapter.plate
         sources.append(
@@ -768,7 +775,7 @@ def build_package(ctx: Context, cid: str) -> Path:
         )
 
         chapter_start = load_latest_chapter_start(char_dir)
-        for chapter_id in CHAPTERS:
+        for chapter_id in scene_ids(frames):
             facts = _facts(by_scene[chapter_id])
             if chapter_start:
                 # D-0089: 공장이 만든 챕터 시작 설정을 사실 파일에 함께 담아 내보내기가 쓰게 한다.

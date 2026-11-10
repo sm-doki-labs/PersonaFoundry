@@ -730,7 +730,8 @@
         '<button type="button" class="fd-head-theme" data-act="theme" data-theme="' + next[0] + '" aria-label="화면 테마: 지금 ' + cur[2] + '. 누르면 ' + next[2] + '" title="화면 테마: ' + cur[2] + '">' + icon(cur[1]) + '</button>';
     }
 
-    // 통화 머리: 캐릭터 이름, 모티브 안내, 지금 상태, 새 대화·고칠 점 적기, 접힌 '설정 보기'(모델·온도·판).
+    // 통화 머리: 캐릭터 이름, 모티브 안내, 지금 상태, 새 대화, 접힌 '설정 보기'(모델·온도·판).
+    // '고칠 점 적기'는 대화 가능한 캐릭터에 적을 곳이 없어 뺐다(QA v5 D-03).
     // 캐릭터를 고르지 않았거나 없는 캐릭터면 머리를 숨기고 상태 카드만 보인다.
     function renderCall() {
       if (!R.call) return;
@@ -762,7 +763,7 @@
         (isMotif(m.origin) ? '<p class="ch-note">' + E(MOTIF_NOTE) + '</p>' : '') +
         (noVideo ? '<p class="ch-vnote">영상이 아직 없어요 · <a href="' + E(factoryHref(chat.characterId)) + '">영상 만들기</a></p>' : '') +
         (info.length ? '<details class="ch-set" data-open-key="set"' + (ui.open.has('set') ? ' open' : '') + '><summary data-key="sum:set">설정 보기</summary><p class="ch-info" aria-label="대화 설정">' + info.join('<span class="dot" aria-hidden="true">·</span>') + '</p></details>' : '') + '</div>' +
-        (ready ? '<div class="ch-acts"><a class="btn" href="' + E(factoryHref(chat.characterId)) + '" title="진행 화면에서 프롬프트에 고칠 점을 적어요">고칠 점 적기</a><button type="button" class="btn" data-act="reset" data-key="reset"' + (hasTalk ? '' : ' disabled') + '>' + icon('refresh') + '새 대화</button></div>' : '');
+        (ready ? '<div class="ch-acts"><button type="button" class="btn" data-act="reset" data-key="reset"' + (hasTalk ? '' : ' disabled') + '>' + icon('refresh') + '새 대화</button></div>' : '');
     }
 
     function playbarHTML(s) {

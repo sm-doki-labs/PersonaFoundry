@@ -133,3 +133,17 @@ def test_export_reports_short_stages_without_blocking(tmp_path):
     warnings = clip_count_warnings(read_json(out / "doki-app/api-svc/seed.json"))
     assert len(warnings) == 3 and set(warnings) <= set(result.unmapped)
     assert ctx.state(cid).stage("sx").status == "APPROVED"
+
+
+def test_original_without_tier_shows_no_video_chip(flow):  # noqa: F811
+    """QA v5 E7: 등급 없이(l2) 만든 오리지널 영상에 "영상 있음 · 영상 없이"를 띄우지 않는다."""
+    from character_factory_poc.web import reads
+
+    ctx, cid, _ = flow
+    run_s6(ctx, cid)
+    approve_gate(ctx, cid, "G5b", {"decision": "APPROVE"})
+    folder = ctx.character_dir(cid)
+    state, _ = reads.read_state(folder)
+    fields = reads.video_fields(folder, state)
+    assert fields["videoTier"] == "none" and fields["videoStatus"] == "none"
+    assert fields["videoError"] == ""

@@ -35,7 +35,7 @@
   // S8c(챕터 시작 설정)는 사람 검토 없이 도는 단계다. 화면 이름은 시작 장면을 따른다(계획 2차 약속 2).
   function s8cName(origin, template) {
     if (template) return template === 'FAN_CALL' ? '팬 통화 장면' : '통화 장면';
-    return origin === 'SOURCE' ? '팬 통화 장면' : '통화 장면';
+    return origin === 'SOURCE' ? '첫 통화 장면' : '통화 장면';
   }
   // 대화할 수 있는지(3차 약속 3). 서버가 대화 화면과 같은 함수로 계산한 chatReady를 그대로 따른다.
   // 서버가 아직 싣지 않으면 대화 화면의 준비 조건(프롬프트 S8과 첫 장면 S8c가 모두 있음)을 단계 기록으로 본다.
@@ -84,11 +84,18 @@
     if (st === 'none' || !text(x.videoLabel).trim()) return tier === 'none' ? '' : '영상 기다리는 중 · ' + tierName(tier);
     return text(x.videoLabel).trim();
   }
+  // 작업 오류를 사람 말로: 앞의 예외 이름을 떼고, 이름뿐인 오류는 그렇다고 적는다.
+  function plainError(raw) {
+    const s = text(raw).replace(/^[A-Za-z_]*(Error|Exception|Iteration): ?/, '').trim();
+    // 'StopIteration'처럼 예외 이름만 있으면 사람에게 뜻이 없다.
+    return (!s || /^[A-Za-z_]+$/.test(s) ? '알 수 없는 오류가 났어요.' : s).slice(0, 200);
+  }
   function videoTone(c) { return { making: 'run', ready: 'ok', failed: 'fail' }[text(c && c.videoStatus)] || ''; }
   // 영상 만들기를 건넬 캐릭터: 대화 가능하고, 영상이 아직 없거나 실패했고, 도는 작업이 없을 때. 영상 상태를 주지 않는 서버면 건네지 않는다.
   function canMakeVideo(detail) {
     const d = detail || {};
-    return isChatReady(d) && !d.job && (d.videoStatus === 'none' || d.videoStatus === 'failed');
+    // 영상이 있어도 등급·시그니처를 바꿀 수 있다. 같은 몸짓은 옮겨 오고 새 영상만 만든다(D-0166).
+    return isChatReady(d) && !d.job && ['none', 'failed', 'ready'].includes(d.videoStatus);
   }
   // 원문 초안(GET /api/sources/{id})에서 준비된 사진 수. 사진 기록은 fileType "photo"(없는 서버면 확장자)로 알아본다.
   function readyPhotos(draft) {
@@ -579,6 +586,17 @@
         actions: [{ act: 'confirm', stage: held.stage, label: '비용 확인', disabled: busy, why: busy ? '지금 작업이 끝나면 확인할 수 있어요.' : '' }]
       });
     });
+    // 마지막 작업이 단계 밖에서 실패하면 노드는 그대로라 이유가 안 보인다(QA v5 C-01·F05). 이유를 한 줄로 알린다.
+    const failedJob = (detail && detail.lastJob) || {};
+    if (!busy && failedJob.status === 'failed' && failedJob.error && !graph.stages.some((def) => (views[def.id] || {}).kind === 'fail')) {
+      items.push({
+        kind: 'fail', order: 0,
+        title: '마지막 작업이 멈췄어요',
+        body: plainError(failedJob.error) + ' 원인을 고친 뒤 이어서 실행해 주세요.',
+        blocked: 0,
+        actions: [{ act: 'resume', label: '이어서 실행' }]
+      });
+    }
     // 앞 단계가 모두 끝났는데 도는 작업이 없으면 공정이 조용히 멈춘다. 이어서 실행할 수 있다고 알린다.
     if (!busy && opts.goal) {
       const preds = predecessors(graph);
@@ -831,7 +849,8 @@
           .then(() => state.graphAsk.delete(key));
       });
     }
-    async function loadProjects() { state.projects = await request('GET', '/api/projects'); }
+    // 보관한 캐릭터도 받아 와야 보관함 수와 보관 풀기가 보인다(QA v5 D-02). 목록에서는 archived로 거른다.
+    async function loadProjects() { state.projects = await request('GET', '/api/projects?includeArchived=true'); }
     async function loadDetail() {
       if (!state.characterId) { state.detail = null; return; }
       const id = state.characterId;
@@ -1317,8 +1336,9 @@
         // 영상(약속 5): 만드는 중이면 그렇다고 적고, 영상이 없거나 실패했으면 보조 버튼으로 영상 만들기를 건넨다.
         if (d.videoStatus === 'making') t2 += ' 영상은 만드는 중이에요. 다 되면 대화할 때 영상이 나와요.';
         else if (d.videoStatus === 'ready') t2 = st === 'chat_ready' ? '영상까지 다 만들었어요. 대화해 보기에서 영상과 함께 대화해요.' : t2;
+        else if (d.videoStatus === 'failed') t2 += ' 영상은 만들지 못했어요' + (d.videoError ? ': ' + plainError(d.videoError) : '.');
         const vOpen = Boolean(state.video && state.video.open);
-        const vBtn = canMakeVideo(d) ? '<button type="button" class="btn" data-act="video-open" aria-expanded="' + vOpen + '">' + icon('video') + (d.videoStatus === 'failed' ? '영상 다시 만들기' : '영상 만들기') + '</button>' : '';
+        const vBtn = canMakeVideo(d) ? '<button type="button" class="btn" data-act="video-open" aria-expanded="' + vOpen + '">' + icon('video') + (d.videoStatus === 'failed' ? '영상 다시 만들기' : d.videoStatus === 'ready' ? '영상 바꾸기' : '영상 만들기') + '</button>' : '';
         html += '<div class="fl-item ok"><span class="mk"></span><div class="tx"><div class="t1">' + E(t1) + '</div><div class="t2">' + E(t2) + '</div></div><div class="acts"><a class="btn pri" href="' + E(chat) + '">' + icon('chat') + (d.videoStatus === 'ready' ? '영상과 함께 대화해 보기' : '대화해 보기') + '</a>' + vBtn + '</div>' +
           (vBtn && vOpen ? videoHTML(d) : '') +
           (st === 'chat_ready' && !tasks.length && !d.job && !vOpen ? moreBuildHTML() : '') + '</div>';
@@ -1363,7 +1383,7 @@
         '<label for="fl-sig-motion">어떤 동작인가요</label><textarea id="fl-sig-motion" data-sig="motion" rows="2" maxlength="400" placeholder="예: 두 손으로 카메라 모양을 만들어 눈앞에 대고 찰칵 누르는 시늉을 해요."' + (busy ? ' disabled' : '') + '>' + E(sig.motion || '') + '</textarea>' +
         '<label for="fl-sig-when">언제 나오면 좋을까요 <span class="opt">선택</span></label><input id="fl-sig-when" data-sig="useWhen" maxlength="200" autocomplete="off" placeholder="예: 골이나 축하 얘기를 할 때" value="' + E(sig.useWhen || '') + '"' + (busy ? ' disabled' : '') + '></div>';
       return '<div class="fl-vid" role="group" aria-label="영상 만들기"><div class="vt-grid" role="radiogroup" aria-label="영상 등급">' + tierCardsHTML('videoTierPick', v.tier, { paidOnly: true, disabled: busy }) + '</div>' + sigHTML +
-        '<p>영상 단계는 비용이 들어요. 시작하면 배경 하나·같은 옷으로 고른 등급의 몸짓 영상을 만들고, 다 되면 대화할 때 영상이 나와요.</p>' +
+        '<p>영상 단계는 비용이 들어요. 시작하면 배경 하나·같은 옷으로 고른 등급의 몸짓 영상을 만들고, 다 되면 대화할 때 영상이 나와요.' + (d.videoStatus === 'ready' ? ' 이미 만든 몸짓은 그대로 두고 새로 생기거나 바뀐 영상만 만들어요.' : '') + ' 후보는 첫 번째로 자동으로 골라요.</p>' +
         (v.error ? '<p class="err" role="alert">' + E(v.error) + '</p>' : '') +
         '<div class="acts"><button type="button" class="btn" data-act="video-go"' + (busy ? ' disabled' : '') + '>' + (v.busy ? '시작하는 중…' : E(tierName(v.tier)) + ' 영상 만들기 시작') + '</button>' + (v.noPhoto ? photoLink : '') + '<button type="button" class="btn ghost" data-act="video-cancel">취소</button></div></div>';
     }
@@ -2508,7 +2528,7 @@
     };
   }
 
-  const pure = { since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, s8cName, chatHref, isChatReady, statusOf, STATUS_LABEL, goalStages, goalOf, goalView, nameLabels, labelOf, autoSlug, splitAttempts, MODE_LABEL, MARK, VIDEO_TIERS, tierOf, tierName, tierCardsHTML, videoText, videoTone, canMakeVideo, readyPhotos, mount };
+  const pure = { plainError, since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, s8cName, chatHref, isChatReady, statusOf, STATUS_LABEL, goalStages, goalOf, goalView, nameLabels, labelOf, autoSlug, splitAttempts, MODE_LABEL, MARK, VIDEO_TIERS, tierOf, tierName, tierCardsHTML, videoText, videoTone, canMakeVideo, readyPhotos, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = pure;
   if (global) global.FactoryFlow = pure;
 })(typeof window !== 'undefined' ? window : null);

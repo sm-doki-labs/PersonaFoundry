@@ -290,19 +290,16 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
             raise FactoryError("모티브 캐릭터는 --ranking을 받지 않는다(얼굴은 받은 사진에서 온다)")
         for sid in ("s1", "s2", "s3"):
             runners.pop(sid, None)
-        from character_factory_poc.pipeline.origin import read_video_tier
         from character_factory_poc.stages.s0_source.run import run_s0
         from character_factory_poc.stages.s2_hero.twin import run_s2_twin
         from character_factory_poc.stages.s3_plan.twin import run_s3_twin
         from character_factory_poc.stages.s6_actions.catalog import (
-            ALL_CHAPTERS,
             MOTIF_VIDEO_TIERS,
         )
         from character_factory_poc.stages.s8_prompts.chapter_start import run_s8c
 
-        # D-0163: 모티브는 등급과 상관없이 배경 하나·장면 이미지 하나만 만든다.
-        tier = MOTIF_VIDEO_TIERS.get(read_video_tier(ctx.character_dir(cid)))
-        chapters = tier.chapters if tier else ALL_CHAPTERS
+        # D-0164: 모티브는 등급과 상관없이(영상 없음·예전 설정 포함) 배경 하나·장면 이미지 하나다.
+        chapters = MOTIF_VIDEO_TIERS["light"].chapters
         runners.update(
             {
                 "s8c": lambda: run_s8c(ctx, cid),
@@ -453,13 +450,32 @@ def _step(
     gate_ok = stage.gate is None or state.gate(stage.gate).status == "APPROVED"
     ran = False
     reusable = st.status in {"APPROVED", "SKIPPED"} or (st.status == "AWAITING_HUMAN" and gate_ok)
+    stale = (
+        opt.video_only
+        and st.status == "AWAITING_HUMAN"
+        and stage.gate
+        and not _matches_video_scope(ctx, cid, sid, st.currentRev)
+    )
+    if stale:
+        # D-0166: 다른 등급으로 만들다 기다리던 후보는 정리하고 이 등급으로 다시 만든다.
+        # 같은 첫 화면·같은 지시의 영상은 다시 만들 때 옮겨 온다(_carry).
+        approve_gate(
+            ctx,
+            cid,
+            stage.gate,
+            {
+                "decision": "APPROVE",
+                "reviewer": "자동 진행",
+                "reasons": "영상 등급을 바꿔 기다리던 후보를 정리했어요.",
+            },
+        )
+        log.add(f"{stage.gate}: 등급이 달라 기다리던 후보를 정리")
+        state = ctx.state(cid)
+        st = state.stage(sid)
+        reusable = True
     if reusable and (not opt.video_only or _matches_video_scope(ctx, cid, sid, st.currentRev)):
         log.add(f"{sid}: 이미 {st.status}({st.currentRev}) — 건너뜀")
     elif st.status == "AWAITING_HUMAN" and stage.gate:
-        if opt.video_only and not _matches_video_scope(ctx, cid, sid, st.currentRev):
-            raise NeedsInputError(
-                "다른 등급으로 만들던 장면이 있어요. 먼저 기다리는 검토를 마쳐 주세요."
-            )
         log.add(f"{sid}: {stage.gate} 대기 중({st.currentRev})")
     else:
         try:

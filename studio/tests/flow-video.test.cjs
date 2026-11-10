@@ -24,11 +24,15 @@ test('header and list show one plain line from the tier and status; nothing for 
   assert.ok(css.includes('.fd-vid{'));
 });
 
-test('영상 만들기 is offered only on chat-ready characters without video (or after a failed try) and nothing running', () => {
+test('영상 만들기 is offered on chat-ready characters with no running job, and a finished video can be changed (D-0166)', () => {
   assert.equal(Flow.canMakeVideo(chatReady({ videoTier: 'none', videoStatus: 'none' })), true);
   assert.equal(Flow.canMakeVideo(chatReady({ videoTier: 'light', videoStatus: 'failed' })), true);
   assert.equal(Flow.canMakeVideo(chatReady({ videoTier: 'light', videoStatus: 'making' })), false);
-  assert.equal(Flow.canMakeVideo(chatReady({ videoTier: 'light', videoStatus: 'ready' })), false);
+  assert.equal(Flow.canMakeVideo(chatReady({ videoTier: 'light', videoStatus: 'ready' })), true, 'the tier or signature can be changed later');
+  assert.ok(src.includes("d.videoStatus === 'ready' ? '영상 바꾸기'"), 'a finished video offers 영상 바꾸기');
+  assert.ok(src.includes('이미 만든 몸짓은 그대로 두고'), 'the chooser says only new or changed clips are made');
+  assert.equal(Flow.plainError('StopIteration'), '알 수 없는 오류가 났어요.');
+  assert.equal(Flow.plainError('NeedsInputError: 사진이 필요해요.'), '사진이 필요해요.');
   assert.equal(Flow.canMakeVideo(chatReady({ videoStatus: 'none', job: { id: 'j' } })), false, 'not while a job runs');
   assert.equal(Flow.canMakeVideo(chatReady({ chatReady: false, videoStatus: 'none' })), false);
   assert.equal(Flow.canMakeVideo(chatReady({})), false, 'a server without video fields is not offered the action');

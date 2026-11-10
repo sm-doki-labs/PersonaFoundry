@@ -140,7 +140,7 @@ test('chat link opens only when the character can chat: the server chatReady win
 });
 
 test('the S8c step is named after the opening scene, and mode names match the upload page', () => {
-  assert.equal(Flow.s8cName('SOURCE', ''), '팬 통화 장면');
+  assert.equal(Flow.s8cName('SOURCE', ''), '첫 통화 장면', 'without a template the name fits family calls too (QA v5 F20)');
   assert.equal(Flow.s8cName('SOURCE', 'FAN_CALL'), '팬 통화 장면');
   assert.equal(Flow.s8cName('SOURCE', 'FAMILY_CALL'), '통화 장면');
   assert.equal(Flow.s8cName('CREATED', ''), '통화 장면');

@@ -96,13 +96,15 @@
     const vReady = on && vs === 'ready';
     const vFailed = on && vs === 'failed';
     // 영상 상태를 주는 서버면 다 되거나 실패할 때까지 '만드는 중'으로 본다. 그 필드가 없는 서버면 기다리는 중으로만 적는다.
-    const making = on && typeof vs === 'string' && !vReady && !vFailed;
+    // 사람 확인 모드는 영상을 자동으로 시작하지 않는다(QA v5 E6). 실제 작업이 돌 때만 '만드는 중'이다.
+    const making = on && typeof vs === 'string' && !vReady && !vFailed && (vs === 'making' || auto);
     if (on && st === 'chat_ready') {
       if (vReady) body = '영상까지 다 만들었어요. 대화해 보기에서 영상과 함께 대화해요.';
       else if (vFailed) body = '대화는 지금 해 볼 수 있어요. 영상은 만들지 못했어요. 진행 화면에서 까닭을 봐 주세요.';
+      else if (!making) body = '대화는 지금 해 볼 수 있어요. 영상은 진행 화면에서 영상 만들기를 눌러 시작해요.';
       else body = '대화는 지금 해 볼 수 있어요. 영상은 이어서 만들고 있어요. 다 되면 대화할 때 영상이 나와요.';
     } else if (on && st === 'running' && body) body += ' 영상은 대화가 된 뒤에 이어서 만들어요.';
-    const vText = making ? '영상 만드는 중 · ' + tierName(tier) : videoText({ videoTier: tier, videoStatus: vs, videoLabel: c.videoLabel });
+    const vText = making ? '영상 만드는 중 · ' + tierName(tier) : (!auto && vs === 'none') ? '영상은 진행 화면에서 시작해요 · ' + tierName(tier) : videoText({ videoTier: tier, videoStatus: vs, videoLabel: c.videoLabel });
     return {
       ready, status: st, title, body,
       tone: { chat_ready: 'ok', failed: 'fail', needs_review: 'wait', stopped: 'wait' }[st] || 'run',
@@ -119,7 +121,9 @@
     const ready = !!(S.chat && S.chat.ready) || c.chatReady === true;
     if (!ready) return true;
     const tier = tierOf(c.videoTier || (S.settings && S.settings.videoTier));
-    return typeof c.videoStatus === 'string' && (c.videoStatus === 'making' || (c.videoStatus === 'none' && tier !== 'none'));
+    // 사람 확인 모드는 영상이 저절로 시작되지 않으니 '없음'에서 기다리지 않는다(QA v5 E6).
+    const auto = c.autoReview !== false && !(S.settings && S.settings.autoReview === false);
+    return typeof c.videoStatus === 'string' && (c.videoStatus === 'making' || (c.videoStatus === 'none' && tier !== 'none' && auto));
   }
   // 서버 기록이 사진인지. fileType을 주지 않는 서버면 확장자로 본다.
   function isPhotoRecord(rec) {
@@ -1096,6 +1100,7 @@
     };
     if (r.tierCards) r.tierCards.innerHTML = tierCardsHTML('videoTier', 'none');
     let tierEditOpen = false;
+    let sigDraft = null; // 바꾸기 칸에 적고 아직 저장하지 않은 시그니처(다시 그려도 지우지 않는다, QA v5 E9)
     const tiles = new Map();
     let chapterTouched = false;
     let confirmDelete = false;
@@ -1177,7 +1182,7 @@
           if (r.sumSig) {
             const sig = set.signaturePose;
             r.sumSig.textContent = sig ? sig.title + ' — ' + sig.motion : '아직 정하지 않았어요';
-            r.sumSig.parentElement.hidden = set.videoTier === 'none' && !sig;
+            r.sumSig.parentElement.hidden = set.videoTier === 'none';
           }
           const notes = r.summary.querySelector('[data-sum-notes]');
           const memo = [text(basis.scope) && text(basis.scope) !== DEFAULT_SCOPE ? text(basis.scope) : '', text(basis.notes)].filter(Boolean).join(' · ');
@@ -1189,7 +1194,7 @@
       if (r.tierEdit) {
         const show = hasDraft && tierEditOpen && !S.finalized;
         r.tierEdit.hidden = !show;
-        const html = show ? '<div class="vt-grid" role="radiogroup" aria-label="영상 등급 바꾸기">' + tierCardsHTML('videoTierEdit', intake.settings().videoTier, { disabled: S.busy === 'tier' }) + '</div><p class="src-fhint">영상 단계는 비용이 들어요. 고르면 바로 저장해요.</p>' + sigEditHTML(intake.settings().signaturePose, S.busy === 'tier') : '';
+        const html = show ? '<div class="vt-grid" role="radiogroup" aria-label="영상 등급 바꾸기">' + tierCardsHTML('videoTierEdit', intake.settings().videoTier, { disabled: S.busy === 'tier' }) + '</div><p class="src-fhint">영상 단계는 비용이 들어요. 등급은 고르면 바로 저장해요.</p>' + (intake.settings().videoTier === 'none' ? '' : sigEditHTML(sigDraft || intake.settings().signaturePose, S.busy === 'tier')) : '';
         if (r.tierEdit.dataset.html !== html) { r.tierEdit.innerHTML = html; r.tierEdit.dataset.html = html; }
       }
       renderTitle();
@@ -1356,8 +1361,9 @@
       const tier = intake.settings().videoTier;
       const has = intake.photoItems().length > 0;
       const ready = c.chatReady === true || !!(S.chat && S.chat.ready);
-      const show = tier !== 'none' || has || (!!S.finalized && ready);
-      return { show, add: show && c.videoStatus !== 'making', tier };
+      // 사진은 처음 만들 때만 올린다(D-0160). 시작한 뒤에는 올린 사진만 보여 주고 더 받지 않는다(QA v5 E3).
+      const show = tier !== 'none' || has;
+      return { show, add: show && !S.finalized && c.videoStatus !== 'making', tier, ready };
     }
     function syncTile(el, it) {
       const q = (s) => el.querySelector(s);
@@ -1383,7 +1389,7 @@
       const list = po.show ? intake.photoItems() : [];
       const ready = list.filter((i) => i.tone === 'ok').length;
       if (r.photoCount) r.photoCount.textContent = list.length ? ready + '장 준비' : '';
-      if (r.photoHint) r.photoHint.textContent = S.finalized && po.tier === 'none' ? '얼굴이 잘 보이는 사진 1장 이상 · 진행 화면에서 영상을 만들 때 이 사진을 써요.' : '얼굴이 잘 보이는 사진 1장 이상 · jpg, png, webp · 한 장에 15MB까지';
+      if (r.photoHint) r.photoHint.textContent = S.finalized ? '만들 때 올린 사진이에요. 진행 화면에서 영상을 만들 때 이 사진을 써요.' : '얼굴이 잘 보이는 사진 1장 이상 · jpg, png, webp · 한 장에 15MB까지';
       const add = r.photos.querySelector('[data-act="pick-photo"]');
       if (add) { add.hidden = !po.add; add.disabled = !po.add; }
       if (!r.photoList) return;
@@ -1535,7 +1541,7 @@
         const q = (n) => (r.tierEdit.querySelector('[name="' + n + '"]') || {}).value;
         const pose = { title: q('sigeTitle'), motion: q('sigeMotion'), useWhen: q('sigeWhen') };
         if (!sigOf(pose)) { S.error = '시그니처 포즈의 이름과 동작을 적어 주세요.'; render(); return; }
-        intake.setSignature(pose).then((ok) => { if (ok) { tierEditOpen = false; render(); const b = r.summary && r.summary.querySelector('[data-act="tier-edit"]'); if (b) b.focus(); } });
+        intake.setSignature(pose).then((ok) => { if (ok) { sigDraft = null; tierEditOpen = false; render(); const b = r.summary && r.summary.querySelector('[data-act="tier-edit"]'); if (b) b.focus(); } });
       }
       else if (act === 'theme' || act === 'theme-next') setTheme(el.dataset.theme || 'system');
       else if (act === 'fold') { listOpen = el.getAttribute('aria-expanded') !== 'true'; render(); }
@@ -1568,6 +1574,7 @@
     function chapterTemplateReset() {
       chapterTouched = false;
       tierEditOpen = false;
+      sigDraft = null;
       if (r.form) r.form.reset();
       if (r.tierHint) r.tierHint.hidden = true;
       if (r.sig) r.sig.hidden = true;
@@ -1576,7 +1583,8 @@
       const t = e.target;
       if (t === r.picker) { intake.addFiles(t.files); t.value = ''; return; }
       if (t === r.photoPicker) { intake.addFiles(t.files, { photoOnly: true }); t.value = ''; return; }
-      if (t.name === 'videoTierEdit') { intake.setTier(t.value).then((ok) => { if (ok) { tierEditOpen = false; render(); const b = r.summary && r.summary.querySelector('[data-act="tier-edit"]'); if (b) b.focus(); } }); return; }
+      // 등급을 고르면 저장하되 칸은 열어 둔다. 시그니처를 같은 칸에서 이어서 적는다(QA v5 E9·A-11).
+      if (t.name === 'videoTierEdit') { const v = t.value; intake.setTier(v).then((ok) => { if (ok) { render(); const c0 = r.tierEdit && r.tierEdit.querySelector('[name="videoTierEdit"][value="' + v + '"]'); if (c0) c0.focus(); } }); return; }
       if (r.form && r.form.contains(t)) {
         if (t.name === 'videoTier') { if (r.tierHint) r.tierHint.hidden = t.value === 'none'; if (r.sig) r.sig.hidden = t.value === 'none'; return; }
         if (t.name === 'chapterTemplate') chapterTouched = true;
@@ -1592,6 +1600,11 @@
     }
     function onInput(e) {
       const t = e.target;
+      if (r.tierEdit && r.tierEdit.contains(t) && /^sige/.test(t.name || '')) {
+        const q = (n) => (r.tierEdit.querySelector('[name="' + n + '"]') || {}).value || '';
+        sigDraft = { title: q('sigeTitle'), motion: q('sigeMotion'), useWhen: q('sigeWhen') };
+        return;
+      }
       if (r.form && r.form.contains(t) && t.name && t.getAttribute('aria-invalid')) fieldError(t.name, '');
     }
     function hasFiles(e) { const dt = e.dataTransfer; return !!(dt && Array.from(dt.types || []).indexOf('Files') >= 0); }
