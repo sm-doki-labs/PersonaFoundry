@@ -2584,7 +2584,7 @@
         var w = Math.round(Number(r.conversations || 0) / most * 100);
         return '<tr><td>' + esc((items.clusterLabels || {})[k] || k) + '</td><td><span class="dataset-bar"><i style="width:' + w + '%"></i></span><span class="num">' + esc(num(r.conversations)) + '</span></td><td class="num">' + esc(num(r.replies)) + '</td><td class="num">' + esc(num(r.supervisedTokens)) + '</td></tr>';
       }).join('') + '</tbody></table>' +
-      '<details class="gate-more"><summary>분할 파일 · ' + esc(dataset.datasetRev || '') + '</summary><table class="metric-table"><thead><tr><th>분할</th><th>파일</th><th class="num">대화</th></tr></thead><tbody>' +
+      '<details class="gate-more"><summary>분할 파일 · ' + esc(revLabel(dataset.datasetRev)) + '</summary><table class="metric-table"><thead><tr><th>분할</th><th>파일</th><th class="num">대화</th></tr></thead><tbody>' +
       list(dataset.files).map(function (f) { return '<tr><td>' + esc(f.split) + '</td><td><code>' + esc(f.path) + '</code></td><td class="num">' + esc(f.conversations) + '</td></tr>'; }).join('') +
       '</tbody></table></details></section>' +
       '<section class="gate-section sample-board"><h2>무작위 표본 ' + list(items.samples).length + '개</h2>' +
@@ -2880,26 +2880,30 @@
 
   // ---------------------------------------------------------------- G9
   // ---------------------------------------------------------------- G8(학습 없이 진행, K-0038)
+  // 학습 환경·상태는 내부 코드(gemma_qlora·PLANNED) 대신 쉬운 말로 보인다(QA v5 B-F22).
+  var TRAIN_ENV_KO = { gemma_qlora: 'Gemma 학습(임대 GPU)', vertex_gemini: 'Gemini 학습(Vertex)', fake: '시험용 가짜 학습' };
+  var TRAIN_STATUS_KO = { PLANNED: '계획만 세움', SUBMITTED: '시작함', RUNNING: '학습 중', SUCCEEDED: '끝남', FAILED: '실패', CANCELLED: '멈춤' };
   function renderPromptOnly(items) {
     var doc = items.decision || {};
     if (isTwinDecision(items)) return renderTwinAdopt(items);
     var runs = list(doc.trainingRuns)
       .map(function (run) {
         var usd = run.estimateUsd == null ? '-' : '$' + Number(run.estimateUsd).toFixed(2);
-        return '<tr><td>' + esc(run.provider) + '</td><td>' + esc(run.status) + '</td><td>' +
+        return '<tr><td>' + esc(TRAIN_ENV_KO[run.provider] || run.provider) + '</td><td>' + esc(TRAIN_STATUS_KO[run.status] || run.status) + '</td><td>' +
           (run.dryRun ? '계획만' : '실행') + '</td><td class="num">' + esc(usd) +
           '</td></tr>';
       })
       .join('');
+    // 기록의 까닭 문장(doc.reason)은 개발 말투라 화면에 싣지 않는다. 기술 정보 · 결정 기록 원문에 그대로 있다.
     return (
       '<section class="gate-section"><h2>학습 결과가 없어요</h2>' +
-      '<p class="section-sub">' + esc(doc.reason || '') + '</p>' +
+      '<p class="section-sub">학습한 모델이 아직 없어서 학습 모델과 비교할 수 없어요. 아래는 지금까지 세운 학습 계획이에요.</p>' +
       '<table class="metric-table"><thead><tr><th>학습 환경</th><th>상태</th><th>실행</th>' +
       '<th>추정 비용</th></tr></thead><tbody>' +
       (runs || '<tr><td colspan="4">학습 계획 없음</td></tr>') + '</tbody></table></section>' +
       '<section class="gate-section"><h2>이렇게 진행돼요</h2>' +
       '<p class="section-sub"><b>' + esc(items.adoptLabel || '긴 프롬프트로 진행') + '</b>을 누르면 학습 모델 평가 없이 패키지를 만들고, ' +
-      '패키지에는 긴 프롬프트·짧은 프롬프트·데이터셋(' + esc(doc.datasetRev || '없음') +
+      '패키지에는 긴 프롬프트·짧은 프롬프트·데이터셋(' + esc(doc.datasetRev ? revLabel(doc.datasetRev) : '없음') +
       ')과 학습 계획이 들어가요. <b>학습을 기다릴게요</b>를 누르면 학습 결과가 생길 때까지 ' +
       '평가 단계가 멈춰요.</p></section>'
     );

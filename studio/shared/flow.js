@@ -522,6 +522,117 @@
     }
     return [];
   }
+  // ---- 모델 준비 갈래의 다음 일(QA v5 B-F06·B-F07) ----
+  // 프롬프트를 승인한 뒤의 모델 단계(데이터 샘플·학습 데이터·학습 계획·평가)는 대화 준비 목표 밖이라 저절로 돌지 않는다.
+  // 지금 할 일·노드 칸·모델 만들기 탭이 같은 버튼을 건넨다. 버튼은 그 단계의 검토(없으면 단계 자신)까지만 돌린다.
+  // 유료 학습은 이 버튼으로 시작하지 않는다(학습 계획까지만). 유료 공급자 단계는 서버가 비용 확인으로 멈춘다.
+  const MODEL_RUN_UNTIL = { s9s: 'G7a', s9: 'G7', s10t: 's10t', s10: 'G8' };
+  function modelPathOf(detail) { return (detail && detail.modelPath) || {}; }
+  function modelModeOf(detail) { return text((detail && detail.modelMode) || modelPathOf(detail).mode) || 'TRAIN'; }
+  function modelNext(graph, detail) {
+    const d = detail || {};
+    if (d.origin !== 'SOURCE' || !graph || modelModeOf(d) === 'PROMPT_ONLY') return null;
+    const gates = gatesById(d);
+    const gs = (id) => upper((gates.get(id) || {}).status);
+    if (gs('G6') !== 'APPROVED' || ['AWAITING_HUMAN', 'APPROVED'].includes(gs('G8'))) return null;
+    const rows = rowsById(d);
+    const held = new Set(R.extractHeld(d).map((h) => h.stage));
+    const ready = (id) => graph.byStage.has(id) && !held.has(id) && ['PENDING', 'REJECTED'].includes(upper((rows.get(id) || {}).status) || 'PENDING');
+    const m = modelPathOf(d);
+    if (modelModeOf(d) === 'BIND_EXISTING') {
+      if (!m.binding) return { stage: 's10', step: 'bind', input: true, title: '연결할 모델을 골라 주세요', body: '학습된 모델을 연결하는 방식이에요. 평가하려면 먼저 이미 학습한 모델의 연결 파일을 올려 주세요.', label: '모델 연결하기' };
+      return ready('s10') ? { stage: 's10', step: 'eval', title: '평가를 시작할 수 있어요', body: '긴 프롬프트와 연결한 모델의 답을 원문에서 떼어 둔 장면으로 비교해요.', label: '평가 시작' } : null;
+    }
+    const tr = m.training || {};
+    if (ready('s9s')) return { stage: 's9s', step: 'src', title: '데이터 샘플을 만들 차례예요', body: '프롬프트를 승인했어요. 학습에 쓸 대화 샘플을 만들고, 클러스터마다 샘플을 검토해요.', label: '데이터 샘플 만들기' };
+    if (gs('G7a') === 'APPROVED' && ready('s9')) return { stage: 's9', step: 'data', title: '학습 데이터를 만들 차례예요', body: '샘플 검토를 마쳤어요. 같은 기준으로 나머지 학습 데이터를 만들어요.', label: '학습 데이터 만들기' };
+    if (gs('G7') === 'APPROVED' && tr.state === 'pending' && graph.byStage.has('s10t')) return { stage: 's10t', step: 'train', title: '학습 계획을 세울 차례예요', body: '계획은 비용이 들지 않아요. 예상 비용·시간을 본 뒤 학습을 시작할지 골라요.', label: '학습 계획 세우기' };
+    if (['done', 'skip'].includes(tr.state) && ready('s10')) return { stage: 's10', step: 'eval', title: '평가를 시작할 수 있어요', body: '긴 프롬프트와 학습 모델에 같은 질문을 하고 답을 비교해요.', label: '평가 시작' };
+    return null;
+  }
+  function modelTasks(graph, detail, views, busy) {
+    const n = modelNext(graph, detail);
+    if (!n) return [];
+    const why = busy ? '지금 작업이 끝나면 할 수 있어요.' : '';
+    return [{
+      kind: 'ready', stage: n.stage, order: 3, title: n.title, age: '모델 만들기', body: n.body,
+      blocked: remaining(graph, views, n.stage),
+      actions: [n.input ? { act: 'open-model', step: n.step, label: n.label } : { act: 'model-run', stage: n.stage, label: n.label, disabled: busy, why }]
+    }];
+  }
+  // 모델 만들기 탭의 지금 단계와 단계 줄. 연결 방식은 '모델 연결 → 평가' 두 단계만 있다(재료·데이터셋·학습이 없다).
+  function modelActive(detail) {
+    const m = modelPathOf(detail);
+    if (modelModeOf(detail) === 'BIND_EXISTING') return m.binding ? 'eval' : 'bind';
+    const t = m.training || {};
+    if (['done', 'skip'].includes(t.state)) return 'eval';
+    if (['plan', 'run', 'hold', 'stopped', 'fail', 'pending'].includes(t.state)) return 'train';
+    return m.dataset ? 'data' : 'src';
+  }
+  function modelSteps(detail, views) {
+    const det = detail || {};
+    const m = modelPathOf(det);
+    const v = views || {};
+    const gates = gatesById(det);
+    const gs = (id) => upper((gates.get(id) || {}).status);
+    const kind = (id) => (v[id] || {}).kind;
+    const bind = modelModeOf(det) === 'BIND_EXISTING';
+    const steps = [];
+    let open;
+    if (bind) {
+      const b = m.binding;
+      const due = gs('G6') === 'APPROVED';
+      steps.push({ id: 'bind', n: 1, ko: '모델 연결', k: b ? 'ok' : due ? 'wait' : 'todo', s: b ? b.kindLabel + ' · ' + text(b.ref) : due ? '연결할 모델을 골라 주세요' : '아직 연결하지 않았어요', done: Boolean(b) && ['AWAITING_HUMAN', 'APPROVED'].includes(gs('G8')) });
+      open = Boolean(b);
+    } else {
+      const mat = m.material;
+      let sk = 'todo';
+      let ss = '프롬프트를 승인하면 정해요';
+      if (mat) { sk = 'ok'; ss = mat.used.map((u) => u.label).join(' + ') || mat.planned.map((p) => p.label).join(' + ') || '정함'; }
+      else if (['run', 'retry'].includes(kind('s9s'))) { sk = 'run'; ss = '데이터 샘플 만드는 중'; }
+      else if (kind('s9s') === 'fail') { sk = 'fail'; ss = '멈춤'; }
+      else if (kind('s9s') === 'confirm') { sk = 'wait'; ss = '실행 확인 대기'; }
+      else if (gs('G6') === 'APPROVED') ss = '데이터 샘플을 만들 차례예요';
+      steps.push({ id: 'src', n: 1, ko: '재료', k: sk, s: ss, done: Boolean(mat) });
+      const d = m.dataset;
+      let dk = 'todo';
+      let ds = '학습 데이터를 만들기 전이에요';
+      if (d) {
+        // 숫자는 데이터셋 승인(G7) 요약과 같은 전체 대화 수다(QA v5 C-08). 학습·검증·평가 나눔은 아래 칸에 있다.
+        if (upper(d.status) === 'APPROVED') { dk = 'ok'; ds = '대화 ' + d.counts.total + '개 · 승인됨'; }
+        else if (upper(d.gates.G7.status) === 'AWAITING_HUMAN') { dk = 'wait'; ds = '데이터셋 승인 대기'; }
+        else if (upper(d.gates.G7a.status) === 'AWAITING_HUMAN') { dk = 'wait'; ds = '샘플 검토 대기'; }
+        else if (['run', 'retry'].includes(kind('s9'))) { dk = 'run'; ds = '만드는 중'; }
+        else if (['run', 'retry'].includes(kind('s9s'))) { dk = 'run'; ds = '샘플 만드는 중'; }
+        else if (kind('s9') === 'fail') { dk = 'fail'; ds = '멈춤'; }
+        else if (kind('s9') === 'confirm') { dk = 'wait'; ds = '실행 확인 대기'; }
+        else ds = gs('G7a') === 'APPROVED' ? '학습 데이터를 만들 차례예요' : '샘플을 다시 만들 차례예요';
+      }
+      steps.push({ id: 'data', n: 2, ko: '데이터셋', k: dk, s: ds, done: dk === 'ok' });
+      const t = m.training || {};
+      const tv = v.s10t || {};
+      const tk = { confirm: 'wait', run: 'run', fail: 'fail', skip: 'ok', done: 'ok', todo: 'todo', wait: 'wait', retry: 'run', out: 'todo' }[tv.kind] || 'todo';
+      // '골랐어요'는 학습 안의 체크포인트 고르기다. 평가(G8)의 채택과 섞이지 않게 쓴다(QA v5 C-08).
+      const tsub = t.state === 'done' ? (t.adopted ? '끝남 · 체크포인트 고름' : '끝남 · 쓸 체크포인트 없음') : t.state === 'locked' ? '데이터셋을 승인하면 열려요' : t.state === 'pending' ? '학습 계획을 세울 차례예요' : tv.sub || KIND_LABEL[tv.kind] || '';
+      steps.push({ id: 'train', n: 3, ko: '학습', k: tk, s: tsub, done: ['done', 'skip'].includes(t.state) });
+      open = ['done', 'skip'].includes(t.state);
+    }
+    const e = m.eval || {};
+    const ev = v.s10 || {};
+    let ek = 'todo';
+    let es = bind ? '모델을 연결하면 열려요' : '학습이 끝나면 열려요';
+    if (open) {
+      const g8 = upper(e.gate && e.gate.status);
+      if (g8 === 'AWAITING_HUMAN') { ek = 'wait'; es = e.promptOnly ? (bind ? '연결한 모델 채택 검토' : '긴 프롬프트 채택 검토') : '블라인드 20쌍 검토'; }
+      else if (g8 === 'APPROVED') { ek = 'ok'; es = e.adopted ? e.adopted.label + '로 채택함' : '채택 결정함'; }
+      else if (ev.kind === 'confirm') { ek = 'wait'; es = '평가 비용 확인 대기'; }
+      else if (['run', 'retry'].includes(ev.kind)) { ek = 'run'; es = '답 모으는 중'; }
+      else if (ev.kind === 'fail') { ek = 'fail'; es = '멈춤'; }
+      else es = '평가를 시작할 차례예요';
+    }
+    steps.push({ id: 'eval', n: steps.length + 1, ko: '평가', k: ek, s: es, done: ek === 'ok' });
+    return steps;
+  }
   // 'video: xai_video/grok-video' 같은 공급자 표기를 쉬운 말로(D-0129).
   const KIND_KO = { video: '영상', image: '이미지', text: '글', judge: '검토' };
   const ADAPTER_KO = { xai_video: 'xAI 그록 영상', grok_oauth: '그록(계정 연결)', grok_web: '그록 웹', fake_video: '시험용 가짜 영상', fake: '시험용 가짜 모델', fake_image: '시험용 가짜 이미지', codex_image: 'Codex 이미지', openai: 'OpenAI', gemini: 'Gemini', vertex_gemini: 'Vertex Gemini' };
@@ -575,6 +686,9 @@
       });
     });
     trainingTasks(tr, busy, graph.byStage.has('s10t') ? remaining(graph, views, 's10t') : 0).forEach((item) => items.push(item));
+    const modelItems = modelTasks(graph, detail, views, busy);
+    modelItems.forEach((item) => items.push(item));
+    const covered = new Set(modelItems.map((item) => item.stage));
     R.extractHeld(detail || {}).forEach((held) => {
       const def = graph.byStage.get(held.stage);
       items.push({
@@ -605,7 +719,7 @@
       const lastJob = (detail && detail.lastJob) || {};
       const blockedByServer = new Set(Array.isArray(lastJob.blocked) ? lastJob.blocked : []);
       const ready = graph.stages.filter((def) => {
-        if ((views[def.id] || {}).kind !== 'todo' || !scope.has(def.id) || blockedByServer.has(def.id)) return false;
+        if ((views[def.id] || {}).kind !== 'todo' || !scope.has(def.id) || blockedByServer.has(def.id) || covered.has(def.id)) return false;
         return Array.from(preds.get(def.id) || []).every((p) => ['done', 'skip'].includes((views[p] || {}).kind));
       });
       if (ready.length) {
@@ -1744,6 +1858,11 @@
       if (x.kind === 'fail' && !managed) acts.push('<button type="button" class="btn pri block" data-act="retry" data-stage="' + E(id) + '"' + (busy ? ' disabled' : '') + '>다시 실행</button>');
       if (gate && upper(gate.status) === 'APPROVED') acts.push('<button type="button" class="btn block" data-act="review" data-gate="' + E(def.gate) + '" data-stage="' + E(id) + '" data-readonly="1">결정 기록 보기</button>');
       const mstepOf = { s9s: 'data', s9: 'data', s10t: 'train', s10: 'eval' }[id];
+      const mn = mstepOf ? modelNext(state.graph, d) : null;
+      if (mn && mn.stage === id) {
+        if (mn.input) prop('기다리는 이유', '연결한 모델이 없어요. 모델 만들기에서 연결 파일을 올려 주세요.');
+        acts.unshift(mn.input ? '<button type="button" class="btn pri block" data-act="open-model" data-step="bind">' + E(mn.label) + '</button>' : '<button type="button" class="btn pri block" data-act="model-run" data-stage="' + E(id) + '"' + (busy ? ' disabled' : '') + '>' + E(mn.label) + '</button>');
+      }
       if (mstepOf) acts.push('<button type="button" class="btn block" data-act="open-model" data-step="' + mstepOf + '">모델 만들기에서 보기</button>');
       const chat = (id === 's8' || id === 's8c') ? chatHref(d) : '';
       if (chat) acts.push('<a class="btn block" href="' + E(chat) + '">' + icon('chat') + '대화해 보기</a>');
@@ -1766,54 +1885,15 @@
       return '<nav class="md-tabs" aria-label="보기"><a href="#c/' + id + '"' + (m ? '' : ' aria-current="page"') + '>공정</a><a href="#c/' + id + '/model"' + (m ? ' aria-current="page"' : '') + '>모델 만들기</a></nav>';
     }
     function mp() { return (state.detail && state.detail.modelPath) || {}; }
-    function mActive() {
-      const m = mp();
-      const t = m.training || {};
-      if (['done', 'skip'].includes(t.state)) return 'eval';
-      if (['plan', 'run', 'hold', 'stopped', 'fail', 'pending'].includes(t.state)) return 'train';
-      return m.dataset ? 'data' : 'src';
-    }
+    function mActive() { return modelActive(state.detail); }
+    function mSteps() { return modelSteps(state.detail, views(null)); }
     function shortLabel(s) { return text(s).split(':')[0]; }
-    function mSteps() {
-      const m = mp();
-      const d = m.dataset;
-      const t = m.training || {};
-      const e = m.eval || {};
-      const v = views(null);
-      const steps = [];
-      const mat = m.material;
-      steps.push({ id: 'src', n: 1, ko: '재료', k: mat ? 'ok' : 'todo', s: mat ? mat.used.map((u) => u.label).join(' + ') || '정함' : '데이터 샘플을 만들면 정해져요', done: Boolean(mat) });
-      let dk = 'todo';
-      let ds = '학습 데이터를 만들기 전이에요';
-      if (d) {
-        const g7 = upper(d.gates.G7.status);
-        const g7a = upper(d.gates.G7a.status);
-        if (upper(d.status) === 'APPROVED') { dk = 'ok'; ds = '학습 ' + d.counts.train + '대화 · 승인됨'; }
-        else if (g7 === 'AWAITING_HUMAN') { dk = 'wait'; ds = '데이터셋 승인 대기'; }
-        else if (g7a === 'AWAITING_HUMAN') { dk = 'wait'; ds = '샘플 검토 대기'; }
-        else if (v.s9 && ['run', 'retry'].includes(v.s9.kind)) { dk = 'run'; ds = '만드는 중'; }
-        else if (v.s9 && v.s9.kind === 'fail') { dk = 'fail'; ds = '멈춤'; }
-        else ds = '만드는 중';
-      }
-      steps.push({ id: 'data', n: 2, ko: '데이터셋', k: dk, s: ds, done: dk === 'ok' });
-      const tv = v.s10t || {};
-      const tk = { confirm: 'wait', run: 'run', fail: 'fail', skip: 'ok', done: 'ok', todo: 'todo', wait: 'wait', retry: 'run', out: 'todo' }[tv.kind] || 'todo';
-      const tsub = t.state === 'done' ? (t.adopted ? '학습 모델을 골랐어요' : '학습 모델을 채택하지 않았어요') : t.state === 'locked' ? '데이터셋을 승인하면 열려요' : t.state === 'pending' ? '학습 계획을 세울 차례예요' : tv.sub || KIND_LABEL[tv.kind] || '';
-      steps.push({ id: 'train', n: 3, ko: '학습', k: tk, s: tsub, done: ['done', 'skip'].includes(t.state) });
-      const ev = v.s10 || {};
-      let ek = 'todo';
-      let es = '학습이 끝나면 열려요';
-      if (['done', 'skip'].includes(t.state)) {
-        const gs = upper(e.gate && e.gate.status);
-        if (gs === 'AWAITING_HUMAN') { ek = 'wait'; es = e.promptOnly ? '긴 프롬프트 채택 검토' : '블라인드 20쌍 검토'; }
-        else if (gs === 'APPROVED') { ek = 'ok'; es = e.promptOnly ? '긴 프롬프트로 채택함' : '채택 결정함'; }
-        else if (ev.kind === 'confirm') { ek = 'wait'; es = '평가 비용 확인 대기'; }
-        else if (['run', 'retry'].includes(ev.kind)) { ek = 'run'; es = '답 모으는 중'; }
-        else if (ev.kind === 'fail') { ek = 'fail'; es = '멈춤'; }
-        else es = '이어서 실행하면 시작해요';
-      }
-      steps.push({ id: 'eval', n: 4, ko: '평가', k: ek, s: es, done: ek === 'ok' });
-      return steps;
+    // 모델 단계의 다음 일(QA v5 B-F06): 그 단계 칸에 시작 버튼을 둔다.
+    function nextNoteHTML(step) {
+      const n = modelNext(state.graph, state.detail);
+      if (!n || n.step !== step || n.input) return '';
+      const busy = Boolean(state.detail.job) || state.busy;
+      return '<div class="md-note"><div><b>' + E(n.title) + '</b><p>' + E(n.body) + '</p></div><button type="button" class="btn pri" data-act="model-run" data-stage="' + E(n.stage) + '"' + (busy ? ' disabled' : '') + '>' + E(n.label) + '</button></div>';
     }
     function mTasks() {
       const d = state.detail;
@@ -1834,19 +1914,24 @@
         k = t.kind === 'fail' ? 'bad' : 'wait';
         t1 = t.title;
         t2 = t.body;
-        if (t.gate === 'G8' && (mp().eval || {}).promptOnly) { t1 = '긴 프롬프트 채택 검토'; t2 = '학습 없이 긴 프롬프트로 패키지를 만들지 확인해요.'; }
+        if (t.gate === 'G8' && (mp().eval || {}).promptOnly) {
+          const bind = modelModeOf(state.detail) === 'BIND_EXISTING';
+          t1 = bind ? '연결한 모델 채택 검토' : '긴 프롬프트 채택 검토';
+          t2 = bind ? '비교 결과를 보고 연결한 모델을 쓸지 정해요.' : '학습 없이 긴 프롬프트로 패키지를 만들지 확인해요.';
+        }
         acts = t.actions.filter((a) => !(a.act === 'open-model' && state.mstep === a.step));
       } else if (tr.state === 'run') {
         k = 'run';
         t2 = tr.stopRequested ? '중단을 요청했어요 · GPU를 반납하고 멈춰요' : '학습 중이에요 · 창을 닫아도 계속 돌아요. 끝나면 받은 일에 알려 드려요';
       }
       let html = acts.map((a, i) => '<button type="button" class="btn' + (i === 0 ? ' pri' : '') + '" data-act="' + E(a.act) + '"' + (a.gate ? ' data-gate="' + E(a.gate) + '"' : '') + (a.stage ? ' data-stage="' + E(a.stage) + '"' : '') + (a.step ? ' data-step="' + E(a.step) + '"' : '') + (a.v ? ' data-v="' + E(a.v) + '"' : '') + (a.disabled ? ' disabled' : '') + '>' + E(a.label) + '</button>').join('');
-      if (state.mstep !== act) html += '<button type="button" class="btn ghost" data-act="mstep" data-step="' + act + '">' + E({ src: '재료', data: '데이터셋', train: '학습', eval: '평가' }[act]) + ' 단계 보기</button>';
+      if (state.mstep !== act) html += '<button type="button" class="btn ghost" data-act="mstep" data-step="' + act + '">' + E({ src: '재료', data: '데이터셋', train: '학습', eval: '평가', bind: '모델 연결' }[act]) + ' 단계 보기</button>';
       return '<div class="md-now ' + k + '" role="status" aria-live="polite"><span class="lab">지금 할 일</span><span class="ic">' + icon(k === 'bad' ? 'x' : k === 'wait' ? 'coins' : k === 'run' ? 'retry' : 'ok') + '</span><span class="t1">' + E(t1) + '</span><span class="t2">' + E(t2) + '</span>' + (html ? '<div class="acts">' + html + '</div>' : '') + '</div>';
     }
     function stepperHTML() {
       const act = mActive();
-      return '<div class="md-steps" role="group" aria-label="모델 만들기 단계">' + mSteps().map((s) => {
+      const steps = mSteps();
+      return '<div class="md-steps' + (steps.length < 4 ? ' n' + steps.length : '') + '" role="group" aria-label="모델 만들기 단계">' + steps.map((s) => {
         const tail = s.id === act ? '<em>지금</em>' : s.done ? '<span class="lk" aria-hidden="true">' + LOCK + '</span>' : '';
         return '<button type="button" class="md-st ' + s.k + '" data-act="mstep" data-step="' + s.id + '" aria-pressed="' + (state.mstep === s.id) + '" aria-label="' + E(s.n + '단계 ' + s.ko + ', ' + s.s + (s.id === act ? ', 지금 단계' : '') + (s.done && s.id !== act ? ', 읽기 전용' : '')) + '"><span class="k"><b>' + (s.k === 'ok' ? icon('check') : s.n) + '</b>' + s.n + '단계' + tail + '</span><strong>' + s.ko + '</strong><span class="s">' + E(s.s) + '</span></button>';
       }).join('') + '</div>';
@@ -1864,13 +1949,20 @@
     }
     function srcHTML() {
       const m = mp().material;
-      if (!m) return '<div class="md-pane"><div class="md-h"><h3>재료</h3>' + pill('muted', '아직 정하지 않았어요') + '</div><p class="lead">프롬프트를 승인하면 데이터 샘플을 만들면서 재료를 정해요.</p></div>';
+      if (!m) {
+        const sv = views(null).s9s || {};
+        const making = ['run', 'retry'].includes(sv.kind);
+        const body = nextNoteHTML('src') || (making ? '<div class="md-note run"><div><b>데이터 샘플을 만드는 중이에요</b><p>끝나면 클러스터마다 샘플을 검토할 차례가 와요.</p></div></div>' : '<p class="lead">프롬프트를 승인하면 데이터 샘플을 만들면서 재료를 정해요.</p>');
+        return '<div class="md-pane"><div class="md-h"><h3>재료</h3>' + pill(making ? 'run' : 'muted', making ? '만드는 중' : '아직 정하지 않았어요') + '</div>' + body + '</div>';
+      }
       const used = m.used.map((u) => E(u.label) + ' <span class="num">' + u.conversations + '대화</span>').join('<br>');
+      // 모티브는 출처 묶음에서 승인한 원문 대화만 그대로 쓴다. 대화 창고·다시 쓰기 설명은 오리지널 재료에만 붙인다.
+      const srcOnly = m.planned.length > 0 && m.planned.every((p) => p.kind === 'SOURCE');
       return '<div class="md-pane"><div class="md-h"><h3>재료</h3>' + pill('ok', '정함') + roChip() + '</div>' +
-        '<dl class="md-ro"><dt>가져오는 곳</dt><dd>' + E(m.planned.map((p) => p.label).join(' + ')) + '<small>대화 데이터 창고(말뭉치·SNS 색인)는 아직 연결하지 않았어요</small></dd>' +
+        '<dl class="md-ro"><dt>가져오는 곳</dt><dd>' + E(m.planned.map((p) => p.label).join(' + ')) + '<small>' + (srcOnly ? '출처 묶음에서 승인한 원문을 그대로 써요' : '대화 데이터 창고(말뭉치·SNS 색인)는 아직 연결하지 않았어요') + '</small></dd>' +
         '<dt>쓴 재료</dt><dd>' + (used || '—') + '</dd>' + sourcesRow(m.sources) +
-        rewriteRow(m) +
-        '<dt>합계</dt><dd class="num">' + m.total + '대화</dd></dl>' +
+        (srcOnly ? '<dt>다시 쓰는 방식</dt><dd>다시 쓰지 않아요<small>원문 대화를 그대로 쓰고, 샘플 검토에서 고치거나 버릴 대화는 빼요</small></dd>' : rewriteRow(m)) +
+        '<dt>합계</dt><dd class="num">' + (m.total ? m.total + '대화' : '아직 없어요<small>학습 데이터를 만들면 세요</small>') + '</dd></dl>' +
         '<div class="md-foot"><p>끝난 단계라 여기서 바꿀 수 없어요. 클러스터마다 고른 샘플은 검토 기록에서 볼 수 있어요.</p>' + recordBtn('G7a', '샘플 검토 기록') + '</div></div>';
     }
     // 다시 쓰는 방식(D-0135): 흐름 뼈대만 쓰고 양쪽을 새로 써요. 원문과 겹친 가장 긴 곳과 뼈대 예시.
@@ -1917,7 +2009,7 @@
     }
     function mixHTML(c) {
       const total = Object.values(c.materials).reduce((a, b) => a + b, 0) || 1;
-      const sns = (c.materials.SNS_REWRITE || 0) + (c.materials.NIKL || 0);
+      const sns = (c.materials.SNS_REWRITE || 0) + (c.materials.NIKL || 0) + (c.materials.SOURCE || 0);
       const syn = c.materials.SYNTH || 0;
       return '<div class="md-mix" role="img" aria-label="' + E('실제 대화 ' + sns + ', 합성 ' + syn) + '"><i class="a" style="width:' + (sns / total * 100) + '%"></i><i class="b" style="width:' + (syn / total * 100) + '%"></i></div><div class="md-mixl"><span>실제 대화 ' + sns + '</span><span>합성 ' + syn + '</span></div>';
     }
@@ -1927,9 +2019,10 @@
       const ok = upper(d.status) === 'APPROVED';
       const g7 = upper(d.gates.G7.status);
       const g7a = upper(d.gates.G7a.status);
-      const head = '<div class="md-h"><h3>데이터셋 ' + E(revLabel(d.rev)) + '</h3>' + (ok ? pill('ok', '승인됨' + (d.gates.G7.decidedAt ? ' · ' + clock(d.gates.G7.decidedAt) : '')) + roChip() : g7 === 'AWAITING_HUMAN' || g7a === 'AWAITING_HUMAN' ? pill('wait', '검토 대기') : pill('run', '만드는 중')) + '</div>';
+      const head = '<div class="md-h"><h3>데이터셋 ' + E(revLabel(d.rev)) + '</h3>' + (ok ? pill('ok', '승인됨' + (d.gates.G7.decidedAt ? ' · ' + clock(d.gates.G7.decidedAt) : '')) + roChip() : g7 === 'AWAITING_HUMAN' || g7a === 'AWAITING_HUMAN' ? pill('wait', '검토 대기') : dataPill()) + '</div>';
       const wait = g7a === 'AWAITING_HUMAN' ? '<div class="md-note wait"><div><b>클러스터별 샘플을 검토할 차례예요</b><p>샘플을 채택하거나 고칠 점을 남기면 나머지 대화를 같은 기준으로 만들어요.</p></div>' + reviewBtn('G7a', '샘플 검토하기') + '</div>'
         : g7 === 'AWAITING_HUMAN' ? '<div class="md-note wait"><div><b>데이터셋을 승인할 차례예요</b><p>검사 결과와 표본 20개를 보고 승인하면 학습 계획을 세워요.</p></div>' + reviewBtn('G7', '데이터셋 검토하기') + '</div>' : '';
+      const next = nextNoteHTML('data');
       const rows = d.clusters.map((c) => {
         const s = c.sample || {};
         const adopt = s.ADOPT || 0;
@@ -1939,13 +2032,17 @@
         const st = upper(x[2].status);
         return '<div class="md-gate ' + (st === 'APPROVED' ? 'ok' : st === 'AWAITING_HUMAN' ? 'wait' : '') + '">' + icon(st === 'APPROVED' ? 'ok' : 'user') + '<div>' + x[1] + ' · ' + (st === 'APPROVED' ? '통과' : st === 'AWAITING_HUMAN' ? '검토 대기' : '아직') + '<small>' + (x[2].decidedAt ? E(clock(x[2].decidedAt)) : '') + '</small></div>' + recordBtn(x[0], '기록') + '</div>';
       }).join('') + '</div>';
-      return '<div class="md-pane">' + head + wait +
+      return '<div class="md-pane">' + head + wait + next +
         '<dl class="md-stats"><div><dt>학습</dt><dd>' + d.counts.train + '<small> 대화</small></dd></div><div><dt>검증</dt><dd>' + d.counts.validation + '<small> 대화</small></dd></div><div><dt>평가</dt><dd>' + d.counts.eval + '<small> 대화</small></dd></div><div><dt>나누는 단위</dt><dd><small>같은 장면 뼈대는 한쪽에만 넣어 섞이지 않게 해요</small></dd></div></dl>' +
         '<div class="md-h"><h4>클러스터</h4><span class="sp"></span><span class="md-legend"><span><i class="a"></i>실제 대화</span><span><i class="b"></i>합성</span></span></div>' +
         '<div class="md-scroll"><table class="md-t"><thead><tr><th>클러스터</th><th class="r">비율</th><th class="r">목표</th><th>재료</th><th>샘플 판정</th><th class="r">학습 · 검증 · 평가</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
         ((d.notes || []).length ? d.notes.map((n) => '<div class="md-note wait"><div><b>데이터셋 경고</b><p>' + E(n) + '</p></div></div>').join('') : '') +
         (d.blocking.length ? '<div class="md-note bad"><div><b>막는 문제 ' + d.blocking.length + '건</b><p>' + E(d.blocking.join(' · ')) + '</p></div></div>' : '') + gates +
         (ok ? '<div class="md-foot"><p>승인한 데이터셋은 바꿀 수 없어요. 학습은 이 버전으로 해요.</p></div>' : '') + '</div>';
+    }
+    function dataPill() {
+      const st = mSteps().find((x) => x.id === 'data') || {};
+      return pill({ run: 'run', fail: 'fail', wait: 'wait' }[st.k] || 'muted', { run: '만드는 중', fail: '멈춤' }[st.k] || (st.k === 'wait' ? st.s : '만들기 전'));
     }
     function phasesHTML(tr) {
       const list = tr.phases && tr.phases.length ? tr.phases : [];
@@ -1972,7 +2069,7 @@
       const busy = Boolean(state.detail.job) || state.busy;
       const fake = p0.provider === 'fake';
       if (tr.state === 'locked') return '<div class="md-pane"><div class="md-h"><h3>학습</h3>' + pill('muted', '아직 열리지 않았어요') + '</div><p class="lead">데이터셋을 승인하면 학습 계획(예상 비용·시간)을 세워요.</p></div>';
-      if (tr.state === 'pending') return '<div class="md-pane"><div class="md-h"><h3>학습</h3>' + pill('muted', '계획 전') + '</div><div class="md-note"><div><b>학습 계획을 세울 차례예요</b><p>계획은 비용이 들지 않아요. 계획을 세우면 예상 비용을 보고 시작할지 골라요.</p></div><button type="button" class="btn pri" data-act="resume"' + (busy ? ' disabled' : '') + '>이어서 실행</button></div></div>';
+      if (tr.state === 'pending') return '<div class="md-pane"><div class="md-h"><h3>학습</h3>' + pill('muted', '계획 전') + '</div><div class="md-note"><div><b>학습 계획을 세울 차례예요</b><p>계획은 비용이 들지 않아요. 계획을 세우면 예상 비용을 보고 시작할지 골라요.</p></div><button type="button" class="btn pri" data-act="model-run" data-stage="s10t"' + (busy ? ' disabled' : '') + '>학습 계획 세우기</button></div></div>';
       const confirm = mConfirmHTML(tr);
       if (tr.state === 'skip') {
         const g8 = upper(((mp().eval || {}).gate || {}).status);
@@ -2028,24 +2125,86 @@
       const m = mp();
       const tr = m.training || {};
       const e = m.eval || {};
-      const sets = '<h4>평가 세트</h4><ul class="md-sets"><li><span>고정 이력 질문</span><span>지난 이야기를 기억하는지</span></li><li><span>서운함</span><span>감정 표현과 회복</span></li><li><span>무례·사과 대본</span><span>사과를 받고 풀리는지</span></li><li><span>200턴 대화 · 사용자 4명</span><span>반복과 200턴째 기억</span></li></ul>';
-      if (!['done', 'skip'].includes(tr.state)) return '<div class="md-pane"><div class="md-h"><h3>평가</h3>' + pill('muted', '아직 열리지 않았어요') + '</div><p class="lead">학습이 끝나거나 학습 없이 진행을 고르면 열려요. 긴 프롬프트와 학습 모델에 같은 질문을 하고, 판정 모델 비교 뒤 블라인드 20쌍을 직접 골라요.</p>' + sets + '</div>';
+      const b = m.binding;
+      const bind = modelModeOf(state.detail) === 'BIND_EXISTING';
+      const sets = bind
+        ? '<h4>평가 방법</h4><ul class="md-sets"><li><span>비교 세트</span><span>원문에서 떼어 둔 실제 대화 장면</span></li><li><span>구별 판정</span><span>실제 답과 모델 답을 판정 모델과 가족이 가려요</span></li></ul>'
+        : '<h4>평가 세트</h4><ul class="md-sets"><li><span>고정 이력 질문</span><span>지난 이야기를 기억하는지</span></li><li><span>서운함</span><span>감정 표현과 회복</span></li><li><span>무례·사과 대본</span><span>사과를 받고 풀리는지</span></li><li><span>200턴 대화 · 사용자 4명</span><span>반복과 200턴째 기억</span></li></ul>';
+      if (bind && !b) return '<div class="md-pane"><div class="md-h"><h3>평가</h3>' + pill('muted', '아직 열리지 않았어요') + '</div><div class="md-note wait"><div><b>연결한 모델이 없어 평가를 기다려요</b><p>평가는 긴 프롬프트와 연결한 모델의 답을 비교해요. 먼저 학습된 모델을 연결해 주세요.</p></div><button type="button" class="btn pri" data-act="mstep" data-step="bind">모델 연결하기</button></div>' + sets + '</div>';
+      if (!bind && !['done', 'skip'].includes(tr.state)) return '<div class="md-pane"><div class="md-h"><h3>평가</h3>' + pill('muted', '아직 열리지 않았어요') + '</div><p class="lead">학습이 끝나거나 학습 없이 진행을 고르면 열려요. 긴 프롬프트와 학습 모델에 같은 질문을 하고, 판정 모델 비교 뒤 블라인드 20쌍을 직접 골라요.</p>' + sets + '</div>';
       const v = views(null).s10 || {};
       const gs = upper(e.gate && e.gate.status);
       const busy = Boolean(state.detail.job) || state.busy;
-      const arms = '<div class="md-vs"><div class="md-arm"><b>긴 프롬프트</b><small>학습 없음 · 지금 서비스 방식</small></div><span class="x">대</span><div class="md-arm"><b>' + (tr.state === 'skip' || !tr.adopted ? '학습 모델 없음' : '학습 모델') + '</b><small>' + (tr.state === 'skip' ? '학습 없이 진행해 비교하지 않아요' : tr.adopted ? sftPromptText(e.sftPrompt) : '학습 모델을 채택하지 않았어요') + '</small></div></div>';
+      // 비교 조건은 G8과 같은 수로 보인다(QA v5 C-08). 사전 등록 전이면 긴 프롬프트와 학습(연결) 모델 두 가지다.
+      const LONG = { label: '긴 프롬프트', sub: '학습 없음 · 지금 서비스 방식' };
+      let arms;
+      if (bind) arms = [LONG, { label: '연결한 모델', sub: b.kindLabel + ' · ' + text(b.ref) }];
+      else if ((e.arms || []).length) arms = e.arms.map((a) => (a.id === 'LONG_BASE' ? LONG : { label: a.label, sub: a.bound ? sftPromptText(e.sftPrompt) : '학습 결과가 없어 답을 받지 않아요' }));
+      else arms = [LONG, { label: tr.state === 'skip' || !tr.adopted ? '학습 모델 없음' : '학습 모델', sub: tr.state === 'skip' ? '학습 없이 진행해 비교하지 않아요' : tr.adopted ? sftPromptText(e.sftPrompt) : '쓸 체크포인트가 없어요' }];
+      const vs = '<div class="md-vs' + (arms.length > 2 ? ' n' + arms.length : '') + '">' + arms.map((a) => '<div class="md-arm"><b>' + E(a.label) + '</b><small>' + E(a.sub) + '</small></div>').join('<span class="x">대</span>') + '</div>';
       let act = '';
-      if (gs === 'AWAITING_HUMAN') act = '<div class="md-note wait"><div><b>' + (e.promptOnly ? '긴 프롬프트로 채택할지 확인해요' : '블라인드 20쌍을 고를 차례예요') + '</b><p>' + (e.promptOnly ? '학습 결과 없이 긴 프롬프트로 패키지를 만들어요.' : '지표와 판정 모델 비교를 보고, 어느 쪽 답이 나은지 직접 골라요.') + '</p></div>' + reviewBtn('G8', e.promptOnly ? '채택 검토하기' : '블라인드 20쌍 고르기') + '</div>';
-      else if (gs === 'APPROVED') act = '<div class="md-note ok"><div><b>평가를 마쳤어요</b><p>' + (e.promptOnly ? '긴 프롬프트로 채택했어요.' : '채택 결정을 기록했어요.') + (e.gate.decidedAt ? ' · ' + E(clock(e.gate.decidedAt)) : '') + '</p></div>' + recordBtn('G8', '결정 기록') + '</div>';
-      else if (v.kind === 'confirm') act = state.confirming === 's10' ? confirmHTML('s10') : '<div class="md-note wait"><div><b>학습 모델 답을 받으려면 GPU를 다시 빌려요</b><p>예상 비용을 확인한 뒤 평가를 시작해요.</p></div><button type="button" class="btn pri" data-act="confirm" data-stage="s10"' + (busy ? ' disabled' : '') + '>비용 확인</button></div>';
-      else if (['run', 'retry'].includes(v.kind)) act = '<div class="md-note run"><div><b>답을 모으는 중이에요</b><p>끝나면 블라인드 20쌍 고르기가 열려요.</p></div></div>';
+      if (gs === 'AWAITING_HUMAN') {
+        const t = !e.promptOnly ? ['블라인드 20쌍을 고를 차례예요', '지표와 판정 모델 비교를 보고, 어느 쪽 답이 나은지 직접 골라요.', '블라인드 20쌍 고르기']
+          : bind ? ['연결한 모델로 채택할지 확인해요', '비교 결과를 보고 연결한 모델을 쓸지 정해요.', '채택 검토하기']
+            : ['긴 프롬프트로 채택할지 확인해요', '학습 결과 없이 긴 프롬프트로 패키지를 만들어요.', '채택 검토하기'];
+        act = '<div class="md-note wait"><div><b>' + t[0] + '</b><p>' + t[1] + '</p></div>' + reviewBtn('G8', t[2]) + '</div>';
+      } else if (gs === 'APPROVED') act = '<div class="md-note ok"><div><b>평가를 마쳤어요</b><p>' + (e.adopted ? E(e.adopted.label) + '로 채택했어요.' : '채택 결정을 기록했어요.') + (e.gate.decidedAt ? ' · ' + E(clock(e.gate.decidedAt)) : '') + '</p></div>' + recordBtn('G8', '결정 기록') + '</div>';
+      else if (v.kind === 'confirm') act = state.confirming === 's10' ? confirmHTML('s10') : '<div class="md-note wait"><div><b>' + (bind ? '평가 비용을 확인해 주세요' : '학습 모델 답을 받으려면 GPU를 다시 빌려요') + '</b><p>예상 비용을 확인한 뒤 평가를 시작해요.</p></div><button type="button" class="btn pri" data-act="confirm" data-stage="s10"' + (busy ? ' disabled' : '') + '>비용 확인</button></div>';
+      else if (['run', 'retry'].includes(v.kind)) act = '<div class="md-note run"><div><b>답을 모으는 중이에요</b><p>끝나면 채택 검토가 열려요.</p></div></div>';
       else if (v.kind === 'fail') act = '<div class="md-note bad"><div><b>평가가 멈췄어요</b><p>' + E(failReason((rowsById(state.detail).get('s10') || {}).lastError).summary) + '</p></div><button type="button" class="btn pri" data-act="retry" data-stage="s10"' + (busy ? ' disabled' : '') + '>다시 실행</button></div>';
-      else act = '<div class="md-note"><div><b>평가를 시작할 수 있어요</b><p>이어서 실행하면 평가부터 진행해요.</p></div><button type="button" class="btn pri" data-act="resume"' + (busy ? ' disabled' : '') + '>이어서 실행</button></div>';
-      return '<div class="md-pane"><div class="md-h"><h3>비교할 두 가지</h3>' + (gs === 'APPROVED' ? roChip() : '') + '</div>' + arms + act + '</div><div class="md-pane">' + sets + '</div>';
+      else act = nextNoteHTML('eval');
+      return '<div class="md-pane"><div class="md-h"><h3>' + (bind || (e.arms || []).length ? '비교하는 조건 ' + arms.length + '가지' : '비교') + '</h3>' + (gs === 'APPROVED' ? roChip() : '') + '</div>' + vs + act + '</div><div class="md-pane">' + sets + '</div>';
+    }
+    // 학습된 모델 연결(QA v5 B-F07): 연결 파일을 고르면 서버가 확인하고 기록한다. 평가 검토가 열리기 전까지 바꿀 수 있다.
+    function bindHTML() {
+      const b = mp().binding;
+      const busy = Boolean(state.detail.job) || state.busy;
+      const locked = ['AWAITING_HUMAN', 'APPROVED'].includes(upper(((mp().eval || {}).gate || {}).status));
+      const err = state.bindError ? '<div class="md-note bad" role="alert"><div><b>연결하지 못했어요</b><p>' + E(state.bindError) + '</p></div></div>' : '';
+      const pick = '<button type="button" class="btn' + (b ? '' : ' pri') + '" data-act="bind-pick"' + (busy ? ' disabled' : '') + '>' + (state.binding ? '확인하는 중…' : b ? '다른 모델 연결' : '연결 파일 고르기') + '</button><input type="file" data-bind-file accept=".json,application/json" hidden aria-hidden="true" tabindex="-1">';
+      const guide = '<details class="fd-tech"><summary>연결 파일에 들어가는 것</summary><p>모델 종류(Hugging Face 어댑터 · Vertex 튜닝 모델 · 서빙 주소), 모델 이름, 버전(커밋), 기반 모델과 그 버전, 서빙 경로, 학습한 사람·날, 학습 데이터 설명, 사용 근거예요. 토큰 값은 넣지 않아요.</p></details>';
+      if (!b) return '<div class="md-pane"><div class="md-h"><h3>모델 연결</h3>' + pill('wait', '연결 전') + '</div><p class="lead">이미 학습한 모델을 이 캐릭터에 연결해요. 연결 파일(.json)을 고르면 서버가 확인한 뒤 기록해요. 학습이나 생성은 하지 않아서 비용이 들지 않아요.</p>' + err + '<div class="acts">' + pick + '</div>' + guide + '</div>';
+      const row = (k, val, small) => (val ? '<dt>' + E(k) + '</dt><dd>' + E(val) + (small ? '<small>' + E(small) + '</small>' : '') + '</dd>' : '');
+      return '<div class="md-pane"><div class="md-h"><h3>연결한 모델</h3>' + pill('ok', '연결함') + (locked ? roChip() : '') + '</div>' + err +
+        '<dl class="md-ro">' + row('모델 종류', b.kindLabel) + row('모델', b.ref) + row('버전', b.revision) + row('기반 모델', b.baseModel, b.baseModelRevision ? '버전 ' + b.baseModelRevision : '') + row('서빙 경로', b.servingRoute) + row('확인', b.checkLabel) +
+        row('학습', [b.trainedBy, b.trainedAt].filter(Boolean).join(' · '), b.dataNote) + row('사용 근거', b.usageBasis) + '</dl>' +
+        (locked ? '<div class="md-foot"><p>평가 검토가 열려서 연결한 모델을 바꿀 수 없어요.</p></div>' : '<div class="md-foot"><p>평가 검토가 열리기 전에는 다른 모델로 바꿀 수 있어요.</p>' + pick + '</div>') + '</div>';
+    }
+    async function connectModel(file) {
+      const id = state.detail && state.detail.id;
+      if (!id || !file) return;
+      state.bindError = '';
+      let body;
+      try {
+        if (file.size > 256 * 1024) throw new Error('big');
+        body = JSON.parse(await file.text());
+      } catch (error) {
+        state.bindError = '연결 파일을 읽지 못했어요. 모델 연결용 .json 파일이 맞는지 확인해 주세요.';
+        render();
+        return;
+      }
+      state.binding = true;
+      state.busy = true;
+      state.feedback = null;
+      render();
+      try {
+        const res = await fetch(R.apiPath(apiBase, '/api/characters/' + encodeURIComponent(id) + '/model-binding'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store' });
+        let data = null;
+        try { data = await res.json(); } catch (error) { data = null; }
+        if (!res.ok) state.bindError = text(data && typeof data.detail === 'string' ? data.detail : '연결하지 못했어요 (' + res.status + ').');
+        else { state.feedback = { tone: 'ok', text: '모델을 연결했어요. 이제 평가를 시작할 수 있어요.' }; state.mstep = 'eval'; }
+      } catch (error) {
+        state.bindError = '서버에 연결하지 못했어요. 연결이 돌아오면 다시 골라 주세요.';
+        state.conn = 'offline';
+      }
+      state.binding = false;
+      state.busy = false;
+      await refresh(false);
     }
     function modelHTML() {
       if (!state.mstep) state.mstep = mActive();
-      const body = state.mstep === 'src' ? srcHTML() : state.mstep === 'data' ? dataHTML() : state.mstep === 'train' ? trainHTML() : evalHTML();
+      if (!mSteps().some((x) => x.id === state.mstep)) state.mstep = mActive();
+      const body = state.mstep === 'bind' ? bindHTML() : state.mstep === 'src' ? srcHTML() : state.mstep === 'data' ? dataHTML() : state.mstep === 'train' ? trainHTML() : evalHTML();
       return '<div class="md">' + nowBarHTML() + stepperHTML() + body + '</div>';
     }
     function modelPanelHTML() {
@@ -2073,22 +2232,41 @@
       } else if (st === 'src' && m.material) {
         const total = m.material.total || 0;
         const sns = m.material.used.filter((u) => u.kind !== 'SYNTH').reduce((a, u) => a + u.conversations, 0);
-        prop('재료', E(m.material.used.map((u) => u.label).join(' + ')));
-        prop('실제 대화 비율', E(total ? Math.round(sns / total * 100) + '%' : '—'), total ? sns / total : null, 'acc');
-        prop('대화 데이터 창고', '연결 전');
+        const srcOnly = m.material.planned.length > 0 && m.material.planned.every((p) => p.kind === 'SOURCE');
+        prop('재료', E((m.material.used.length ? m.material.used : m.material.planned).map((u) => u.label).join(' + ')));
+        if (!srcOnly) {
+          prop('실제 대화 비율', E(total ? Math.round(sns / total * 100) + '%' : '—'), total ? sns / total : null, 'acc');
+          prop('대화 데이터 창고', '연결 전');
+        }
       } else if (st === 'data' && m.dataset) {
         prop('전체', E(m.dataset.counts.total + '대화'));
         prop('목표(학습)', E((m.dataset.planned || '—') + '대화'));
         prop('경고', E(m.dataset.warnings.length + '건'));
         if (m.dataset.trainingPrompt) prop('학습용 프롬프트', E((m.dataset.trainingPrompt.longestChars || 0).toLocaleString('ko-KR') + '자 이하 · 관계 ' + m.dataset.trainingPrompt.relationships + ' · 채널 ' + m.dataset.trainingPrompt.channels));
         prop('막는 문제', E(m.dataset.blocking.length + '건'));
+      } else if (st === 'bind' && m.binding) {
+        title = '연결한 모델';
+        prop('모델 종류', E(m.binding.kindLabel));
+        prop('모델', E(m.binding.ref || ''));
+        prop('확인', E(m.binding.checkLabel));
       } else if (st === 'eval') {
-        prop('평가', E(KIND_LABEL[(views(null).s10 || {}).kind] || '—'));
-        prop('블라인드', (m.eval || {}).promptOnly ? '없음 · 학습 없이 진행해 비교하지 않아요' : '20쌍 · 사람이 골라요');
-        prop('판정', '순서를 바꿔 두 번');
+        const ev = m.eval || {};
+        prop('평가', E((mSteps().find((x) => x.id === 'eval') || {}).s || '—'));
+        if (ev.adopted) prop('채택', E(ev.adopted.label));
+        if (modelModeOf(state.detail) === 'BIND_EXISTING') prop('비교 세트', '원문에서 떼어 둔 장면');
+        else {
+          prop('블라인드', ev.promptOnly ? '없음 · 학습 없이 진행해 비교하지 않아요' : '20쌍 · 사람이 골라요');
+          prop('판정', '순서를 바꿔 두 번');
+        }
       }
       return '<div class="ins-head"><span class="ins-kicker">모델 만들기</span><div class="ins-title"><h2>' + E(title) + '</h2></div></div><section class="ins-sec"><dl class="ins-props md-props">' + (props.join('') || '<dt>상태</dt><dd>아직 기록이 없어요</dd>') + '</dl></section>';
     }
+    const MODEL_RUN_OK = {
+      s9s: '데이터 샘플 만들기를 요청했어요. 끝나면 샘플 검토를 알려 드려요.',
+      s9: '학습 데이터 만들기를 요청했어요. 끝나면 데이터셋 승인을 알려 드려요.',
+      s10t: '학습 계획을 세우고 있어요. 계획에는 비용이 들지 않아요.',
+      s10: '평가를 요청했어요. 비용이 드는 평가면 시작하기 전에 다시 물어봐요.'
+    };
     function goModel() {
       if (modelMode()) { render(); return; }
       state.keepStep = true;
@@ -2222,7 +2400,7 @@
         if (state.sel) loadGateViews();
       }
       if (state.detail && modelMode() && !promptOnly(state.detail)) {
-        if (!state.wasModel && !state.keepStep) { state.mstep = null; state.mconfirm = null; }
+        if (!state.wasModel && !state.keepStep) { state.mstep = null; state.mconfirm = null; state.bindError = ''; }
         state.wasModel = true;
         state.keepStep = false;
         renderTop(v);
@@ -2366,7 +2544,10 @@
       else if (act === 'mconfirm') { state.mconfirm = el.dataset.v; state.mstep = el.dataset.step || state.mstep || 'train'; goModel(); const go = doc.querySelector('.md-confirm .btn:not(.ghost)'); if (go) go.focus(); }
       else if (act === 'mconfirm-cancel') { state.mconfirm = null; render(); }
       else if (act === 'train-go' || act === 'train-retry') { state.mconfirm = null; run({ characterId: id, action: 'train', confirm: ['s10t'], until: 's10t' }, act === 'train-go' ? '학습을 시작했어요. 진행은 학습 단계에서 볼 수 있어요.' : '결과를 다시 받아 오고 있어요.'); }
-      else if (act === 'skip-go') { state.mconfirm = null; run({ characterId: id, action: 'skip-training', until: currentUntil() || orchestrator().resumeUntil || 'sx' }, '학습 없이 진행해요. 평가에서 긴 프롬프트 채택을 확인해 주세요.'); }
+      // 학습 없이 진행은 평가 검토(G8)까지만 이어 간다. 다른 목표 작업을 따라가지 않는다.
+      else if (act === 'skip-go') { state.mconfirm = null; run({ characterId: id, action: 'skip-training', until: 'G8' }, '학습 없이 진행해요. 평가에서 긴 프롬프트 채택을 확인해 주세요.'); }
+      else if (act === 'model-run' && MODEL_RUN_UNTIL[el.dataset.stage]) run(R.runRequest(id, MODEL_RUN_UNTIL[el.dataset.stage], []), MODEL_RUN_OK[el.dataset.stage]);
+      else if (act === 'bind-pick') { const input = doc.querySelector('[data-bind-file]'); if (input) input.click(); }
       else if (act === 'stop-go') { state.mconfirm = null; post('/api/characters/' + encodeURIComponent(id) + '/training/stop', '중단을 요청했어요. GPU를 반납하고 멈춰요.'); }
       else if (act === 'release-go') { state.mconfirm = null; post('/api/characters/' + encodeURIComponent(id) + '/training/release', '결과를 버리고 GPU를 반납했어요.'); }
       else if (act === 'zoom-in') zoomStep(1);
@@ -2416,6 +2597,7 @@
     }
     function onChange(event) {
       const el = event.target;
+      if (el.matches('[data-bind-file]')) { const file = el.files && el.files[0]; connectModel(file); return; }
       if (el.matches('[data-pick]')) {
         if (el.value === '__new') { state.form.open = true; render(); return; }
         if (el.value === '__src') { global.location.href = 'sources.html'; return; }
@@ -2528,7 +2710,7 @@
     };
   }
 
-  const pure = { plainError, since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, s8cName, chatHref, isChatReady, statusOf, STATUS_LABEL, goalStages, goalOf, goalView, nameLabels, labelOf, autoSlug, splitAttempts, MODE_LABEL, MARK, VIDEO_TIERS, tierOf, tierName, tierCardsHTML, videoText, videoTone, canMakeVideo, readyPhotos, mount };
+  const pure = { plainError, since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, s8cName, chatHref, isChatReady, statusOf, STATUS_LABEL, goalStages, goalOf, goalView, modelNext, modelTasks, modelSteps, modelActive, MODEL_RUN_UNTIL, nameLabels, labelOf, autoSlug, splitAttempts, MODE_LABEL, MARK, VIDEO_TIERS, tierOf, tierName, tierCardsHTML, videoText, videoTone, canMakeVideo, readyPhotos, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = pure;
   if (global) global.FactoryFlow = pure;
 })(typeof window !== 'undefined' ? window : null);

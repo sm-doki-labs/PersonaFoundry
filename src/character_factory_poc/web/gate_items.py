@@ -857,7 +857,10 @@ def data_dataset(char_dir: Path, character_id: str, stage_dir: str, rev: str) ->
     notes = [
         f"차단 실패 {dataset.get('blockingFailures', 0)}건, 경고 {dataset.get('warnings', 0)}건"
     ]
-    notes += [str(n) for n in report.get("warnings", [])][:5] if isinstance(report, dict) else []
+    if isinstance(report, dict):
+        from character_factory_poc.web.model_path import plain_note
+
+        notes += [plain_note(str(n)) for n in report.get("warnings", [])][:5]
     plan = read_json(rev_dir / "plan.json") or {}
     labels = {
         str(c.get("clusterId")): str(c.get("label") or c.get("clusterId"))
