@@ -2397,7 +2397,7 @@
       others.sort((a, b) => (a.s.oldest || Infinity) - (b.s.oldest || Infinity));
       if (!others.length) return null;
       const o = others[0];
-      return { id: o.s.c.id, gate: o.t.gate, stage: o.t.stage, label: '다음 검토 · ' + displayName(o.s.c.name, o.s.c.id) + ' · ' + o.t.title };
+      return { id: o.s.c.id, gate: o.t.gate, stage: o.t.stage, label: '다음 검토 · ' + labelOf(o.s.c) + ' · ' + o.t.title };
     }
     function openNextTarget() {
       const t = state.nextTarget;
@@ -2461,7 +2461,7 @@
           : { t: title + ': 결정을 기록했어요.', s: '' };
       note.at = Date.now();
       const nb = state.batch === m.gate ? nextInBatch() : null;
-      if (nb) { note.act = 'next-batch'; note.label = '다음 건 검토 · ' + displayName(nb.next.c.name, nb.next.c.id) + ' (' + nb.left + '건 남음)'; }
+      if (nb) { note.act = 'next-batch'; note.label = '다음 건 검토 · ' + labelOf(nb.next.c) + ' (' + nb.left + '건 남음)'; }
       else { note.act = 'next-review'; note.gate = m.gate; }
       state.notes = [note].concat(state.notes).slice(0, 3);
       state.decided[m.gate] = Date.now();
