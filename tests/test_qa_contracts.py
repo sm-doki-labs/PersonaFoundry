@@ -48,7 +48,10 @@ def test_readiness_requires_both_usable_artifacts(case):
     ready(folder)
     put(
         folder / "state.json",
-        {"stages": {key: {"status": "APPROVED"} for key in ("s0", "s3", "s7", "s8", "s8c")}},
+        {
+            "stages": {key: {"status": "APPROVED"} for key in ("s0", "s3", "s7", "s8", "s8c")},
+            "gates": {"G6": {"status": "APPROVED", "rev": "pv10"}},
+        },
     )
     row, meta = status(client, url)
     assert (row["status"], row["statusLabel"], row["displayName"]) == (
@@ -66,7 +69,7 @@ def test_readiness_requires_both_usable_artifacts(case):
         )
     ]
     write_model_mode(folder, "TRAIN")
-    assert status(client, url)[0]["goal"]["total"] == 8
+    assert status(client, url)[0]["goal"] == {"label": "대화와 학습 준비", "done": 5, "total": 8}
     put(folder / "s8-chapters/cs2/chapter-start.json", {"chapters": []})
     row, meta = status(client, url)
     assert not row["chatReady"] and meta["missing"] == ["scene"] and "장면" in meta["reason"]
@@ -88,6 +91,8 @@ def test_job_and_review_states(case, monkeypatch):
         row, meta = status(client, url)
         assert (row["statusLabel"], meta["reason"]) == ("만드는 중", "만드는 중이에요")
     put(folder / "state.json", {"gates": {"G0": {"status": "AWAITING_HUMAN"}}})
+    assert status(client, url)[0]["statusLabel"] == "확인 필요"
+    put(folder / "state.json", {"stages": {"s0": {"status": "REJECTED"}}})
     assert status(client, url)[0]["statusLabel"] == "확인 필요"
     put(folder / "state.json", {"stages": {"s0": {"status": "CHECK_FAILED"}}})
     assert status(client, url)[0]["statusLabel"] == "실패"

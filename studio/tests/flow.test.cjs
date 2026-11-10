@@ -183,9 +183,18 @@ test('resume keeps an unfinished stage goal and retry always covers the failed s
 
 test('a completed request explains why no new stage started', () => {
   const job = {status: 'succeeded', ranStages: []};
-  assert.match(Flow.runFeedback(job), /이미 마쳐/);
+  const d = detail(rows({s7: 'APPROVED'}));
+  assert.match(Flow.runFeedback({...job, until: 's7'}, graph, d), /이미 마쳐/);
+  assert.match(Flow.runFeedback({...job, until: 's5'}, graph, d), /필요한 입력/);
   assert.match(Flow.runFeedback({...job, waiting: ['G3']}), /검토/);
   assert.match(Flow.runFeedback({...job, held: ['s5']}), /비용/);
   assert.match(Flow.runFeedback({...job, blocked: ['s7']}), /입력/);
   assert.equal(Flow.runFeedback({...job, status: 'running'}), '');
+});
+
+test('chat availability preserves outstanding reviews, and rejected prompts offer rework', () => {
+  assert.match(Flow.chatStatusText(2), /대화할 수 있어요.*검토 2건/);
+  const d = detail(rows({s8: 'REJECTED'}));
+  const tasks = Flow.buildTasks(graph, d, Flow.viewsFor(graph, d, {}));
+  assert.ok(tasks.some(t => t.actions.some(a => a.act === 'run-stage' && a.stage === 's8')));
 });

@@ -492,6 +492,11 @@ class JobManager:
         ):
             raise ValueError("영상 만들기를 마치지 못했어요.")
         if job.until == "s8c" and ctx.state(job.character_id).stage("s8c").status != "APPROVED":
+            state = ctx.state(job.character_id)
+            if (log.waiting or log.held) and not any(
+                state.stage(sid).status == "CHECK_FAILED" for sid in log.blocked
+            ):
+                return log
             raise ValueError("대화 준비를 마치지 못했어요. 멈춘 단계의 작업 기록을 확인해 주세요.")
         return log
 

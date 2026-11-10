@@ -44,7 +44,7 @@
     if (typeof d.chatReady === 'boolean') return d.chatReady;
     if (d.origin !== 'SOURCE' || !d.id) return false;
     const rows = rowsById(d);
-    const made = (id) => ['APPROVED', 'AWAITING_HUMAN'].includes(upper((rows.get(id) || {}).status));
+    const made = (id) => upper((rows.get(id) || {}).status) === 'APPROVED';
     return made('s8') && made('s8c');
   }
   // 대화해 보기 주소. 대화할 수 있을 때만 연다(대화 화면에서 막히는 버튼을 보이지 않는다).
@@ -556,6 +556,11 @@
           .concat([{ act: 'retry', stage: def.id, label: '다시 실행', disabled: busy, why: busy ? '지금 작업이 끝나면 다시 실행할 수 있어요.' : '' }])
       });
     });
+    if (upper((rows.get('s8') || {}).status) === 'REJECTED') {
+      items.push({ kind: 'ready', stage: 's8', order: 1, blocked: 0,
+        title: '말투와 성격을 다시 만들 차례예요', body: '고칠 점을 반영한 뒤 새 버전을 승인하면 대화할 수 있어요.',
+        actions: [{ act: 'run-stage', stage: 's8', label: '프롬프트 다시 만들기', disabled: busy }] });
+    }
     R.pendingGatesFor(detail || {}, graph).forEach((pending) => {
       const gateRow = gatesById(detail).get(pending.id) || {};
       const stage = pending.stage;
@@ -671,12 +676,16 @@
     const goal = goals.find((g) => unfinishedGoal(graph, d, g) && (!retryStage || ancestors(graph, g).has(retryStage)));
     return goal || retryStage || (d.origin === 'SOURCE' && unfinishedGoal(graph, d, 's8c') ? 's8c' : 'sx');
   }
-  function runFeedback(job) {
+  function chatStatusText(reviewCount) {
+    return '대화할 수 있어요' + (reviewCount ? ' · 검토 ' + reviewCount + '건이 남았어요' : '');
+  }
+  function runFeedback(job, graph, detail) {
     if (!job || job.status !== 'succeeded' || !Array.isArray(job.ranStages)) return '';
     if ((job.held || []).length) return '비용 확인을 기다리고 있어요. 예상 비용을 보고 실행할지 골라 주세요.';
     if ((job.waiting || []).length) return '검토를 기다리고 있어요. 결과를 확인하면 이어서 만들 수 있어요.';
     if ((job.blocked || []).length) return '아직 시작할 수 없는 단계가 있어요. 앞 단계의 결과와 필요한 입력을 확인해 주세요.';
-    return job.ranStages.length ? '이번 실행을 마쳤어요.' : '목표까지 이미 마쳐서 새로 실행할 단계가 없어요.';
+    if (job.ranStages.length) return '이번 실행을 마쳤어요.';
+    return unfinishedGoal(graph, detail, job.until) ? '이 목표로 시작할 수 있는 단계가 없어요. 필요한 입력과 앞 단계를 확인해 주세요.' : '목표까지 이미 마쳐서 새로 실행할 단계가 없어요.';
   }
 
   function targetLabel(graph, until) {
@@ -884,8 +893,9 @@
       const recent = Object.keys(state.decided).filter((g) => Date.now() - state.decided[g] < 60000).map((g) => ((state.graph.byGate.get(g) || {}).title || g) + ':');
       const fresh = diffNotes(state.graph, prev, next, Date.now()).filter((n) => !recent.some((prefix) => n.t.indexOf(prefix) === 0));
       if (fresh.length) state.notes = fresh.concat(state.notes).slice(0, 3);
-      const tracked = (next.jobs || []).find((j) => j.jobId === (state.feedback || {}).jobId);
-      const result = runFeedback(tracked);
+      const tracked = (next.jobs || []).find((j) => j.jobId === state.runJobId);
+      const result = runFeedback(tracked, state.graph, next);
+      if (result || (tracked && tracked.status === 'failed')) state.runJobId = null;
       if (result) state.feedback = { tone: 'ok', text: result };
       else if (tracked && tracked.status === 'failed') state.feedback = { tone: 'bad', text: '작업이 멈췄어요. 지금 할 일에서 이유를 확인해 주세요.' };
       state.detail = next;
@@ -1207,7 +1217,7 @@
     }
     function nowText(s) {
       const st = s.status.status;
-      if (st === 'chat_ready') return '다 만들었어요 · 대화할 수 있어요';
+      if (st === 'chat_ready') return chatStatusText(s.review);
       if (st === 'running') return '만드는 중이에요';
       if (st === 'draft') return s.c.origin === 'SOURCE' ? '원문을 올리는 중이에요' : '아직 실행하지 않았어요';
       if (st === 'done') return '모든 단계를 마쳤어요';
@@ -1327,7 +1337,10 @@
     function tasksHTML(v) {
       const d = state.detail;
       const now = Date.now();
-      const tasks = buildTasks(state.graph, d, v, { now, gateViews: state.gateViews, jobActive: Boolean(d.job) || state.busy, goal: notStarted() || (isChatReady(d) && currentUntil() === 'sx' && !(d.lastJob && d.lastJob.until === 'sx')) ? '' : currentUntil() });
+      const goal = currentUntil();
+      // 대화가 준비된 뒤 남은 선택 작업은 직접 시작했을 때만 지금 할 일에 넣는다.
+      const optional = isChatReady(d) && goal === 'sx' && (d.lastJob || {}).until !== goal;
+      const tasks = buildTasks(state.graph, d, v, { now, gateViews: state.gateViews, jobActive: Boolean(d.job) || state.busy, goal: notStarted() || optional ? '' : goal });
       state.notes = state.notes.filter((n) => now - n.at < 15 * 60000);
       const sum = currentSummary();
       const st = sum ? sum.status.status : '';
@@ -1335,7 +1348,7 @@
       // 모티브인데 아직 대화할 수 없고 아무것도 돌지 않으면, 대화까지 남은 단계와 이어서 만들 버튼을 먼저 보인다(QA C1).
       let goalLeft = null;
       if (!chat && isMotif(d) && !d.job && !tasks.some((t) => t.kind === 'ready')) {
-        const gs = goalStages(state.graph, d);
+        const gs = ancestors(state.graph, state.graph.byStage.has('s8c') ? 's8c' : 's8');
         const preds = predecessors(state.graph);
         const left = gs ? state.graph.stages.filter((s) => gs.has(s.id) && (v[s.id] || {}).kind === 'todo') : [];
         // 서버가 마지막 작업에서 시작할 수 없다고 남긴 단계는 권하지 않는다(buildTasks의 '이어서 실행'과 같은 규칙).
@@ -1352,11 +1365,11 @@
           '<div class="acts"><button type="button" class="btn pri" data-act="run-stage" data-stage="' + E(goalLeft.end) + '"' + (state.busy ? ' disabled' : '') + '>대화 준비 이어서 하기</button></div></div>';
       }
       if (chat) {
-        const t1 = st === 'chat_ready' ? '다 만들었어요 · 대화할 수 있어요' : '대화할 수 있어요';
+        const t1 = chatStatusText(tasks.filter((t) => t.kind === 'wait').length);
         let t2 = st === 'chat_ready' ? '만든 캐릭터와 바로 대화해 볼 수 있어요.' : st === 'running' ? '그동안 다른 단계를 더 만들고 있어요.' : '아래 할 일을 마치지 않아도 대화해 볼 수 있어요.';
         // 영상(약속 5): 만드는 중이면 그렇다고 적고, 영상이 없거나 실패했으면 보조 버튼으로 영상 만들기를 건넨다.
         if (d.videoStatus === 'making') t2 += ' 영상은 만드는 중이에요. 다 되면 대화할 때 영상이 나와요.';
-        else if (d.videoStatus === 'ready') t2 = st === 'chat_ready' ? '영상까지 다 만들었어요. 대화해 보기에서 영상과 함께 대화해요.' : t2;
+        else if (d.videoStatus === 'ready') t2 = st === 'chat_ready' ? '영상과 함께 대화해 볼 수 있어요.' : t2;
         else if (d.videoStatus === 'failed') t2 += ' 영상은 만들지 못했어요' + (d.videoError ? ': ' + plainError(d.videoError) : '.');
         const vOpen = Boolean(state.video && state.video.open);
         const vBtn = canMakeVideo(d) ? '<button type="button" class="btn" data-act="video-open" aria-expanded="' + vOpen + '">' + icon('video') + (d.videoStatus === 'failed' ? '영상 다시 만들기' : d.videoStatus === 'ready' ? '영상 바꾸기' : '영상 만들기') + '</button>' : '';
@@ -1449,16 +1462,11 @@
       }
       await refresh(false);
     }
-    // 대화 가능까지 마친 뒤 더 만들 때 갈 목표. 지금 목표와 같으면 끝까지 간다.
-    function nextGoal() {
-      const cur = currentUntil();
-      const next = orchestrator().resumeUntil || 'sx';
-      return next !== cur && (next === 'sx' || state.graph.byGate.has(next)) ? next : 'sx';
-    }
     function moreBuildHTML() {
-      const next = nextGoal();
+      const next = 'sx';
       const v = views(null);
       const left = Array.from(ancestors(state.graph, next)).filter((id) => !['done', 'skip'].includes((v[id] || {}).kind));
+      if (!left.length) return '';
       const names = state.graph.lanes.filter((lane) => laneIds(lane).some((id) => left.indexOf(id) >= 0)).map((lane) => lane.label);
       const label = targetLabel(state.graph, next);
       const open = Boolean(state.moreOpen);
@@ -1734,7 +1742,7 @@
       const prop = (k, val, cls) => { if (val) props.push('<dt>' + E(k) + '</dt><dd' + (cls ? ' class="' + cls + '"' : '') + '>' + val + '</dd>'); };
       if (state.graph.origin === 'SOURCE') prop('하는 일', E(stageHint(def)));
       prop('상태', E(x.sub || KIND_LABEL[x.kind]));
-      const gs = goalStages(state.graph, d);
+      const gs = ancestors(state.graph, state.graph.byStage.has('s8c') ? 's8c' : 's8');
       if (gs && !gs.has(id)) prop('목표', '대화하는 데 꼭 필요한 단계는 아니에요');
       prop('버전', row.rev ? E(revLabel(row.rev)) : '');
       prop('시작', row.startedAt ? E(clock(row.startedAt)) : '');
@@ -2294,7 +2302,8 @@
       render();
       try {
         const job = await request('POST', '/api/jobs', payload);
-        state.feedback = okText ? { tone: 'ok', text: okText, jobId: payload.action === 'run' ? job.jobId : null } : null;
+        state.runJobId = payload.action === 'run' ? job.jobId : null;
+        state.feedback = okText ? { tone: 'ok', text: okText } : null;
       } catch (error) {
         state.feedback = { tone: 'bad', text: error.message };
         if (error.network) state.conn = 'offline';
@@ -2549,7 +2558,7 @@
     };
   }
 
-  const pure = { runGoal, runFeedback, plainError, since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, s8cName, chatHref, isChatReady, statusOf, STATUS_LABEL, goalStages, goalOf, goalView, nameLabels, labelOf, autoSlug, splitAttempts, MODE_LABEL, MARK, VIDEO_TIERS, tierOf, tierName, tierCardsHTML, videoText, videoTone, canMakeVideo, readyPhotos, mount };
+  const pure = { chatStatusText, runGoal, runFeedback, plainError, since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, s8cName, chatHref, isChatReady, statusOf, STATUS_LABEL, goalStages, goalOf, goalView, nameLabels, labelOf, autoSlug, splitAttempts, MODE_LABEL, MARK, VIDEO_TIERS, tierOf, tierName, tierCardsHTML, videoText, videoTone, canMakeVideo, readyPhotos, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = pure;
   if (global) global.FactoryFlow = pure;
 })(typeof window !== 'undefined' ? window : null);
