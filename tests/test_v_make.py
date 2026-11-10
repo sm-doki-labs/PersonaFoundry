@@ -7,7 +7,11 @@ from fastapi.testclient import TestClient
 
 from character_factory_poc.common.store import read_json
 from character_factory_poc.providers.fake_vision import FakeVisionModel, all_pass
-from character_factory_poc.stages.s6_actions.catalog import MOTIF_STAGE_NOTE, MOTIF_VIDEO_TIERS
+from character_factory_poc.stages.s6_actions.catalog import (
+    MOTIF_STAGE_NOTE,
+    MOTIF_VIDEO_TIERS,
+    SIGNATURE_KEY,
+)
 from character_factory_poc.web.app import create_app
 from tests.support.flow import make_ctx
 from tests.support.synthetic import prompter_output
@@ -18,6 +22,12 @@ from tests.test_source_intake import put
 from tests.test_source_s0 import _good_digest
 from tests.test_twin_flow import _pack
 from tests.test_twin_s3 import _answer
+
+POSE = {
+    "title": "찰칵 세리머니",
+    "motion": "두 손으로 카메라 모양을 만들어 눈앞에 대고 찰칵 누르는 시늉을 한다.",
+    "useWhen": "골이나 축하 얘기를 할 때",
+}
 
 
 def wait(client, job, expected="succeeded"):
@@ -82,6 +92,11 @@ def test_light(tmp_path, monkeypatch):
     assert bad["status"] == "problem" and bad["problems"]
     assert client.delete(url + "/files/" + bad["fileId"]).is_success
     assert upload((files / "mom.png").read_bytes())["fileType"] == "photo"
+    # D-0165: 영상을 고르면 시그니처 포즈도 유저가 정해야 시작할 수 있다.
+    assert "시그니처 포즈" in client.post(url + "/finalize").json()["detail"]
+    saved = client.patch(url + "/settings", json={"videoTier": "light", "signaturePose": POSE})
+    assert saved.json()["signaturePose"] == POSE
+    assert client.get(url).json()["signaturePose"] == POSE and client.get(url).json()["canFinalize"]
 
     entered, resume = Event(), Event()
 
@@ -139,7 +154,12 @@ def test_light(tmp_path, monkeypatch):
     assert [ch["chapterId"] for ch in inputs["chapters"]] == ["ch1"]
     assert [a["actionKey"] for a in inputs["chapters"][0]["actions"]] == list(
         MOTIF_VIDEO_TIERS["light"].actions
-    )
+    ) + [SIGNATURE_KEY]
+    signature = inputs["chapters"][0]["actions"][-1]
+    assert signature["title"] == POSE["title"] and signature["description"] == POSE["motion"]
+    assert signature["pickRole"] == "emotion" and POSE["useWhen"] in signature["useWhen"]
+    assert POSE["motion"] in signature["prompt"] and MOTIF_STAGE_NOTE in signature["prompt"]
+    assert row["signaturePose"] == POSE
     assert inputs["chapters"][0]["stageNote"] == MOTIF_STAGE_NOTE
     assert all("Relationship stage" not in a["prompt"] for a in inputs["chapters"][0]["actions"])
     state = ctx.state(cid)
@@ -170,11 +190,23 @@ def test_light(tmp_path, monkeypatch):
     assert [ch["chapterId"] for ch in upgraded["chapters"]] == ["ch1"]
     assert [a["actionKey"] for a in upgraded["chapters"][0]["actions"]] == list(
         MOTIF_VIDEO_TIERS["standard"].actions
-    )
+    ) + [SIGNATURE_KEY]
     assert upgraded["schemaVersion"] == "action-inputs-light-v1"
     assert ctx.state(cid).gate("G1s").rev == "ar1"
     # 장면이 같으므로 배경·장면 이미지를 다시 만들지 않고 같은 첫 화면에 몸짓만 더한다.
     assert ctx.state(cid).gate("G4").rev == "fr1"
     assert upgraded["frameRev"] == "fr1"
     assert not (folder / "s4a-backgrounds/bg2").exists()
+    assert client.get(detail).json()["videoStatus"] == "ready"
+
+    # 시그니처를 바꾸면 영상을 다시 만들어야 하고, 같은 장면 이미지에 새 동작으로 만든다.
+    changed = POSE | {"motion": "손가락으로 작은 하트를 만들어 화면 쪽으로 내민다."}
+    assert client.patch(
+        url + "/settings", json={"videoTier": "standard", "signaturePose": changed}
+    ).is_success
+    assert client.get(detail).json()["videoStatus"] == "none"
+    wait(client, client.post(detail + "/videos", json={"videoTier": "standard"}).json()["jobId"])
+    again = read_json(folder / "s6-actions/va3/inputs.json")
+    assert again["frameRev"] == "fr1"
+    assert again["chapters"][0]["actions"][-1]["description"] == changed["motion"]
     assert client.get(detail).json()["videoStatus"] == "ready"

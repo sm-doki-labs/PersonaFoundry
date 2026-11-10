@@ -68,15 +68,21 @@ def test_motif_tiers_are_one_scene(tmp_path, tier, total, seconds):
     from character_factory_poc.stages.s6_actions.run import _resolve_config
 
     ctx, _ = make_ctx(tmp_path)
-    cfg = _resolve_config({"video_tier": tier, "motif": True})
-    assert cfg["chapters"] == ("ch1",) and len(cfg["actions"]) == total
-    assert set(MOTIF_VIDEO_TIERS["light"].actions) <= set(cfg["actions"]) <= set(APP_KEYS)
-    assert len(set(cfg["actions"])) == total
+    with pytest.raises(CheckFailed, match="시그니처 포즈"):
+        _resolve_config({"video_tier": tier, "motif": True})
+    pose = {"title": "찰칵", "motion": "카메라 모양 손", "useWhen": ""}
+    cfg = _resolve_config({"video_tier": tier, "motif": True, "signature": pose})
+    # D-0165: 모든 등급에 시그니처 포즈가 한 편 더 붙는다.
+    assert cfg["chapters"] == ("ch1",) and len(cfg["actions"]) == total + 1
+    assert cfg["actions"][-1] == "signature_good"
+    tier_keys = cfg["actions"][:-1]
+    assert set(MOTIF_VIDEO_TIERS["light"].actions) <= set(tier_keys) <= set(APP_KEYS)
+    assert len(set(tier_keys)) == total
     image, video = plan_calls(ctx, cfg)
-    assert image.calls == 1 and video.calls == total
+    assert image.calls == 1 and video.calls == total + 1
     assert (
         sum(cfg["durations"]["idle" if k.startswith("idle") else "emotion"] for k in cfg["actions"])
-        == seconds
+        == seconds + 10
     )
 
 

@@ -1356,7 +1356,13 @@
       // 사진은 원문과 함께 처음 만들 때 올린다. 이미 만든 캐릭터에는 사진을 덧붙일 수 없어서 새로 만드는 길을 안내한다.
       if (v.photos === 0) return '<div class="fl-vid" role="group" aria-label="영상 만들기"><p>이 캐릭터는 만들 때 사진을 올리지 않아서 영상을 만들 수 없어요. 원문 화면에서 사진과 원문을 함께 올려 새로 만들어 주세요.</p><div class="acts"><a class="btn" href="sources.html">원문 화면에서 새로 만들기</a>' + close + '</div></div>';
       const busy = Boolean(v.busy || state.busy);
-      return '<div class="fl-vid" role="group" aria-label="영상 만들기"><div class="vt-grid" role="radiogroup" aria-label="영상 등급">' + tierCardsHTML('videoTierPick', v.tier, { paidOnly: true, disabled: busy }) + '</div>' +
+      const sig = v.sig || {};
+      // 시그니처 포즈(D-0165): 모든 등급에 한 편씩. 이미 정했으면 채워 두고 고칠 수 있게 한다.
+      const sigHTML = '<div class="fl-sig" role="group" aria-labelledby="fl-sig-h"><p id="fl-sig-h"><b>시그니처 포즈</b> 모든 등급에 한 편씩 들어가요.</p>' +
+        '<label for="fl-sig-title">이름</label><input id="fl-sig-title" data-sig="title" maxlength="30" autocomplete="off" placeholder="예: 찰칵 세리머니" value="' + E(sig.title || '') + '"' + (busy ? ' disabled' : '') + '>' +
+        '<label for="fl-sig-motion">어떤 동작인가요</label><textarea id="fl-sig-motion" data-sig="motion" rows="2" maxlength="400" placeholder="예: 두 손으로 카메라 모양을 만들어 눈앞에 대고 찰칵 누르는 시늉을 해요."' + (busy ? ' disabled' : '') + '>' + E(sig.motion || '') + '</textarea>' +
+        '<label for="fl-sig-when">언제 나오면 좋을까요 <span class="opt">선택</span></label><input id="fl-sig-when" data-sig="useWhen" maxlength="200" autocomplete="off" placeholder="예: 골이나 축하 얘기를 할 때" value="' + E(sig.useWhen || '') + '"' + (busy ? ' disabled' : '') + '></div>';
+      return '<div class="fl-vid" role="group" aria-label="영상 만들기"><div class="vt-grid" role="radiogroup" aria-label="영상 등급">' + tierCardsHTML('videoTierPick', v.tier, { paidOnly: true, disabled: busy }) + '</div>' + sigHTML +
         '<p>영상 단계는 비용이 들어요. 시작하면 배경 하나·같은 옷으로 고른 등급의 몸짓 영상을 만들고, 다 되면 대화할 때 영상이 나와요.</p>' +
         (v.error ? '<p class="err" role="alert">' + E(v.error) + '</p>' : '') +
         '<div class="acts"><button type="button" class="btn" data-act="video-go"' + (busy ? ' disabled' : '') + '>' + (v.busy ? '시작하는 중…' : E(tierName(v.tier)) + ' 영상 만들기 시작') + '</button>' + (v.noPhoto ? photoLink : '') + '<button type="button" class="btn ghost" data-act="video-cancel">취소</button></div></div>';
@@ -1366,7 +1372,8 @@
       if (!d) return;
       const id = d.id;
       const t = tierOf(d.videoTier);
-      state.video = { open: true, tier: t === 'none' ? 'light' : t, photos: null, busy: false, error: '' };
+      const s = d.signaturePose || {};
+      state.video = { open: true, tier: t === 'none' ? 'light' : t, photos: null, busy: false, error: '', sig: { title: text(s.title), motion: text(s.motion), useWhen: text(s.useWhen) } };
       render();
       let n = -1; // 원문 초안을 읽지 못하면 모른다(-1). 그때는 고르게 두고 서버가 막으면 그 문장을 보인다.
       try { n = readyPhotos(await request('GET', '/api/sources/' + encodeURIComponent(id))); } catch (error) { n = -1; }
@@ -1377,11 +1384,20 @@
       const v = state.video;
       if (!d || !v || v.busy) return;
       const tier = tierOf(v.tier) === 'none' ? 'light' : v.tier;
+      const sig = v.sig || {};
+      const signaturePose = { title: text(sig.title).trim(), motion: text(sig.motion).trim(), useWhen: text(sig.useWhen).trim() };
+      if (!signaturePose.title || !signaturePose.motion) {
+        v.error = '시그니처 포즈의 이름과 어떤 동작인지 적어 주세요.';
+        render();
+        const el = doc.querySelector(signaturePose.title ? '#fl-sig-motion' : '#fl-sig-title');
+        if (el) el.focus();
+        return;
+      }
       v.busy = true;
       v.error = '';
       render();
       try {
-        await request('POST', '/api/characters/' + encodeURIComponent(d.id) + '/videos', { videoTier: tier });
+        await request('POST', '/api/characters/' + encodeURIComponent(d.id) + '/videos', { videoTier: tier, signaturePose });
         state.video = null;
         state.feedback = { tone: 'ok', text: tierName(tier) + ' 영상을 만들기 시작했어요. 다 되면 대화할 때 영상이 나와요.' };
       } catch (error) {
@@ -2397,6 +2413,7 @@
       if (!event.target.matches) return;
       if (event.target.matches('[data-ov-q]')) { state.ov.q = event.target.value; render(); }
       else if (event.target.matches('[data-side-q]')) { state.sq = event.target.value; render(); }
+      else if (event.target.matches('[data-sig]') && state.video) { state.video.sig = Object.assign({}, state.video.sig, { [event.target.dataset.sig]: event.target.value }); }
     }
     function onKey(event) {
       if (event.key === 'Escape' && state.menuOpen) { event.preventDefault(); state.menuOpen = false; render(); const b = doc.querySelector('[data-act="menu"]'); if (b) b.focus(); return; }

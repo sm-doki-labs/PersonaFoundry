@@ -97,6 +97,60 @@ def stage_note(chapter_id: str, *, motif: bool = False) -> str:
     return MOTIF_STAGE_NOTE if motif else STAGE_NOTES[chapter_id]
 
 
+# 시그니처 포즈(D-0165). 유저가 정한 동작 하나를 모티브의 모든 등급에 한 편씩 더한다.
+# 대화 중에는 감정 반응과 같은 후보로 들어가, '이럴 때'를 보고 자동으로 고른다.
+SIGNATURE_KEY = "signature_good"
+
+
+def signature_clip(signature: dict) -> dict:
+    title = signature["title"].strip()
+    motion = signature["motion"].strip()
+    use_when = (signature.get("useWhen") or "").strip()
+    return {
+        "key": SIGNATURE_KEY,
+        "playType": "reaction",
+        "mood": "good",
+        "title": title,
+        "description": motion,
+        "useWhen": (
+            f"{title} — 이 사람을 대표하는 시그니처 포즈. {use_when}"
+            if use_when
+            else f"{title} — 이 사람을 대표하는 시그니처 포즈. 반가운 인사, 축하, "
+            "자기를 대표하는 순간을 이야기할 때."
+        ),
+        "motion": (
+            f'The person performs their own signature pose, "{title}". '
+            f"The pose, described by the user in Korean: {motion} "
+            "Make the gesture clear, confident and instantly recognizable, hold it for a beat, "
+            "then lower the hands and ease back into the exact gentle smile of the reference "
+            "image, holding it calmly to the end. The person is seen from a distance with most of "
+            "the body in frame, so make the pose readable through the arms, shoulders and posture "
+            "as well as the face. The feet stay planted: no stepping, no walking, no turning "
+            "the whole body. The final frame matches the first frame in pose. Perform the "
+            "movement at real-life speed — never slow motion."
+        ),
+        "pickRole": "emotion",
+        "actionCategory": None,
+    }
+
+
+def clip_of(key: str, cfg: dict) -> dict:
+    """카탈로그 몸짓, 또는 이 캐릭터의 시그니처 포즈."""
+    if key == SIGNATURE_KEY:
+        return signature_clip(cfg["signature"])
+    return CATALOG[key]
+
+
+def signature_matches(inputs: dict, signature: dict | None) -> bool:
+    """만든 영상 입력의 시그니처가 지금 설정과 같은가. 시그니처를 바꾸면 영상을 다시 만든다."""
+    actions = [a for ch in inputs.get("chapters", []) for a in ch.get("actions", [])]
+    made = next((a for a in actions if a.get("actionKey") == SIGNATURE_KEY), None)
+    if not signature:
+        return made is None
+    want = signature_clip(signature)
+    return bool(made) and all(made.get(k) == want[k] for k in ("title", "description", "useWhen"))
+
+
 NEUTRAL_PROMPT = (
     "Make the same photo as the attached reference — same person, face, hair, pose, hands, "
     "outfit, background, light and framing. Change only the facial expression to a calm neutral "
@@ -116,10 +170,17 @@ def neutral_prompt(*, twin: bool = False) -> str:
     )
 
 
-def build_prompt(key: str, chapter_id: str, review_note: str = "", *, motif: bool = False) -> str:
+def build_prompt(
+    key: str,
+    chapter_id: str,
+    review_note: str = "",
+    *,
+    motif: bool = False,
+    clip: dict | None = None,
+) -> str:
     """앱 움직임 원문에 관계 단계·외형 유지 조건과 사람 수정 메모만 덧붙인다."""
     prompt = (
-        f"{CATALOG[key]['motion']} {stage_note(chapter_id, motif=motif)} "
+        f"{(clip or CATALOG[key])['motion']} {stage_note(chapter_id, motif=motif)} "
         "Keep the same person, face, outfit and background as the first frame. "
         "No text, logos or extra people."
     )

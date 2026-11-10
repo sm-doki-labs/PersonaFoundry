@@ -89,6 +89,12 @@
             <div class="vt-grid" data-tier-cards></div>
             <p class="src-fhint" id="src-tier-h">영상을 고르면 대화가 된 뒤에 배경 하나·같은 옷으로 여러 몸짓 영상을 만들어요. 영상 단계는 비용이 들어요.</p>
             <p class="src-fhint" data-tier-hint hidden>다음 단계에서 원문과 함께 얼굴이 잘 보이는 사진을 1장 이상 올려 주세요.</p>
+          <div class="src-sig" data-sig hidden>
+            <p class="src-sig-h"><b>시그니처 포즈</b><span class="src-fhint">모든 영상 등급에 한 편씩 들어가요. 이 사람 하면 떠오르는 동작을 적어 주세요.</span></p>
+            <div class="src-fld"><label for="src-sig-title">이름</label><input id="src-sig-title" name="sigTitle" maxlength="30" autocomplete="off" placeholder="예: 찰칵 세리머니" aria-describedby="src-sig-title-e"><p class="src-ferr" id="src-sig-title-e" data-err="sigTitle" hidden></p></div>
+            <div class="src-fld"><label for="src-sig-motion">어떤 동작인가요</label><textarea id="src-sig-motion" name="sigMotion" rows="2" maxlength="400" placeholder="예: 두 손으로 카메라 모양을 만들어 눈앞에 대고 찰칵 누르는 시늉을 해요." aria-describedby="src-sig-motion-e"></textarea><p class="src-ferr" id="src-sig-motion-e" data-err="sigMotion" hidden></p></div>
+            <div class="src-fld"><label for="src-sig-when">언제 나오면 좋을까요 <span class="opt">선택</span></label><input id="src-sig-when" name="sigWhen" maxlength="200" autocomplete="off" placeholder="예: 골이나 축하 얘기를 할 때"></div>
+          </div>
           </fieldset>
 
           <div class="src-switch">
@@ -116,6 +122,7 @@
           <div><dt>기본 정보</dt><dd data-sum-facts></dd></div>
           <div><dt>모델 준비 방식</dt><dd data-sum-mode></dd></div>
           <div><dt>영상</dt><dd><span data-sum-video></span> <button type="button" class="link src-sum-edit" data-act="tier-edit" aria-expanded="false" aria-controls="src-tier-edit">바꾸기</button></dd></div>
+          <div hidden><dt>시그니처 포즈</dt><dd data-sum-sig></dd></div>
           <div><dt>진행 방식</dt><dd data-sum-auto></dd></div>
           <div><dt>메모</dt><dd data-sum-notes></dd></div>
         </dl>

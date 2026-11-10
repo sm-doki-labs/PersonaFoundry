@@ -649,3 +649,10 @@ body.fl{font-family:var(--fd-font);font-size:var(--fd-fs-3);line-height:1.5;lett
 .fl-vid .acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .fl-vid .err{color:var(--fd-danger-fg)}
 .fl-vid .btn{text-decoration:none}
+.fl-sig{display:flex;flex-direction:column;gap:4px;max-width:62ch;padding-top:4px}
+.fl-sig>p{margin:0 0 4px;color:var(--fd-fg-muted);font-size:var(--fd-fs-2)}
+.fl-sig>p b{color:var(--fd-fg);font-weight:600;margin-right:4px}
+.fl-sig label{font-size:var(--fd-fs-2);font-weight:500;color:var(--fd-fg-muted);margin-top:4px}
+.fl-sig .opt{font-weight:400;color:var(--fd-fg-subtle);margin-left:4px}
+.fl-sig input,.fl-sig textarea{font:inherit;color:var(--fd-fg);background:var(--fd-bg-surface);border:1px solid var(--fd-line-strong);border-radius:var(--fd-r-2);padding:6px 10px;width:100%}
+.fl-sig textarea{resize:vertical}

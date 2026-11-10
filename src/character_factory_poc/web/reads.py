@@ -630,19 +630,23 @@ def job_status(row, job, last):
 
 
 def video_fields(folder, state):
-    from character_factory_poc.pipeline.origin import read_video_tier
+    from character_factory_poc.pipeline.origin import is_twin, read_signature, read_video_tier
+    from character_factory_poc.stages.s6_actions.catalog import signature_matches
 
     tier = read_video_tier(folder)
+    signature = read_signature(folder)
     gate = state.get("gates", {}).get("G5b", {})
     approved = gate.get("rev") if gate.get("status") == "APPROVED" else None
     preset = ""
+    inputs = {}
     if approved:
-        preset = (read_json_file(folder / "s6-actions" / approved / "inputs.json") or {}).get(
-            "preset", ""
-        )
+        inputs = read_json_file(folder / "s6-actions" / approved / "inputs.json") or {}
+        preset = inputs.get("preset", "")
+    # D-0165: 모티브는 시그니처 포즈를 바꾸면 영상을 다시 만들어야 한다.
+    same_signature = not tier or not is_twin(folder) or signature_matches(inputs, signature)
     job = read_json_file(folder / "video-job.json") or {}
     status = "none"
-    if tier != "none" and approved and (not tier or preset == f"tier:{tier}"):
+    if tier != "none" and approved and (not tier or preset == f"tier:{tier}") and same_signature:
         status = "ready"
     elif tier and tier == job.get("tier"):
         if job.get("status") in ("queued", "running"):
@@ -659,6 +663,7 @@ def video_fields(folder, state):
         videoTier=tier or (preset.removeprefix("tier:") if preset.startswith("tier:") else "none"),
         videoStatus=status,
         videoLabel=labels[status],
+        signaturePose=signature,
     )
 
 
@@ -804,6 +809,7 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
                 "videoTier",
                 "videoStatus",
                 "videoLabel",
+                "signaturePose",
                 *QA_FIELDS,
             )
         },

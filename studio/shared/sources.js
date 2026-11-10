@@ -44,6 +44,12 @@
   function labelOf(pairs, id) { const p = pairs.find((x) => x[0] === id); return p ? p[1] : ''; }
   function tierOf(value) { return VIDEO_TIERS.some((t) => t[0] === value) ? value : 'none'; }
   function tierName(value) { return labelOf(VIDEO_TIERS, tierOf(value)); }
+  // 시그니처 포즈(D-0165): 이름과 동작이 있어야 쓴다. 앞뒤 공백은 뗀다.
+  function sigOf(value) {
+    const v = value || {};
+    const sig = { title: text(v.title).trim(), motion: text(v.motion).trim(), useWhen: text(v.useWhen).trim() };
+    return sig.title && sig.motion ? sig : null;
+  }
   // 등급 고르기 카드. 원문 화면과 진행 화면의 영상 만들기가 같은 카드를 쓴다. paidOnly면 '영상 없이'를 뺀다.
   function tierCardsHTML(name, value, opts) {
     const o = opts || {};
@@ -482,7 +488,7 @@
       const c = state.character || {};
       const s = state.settings || {};
       const pick = (k) => (d[k] != null ? d[k] : c[k] != null ? c[k] : s[k] != null ? s[k] : null);
-      return { modelMode: pick('modelMode'), autoReview: pick('autoReview'), videoTier: tierOf(pick('videoTier')) };
+      return { modelMode: pick('modelMode'), autoReview: pick('autoReview'), videoTier: tierOf(pick('videoTier')), signaturePose: sigOf(pick('signaturePose')) };
     }
     // 시작 전에 영상 등급을 바꾼다(약속 5 PATCH settings). 실패하면 화면 값은 그대로 두고 알린다.
     async function setTier(value) {
@@ -509,6 +515,30 @@
       return ok;
     }
 
+    // 시그니처 포즈(D-0165)를 저장한다. 영상 등급은 그대로 두고 함께 보낸다.
+    async function setSignature(pose) {
+      const sig = sigOf(pose);
+      if (!state.cid || state.finalized || state.busy || !sig) return false;
+      state.busy = 'tier';
+      state.error = null;
+      emit();
+      let ok = false;
+      try {
+        const data = await request('PATCH', '/api/sources/' + encodeURIComponent(state.cid) + '/settings', { videoTier: settings().videoTier, signaturePose: sig });
+        const saved = sigOf(data && data.signaturePose) || sig;
+        state.settings = Object.assign({}, state.settings || {}, { signaturePose: saved });
+        if (state.draft) state.draft.signaturePose = saved;
+        state.announce = '시그니처 포즈를 저장했어요.';
+        ok = true;
+      } catch (error) {
+        state.error = '시그니처 포즈를 저장하지 못했어요. ' + errorText(error);
+      }
+      state.busy = null;
+      emit();
+      if (ok) await refresh();
+      return ok;
+    }
+
     function validateDraft(input) {
       const v = input || {};
       const errors = {};
@@ -517,6 +547,10 @@
       if (!text(v.age).trim()) errors.age = '나이를 적어 주세요.';
       if (!text(v.gender).trim()) errors.gender = '성별을 골라 주세요.';
       if (!text(v.job).trim()) errors.job = '하는 일을 적어 주세요.';
+      if (tierOf(v.videoTier) !== 'none') {
+        if (!text(v.sigTitle).trim()) errors.sigTitle = '시그니처 포즈 이름을 적어 주세요.';
+        if (!text(v.sigMotion).trim()) errors.sigMotion = '어떤 동작인지 적어 주세요.';
+      }
       return errors;
     }
     async function createDraft(input) {
@@ -539,11 +573,13 @@
           videoTier
         };
         if (input.chapterTemplate) body.chapterTemplate = input.chapterTemplate;
+        const signaturePose = videoTier === 'none' ? null : sigOf({ title: input.sigTitle, motion: input.sigMotion, useWhen: input.sigWhen });
+        if (signaturePose) body.signaturePose = signaturePose;
         const data = await request('POST', '/api/sources/drafts', body);
         state.busy = null;
         if (o.onCid) o.onCid(data.characterId);
         await load(data.characterId);
-        state.settings = { modelMode, autoReview, videoTier };
+        state.settings = { modelMode, autoReview, videoTier, signaturePose };
         emit();
         return { characterId: data.characterId };
       } catch (error) {
@@ -927,7 +963,7 @@
     function uploading() { return state.uploads.some((u) => ACTIVE.indexOf(u.phase) >= 0); }
 
     return {
-      state, load, refresh, progress, projects, drafts, settings, setTier, createDraft, validateDraft, addFiles, retry, dismiss, editFile, removeFile, importPath, finalize, deleteDraft, reset, startState, items, photoItems, uploading,
+      state, load, refresh, progress, projects, drafts, settings, setTier, setSignature, createDraft, validateDraft, addFiles, retry, dismiss, editFile, removeFile, importPath, finalize, deleteDraft, reset, startState, items, photoItems, uploading,
       subscribe(fn) { listeners.push(fn); return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); }; }
     };
   }
@@ -1054,7 +1090,7 @@
       side: $('[data-side]'), headTheme: $('[data-head-theme]'), fileSum: $('[data-file-sum]'), startLead: $('[data-start-lead]'),
       doneTitle: $('[data-done-title]'), doneText: $('[data-done-text]'), prog: $('[data-prog]'), progText: $('[data-prog-text]'), chatLink: $('[data-chat-link]'),
       title: $('[data-title]'), intro: $('[data-intro]'), crumb: $('[data-crumb]'), resume: $('[data-resume]'), adv: $('[data-adv]'), startNote: $('[data-start-note]'),
-      tierCards: $('[data-tier-cards]'), tierHint: $('[data-tier-hint]'), sumVideo: $('[data-sum-video]'), tierEdit: $('[data-tier-edit]'),
+      tierCards: $('[data-tier-cards]'), tierHint: $('[data-tier-hint]'), sumVideo: $('[data-sum-video]'), tierEdit: $('[data-tier-edit]'), sig: $('[data-sig]'), sumSig: $('[data-sum-sig]'),
       photos: $('[data-photos]'), photoList: $('[data-photo-list]'), photoPicker: $('[data-photo-picker]'), photoCount: $('[data-photo-count]'), photoHint: $('[data-photo-hint]'),
       videoLine: $('[data-video-line]'), videoText: $('[data-video-text]')
     };
@@ -1138,6 +1174,11 @@
             const edit = r.summary.querySelector('[data-act="tier-edit"]');
             if (edit) { edit.hidden = !!S.finalized; edit.disabled = S.busy === 'tier'; edit.setAttribute('aria-expanded', String(tierEditOpen && !S.finalized)); edit.textContent = tierEditOpen ? '닫기' : '바꾸기'; }
           }
+          if (r.sumSig) {
+            const sig = set.signaturePose;
+            r.sumSig.textContent = sig ? sig.title + ' — ' + sig.motion : '아직 정하지 않았어요';
+            r.sumSig.parentElement.hidden = set.videoTier === 'none' && !sig;
+          }
           const notes = r.summary.querySelector('[data-sum-notes]');
           const memo = [text(basis.scope) && text(basis.scope) !== DEFAULT_SCOPE ? text(basis.scope) : '', text(basis.notes)].filter(Boolean).join(' · ');
           notes.textContent = memo;
@@ -1148,7 +1189,7 @@
       if (r.tierEdit) {
         const show = hasDraft && tierEditOpen && !S.finalized;
         r.tierEdit.hidden = !show;
-        const html = show ? '<div class="vt-grid" role="radiogroup" aria-label="영상 등급 바꾸기">' + tierCardsHTML('videoTierEdit', intake.settings().videoTier, { disabled: S.busy === 'tier' }) + '</div><p class="src-fhint">영상 단계는 비용이 들어요. 고르면 바로 저장해요.</p>' : '';
+        const html = show ? '<div class="vt-grid" role="radiogroup" aria-label="영상 등급 바꾸기">' + tierCardsHTML('videoTierEdit', intake.settings().videoTier, { disabled: S.busy === 'tier' }) + '</div><p class="src-fhint">영상 단계는 비용이 들어요. 고르면 바로 저장해요.</p>' + sigEditHTML(intake.settings().signaturePose, S.busy === 'tier') : '';
         if (r.tierEdit.dataset.html !== html) { r.tierEdit.innerHTML = html; r.tierEdit.dataset.html = html; }
       }
       renderTitle();
@@ -1469,9 +1510,9 @@
       const mode = (f.querySelector('[name="modelMode"]:checked') || {}).value;
       const tier = (f.querySelector('[name="videoTier"]:checked') || {}).value;
       const auto = f.querySelector('[name="autoReview"]');
-      const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined, modelMode: mode, autoReview: auto ? auto.checked : true, videoTier: tier };
+      const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined, modelMode: mode, autoReview: auto ? auto.checked : true, videoTier: tier, sigTitle: f.querySelector('[name="sigTitle"]').value, sigMotion: f.querySelector('[name="sigMotion"]').value, sigWhen: f.querySelector('[name="sigWhen"]').value };
       const errors = intake.validateDraft(input);
-      ['displayName', 'subjectKind', 'age', 'gender', 'job'].forEach((n) => fieldError(n, errors[n]));
+      ['displayName', 'subjectKind', 'age', 'gender', 'job', 'sigTitle', 'sigMotion'].forEach((n) => fieldError(n, errors[n]));
       const first = Object.keys(errors)[0];
       if (first) { const ctl = f.querySelector('[name="' + first + '"]'); if (ctl) ctl.focus(); return; }
       intake.createDraft(input).then((res) => {
@@ -1490,6 +1531,12 @@
       if (act === 'pick' && r.picker) r.picker.click();
       else if (act === 'pick-photo' && r.photoPicker) r.photoPicker.click();
       else if (act === 'tier-edit') { tierEditOpen = !tierEditOpen; render(); if (tierEditOpen && r.tierEdit) { const cur = r.tierEdit.querySelector('input:checked'); if (cur) cur.focus(); } }
+      else if (act === 'sig-save' && r.tierEdit) {
+        const q = (n) => (r.tierEdit.querySelector('[name="' + n + '"]') || {}).value;
+        const pose = { title: q('sigeTitle'), motion: q('sigeMotion'), useWhen: q('sigeWhen') };
+        if (!sigOf(pose)) { S.error = '시그니처 포즈의 이름과 동작을 적어 주세요.'; render(); return; }
+        intake.setSignature(pose).then((ok) => { if (ok) { tierEditOpen = false; render(); const b = r.summary && r.summary.querySelector('[data-act="tier-edit"]'); if (b) b.focus(); } });
+      }
       else if (act === 'theme' || act === 'theme-next') setTheme(el.dataset.theme || 'system');
       else if (act === 'fold') { listOpen = el.getAttribute('aria-expanded') !== 'true'; render(); }
       else if (act === 'toggle' && key) { open[key] = el.getAttribute('aria-expanded') !== 'true'; render(); }
@@ -1509,11 +1556,21 @@
       else if (act === 'reload') { const cid = route(); if (cid) intake.load(cid); }
       else if (act === 'restart') { intake.reset(); clearHash(); render(); intake.drafts(); }
     }
+    // 바꾸기 칸의 시그니처 포즈. 등급과 달리 적고 나서 저장 버튼으로 보낸다.
+    function sigEditHTML(sig, busy) {
+      const s = sig || { title: '', motion: '', useWhen: '' };
+      return '<div class="src-sig" data-sig-edit><p class="src-sig-h"><b>시그니처 포즈</b><span class="src-fhint">모든 영상 등급에 한 편씩 들어가요.</span></p>' +
+        '<div class="src-fld"><label for="src-sige-title">이름</label><input id="src-sige-title" name="sigeTitle" maxlength="30" autocomplete="off" placeholder="예: 찰칵 세리머니" value="' + E(s.title) + '"></div>' +
+        '<div class="src-fld"><label for="src-sige-motion">어떤 동작인가요</label><textarea id="src-sige-motion" name="sigeMotion" rows="2" maxlength="400" placeholder="예: 두 손으로 카메라 모양을 만들어 눈앞에 대고 찰칵 누르는 시늉을 해요.">' + E(s.motion) + '</textarea></div>' +
+        '<div class="src-fld"><label for="src-sige-when">언제 나오면 좋을까요 <span class="opt">선택</span></label><input id="src-sige-when" name="sigeWhen" maxlength="200" autocomplete="off" placeholder="예: 골이나 축하 얘기를 할 때" value="' + E(s.useWhen) + '"></div>' +
+        '<div class="acts"><button type="button" class="btn" data-act="sig-save"' + (busy ? ' disabled' : '') + '>시그니처 포즈 저장</button></div></div>';
+    }
     function chapterTemplateReset() {
       chapterTouched = false;
       tierEditOpen = false;
       if (r.form) r.form.reset();
       if (r.tierHint) r.tierHint.hidden = true;
+      if (r.sig) r.sig.hidden = true;
     }
     function onChange(e) {
       const t = e.target;
@@ -1521,7 +1578,7 @@
       if (t === r.photoPicker) { intake.addFiles(t.files, { photoOnly: true }); t.value = ''; return; }
       if (t.name === 'videoTierEdit') { intake.setTier(t.value).then((ok) => { if (ok) { tierEditOpen = false; render(); const b = r.summary && r.summary.querySelector('[data-act="tier-edit"]'); if (b) b.focus(); } }); return; }
       if (r.form && r.form.contains(t)) {
-        if (t.name === 'videoTier' && r.tierHint) { r.tierHint.hidden = t.value === 'none'; return; }
+        if (t.name === 'videoTier') { if (r.tierHint) r.tierHint.hidden = t.value === 'none'; if (r.sig) r.sig.hidden = t.value === 'none'; return; }
         if (t.name === 'chapterTemplate') chapterTouched = true;
         if (t.name === 'subjectKind') {
           fieldError('subjectKind', '');
@@ -1589,7 +1646,7 @@
     };
   }
 
-  const api = { MAX_BYTES, EXTENSIONS, PHOTO_EXTENSIONS, PHOTO_MAX_BYTES, VIDEO_TIERS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, ro, shortDate, suggestTextId, checkFile, isPhotoName, isPhotoRecord, tierOf, tierName, tierCardsHTML, videoText, doneView, wantsPoll, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
+  const api = { sigOf, MAX_BYTES, EXTENSIONS, PHOTO_EXTENSIONS, PHOTO_MAX_BYTES, VIDEO_TIERS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, ro, shortDate, suggestTextId, checkFile, isPhotoName, isPhotoRecord, tierOf, tierName, tierCardsHTML, videoText, doneView, wantsPoll, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global) global.SourceIntake = api;
 })(typeof window !== 'undefined' ? window : null);

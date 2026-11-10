@@ -397,8 +397,8 @@ def _mark_failed(ctx: Context, cid: str, sid: str, message: str) -> None:
 def _matches_video_scope(ctx, cid, sid, rev):
     """등급이 바뀌면 범위가 같은 승인 결과만 재사용한다."""
     from character_factory_poc.common.store import read_json
-    from character_factory_poc.pipeline.origin import is_twin, read_video_tier
-    from character_factory_poc.stages.s6_actions.catalog import video_tiers
+    from character_factory_poc.pipeline.origin import is_twin, read_signature, read_video_tier
+    from character_factory_poc.stages.s6_actions.catalog import signature_matches, video_tiers
 
     folder = ctx.character_dir(cid)
     tier = read_video_tier(folder)
@@ -407,7 +407,11 @@ def _matches_video_scope(ctx, cid, sid, rev):
     state = ctx.state(cid)
     if sid == "s6":
         data = read_json(folder / "s6-actions" / rev / "inputs.json")
-        return data["preset"] == f"tier:{tier}" and data["frameRev"] == state.gate("G4").rev
+        return (
+            data["preset"] == f"tier:{tier}"
+            and data["frameRev"] == state.gate("G4").rev
+            and (not is_twin(folder) or signature_matches(data, read_signature(folder)))
+        )
     locations = {
         "s4a": ("s4a-backgrounds", "background-candidates.json"),
         "s4b": ("s4b-poses", "scene-plan.json"),

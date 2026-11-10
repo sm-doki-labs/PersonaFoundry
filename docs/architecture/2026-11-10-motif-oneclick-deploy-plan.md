@@ -161,7 +161,7 @@ QA 원문: ~/Documents/Codex/2026-11-07/new-chat/ux-qa/{create,review,chat}/ (�
 - 영상 등급 값: "none" | "light" | "standard" | "pro" | "max". 화면 이름은 영상 없이 / 라이트 / 스탠다드 / 프로 / 맥스. 화면에는 개수를 쓰지 않는다.
 - POST /api/sources/drafts 본문에 videoTier(기본 "none")를 더한다. PATCH /api/sources/{cid}/settings 본문 {videoTier}로 시작 전·대화 가능 뒤에도 바꿀 수 있다.
 - 원문 업로드는 사진(.jpg .jpeg .png .webp, 15MB 이하)도 받는다. FileRecord에 fileType: "text" | "photo"를 싣는다. 사진은 출처 묶음 photos로 들어간다. videoTier가 none이 아니면 사진이 1장 이상 있어야 시작할 수 있다(problems에 쉬운 말로).
-- 자동 진행에서 videoTier가 none이 아니면 대화 가능 뒤에도 이어서 기준 사진(G1s 첫 사진), 장면 이미지(G4a·G4b·G4 첫 후보), 동작 영상(G5b 승인)을 자동으로 돈다. 모티브는 등급과 상관없이 배경 하나·장면 이미지 하나(ch1)이고 등급은 몸짓 수만 정한다(라이트 10, 스탠다드 20, 프로 28, 맥스 37종, D-0164). 등급을 고른 것이 유료 실행 확인을 대신한다. 소개 영상(S5)과 학습은 돌리지 않는다.
+- 자동 진행에서 videoTier가 none이 아니면 대화 가능 뒤에도 이어서 기준 사진(G1s 첫 사진), 장면 이미지(G4a·G4b·G4 첫 후보), 동작 영상(G5b 승인)을 자동으로 돈다. 모티브는 등급과 상관없이 배경 하나·장면 이미지 하나(ch1)이고 등급은 몸짓 수만 정한다(라이트 10, 스탠다드 20, 프로 28, 맥스 37종, D-0164). 모든 등급에 유저가 정한 시그니처 포즈 한 편이 더해진다(signaturePose {title, motion, useWhen}, drafts·settings·videos 본문, D-0165). 등급을 고른 것이 유료 실행 확인을 대신한다. 소개 영상(S5)과 학습은 돌리지 않는다.
 - POST /api/characters/{id}/videos 본문 {videoTier} → 대화 가능한 캐릭터에 영상 만들기를 건다({jobId}).
 - 캐릭터 상세·목록에 videoTier, videoStatus("none" | "making" | "ready" | "failed"), videoLabel(쉬운 말)을 싣는다.
 

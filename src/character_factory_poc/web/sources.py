@@ -46,9 +46,11 @@ from character_factory_poc.pipeline.origin import (
     VideoTier,
     read_auto_review,
     read_origin,
+    read_signature,
     read_video_tier,
     write_model_mode,
     write_origin,
+    write_signature,
     write_video_tier,
 )
 from character_factory_poc.stages.s0_source import parse
@@ -69,12 +71,26 @@ class KnownFacts(Strict):
     background: str = Field(default="", max_length=400)
 
 
+class SignaturePose(Strict):
+    """유저가 정하는 시그니처 포즈(D-0165). 모든 영상 등급에 한 편씩 들어간다."""
+
+    title: str = Field(min_length=1, max_length=30)
+    motion: str = Field(min_length=1, max_length=400)
+    useWhen: str = Field(default="", max_length=200)
+
+
 class Settings(Strict):
     videoTier: VideoTier
+    signaturePose: SignaturePose | None = None
+
+
+def _signature(pose: SignaturePose) -> dict:
+    return {k: v.strip() for k, v in pose.model_dump().items()}
 
 
 class Draft(Strict):
     videoTier: VideoTier = "none"
+    signaturePose: SignaturePose | None = None
     displayName: str = Field(min_length=1)
     subjectKind: SubjectKind
     usageBasis: UsageBasis = Field(default_factory=UsageBasis)
@@ -179,6 +195,8 @@ def summary(draft):
         f["fileType"] == "photo" and f["status"] == "ready" for f in files
     ):
         problems.append("영상을 만들려면 인물 사진을 한 장 이상 올려 주세요.")
+    if draft["videoTier"] != "none" and not draft.get("signaturePose"):
+        problems.append("영상을 만들려면 시그니처 포즈를 정해 주세요.")
     ids = [f["textId"] for f in files if f["textId"]]
     if len(ids) != len(set(ids)):
         problems.append("원문 이름이 겹쳐요.")
@@ -283,13 +301,14 @@ def install_source_routes(app, conf, jobs):
             fcntl.flock(fp, fcntl.LOCK_EX)
             draft = {} if legacy else json.loads(state.read_text("utf-8"))
             draft["videoTier"] = read_video_tier(folder) or "none"
+            draft["signaturePose"] = read_signature(folder)
             for item in draft.get("files", []):
                 item.setdefault("fileType", "text")
             if edit and (jobs.active_for(cid) or (draft.get("jobId") and not purge)):
                 raise WebError(409, "이미 만들기를 시작해서 원문을 바꿀 수 없어요.")
             yield folder, draft
             if edit:
-                save(state, draft)
+                save(state, {k: v for k, v in draft.items() if k != "signaturePose"})
 
     @router.post("/drafts")
     def create(body: Draft):
@@ -299,6 +318,8 @@ def install_source_routes(app, conf, jobs):
         folder = ctx.character_dir(cid)
         write_origin(folder, SOURCE, auto_review=body.autoReview)
         write_video_tier(folder, body.videoTier)
+        if body.signaturePose:
+            write_signature(folder, _signature(body.signaturePose))
         write_model_mode(folder, body.modelMode)
         subject = SourceSubject(displayName=body.displayName, kind=body.subjectKind)
         save(
@@ -342,6 +363,7 @@ def install_source_routes(app, conf, jobs):
             problems, ready = summary(draft)
             return {k: draft[k] for k in ("characterId", "subject", "usageBasis", "files")} | {
                 "videoTier": draft["videoTier"],
+                "signaturePose": draft["signaturePose"],
                 "knownFacts": draft.get("knownFacts", {}),
                 "store": conf.source_store,
                 "allowPathImport": allow_import,
@@ -557,7 +579,7 @@ def install_source_routes(app, conf, jobs):
             trigger="videos-with-chat" if prepare_chat else "videos",
         )
 
-    def change_settings(folder, draft, cid, tier):
+    def change_settings(folder, draft, cid, tier, signature=None):
         if jobs.active_for(cid):
             raise WebError(409, "만들기가 끝난 뒤에 바꿀 수 있어요.")
         if (draft.get("jobId") or "files" not in draft) and not reads.character_summary(folder)[
@@ -565,12 +587,15 @@ def install_source_routes(app, conf, jobs):
         ]:
             raise WebError(409, "대화 준비가 끝난 뒤에 바꿀 수 있어요.")
         write_video_tier(folder, tier)
+        if signature:
+            write_signature(folder, _signature(signature))
+            draft["signaturePose"] = read_signature(folder)
 
     @router.patch("/{cid}/settings")
     def settings(cid: str, body: Settings):
         with opened(cid, settings=True) as (folder, draft):
-            change_settings(folder, draft, cid, body.videoTier)
-        return {"videoTier": body.videoTier}
+            change_settings(folder, draft, cid, body.videoTier, body.signaturePose)
+            return {"videoTier": body.videoTier, "signaturePose": read_signature(folder)}
 
     videos = APIRouter(route_class=IntakeRoute)
 
@@ -582,6 +607,8 @@ def install_source_routes(app, conf, jobs):
                 raise WebError(409, "대화 준비가 끝나면 영상을 만들 수 있어요.")
             if body.videoTier == "none":
                 raise WebError(422, "만들 영상의 등급을 골라 주세요.")
+            if not body.signaturePose and not read_signature(folder):
+                raise WebError(422, "영상을 만들려면 시그니처 포즈를 정해 주세요.")
             gate = next(
                 (g for g in row["gates"] if g["id"] == "G0" and g["status"] == "APPROVED"), {}
             )
@@ -590,7 +617,7 @@ def install_source_routes(app, conf, jobs):
                 or {}
             ).get("photos"):
                 raise WebError(409, "영상을 만들려면 사진이 담긴 원문 묶음이 필요해요.")
-            change_settings(folder, draft, cid, body.videoTier)
+            change_settings(folder, draft, cid, body.videoTier, body.signaturePose)
             return {"jobId": video_job(cid)["jobId"]}
 
     app.include_router(videos)

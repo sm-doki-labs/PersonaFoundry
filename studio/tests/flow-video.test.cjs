@@ -39,7 +39,9 @@ test('the chooser uses the same tier cards without "영상 없이", posts the ti
   assert.deepEqual(Array.from(html.matchAll(/value="([a-z]+)"/g)).map((m) => m[1]), ['light', 'standard', 'pro', 'max']);
   assert.match(html, /value="light" checked/);
   assert.ok(!/\d/.test(html.replace(/<[^>]+>/g, ' ')), 'no counts on the cards');
-  assert.ok(src.includes("request('POST', '/api/characters/' + encodeURIComponent(d.id) + '/videos', { videoTier: tier })"));
+  assert.ok(src.includes("request('POST', '/api/characters/' + encodeURIComponent(d.id) + '/videos', { videoTier: tier, signaturePose })"));
+  assert.ok(src.includes('data-sig="title"') && src.includes('data-sig="motion"') && src.includes('data-sig="useWhen"'), 'the chooser asks for the signature pose (D-0165)');
+  assert.ok(src.includes('시그니처 포즈의 이름과 어떤 동작인지 적어 주세요.'), 'name and motion are required before the paid start');
   assert.ok(src.includes("'sources.html#c/' + encodeURIComponent(d.id)"), 'the no-photo note links to the source page of that character');
   assert.ok(src.includes('만들 때 사진을 올리지 않아서 영상을 만들 수 없어요'), 'a character without photos is sent to make a new one with photos');
   assert.ok(src.includes('영상 단계는 비용이 들어요'));

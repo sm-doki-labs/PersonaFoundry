@@ -35,8 +35,11 @@ from character_factory_poc.stages.s6_actions.catalog import (
     CATALOG,
     NEUTRAL_NEGATIVE,
     PRESETS,
+    SIGNATURE_KEY,
     build_prompt,
+    clip_of,
     neutral_prompt,
+    signature_matches,
     stage_note,
     video_tiers,
 )
@@ -66,6 +69,11 @@ def _resolve_config(settings: dict[str, Any]) -> dict[str, Any]:
         cfg["chapters"] = tiers[tier].chapters
         cfg["actions"] = list(tiers[tier].actions)
         cfg["preset"] = f"tier:{tier}"
+        if cfg.get("motif"):
+            # D-0165: 모티브는 등급마다 유저가 정한 시그니처 포즈를 한 편 더한다.
+            if not cfg.get("signature"):
+                raise CheckFailed("s6", ["영상을 만들려면 시그니처 포즈를 정해 주세요."])
+            cfg["actions"].append(SIGNATURE_KEY)
     else:
         if preset == "standard":
             preset = "full37"
@@ -113,7 +121,7 @@ def _resolve_config(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 def s6_config(ctx: Context, cid: str | None = None) -> dict[str, Any]:
-    from character_factory_poc.pipeline.origin import read_video_tier
+    from character_factory_poc.pipeline.origin import read_signature, read_video_tier
 
     settings = dict(ctx.config.stage("s6"))
     tier = read_video_tier(ctx.character_dir(cid)) if cid else None
@@ -122,11 +130,13 @@ def s6_config(ctx: Context, cid: str | None = None) -> dict[str, Any]:
     if tier:
         settings["video_tier"] = tier
         settings["motif"] = is_twin(ctx.character_dir(cid))
+        if settings["motif"]:
+            settings["signature"] = read_signature(ctx.character_dir(cid))
     return _resolve_config(settings)
 
 
 def _duration(cfg: dict, key: str) -> int:
-    return cfg["durations"][CATALOG[key]["pickRole"] or "idle"]
+    return cfg["durations"][clip_of(key, cfg)["pickRole"] or "idle"]
 
 
 def estimate(ctx: Context, cfg: dict[str, Any], calls: int = 1) -> float:
@@ -211,7 +221,7 @@ def plan_calls(ctx: Context, cfg: dict[str, Any], cid: str | None = None) -> lis
             for key in cfg["actions"]:
                 if not previous or f"{ch}-{key}" in changes:
                     durations.extend([_duration(cfg, key)] * cfg["candidates"])
-        if not previous and any(CATALOG[key]["mood"] == "bad" for key in cfg["actions"]):
+        if not previous and any(clip_of(key, cfg)["mood"] == "bad" for key in cfg["actions"]):
             bad_frames = chapter_count
         resolution = cfg["resolution"]
     pcfg = ctx.config.provider("video")
@@ -246,12 +256,16 @@ def _pending_rev(ctx: Context, cid: str) -> str | None:
     path = ctx.character_dir(cid) / "s6-actions" / stage.currentRev / "inputs.json"
     if not path.exists():
         return None
-    from character_factory_poc.pipeline.origin import read_video_tier
+    from character_factory_poc.pipeline.origin import read_signature, read_video_tier
 
     tier = read_video_tier(ctx.character_dir(cid))
     if tier:
         inputs = read_inputs(path)
         if inputs.preset != f"tier:{tier}" or inputs.frameRev != ctx.state(cid).gate("G4").rev:
+            return None
+        if is_twin(ctx.character_dir(cid)) and not signature_matches(
+            dump(inputs), read_signature(ctx.character_dir(cid))
+        ):
             return None
     return stage.currentRev
 
@@ -380,7 +394,7 @@ def _make_inputs(ctx, cid, rev, rev_dir, frames, frame_dir, cfg, video, budget, 
             if previous and aid not in changes:
                 actions.append(dump(carried[aid]))
                 continue
-            clip = CATALOG[key]
+            clip = clip_of(key, cfg)
             note = changes.get(aid, "")
             actions.append(
                 {
@@ -396,7 +410,7 @@ def _make_inputs(ctx, cid, rev, rev_dir, frames, frame_dir, cfg, video, budget, 
                     "duration": _duration(cfg, key),
                     "reviewNote": note,
                     "prompt": build_prompt(
-                        key, frame.chapterId, note, motif=bool(cfg.get("motif"))
+                        key, frame.chapterId, note, motif=bool(cfg.get("motif")), clip=clip
                     ),
                 }
             )

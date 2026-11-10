@@ -334,7 +334,7 @@ test('a draft with only a memo sends the team-internal scope, and carries the mo
   assert.deepEqual(body.usageBasis, { scope: S.DEFAULT_SCOPE, notes: '발표용' });
   assert.equal(body.modelMode, 'TRAIN');
   assert.equal(body.autoReview, false);
-  assert.deepEqual(intake.settings(), { modelMode: 'TRAIN', autoReview: false, videoTier: 'none' }, 'the summary shows what the server holds');
+  assert.deepEqual(intake.settings(), { modelMode: 'TRAIN', autoReview: false, videoTier: 'none', signaturePose: null }, 'the summary shows what the server holds');
 
   const other = fakeServer();
   const b = S.createIntake({ fetch: other.fetch, origin: ORIGIN, XHR: null });
@@ -534,7 +534,8 @@ test('file cards hide the internal text id, the path import is folded under 고�
 // ---- 4차 약속 5: 영상 등급과 사진 ----
 async function tierDraft(server, videoTier) {
   const intake = S.createIntake({ fetch: server.fetch, origin: ORIGIN, XHR: null });
-  await intake.createDraft({ displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', age: '34세', gender: '남성', job: '축구선수', videoTier });
+  const sig = videoTier === 'none' ? {} : { sigTitle: '찰칵 세리머니', sigMotion: '두 손으로 카메라 모양을 만든다.' };
+  await intake.createDraft(Object.assign({ displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', age: '34세', gender: '남성', job: '축구선수', videoTier }, sig));
   return intake;
 }
 const photo = (name, size) => file(name || 'face.jpg', size == null ? 5000 : size, 'image/jpeg');
@@ -632,6 +633,25 @@ test('the photo box refuses other files, big photos stay out, and photos can sti
   assert.deepEqual(server.calls.filter((c) => c.method === 'POST' && c.path.endsWith('/files')).map((c) => c.body.filename), ['second.jpg'], 'texts are locked after the start, photos are not');
   assert.equal(intake.photoItems().length, 2);
   assert.ok(intake.photoItems().every((p) => !p.removable), 'photos already in use cannot be removed after the start');
+});
+
+test('a video tier needs a signature pose: name and motion are required, the pose goes with the draft and can be saved later (D-0165)', async () => {
+  const server = fakeServer();
+  const intake = S.createIntake({ fetch: server.fetch, origin: ORIGIN, XHR: null });
+  const base = { displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', age: '34세', gender: '남성', job: '축구선수', videoTier: 'light' };
+  const missing = await intake.createDraft(base);
+  assert.deepEqual(Object.keys(missing.errors).sort(), ['sigMotion', 'sigTitle']);
+  assert.equal(server.calls.length, 0, 'nothing is sent without the pose');
+  assert.deepEqual(intake.validateDraft(Object.assign({}, base, { videoTier: 'none' })), {}, 'no pose is asked without video');
+  await intake.createDraft(Object.assign({}, base, { sigTitle: ' 찰칵 세리머니 ', sigMotion: '두 손으로 카메라 모양을 만든다.', sigWhen: '' }));
+  assert.deepEqual(server.calls[0].body.signaturePose, { title: '찰칵 세리머니', motion: '두 손으로 카메라 모양을 만든다.', useWhen: '' });
+  assert.equal(intake.settings().signaturePose.title, '찰칵 세리머니');
+  server.calls.length = 0;
+  assert.equal(await intake.setSignature({ title: '하트', motion: '손가락 하트를 내민다.', useWhen: '고마울 때' }), true);
+  const call = server.calls.find((c) => c.method === 'PATCH');
+  assert.deepEqual(call.body, { videoTier: 'light', signaturePose: { title: '하트', motion: '손가락 하트를 내민다.', useWhen: '고마울 때' } });
+  assert.equal(await intake.setSignature({ title: '하트', motion: ' ' }), false, 'a pose without motion is not sent');
+  assert.equal(S.sigOf({ title: 'a' }), null);
 });
 
 test('the tier can be changed before the start, and an older server says so plainly', async () => {
