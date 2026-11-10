@@ -135,7 +135,11 @@ def test_suggestions_and_drafts(case):
         dict(name="선수(본인)", lines=1),
     ]
     assert item["suggested"] == dict(
-        kind="TRANSCRIPT", register="CASUAL", subjectSpeaker="선수(본인)", userSpeaker="진행"
+        kind="TRANSCRIPT",
+        register="CASUAL",
+        subjectSpeaker="선수(본인)",
+        userSpeaker="진행",
+        subjectChoices=["진행", "선수(본인)"],
     )
     assert item["subjectSpeaker"] == "선수(본인)"
     problem = client.patch(file, json={"subjectSpeaker": "다른 이름"}).json()
