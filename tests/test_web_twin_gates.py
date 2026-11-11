@@ -87,6 +87,9 @@ def test_g0_view_shows_source_summary_without_holdout_text(tmp_path, twin_decisi
         assert items["usageProblems"] == [] and items["usage"]["consentBy"]
         assert items["texts"][0]["subjectSpeaker"] == "엄마"
         assert items["texts"][0]["userSpeaker"] == "나"
+        # 말한 자리는 G0 원문 표에 보인다. 묶음에 적지 않았으면 종류 기본값(카톡 → 캐주얼)이다.
+        assert items["texts"][0]["register"] == "CASUAL"
+        assert items["texts"][0]["sourceUrl"] is None
         assert items["agent"]["speakerCheck"]["confirmed"] is True
         reps = items["agent"]["representative"]
         assert reps and all(r["text"] for r in reps)
@@ -103,14 +106,12 @@ def test_g0_view_shows_source_summary_without_holdout_text(tmp_path, twin_decisi
     assert ctx.state(cid).gate("G0").status == "APPROVED"
 
 
-def test_g0_usage_lock_and_change_request(tmp_path, twin_decisions):
+def test_g0_optional_usage_and_change_request(tmp_path, twin_decisions):
     ctx, cid, _ = _s0(tmp_path, consent=False)
     with _client(tmp_path) as client:
         view = _view(client, cid, "G0")
-        assert len(view["items"]["usageProblems"]) == 2
+        assert view["items"]["usageProblems"] == []
         url = f"/api/characters/{cid}/gates/G0/decision"
-        res = client.post(url, json={"decision": "APPROVE", "reviewer": "u"})
-        assert res.status_code == 409 and "사용 근거" in res.text
         res = client.post(
             url,
             json={
@@ -167,7 +168,7 @@ def _no_answer_key(raw: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "mode,label", [("PROMPT_ONLY", "긴 프롬프트로 진행"), ("BIND_EXISTING", "연결한 모델로 진행")]
+    "mode,label", [("PROMPT_ONLY", "프롬프트만 사용해요"), ("BIND_EXISTING", "연결한 모델로 진행")]
 )
 def test_twin_g8_adopt_label_and_comparison_summary(
     tmp_path, monkeypatch, twin_decisions, mode, label

@@ -24,14 +24,189 @@
     return { cls: noData ? 'tw nt' : 'tw', cell };
   }
   // 갈래·모델 준비 방식 표시(D-0128, D-0118). 코드 값은 화면에 보이지 않는다.
-  const MODE_LABEL = { TRAIN: '학습', BIND_EXISTING: '학습된 모델 연결', PROMPT_ONLY: '긴 프롬프트' };
+  const MODE_LABEL = { TRAIN: '학습', BIND_EXISTING: '학습된 모델 연결', PROMPT_ONLY: '프롬프트만' };
   function trackLabel(c) {
     const x = c || {};
     if (x.origin !== 'SOURCE') return '오리지널';
     return (x.originLabel || '모티브') + ' · ' + (MODE_LABEL[x.modelMode] || MODE_LABEL.TRAIN);
   }
   // 모티브 단계 줄에 붙이는 쉬운 설명. 단계 이름은 서버 그래프를 그대로 쓴다.
-  const TWIN_HINT = { s2: '받은 사진에서 기준 사진 고르기' };
+  const TWIN_HINT = { s2: '받은 사진에서 기준 사진 고르기', s8c: '선택한 장면을 정하고 장면마다 대화 표본을 만들어요' };
+  // S8c(챕터 시작 설정)는 사람 검토 없이 도는 단계다. 화면 이름은 시작 장면을 따른다(계획 2차 약속 2).
+  function s8cName(origin, template) {
+    if (template === 'FRIEND_CHAT') return '친구 대화 장면';
+    if (template === 'INTERVIEW') return '인터뷰 장면';
+    if (template) return template === 'FAN_CALL' ? '팬 통화 장면' : '통화 장면';
+    return origin === 'SOURCE' ? '첫 통화 장면' : '통화 장면';
+  }
+  // 대화할 수 있는지(3차 약속 3). 서버가 대화 화면과 같은 함수로 계산한 chatReady를 그대로 따른다.
+  // 서버가 아직 싣지 않으면 대화 화면의 준비 조건(프롬프트 S8과 첫 장면 S8c가 모두 있음)을 단계 기록으로 본다.
+  function isChatReady(detail) {
+    const d = detail || {};
+    if (typeof d.chatReady === 'boolean') return d.chatReady;
+    if (d.origin !== 'SOURCE' || !d.id) return false;
+    const rows = rowsById(d);
+    const made = (id) => upper((rows.get(id) || {}).status) === 'APPROVED';
+    return made('s8') && made('s8c');
+  }
+  // 대화해 보기 주소. 대화할 수 있을 때만 연다(대화 화면에서 막히는 버튼을 보이지 않는다).
+  function chatHref(detail) {
+    const d = detail || {};
+    return d.id && isChatReady(d) ? 'chat.html#c/' + encodeURIComponent(d.id) : '';
+  }
+  // 영상 등급(계획 4차 약속 5). 원문 화면(sources.js)과 같은 표·같은 카드다(시험이 같은지 본다). 화면에는 개수를 쓰지 않는다.
+  const VIDEO_TIERS = [
+    ['none', '영상 없이', '대화만 만들어요. 영상 비용이 들지 않아요.', 0],
+    ['light', '라이트', '자주 쓰는 기본 감정만, 가장 빨리 확인해요.', 1],
+    ['standard', '스탠다드', '대화에서 자주 쓰는 감정까지 만들어요.', 2],
+    ['pro', '프로', '더 섬세한 감정까지 만들어요.', 3],
+    ['max', '맥스', '앱에서 쓰는 반응 전부예요. 가장 오래 걸리고 비용도 가장 커요.', 4]
+  ];
+  const COST_WORD = ['없음', '적음', '보통', '많음', '가장 많음'];
+  function tierOf(value) { return VIDEO_TIERS.some((t) => t[0] === value) ? value : 'none'; }
+  function tierName(value) { return VIDEO_TIERS.find((t) => t[0] === tierOf(value))[1]; }
+  function tierCardsHTML(name, value, opts) {
+    const o = opts || {};
+    const cur = tierOf(value);
+    return VIDEO_TIERS.filter((t) => !(o.paidOnly && t[0] === 'none')).map((t) => {
+      // 시간·비용 네 칸. '영상 없이'는 설명이 비용 없음을 말하므로 칸을 두지 않는다.
+      const meter = t[3] ? '<span class="vt-cost" role="img" aria-label="시간·비용 ' + COST_WORD[t[3]] + '">' + [1, 2, 3, 4].map((n) => '<i' + (n <= t[3] ? ' class="on"' : '') + '></i>').join('') + '</span>' : '';
+      return '<label class="vt-opt"><input type="radio" name="' + E(name) + '" value="' + t[0] + '"' + (t[0] === cur ? ' checked' : '') + (o.disabled ? ' disabled' : '') + '><span class="vt-tx"><span class="vt-top"><b>' + t[1] + '</b>' + meter + '</span><small>' + t[2] + '</small></span></label>';
+    }).join('');
+  }
+  // 영상 상태 한 줄(원문 화면과 같은 규칙). 상태를 알면 등급 이름을 붙여 쓰고, 영상이 없으면 빈칸이다(머리·목록에 아무것도 붙이지 않는다).
+  // 모르는 상태일 때만 서버 videoLabel을 쓴다.
+  function videoText(c) {
+    const x = c || {};
+    const tier = tierOf(x.videoTier);
+    const st = text(x.videoStatus);
+    if (st === 'failed') return '영상을 만들지 못했어요';
+    if (st === 'making') return '영상 만드는 중 · ' + tierName(tier);
+    if (st === 'ready') return '영상 있음 · ' + tierName(tier);
+    if (st === 'none' || !text(x.videoLabel).trim()) return tier === 'none' ? '' : '영상 기다리는 중 · ' + tierName(tier);
+    return text(x.videoLabel).trim();
+  }
+  // 작업 오류를 사람 말로: 앞의 예외 이름을 떼고, 이름뿐인 오류는 그렇다고 적는다.
+  function plainError(raw) {
+    const s = text(raw).replace(/^[A-Za-z_]*(Error|Exception|Iteration): ?/, '').trim();
+    // 'StopIteration'처럼 예외 이름만 있으면 사람에게 뜻이 없다.
+    return (!s || /^[A-Za-z_]+$/.test(s) ? '알 수 없는 오류가 났어요.' : s).slice(0, 200);
+  }
+  function videoTone(c) { return { making: 'run', ready: 'ok', failed: 'fail' }[text(c && c.videoStatus)] || ''; }
+  // 영상 만들기를 건넬 캐릭터: 대화 가능하고, 영상이 아직 없거나 실패했고, 도는 작업이 없을 때. 영상 상태를 주지 않는 서버면 건네지 않는다.
+  function canMakeVideo(detail) {
+    const d = detail || {};
+    // 영상이 있어도 등급·시그니처를 바꿀 수 있다. 같은 몸짓은 옮겨 오고 새 영상만 만든다(D-0166).
+    return isChatReady(d) && !d.job && ['none', 'failed', 'ready'].includes(d.videoStatus);
+  }
+  // 원문 초안(GET /api/sources/{id})에서 준비된 사진 수. 사진 기록은 fileType "photo"(없는 서버면 확장자)로 알아본다.
+  function readyPhotos(draft) {
+    return ((draft && draft.files) || []).filter((f) => {
+      const t = text(f && f.fileType);
+      const photo = t ? t === 'photo' : /\.(jpe?g|png|webp)$/i.test(text(f && f.filename));
+      return photo && f.status === 'ready';
+    }).length;
+  }
+  // 캐릭터 상태는 모든 화면이 같은 낱말을 쓴다(3차 약속 3). 서버 status·statusLabel이 먼저이고,
+  // 없을 때만 이 화면이 가진 기록으로 같은 규칙을 따라 정한다. done은 끝까지 마친 오리지널 캐릭터에만 쓴다.
+  const STATUS_LABEL = { draft: '시작 전', running: '만드는 중', needs_review: '확인 필요', chat_ready: '대화 가능', failed: '실패', stopped: '멈춤', done: '완료' };
+  const STATUS_TONE = { draft: 'muted', running: 'run', needs_review: 'wait', chat_ready: 'ok', failed: 'fail', stopped: 'muted', done: 'ok' };
+  const STATUS_RANK = { needs_review: 0, failed: 1, running: 2, chat_ready: 3, draft: 4, stopped: 5, done: 6 };
+  // 시연 모드(모든 검토 자동 승인 → 테스터 전용 발행)는 상태 낱말 뒤에 붙인다. 품질 검토가 아니다.
+  const DEMO_LABEL = { ready: '시연 모드', publishing: '시연 · 테스터 발행 중', published: '시연 · 테스터 발행됨', publish_failed: '시연 · 발행 실패', budget: '시연 · 예산 상한', stopped: '시연 · 멈춤', failed: '시연 · 멈춤', packaged: '시연 · 패키지 완료' };
+  function statusOf(c, sum) {
+    const x = c || {};
+    const s = sum || {};
+    let st = STATUS_LABEL[x.status] ? x.status : '';
+    if (!st) st = s.running ? 'running' : s.fail ? 'failed' : (s.review || s.paid) ? 'needs_review' : isChatReady(x) ? 'chat_ready' : s.complete ? 'done' : s.fresh ? 'draft' : 'stopped';
+    const demo = x.demo && x.demo.enabled ? (DEMO_LABEL[x.demo.phase] || DEMO_LABEL.ready) : '';
+    const label = (text(x.statusLabel).trim() || STATUS_LABEL[st]) + (demo ? ' · ' + demo : '');
+    return { status: st, label, tone: STATUS_TONE[st] || 'muted', rank: STATUS_RANK[st] == null ? 9 : STATUS_RANK[st] };
+  }
+  // 목표 경로: 모티브는 대화 가능까지 필요한 단계만(첫 장면 S8c, 없으면 프롬프트 S8의 앞 단계들). 학습 방식이면 학습 단계까지 더한다.
+  // 오리지널은 목표 경로를 따로 두지 않는다(null).
+  function goalStages(graph, detail) {
+    const d = detail || {};
+    if (!graph || (d.origin || graph.origin) !== 'SOURCE') return null;
+    const end = graph.byStage.has('s8c') ? 's8c' : graph.byStage.has('s8') ? 's8' : '';
+    if (!end) return null;
+    const set = ancestors(graph, end);
+    if ((d.modelMode || graph.modelMode) === 'TRAIN' && graph.byStage.has('s10t')) ancestors(graph, 's10t').forEach((id) => set.add(id));
+    return set;
+  }
+  // 진행 숫자. 서버 goal {label, done, total}이 있으면 그대로, 없으면 목표 경로(오리지널은 전체 단계)로 센다.
+  function goalOf(graph, detail, views) {
+    const ids = goalStages(graph, detail);
+    const g = detail && detail.goal;
+    if (g && Number(g.total) > 0) return { label: text(g.label).trim() || (ids ? '대화 제작 단계' : '전체'), done: Number(g.done) || 0, total: Number(g.total), ids };
+    const list = ids ? Array.from(ids) : (graph ? graph.stages.map((s) => s.id) : []);
+    const done = list.filter((id) => ['done', 'skip'].includes(((views || {})[id] || {}).kind)).length;
+    return { label: ids ? '대화 제작 단계' : '전체', done, total: list.length, ids };
+  }
+  // 모티브 그래프 접기: 목표 경로 단계와 지금 일이 걸린(실행·대기·실패·비용 확인) 단계만 남기고 나머지는 숨긴다.
+  // keep이 null이면 전부 보인다(오리지널이거나 사람이 펼쳤을 때). hidden은 접었을 때 숨는 단계 수다.
+  const ACTIVE_KINDS = ['run', 'retry', 'wait', 'confirm', 'fail'];
+  function goalView(graph, detail, views, showOff) {
+    const ids = goalStages(graph, detail);
+    if (!ids) return { ids: null, keep: null, hidden: 0 };
+    const keep = new Set();
+    graph.stages.forEach((s) => { if (ids.has(s.id) || ACTIVE_KINDS.includes(((views || {})[s.id] || {}).kind)) keep.add(s.id); });
+    const hidden = graph.stages.length - keep.size;
+    return { ids, keep: showOff ? null : keep, hidden };
+  }
+  // 이름이 같은 캐릭터는 만든 날짜·시간으로 구분한다. 시간이 없거나 그래도 같으면 짧은 이름을 덧붙인다.
+  function pad2(n) { return String(n).padStart(2, '0'); }
+  // 만든 시각: 서버 createdAt → 첫 실행 시각 → ID의 날짜(시각 없음) 순.
+  function createdOf(c) {
+    const x = c || {};
+    const t = parseTime(x.createdAt);
+    if (t != null) return { t, time: true };
+    const starts = (x.stages || []).map((s) => parseTime(s.startedAt)).filter((v) => v != null);
+    if (starts.length) return { t: Math.min.apply(null, starts), time: true };
+    const m = /^cf-(\d{4})(\d{2})(\d{2})-/.exec(text(x.id));
+    return m ? { t: new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).getTime(), time: false } : { t: 0, time: false };
+  }
+  function createdLabel(c) {
+    const w = createdOf(c);
+    if (!w.t) return '';
+    const d = new Date(w.t);
+    return (d.getMonth() + 1) + '/' + d.getDate() + (w.time ? ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) : '');
+  }
+  function labelOf(c) {
+    const x = c || {};
+    return displayName(x.displayName || (x.persona && x.persona.name) || x.name, x.id);
+  }
+  function nameLabels(list) {
+    const groups = new Map();
+    (list || []).forEach((c) => { const n = labelOf(c); if (!groups.has(n)) groups.set(n, []); groups.get(n).push(c); });
+    const out = new Map();
+    groups.forEach((cs, n) => {
+      const whens = cs.map(createdLabel);
+      cs.forEach((c, i) => {
+        let note = '';
+        if (cs.length > 1) {
+          note = whens[i] ? whens[i] + ' 만듦' : '';
+          if (!whens[i] || whens.filter((w) => w === whens[i]).length > 1) note = (note ? note + ' · ' : '') + text(c.id).replace(/^cf-\d{8}-/, '');
+        }
+        out.set(c.id, { name: n, note });
+      });
+    });
+    return out;
+  }
+  // 새로 지어내는 캐릭터의 짧은 이름은 자동으로 만든다(브리프 속 영문 낱말 + 시각). 직접 정하는 칸은 고급 설정으로 접는다.
+  function autoSlug(brief, now) {
+    const words = (text(brief).toLowerCase().match(/[a-z0-9]+/g) || []).slice(0, 2).join('-').slice(0, 24);
+    return (words ? words : 'char') + '-' + Math.floor(Number(now || Date.now())).toString(36).slice(-5);
+  }
+  // 회차 기록: 마지막에 성공한 단계라면 그 전에 실패한 시도는 따로 접어 둔다.
+  function splitAttempts(hist, succeeded) {
+    const all = Array.isArray(hist) ? hist : [];
+    if (!succeeded) return { shown: all, earlier: [] };
+    const lastOk = all.map((a) => Boolean(a.result) && a.result !== 'CHECK_FAILED' && a.result !== 'RESTARTED').lastIndexOf(true);
+    if (lastOk < 0) return { shown: all, earlier: [] };
+    const earlier = all.filter((a, i) => i < lastOk && (a.result === 'CHECK_FAILED' || a.result === 'RESTARTED'));
+    return { shown: all.filter((a) => earlier.indexOf(a) < 0), earlier };
+  }
   // 단계 이름 뒤 표시(사람 검토·유료 아이콘)는 마지막 낱말에 붙인다. 칸이 좁아도 아이콘만 다음 줄로 떨어지지 않는다.
   function stageNameHTML(name, marks) {
     const s = String(name == null ? '' : name);
@@ -62,7 +237,12 @@
     expand: '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>',
     shrink: '<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>',
     grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
-    copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>'
+    copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
+    chat: '<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/>',
+    gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+    more: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+    archive: '<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><line x1="10" y1="12" x2="14" y2="12"/>',
+    video: '<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/>'
   };
   // 브랜드 마크: 보라 둥근 사각형 안의 F와 불꽃 점(D-0102).
   const MARK = '<svg class="fd-mark" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="var(--fd-accent)"/><path d="M8.5 17V7h7.5M8.5 12h5" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16.4" cy="16.4" r="1.7" fill="#fff"/></svg>';
@@ -86,6 +266,9 @@
     if (/timeout|timed out|시간 초과/i.test(s)) return { summary: '응답이 제한 시간 안에 오지 않았어요.', detail: s };
     if (/connect|connection|network|연결/i.test(s)) return { summary: '공급자에 연결하지 못했어요.', detail: s };
     if (/budget|예산/i.test(s)) return { summary: '정해 둔 호출 예산을 넘어 멈췄어요.', detail: s };
+    if (/TaintedOutputError|작업 공간 밖/.test(s)) return { summary: '작업 공간 밖의 파일을 건드리려 해서 멈췄어요.', detail: s };
+    // 'SomethingError: …' 같은 개발자용 오류 이름은 그대로 보이지 않는다. 원문은 기술 정보에 남는다.
+    if (/^[A-Za-z_.]*(Error|Exception)\b/.test(s)) return { summary: '실행 중에 오류가 나서 멈췄어요. 자세한 내용은 기술 정보에 있어요.', detail: s };
     const line = s.split('\n')[0];
     return { summary: line.length > 120 ? line.slice(0, 117) + '…' : line, detail: line === s && line.length <= 120 ? '' : s };
   }
@@ -345,9 +528,120 @@
     }
     return [];
   }
+  // ---- 모델 준비 갈래의 다음 일(QA v5 B-F06·B-F07) ----
+  // 프롬프트를 승인한 뒤의 모델 단계(데이터 샘플·학습 데이터·학습 계획·평가)는 대화 준비 목표 밖이라 저절로 돌지 않는다.
+  // 지금 할 일·노드 칸·모델 만들기 탭이 같은 버튼을 건넨다. 버튼은 그 단계의 검토(없으면 단계 자신)까지만 돌린다.
+  // 유료 학습은 이 버튼으로 시작하지 않는다(학습 계획까지만). 유료 공급자 단계는 서버가 비용 확인으로 멈춘다.
+  const MODEL_RUN_UNTIL = { s9s: 'G7a', s9: 'G7', s10t: 's10t', s10: 'G8' };
+  function modelPathOf(detail) { return (detail && detail.modelPath) || {}; }
+  function modelModeOf(detail) { return text((detail && detail.modelMode) || modelPathOf(detail).mode) || 'TRAIN'; }
+  function modelNext(graph, detail) {
+    const d = detail || {};
+    if (d.origin !== 'SOURCE' || !graph || modelModeOf(d) === 'PROMPT_ONLY') return null;
+    const gates = gatesById(d);
+    const gs = (id) => upper((gates.get(id) || {}).status);
+    if (gs('G6') !== 'APPROVED' || ['AWAITING_HUMAN', 'APPROVED'].includes(gs('G8'))) return null;
+    const rows = rowsById(d);
+    const held = new Set(R.extractHeld(d).map((h) => h.stage));
+    const ready = (id) => graph.byStage.has(id) && !held.has(id) && ['PENDING', 'REJECTED'].includes(upper((rows.get(id) || {}).status) || 'PENDING');
+    const m = modelPathOf(d);
+    if (modelModeOf(d) === 'BIND_EXISTING') {
+      if (!m.binding) return { stage: 's10', step: 'bind', input: true, title: '연결할 모델을 골라 주세요', body: '학습된 모델을 연결하는 방식이에요. 평가하려면 먼저 이미 학습한 모델의 연결 파일을 올려 주세요.', label: '모델 연결하기' };
+      return ready('s10') ? { stage: 's10', step: 'eval', title: '평가를 시작할 수 있어요', body: '긴 프롬프트와 연결한 모델의 답을 원문에서 떼어 둔 장면으로 비교해요.', label: '평가 시작' } : null;
+    }
+    const tr = m.training || {};
+    if (ready('s9s')) return { stage: 's9s', step: 'src', title: '데이터 샘플을 만들 차례예요', body: '프롬프트를 승인했어요. 학습에 쓸 대화 샘플을 만들고, 클러스터마다 샘플을 검토해요.', label: '데이터 샘플 만들기' };
+    if (gs('G7a') === 'APPROVED' && ready('s9')) return { stage: 's9', step: 'data', title: '학습 데이터를 만들 차례예요', body: '샘플 검토를 마쳤어요. 같은 기준으로 나머지 학습 데이터를 만들어요.', label: '학습 데이터 만들기' };
+    if (gs('G7') === 'APPROVED' && tr.state === 'pending' && graph.byStage.has('s10t')) return { stage: 's10t', step: 'train', title: '학습 계획을 세울 차례예요', body: '계획은 비용이 들지 않아요. 예상 비용·시간을 본 뒤 학습을 시작할지 골라요.', label: '학습 계획 세우기' };
+    if (['done', 'skip'].includes(tr.state) && ready('s10')) return { stage: 's10', step: 'eval', title: '평가를 시작할 수 있어요', body: '긴 프롬프트와 학습 모델에 같은 질문을 하고 답을 비교해요.', label: '평가 시작' };
+    return null;
+  }
+  function modelTasks(graph, detail, views, busy) {
+    const n = modelNext(graph, detail);
+    if (!n) return [];
+    const why = busy ? '지금 작업이 끝나면 할 수 있어요.' : '';
+    return [{
+      kind: 'ready', stage: n.stage, order: 3, title: n.title, age: '모델 만들기', body: n.body,
+      blocked: remaining(graph, views, n.stage),
+      actions: [n.input ? { act: 'open-model', step: n.step, label: n.label } : { act: 'model-run', stage: n.stage, label: n.label, disabled: busy, why }]
+    }];
+  }
+  // 모델 만들기 탭의 지금 단계와 단계 줄. 연결 방식은 '모델 연결 → 평가' 두 단계만 있다(재료·데이터셋·학습이 없다).
+  function modelActive(detail) {
+    const m = modelPathOf(detail);
+    if (modelModeOf(detail) === 'BIND_EXISTING') return m.binding ? 'eval' : 'bind';
+    const t = m.training || {};
+    if (['done', 'skip'].includes(t.state)) return 'eval';
+    if (['plan', 'run', 'hold', 'stopped', 'fail', 'pending'].includes(t.state)) return 'train';
+    return m.dataset ? 'data' : 'src';
+  }
+  function modelSteps(detail, views) {
+    const det = detail || {};
+    const m = modelPathOf(det);
+    const v = views || {};
+    const gates = gatesById(det);
+    const gs = (id) => upper((gates.get(id) || {}).status);
+    const kind = (id) => (v[id] || {}).kind;
+    const bind = modelModeOf(det) === 'BIND_EXISTING';
+    const steps = [];
+    let open;
+    if (bind) {
+      const b = m.binding;
+      const due = gs('G6') === 'APPROVED';
+      steps.push({ id: 'bind', n: 1, ko: '모델 연결', k: b ? 'ok' : due ? 'wait' : 'todo', s: b ? b.kindLabel + ' · ' + text(b.ref) : due ? '연결할 모델을 골라 주세요' : '아직 연결하지 않았어요', done: Boolean(b) && ['AWAITING_HUMAN', 'APPROVED'].includes(gs('G8')) });
+      open = Boolean(b);
+    } else {
+      const mat = m.material;
+      let sk = 'todo';
+      let ss = '프롬프트를 승인하면 정해요';
+      if (mat) { sk = 'ok'; ss = mat.used.map((u) => u.label).join(' + ') || mat.planned.map((p) => p.label).join(' + ') || '정함'; }
+      else if (['run', 'retry'].includes(kind('s9s'))) { sk = 'run'; ss = '데이터 샘플 만드는 중'; }
+      else if (kind('s9s') === 'fail') { sk = 'fail'; ss = '멈춤'; }
+      else if (kind('s9s') === 'confirm') { sk = 'wait'; ss = '실행 확인 대기'; }
+      else if (gs('G6') === 'APPROVED') ss = '데이터 샘플을 만들 차례예요';
+      steps.push({ id: 'src', n: 1, ko: '재료', k: sk, s: ss, done: Boolean(mat) });
+      const d = m.dataset;
+      let dk = 'todo';
+      let ds = '학습 데이터를 만들기 전이에요';
+      if (d) {
+        // 숫자는 데이터셋 승인(G7) 요약과 같은 전체 대화 수다(QA v5 C-08). 학습·검증·평가 나눔은 아래 칸에 있다.
+        if (upper(d.status) === 'APPROVED') { dk = 'ok'; ds = '대화 ' + d.counts.total + '개 · 승인됨'; }
+        else if (upper(d.gates.G7.status) === 'AWAITING_HUMAN') { dk = 'wait'; ds = '데이터셋 승인 대기'; }
+        else if (upper(d.gates.G7a.status) === 'AWAITING_HUMAN') { dk = 'wait'; ds = '샘플 검토 대기'; }
+        else if (['run', 'retry'].includes(kind('s9'))) { dk = 'run'; ds = '만드는 중'; }
+        else if (['run', 'retry'].includes(kind('s9s'))) { dk = 'run'; ds = '샘플 만드는 중'; }
+        else if (kind('s9') === 'fail') { dk = 'fail'; ds = '멈춤'; }
+        else if (kind('s9') === 'confirm') { dk = 'wait'; ds = '실행 확인 대기'; }
+        else ds = gs('G7a') === 'APPROVED' ? '학습 데이터를 만들 차례예요' : '샘플을 다시 만들 차례예요';
+      }
+      steps.push({ id: 'data', n: 2, ko: '데이터셋', k: dk, s: ds, done: dk === 'ok' });
+      const t = m.training || {};
+      const tv = v.s10t || {};
+      const tk = { confirm: 'wait', run: 'run', fail: 'fail', skip: 'ok', done: 'ok', todo: 'todo', wait: 'wait', retry: 'run', out: 'todo' }[tv.kind] || 'todo';
+      // '골랐어요'는 학습 안의 체크포인트 고르기다. 평가(G8)의 채택과 섞이지 않게 쓴다(QA v5 C-08).
+      const tsub = t.state === 'done' ? (t.adopted ? '끝남 · 체크포인트 고름' : '끝남 · 쓸 체크포인트 없음') : t.state === 'locked' ? '데이터셋을 승인하면 열려요' : t.state === 'pending' ? '학습 계획을 세울 차례예요' : tv.sub || KIND_LABEL[tv.kind] || '';
+      steps.push({ id: 'train', n: 3, ko: '학습', k: tk, s: tsub, done: ['done', 'skip'].includes(t.state) });
+      open = ['done', 'skip'].includes(t.state);
+    }
+    const e = m.eval || {};
+    const ev = v.s10 || {};
+    let ek = 'todo';
+    let es = bind ? '모델을 연결하면 열려요' : '학습이 끝나면 열려요';
+    if (open) {
+      const g8 = upper(e.gate && e.gate.status);
+      if (g8 === 'AWAITING_HUMAN') { ek = 'wait'; es = e.promptOnly ? (bind ? '연결한 모델 채택 검토' : '긴 프롬프트 채택 검토') : '블라인드 20쌍 검토'; }
+      else if (g8 === 'APPROVED') { ek = 'ok'; es = e.adopted ? e.adopted.label + '로 채택함' : '채택 결정함'; }
+      else if (ev.kind === 'confirm') { ek = 'wait'; es = '평가 비용 확인 대기'; }
+      else if (['run', 'retry'].includes(ev.kind)) { ek = 'run'; es = '답 모으는 중'; }
+      else if (ev.kind === 'fail') { ek = 'fail'; es = '멈춤'; }
+      else es = '평가를 시작할 차례예요';
+    }
+    steps.push({ id: 'eval', n: steps.length + 1, ko: '평가', k: ek, s: es, done: ek === 'ok' });
+    return steps;
+  }
   // 'video: xai_video/grok-video' 같은 공급자 표기를 쉬운 말로(D-0129).
   const KIND_KO = { video: '영상', image: '이미지', text: '글', judge: '검토' };
-  const ADAPTER_KO = { xai_video: 'xAI 그록 영상', grok_oauth: '그록(계정 연결)', grok_web: '그록 웹', fake_video: '시험용 가짜 영상', fake: '시험용 가짜 모델', fake_image: '시험용 가짜 이미지', codex_image: 'Codex 이미지', openai: 'OpenAI', gemini: 'Gemini', vertex_gemini: 'Vertex Gemini' };
+  const ADAPTER_KO = { xai_video: 'xAI 그록 영상', grok: '그록(계정 연결 우선)', grok_oauth: '그록(계정 연결)', grok_web: '그록 웹', fake_video: '시험용 가짜 영상', fake: '시험용 가짜 모델', fake_image: '시험용 가짜 이미지', codex_image: 'Codex 이미지', openai: 'OpenAI', gemini: 'Gemini', vertex_gemini: 'Vertex Gemini' };
   function providerKo(p) {
     const m = /^(?:(\w+):\s*)?([\w-]+)(?:\/(.+))?$/.exec(text(p).trim());
     if (!m) return text(p);
@@ -379,6 +673,11 @@
           .concat([{ act: 'retry', stage: def.id, label: '다시 실행', disabled: busy, why: busy ? '지금 작업이 끝나면 다시 실행할 수 있어요.' : '' }])
       });
     });
+    if (upper((rows.get('s8') || {}).status) === 'REJECTED') {
+      items.push({ kind: 'ready', stage: 's8', order: 1, blocked: 0,
+        title: '말투와 성격을 다시 만들 차례예요', body: '고칠 점을 반영한 뒤 새 버전을 승인하면 대화할 수 있어요.',
+        actions: [{ act: 'run-stage', stage: 's8', label: '프롬프트 다시 만들기', disabled: busy }] });
+    }
     R.pendingGatesFor(detail || {}, graph).forEach((pending) => {
       const gateRow = gatesById(detail).get(pending.id) || {};
       const stage = pending.stage;
@@ -398,6 +697,9 @@
       });
     });
     trainingTasks(tr, busy, graph.byStage.has('s10t') ? remaining(graph, views, 's10t') : 0).forEach((item) => items.push(item));
+    const modelItems = modelTasks(graph, detail, views, busy);
+    modelItems.forEach((item) => items.push(item));
+    const covered = new Set(modelItems.map((item) => item.stage));
     R.extractHeld(detail || {}).forEach((held) => {
       const def = graph.byStage.get(held.stage);
       items.push({
@@ -409,6 +711,17 @@
         actions: [{ act: 'confirm', stage: held.stage, label: '비용 확인', disabled: busy, why: busy ? '지금 작업이 끝나면 확인할 수 있어요.' : '' }]
       });
     });
+    // 마지막 작업이 단계 밖에서 실패하면 노드는 그대로라 이유가 안 보인다(QA v5 C-01·F05). 이유를 한 줄로 알린다.
+    const failedJob = (detail && detail.lastJob) || {};
+    if (!busy && failedJob.status === 'failed' && failedJob.error && !graph.stages.some((def) => (views[def.id] || {}).kind === 'fail')) {
+      items.push({
+        kind: 'fail', order: 0,
+        title: '마지막 작업이 멈췄어요',
+        body: plainError(failedJob.error) + ' 원인을 고친 뒤 이어서 실행해 주세요.',
+        blocked: 0,
+        actions: [{ act: 'resume', label: '이어서 실행' }]
+      });
+    }
     // 앞 단계가 모두 끝났는데 도는 작업이 없으면 공정이 조용히 멈춘다. 이어서 실행할 수 있다고 알린다.
     if (!busy && opts.goal) {
       const preds = predecessors(graph);
@@ -417,7 +730,7 @@
       const lastJob = (detail && detail.lastJob) || {};
       const blockedByServer = new Set(Array.isArray(lastJob.blocked) ? lastJob.blocked : []);
       const ready = graph.stages.filter((def) => {
-        if ((views[def.id] || {}).kind !== 'todo' || !scope.has(def.id) || blockedByServer.has(def.id)) return false;
+        if ((views[def.id] || {}).kind !== 'todo' || !scope.has(def.id) || blockedByServer.has(def.id) || covered.has(def.id)) return false;
         return Array.from(preds.get(def.id) || []).every((p) => ['done', 'skip'].includes((views[p] || {}).kind));
       });
       if (ready.length) {
@@ -469,6 +782,32 @@
     return notes.map((n) => Object.assign(n, { at: now }));
   }
 
+  function unfinishedGoal(graph, detail, target) {
+    const gate = graph.byGate.get(target);
+    const row = gate ? gatesById(detail).get(target) : rowsById(detail).get(target);
+    return (gate || graph.byStage.has(target)) && !['APPROVED', 'SKIPPED'].includes(upper((row || {}).status));
+  }
+  function runGoal(graph, detail, fallback, retryStage) {
+    const d = detail || {};
+    const goals = [d.job, ...(d.jobs || []), d.lastJob]
+      .filter((j) => j && (!j.action || j.action === 'run') && !(j.confirm || []).length && !['videos', 'videos-with-chat'].includes(j.trigger))
+      .map((j) => j.until);
+    goals.push(fallback);
+    const goal = goals.find((g) => unfinishedGoal(graph, d, g) && (!retryStage || ancestors(graph, g).has(retryStage)));
+    return goal || retryStage || (d.origin === 'SOURCE' && unfinishedGoal(graph, d, 's8c') ? 's8c' : 'sx');
+  }
+  function chatStatusText(reviewCount) {
+    return '대화할 수 있어요' + (reviewCount ? ' · 검토 ' + reviewCount + '건이 남았어요' : '');
+  }
+  function runFeedback(job, graph, detail) {
+    if (!job || job.status !== 'succeeded' || !Array.isArray(job.ranStages)) return '';
+    if ((job.held || []).length) return '비용 확인을 기다리고 있어요. 예상 비용을 보고 실행할지 골라 주세요.';
+    if ((job.waiting || []).length) return '검토를 기다리고 있어요. 결과를 확인하면 이어서 만들 수 있어요.';
+    if ((job.blocked || []).length) return '아직 시작할 수 없는 단계가 있어요. 앞 단계의 결과와 필요한 입력을 확인해 주세요.';
+    if (job.ranStages.length) return '이번 실행을 마쳤어요.';
+    return unfinishedGoal(graph, detail, job.until) ? '이 목표로 시작할 수 있는 단계가 없어요. 필요한 입력과 앞 단계를 확인해 주세요.' : '목표까지 이미 마쳐서 새로 실행할 단계가 없어요.';
+  }
+
   function targetLabel(graph, until) {
     const id = text(until).trim();
     if (!id) return '';
@@ -488,7 +827,7 @@
       side: $('[data-side]'), top: $('[data-top]'), banner: $('[data-banner]'), head: $('[data-head]'),
       graph: $('[data-graph]'), grid: $('[data-grid]'), legend: $('[data-legend]'), svg: $('[data-graph] svg.w'),
       view: $('[data-view]'), zoombar: $('[data-zoombar]'), shell: $('.fd-shell'), body: $('.fd-body'),
-      panel: $('[data-panel]'), sheet: $('[data-sheet]'), scrim: $('[data-scrim]')
+      panel: $('[data-panel]'), sheet: $('[data-sheet]'), scrim: $('[data-scrim]'), offgoal: $('[data-offgoal]')
     };
     const store = (() => { try { return global.localStorage; } catch (error) { return null; } })();
     const state = {
@@ -497,6 +836,8 @@
       conn: 'connecting', lastSync: null, busy: false, form: { open: false, slug: '', brief: '', error: '' },
       target: null, sheetKey: '', opener: null, openerGate: '', destroyed: false,
       overview: false, ov: { q: '', gate: '' }, batch: null, pendingReview: null, confirming: null, plans: {}, nextTarget: null, focus: false,
+      // 사이드바 검색어, 보관함 보기, 목표 밖 단계 펼치기(3차 QA)
+      sq: '', showArchived: false, showOff: false,
       // 갈래·모델 준비 방식마다 그래프가 다르다. 'CREATED|TRAIN' 같은 열쇠로 받아 둔 그래프(개요·받은 일이 캐릭터마다 자기 그래프로 센다).
       graphs: new Map(), graphSeq: 0, graphAsk: new Set(),
       theme: (store && ['light', 'dark'].includes(store.getItem('fd-theme'))) ? store.getItem('fd-theme') : 'system'
@@ -548,10 +889,21 @@
       return m ? decodeURIComponent(m[1]) : null;
     }
     function route() {
-      const m = /^#all(?:\/(\w+))?/.exec(text(global.location && global.location.hash));
-      return m ? { overview: true, filter: ['mine', 'run', 'fail', 'done'].includes(m[1]) ? m[1] : 'all' } : { overview: false, filter: '' };
+      const hash = text(global.location && global.location.hash);
+      // 처음 열면(주소에 캐릭터가 없으면) 전체 캐릭터 목록부터 보인다. 오래 멈춘 남의 캐릭터를 먼저 열지 않는다.
+      if (!hash || hash === '#') return { overview: true, filter: 'all' };
+      const m = /^#all(?:\/(\w+))?/.exec(hash);
+      const f = m && m[1] === 'done' ? 'chat' : m && m[1];
+      return m ? { overview: true, filter: ['mine', 'run', 'fail', 'chat'].includes(f) ? f : 'all' } : { overview: false, filter: '' };
     }
     function characters() { return (state.projects && state.projects.characters) || []; }
+    // 보관한 캐릭터는 기본 목록에서 숨긴다(지우지 않는다). 지금 화면에 연 캐릭터는 보관했어도 보인다.
+    function visibleChars() {
+      const open = route().overview || state.form.open ? null : state.characterId;
+      return characters().filter((c) => state.showArchived ? c.archived : (!c.archived || c.id === open));
+    }
+    function archivedCount() { return characters().filter((c) => c.archived).length; }
+    function createdTime(c) { return createdOf(c).t; }
     function graphKey(x) { return text((x && x.origin) || 'CREATED') + '|' + text((x && x.modelMode) || 'TRAIN'); }
     // 그 캐릭터의 그래프. 지금 연 캐릭터는 그 캐릭터로 받은 그래프, 나머지는 같은 갈래·방식으로 받아 둔 그래프다.
     function graphOf(c) {
@@ -567,6 +919,10 @@
     function trackHTML(c) {
       const tw = c && c.origin === 'SOURCE';
       return '<span class="fd-track' + (tw ? ' tw' : '') + '"><span class="d" aria-hidden="true"></span>' + E(trackLabel(c)) + '</span>';
+    }
+    function videoChipHTML(c) {
+      const t = videoText(c);
+      return t ? '<span class="fd-vid ' + videoTone(c) + '"><span class="d" aria-hidden="true"></span>' + E(t) + '</span>' : '';
     }
 
     // ---- 캐릭터 요약(개요·사이드바·받은 일이 같은 기준으로 센다) ----
@@ -590,10 +946,11 @@
       const fail = n('fail');
       const review = n('wait');
       const paid = n('confirm');
-      const rank = fail ? 0 : review ? 1 : paid ? 2 : running ? 3 : isComplete ? 6 : fresh ? 5 : 4;
-      return { c, tasks, fail, review, paid, todo: fail + review + paid, done, total: graph.stages.length, complete: isComplete, fresh, running, oldest: waits.length ? Math.min.apply(null, waits) : null, lanes, rank, top: tasks[0] || null, updated: parseTime(det.updatedAt || c.updatedAt) };
+      const status = statusOf(det, { fail, review, paid, running, complete: isComplete, fresh });
+      const goal = goalOf(graph, det, v);
+      return { c, tasks, fail, review, paid, todo: fail + review + paid, done, total: graph.stages.length, complete: isComplete, fresh, running, oldest: waits.length ? Math.min.apply(null, waits) : null, lanes, rank: status.rank, status, goal, chat: chatHref(det), created: createdTime(c), top: tasks[0] || null, updated: parseTime(det.updatedAt || c.updatedAt) };
     }
-    function statusDot(s) { return s.fail ? 'fail' : s.todo ? 'wait' : s.running ? 'run' : s.complete ? 'ok' : ''; }
+    function statusDot(s) { const t = s.status.tone; return t === 'muted' ? '' : t; }
     function nextInBatch() {
       if (!state.batch || !state.graph) return null;
       const list = characters().filter((c) => c.id !== state.characterId).map(summaryOf)
@@ -601,14 +958,6 @@
       list.sort((a, b) => (a.oldest || Infinity) - (b.oldest || Infinity));
       return list.length ? { next: list[0], left: list.length } : null;
     }
-    function pickDefault() {
-      const list = characters();
-      if (!list.length) return null;
-      const waiting = list.find((c) => c.awaitingHuman);
-      const running = list.find((c) => c.job);
-      return (waiting || running || list.slice().sort((a, b) => text(b.updatedAt).localeCompare(text(a.updatedAt)))[0]).id;
-    }
-
     function adoptGraph(raw) {
       const g = R.buildGraph(raw);
       g.paid = new Map((raw.stages || []).map((s) => [s.id, s.paid || []]));
@@ -618,6 +967,8 @@
       g.layout = layoutOf(g);
       g.origin = raw.origin || 'CREATED';
       g.modelMode = raw.modelMode || 'TRAIN';
+      const s8c = g.byStage.get('s8c');
+      if (s8c) s8c.name = s8cName(g.origin, '');
       state.graphs.set(g.key, g);
       return g;
     }
@@ -649,7 +1000,8 @@
           .then(() => state.graphAsk.delete(key));
       });
     }
-    async function loadProjects() { state.projects = await request('GET', '/api/projects'); }
+    // 보관한 캐릭터도 받아 와야 보관함 수와 보관 풀기가 보인다(QA v5 D-02). 목록에서는 archived로 거른다.
+    async function loadProjects() { state.projects = await request('GET', '/api/projects?includeArchived=true'); }
     async function loadDetail() {
       if (!state.characterId) { state.detail = null; return; }
       const id = state.characterId;
@@ -661,6 +1013,11 @@
       const recent = Object.keys(state.decided).filter((g) => Date.now() - state.decided[g] < 60000).map((g) => ((state.graph.byGate.get(g) || {}).title || g) + ':');
       const fresh = diffNotes(state.graph, prev, next, Date.now()).filter((n) => !recent.some((prefix) => n.t.indexOf(prefix) === 0));
       if (fresh.length) state.notes = fresh.concat(state.notes).slice(0, 3);
+      const tracked = (next.jobs || []).find((j) => j.jobId === state.runJobId);
+      const result = runFeedback(tracked, state.graph, next);
+      if (result || (tracked && tracked.status === 'failed')) state.runJobId = null;
+      if (result) state.feedback = { tone: 'ok', text: result };
+      else if (tracked && tracked.status === 'failed') state.feedback = { tone: 'bad', text: '작업이 멈췄어요. 지금 할 일에서 이유를 확인해 주세요.' };
       state.detail = next;
       if (state.review && !state.review.readonly) {
         const g = gatesById(next).get(state.review.gate);
@@ -691,10 +1048,13 @@
         if (!state.graph || full) await loadGraph();
         await loadProjects();
         ensureGraphs();
-        const wanted = routeId() || state.characterId || pickDefault();
+        // 주소에 캐릭터가 없으면 아무 캐릭터도 고르지 않는다(첫 화면은 전체 캐릭터 목록).
+        const wanted = routeId() || state.characterId || null;
         const changed = wanted !== state.characterId;
         if (changed) {
           state.characterId = wanted; state.detail = null; state.sel = null; closeSheet(false); state.notes = []; state.open = new Set(); state.target = null; state.mstep = null; state.mconfirm = null;
+          state.showOff = false; state.menuOpen = false; state.moreOpen = false;
+          state.video = null;
           // 새 그래프가 오기 전에는 받아 둔 같은 갈래 그래프로 그린다(이전 캐릭터의 그래프를 남기지 않는다).
           const entry = characters().find((c) => c.id === wanted);
           state.graph = state.graphs.get(graphKey(entry)) || state.graphs.get('CREATED|TRAIN') || state.graph;
@@ -758,67 +1118,92 @@
     function orchestrator() { return (state.rawGraph && state.rawGraph.orchestrator) || {}; }
     function setupScope() { return notStarted() ? ancestors(state.graph, state.target || defaultTarget()) : null; }
     function currentUntil() {
-      const d = state.detail || {};
-      // 실행 확인·다시 실행 작업은 그 단계까지만 돈다. 전체 목표는 그런 작업이 아닌 가장 최근 작업에서 읽는다.
-      const jobs = [d.job].concat(Array.isArray(d.jobs) ? d.jobs : []).filter(Boolean);
-      const single = (j) => (Array.isArray(j.confirm) && j.confirm.length) || (j.until && j.until !== 'sx' && state.graph && state.graph.byStage && state.graph.byStage.has(j.until));
-      const job = jobs.find((j) => !single(j)) || d.lastJob;
-      return job ? job.until : '';
+      return runGoal(state.graph, state.detail, orchestrator().resumeUntil);
     }
-    function elapsed(now) {
-      const hist = (state.detail && state.detail.history) || {};
+    // 마지막 작업 시각과 걸린 시간(첫 시작 → 마지막 끝). 아무것도 돌지 않을 때 시간이 저절로 늘어나지 않는다.
+    function activity() {
+      const d = state.detail || {};
+      const hist = d.history || {};
       let first = null;
       let last = null;
       Object.keys(hist).forEach((id) => (hist[id] || []).forEach((a) => {
         const s = parseTime(a.startedAt);
         const e = parseTime(a.endedAt);
         if (s != null && (first == null || s < first)) first = s;
-        if (e != null && (last == null || e > last)) last = e;
+        const end = e != null ? e : s;
+        if (end != null && (last == null || end > last)) last = end;
       }));
-      if (first == null) return '';
-      return span((complete() && last ? last : now) - first) + (complete() ? ' 걸림' : ' 경과');
+      (d.gates || []).forEach((g) => { const t = parseTime(g.decidedAt); if (t != null && (last == null || t > last)) last = t; });
+      if (last == null) last = parseTime(d.updatedAt);
+      return { last, took: first != null && last != null && last - first >= 60000 ? span(last - first) : '' };
     }
-    function nameOf(d) { return displayName(d && ((d.persona && d.persona.name) || (d.summary && d.summary.name) || d.name), d && d.id); }
-    function charStatus(c) {
-      if (c.awaitingHuman) return 'wait';
-      if ((c.stages || []).some((s) => upper(s.status) === 'CHECK_FAILED')) return 'fail';
-      if (c.job) return 'run';
-      const p = c.progress || {};
-      if (p.total && p.done >= p.total) return 'ok';
-      return '';
+    function whenText(t) {
+      if (t == null) return '';
+      const d = new Date(t);
+      const now = new Date();
+      const hm = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+      return d.toDateString() === now.toDateString() ? hm : (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hm;
+    }
+    function nameOf(d) { return labelOf({ id: d && d.id, displayName: d && d.displayName, persona: d && d.persona, name: d && (d.name || (d.summary && d.summary.name)) }); }
+    function isMotif(d) { return Boolean(d) && (d.origin || (state.graph && state.graph.origin)) === 'SOURCE'; }
+    // 프롬프트만 쓰는 모티브는 학습을 하지 않으므로 모델 만들기 탭이 없다.
+    function promptOnly(d) { return isMotif(d) && (d.modelMode || (state.graph && state.graph.modelMode)) === 'PROMPT_ONLY'; }
+    function currentSummary() {
+      if (!state.detail) return null;
+      return allSums().get(state.detail.id) || summaryOf(Object.assign({}, characters().find((c) => c.id === state.detail.id) || {}, { id: state.detail.id }));
     }
     function counts(v) {
       const c = { run: 0, fail: 0, wait: 0, done: 0 };
       Object.keys(v).forEach((id) => { const k = v[id].kind; if (k === 'run' || k === 'retry') c.run++; if (k === 'fail') c.fail++; if (k === 'wait' || k === 'confirm') c.wait++; if (k === 'done' || k === 'skip') c.done++; });
       return c;
     }
+    // 한 번 그릴 때 캐릭터마다 요약을 한 번만 만든다(사이드바·머리줄·개요가 같은 값을 쓴다).
+    let sumMemo = null;
+    function allSums() {
+      if (!sumMemo) sumMemo = new Map(state.graph ? characters().map((c) => [c.id, summaryOf(c)]) : []);
+      return sumMemo;
+    }
+    function visibleSums() { const m = allSums(); return visibleChars().map((c) => m.get(c.id)).filter(Boolean); }
+    function inboxCount() { let n = 0; allSums().forEach((s) => { if (!s.c.archived) n += s.todo; }); return n; }
+    // 사이드바는 최근에 만든 캐릭터가 위에 온다(상태가 바뀌어도 자리가 흔들리지 않는다). 상태는 줄마다 글자로 보인다.
+    function byNewest(a, b) { return b.created - a.created || (b.updated || 0) - (a.updated || 0) || text(b.c.id).localeCompare(text(a.c.id)); }
 
     // ---- 사이드바 ----
     function renderSide() {
       if (!region.side) return;
-      const list = characters();
-      // 실패·검토·유료 확인을 모든 캐릭터에서 같은 기준으로 센다(받은 일 = 머리줄 = 개요).
-      const sums = state.graph ? list.map(summaryOf) : [];
-      const byId = new Map(sums.map((s) => [s.c.id, s]));
-      const inbox = sums.reduce((n, s) => n + s.todo, 0);
       const rt = route();
-      const items = list.map((c) => {
-        const s = byId.get(c.id);
-        const name = displayName(c.name, c.id);
-        const waiting = s ? s.todo : 0;
-        return '<button type="button" class="fd-nav" data-act="pick" data-id="' + E(c.id) + '"' + (!rt.overview && c.id === state.characterId ? ' aria-current="page"' : '') + ' title="' + E(name) + '">' +
-          '<span class="fd-av" aria-hidden="true">' + E(Array.from(name)[0] || '?') + '<span class="st ' + (s ? statusDot(s) : '') + '"></span></span>' +
-          '<span class="lbl">' + E(name) + '</span>' +
-          (waiting ? '<span class="num attn"><span class="sr">할 일 </span>' + waiting + '<span class="u">건</span></span>' : '<span class="num" title="' + (s ? E(s.done + '/' + s.total + '단계 완료') : '') + '">' + (s ? s.done + '/' + s.total : '') + '</span>') + '</button>';
+      const labels = nameLabels(characters());
+      const q = state.sq.trim().toLowerCase();
+      const rows = visibleSums().sort(byNewest).filter((s) => {
+        if (!q) return true;
+        const l = labels.get(s.c.id) || {};
+        return (text(l.name) + ' ' + text(l.note) + ' ' + text(s.c.persona && s.c.persona.job)).toLowerCase().indexOf(q) >= 0;
+      });
+      const items = rows.map((s) => {
+        const c = s.c;
+        const l = labels.get(c.id) || { name: labelOf(c), note: '' };
+        const sub = [s.status.label, l.note].filter(Boolean).join(' · ');
+        return '<button type="button" class="fd-nav two" data-act="pick" data-id="' + E(c.id) + '"' + (!rt.overview && c.id === state.characterId ? ' aria-current="page"' : '') + ' title="' + E(l.name + ' · ' + sub) + '">' +
+          '<span class="fd-av" aria-hidden="true">' + E(Array.from(l.name)[0] || '?') + '<span class="st ' + statusDot(s) + '"></span></span>' +
+          '<span class="lbl"><span class="nm"><span class="tx">' + E(l.name) + '</span>' + (c.origin === 'SOURCE' ? '<span class="fd-org" title="' + E(trackLabel(c)) + '">' + E(c.originLabel || '모티브') + '</span>' : '') + '</span><small>' + E(sub) + '</small></span>' +
+          (s.todo ? '<span class="num attn"><span class="sr">할 일 </span>' + s.todo + '<span class="u">건</span></span>' : '') + '</button>';
       }).join('');
+      const inbox = inboxCount();
+      const arch = archivedCount();
+      const empty = q ? '찾는 캐릭터가 없어요' : state.showArchived ? '보관한 캐릭터가 없어요' : '아직 없어요';
       const theme = [['system', 'monitor', '시스템 설정 따르기'], ['light', 'sun', '밝은 화면'], ['dark', 'moon', '어두운 화면']]
         .map((t) => '<button type="button" data-act="theme" data-theme="' + t[0] + '" aria-pressed="' + (state.theme === t[0]) + '" aria-label="' + t[2] + '" title="' + t[2] + '">' + icon(t[1]) + '</button>').join('');
       region.side.innerHTML = '<div class="fd-brand">' + MARK + '<div class="fd-word"><b>Foundry</b><small>캐릭터 공장</small></div></div>' +
-        '<div class="fd-side-actions"><button type="button" class="btn block" data-act="new" title="새 캐릭터">' + icon('plus') + '<span class="lbl">새 캐릭터</span></button></div>' +
-        '<nav aria-label="캐릭터 탐색"><button type="button" class="fd-nav" data-act="overview" title="전체 캐릭터"' + (rt.overview && rt.filter !== 'mine' ? ' aria-current="page"' : '') + '>' + icon('grid') + '<span class="lbl">전체 캐릭터</span><span class="num">' + list.length + '명</span></button>' +
+        '<div class="fd-side-actions"><a class="btn block" href="sources.html" title="실존 인물을 원문으로 만들어요" style="text-decoration:none">' + icon('user') + '<span class="lbl">실존 인물 · 원문으로</span></a>' +
+        '<button type="button" class="btn block" data-act="new" title="지어낸 캐릭터를 브리프로 만들어요" style="margin-top:6px">' + icon('plus') + '<span class="lbl">새로 지어내기</span></button></div>' +
+        '<nav aria-label="캐릭터 탐색"><button type="button" class="fd-nav" data-act="overview" title="전체 캐릭터"' + (rt.overview && rt.filter !== 'mine' ? ' aria-current="page"' : '') + '>' + icon('grid') + '<span class="lbl">전체 캐릭터</span><span class="num">' + characters().filter((c) => !c.archived).length + '명</span></button>' +
         '<button type="button" class="fd-nav" data-act="inbox" title="받은 일"' + (rt.overview && rt.filter === 'mine' ? ' aria-current="page"' : '') + '>' + icon('inbox') + '<span class="lbl">받은 일</span>' + (inbox ? '<span class="num attn"><span class="sr">할 일 </span>' + inbox + '<span class="u">건</span></span>' : '<span class="num">0건</span>') + '</button>' +
-        '<h2>캐릭터</h2>' + (items || '<p class="hint" style="padding:0 8px">아직 없어요</p>') + '</nav>' +
-        '<div class="fd-side-foot"><a class="fd-help" href="help.html" target="_blank" rel="noopener" title="사용 안내" aria-label="사용 안내">?</a><div class="fd-theme" role="group" aria-label="화면 테마">' + theme + '</div><div class="fd-foot-links"><a href="help.html" target="_blank" rel="noopener">사용 안내</a><a href="d-ops.html">이전 화면</a><a href="d-ops.html?panel=text">모델 설정</a></div></div>';
+        '<h2>' + (state.showArchived ? '보관함' : '캐릭터') + '</h2>' +
+        '<div class="fd-side-q"><label class="sr" for="fd-side-q">캐릭터 이름으로 찾기</label><input id="fd-side-q" data-side-q type="search" placeholder="이름으로 찾기" value="' + E(state.sq) + '" autocomplete="off"></div>' +
+        (items || '<p class="hint fd-side-empty">' + empty + '</p>') +
+        (arch || state.showArchived ? '<button type="button" class="fd-nav fd-arch" data-act="archived" aria-pressed="' + state.showArchived + '" title="' + (state.showArchived ? '보관함 닫기' : '보관한 캐릭터 보기') + '">' + icon('archive') + '<span class="lbl">' + (state.showArchived ? '보관함 닫기' : '보관함') + '</span><span class="num">' + arch + '명</span></button>' : '') + '</nav>' +
+        '<div class="fd-side-foot"><a class="fd-help" href="help.html" target="_blank" rel="noopener" title="사용 안내" aria-label="사용 안내">?</a><div class="fd-theme" role="group" aria-label="화면 테마">' + theme + '</div>' +
+        '<div class="fd-foot-links"><a href="help.html" target="_blank" rel="noopener">사용 안내</a><a class="fd-ops" href="d-ops.html?panel=text" title="모델 설정 (운영 담당용)" aria-label="모델 설정 (운영 담당용)">' + icon('gear') + '</a></div></div>';
     }
 
     // ---- 머리줄 ----
@@ -830,49 +1215,44 @@
       const next = order[(i + 1) % order.length];
       return '<button type="button" class="fd-head-theme" data-act="theme" data-theme="' + next[0] + '" aria-label="화면 테마: 지금 ' + cur[2] + '. 누르면 ' + next[2] + '" title="화면 테마: ' + cur[2] + '">' + icon(cur[1]) + '</button>';
     }
+    // 연결 상태는 끊겼을 때만 보인다.
     function connHTML() {
-      const conn = state.conn === 'offline' ? ['off', '연결 끊김 · 다시 연결하는 중'] : state.conn === 'reconnecting' ? ['wait', '다시 연결하는 중'] : state.conn === 'connecting' ? ['wait', '연결하는 중'] : ['', '연결됨' + (state.lastSync ? ' · 갱신 ' + clock(new Date(state.lastSync).toISOString()) : '')];
-      return '<span class="fd-conn ' + conn[0] + '" role="status"><span class="d"></span>' + conn[1] + '</span>';
+      if (state.conn === 'offline') return '<span class="fd-conn off" role="status"><span class="d"></span>연결 끊김 · 다시 연결하는 중</span>';
+      if (state.conn === 'reconnecting') return '<span class="fd-conn wait" role="status"><span class="d"></span>다시 연결하는 중</span>';
+      return '';
     }
+    function statusPill(st) { return '<span class="fl-pill ' + st.tone + '"><span class="d"></span>' + E(st.label) + '</span>'; }
     function renderTop(v) {
       const d = state.detail;
-      const list = characters();
-      const sums = state.graph ? list.map(summaryOf) : [];
-      const label = (s) => s.fail ? ' · 멈춤' : s.review ? ' · 검토 대기' : s.paid ? ' · 유료 확인' : '';
-      const picker = list.length ? '<label class="sr" for="fl-pick">캐릭터</label><select id="fl-pick" class="fd-pick" data-pick><option value="__all"' + (state.overview ? ' selected' : '') + '>전체 캐릭터</option>' + sums.map((s) => '<option value="' + E(s.c.id) + '"' + (!state.overview && s.c.id === state.characterId ? ' selected' : '') + '>' + E(displayName(s.c.name, s.c.id)) + label(s) + '</option>').join('') + '<option value="__new">+ 새 캐릭터</option></select>' : '';
+      const sums = visibleSums().sort(byNewest);
+      const labels = nameLabels(characters());
+      const optName = (s) => { const l = labels.get(s.c.id) || { name: labelOf(s.c), note: '' }; return l.name + (l.note ? ' (' + l.note + ')' : '') + ' · ' + s.status.label; };
+      const picker = characters().length ? '<label class="sr" for="fl-pick">캐릭터</label><select id="fl-pick" class="fd-pick" data-pick><option value="__all"' + (state.overview ? ' selected' : '') + '>전체 캐릭터</option>' + sums.map((s) => '<option value="' + E(s.c.id) + '"' + (!state.overview && !state.form.open && s.c.id === state.characterId ? ' selected' : '') + '>' + E(optName(s)) + '</option>').join('') + '<option value="__src">+ 실존 인물 · 원문으로</option><option value="__new"' + (state.form.open ? ' selected' : '') + '>+ 새로 지어내기</option></select>' : '';
+      if (state.form.open) {
+        region.top.innerHTML = '<nav class="fd-crumb" aria-label="위치"><a class="up" href="#all">전체 캐릭터</a><span class="sep">/</span><b>새로 지어내기</b></nav>' + picker + '<div class="fd-metrics">' + connHTML() + '</div>' + headThemeHTML();
+        if (doc.title !== undefined) doc.title = '새로 지어내기 · Foundry';
+        return;
+      }
       if (state.overview) {
-        const fail = sums.filter((s) => s.fail).length;
-        const mine = sums.filter((s) => s.todo).length;
-        const run = sums.filter((s) => s.running).length;
-        const pillsO = (fail ? '<span class="fl-pill fail"><span class="d"></span>멈춘 캐릭터 ' + fail + '명</span>' : '') + (mine ? '<span class="fl-pill wait"><span class="d"></span>내 차례 ' + mine + '명</span>' : '') + (run ? '<span class="fl-pill run"><span class="d"></span>진행 중 ' + run + '명</span>' : '');
-        region.top.innerHTML = '<nav class="fd-crumb" aria-label="위치">' + (route().filter === 'mine' ? '<a class="up" href="#all">전체 캐릭터</a><span class="sep">/</span><b>받은 일</b>' : '<b>전체 캐릭터</b>') + '</nav>' + picker + pillsO + '<div class="fd-metrics"><span>캐릭터 <b>' + list.length + '</b>명</span>' + connHTML() + '</div>' + headThemeHTML();
-        const todo = sums.reduce((n, s) => n + s.todo, 0);
+        const n = (st) => sums.filter((s) => s.status.status === st).length;
+        const pillsO = [['failed', '실패'], ['needs_review', '확인 필요'], ['running', '만드는 중']].map((x) => n(x[0]) ? statusPill({ tone: STATUS_TONE[x[0]], label: x[1] + ' ' + n(x[0]) + '명' }) : '').join('');
+        region.top.innerHTML = '<nav class="fd-crumb" aria-label="위치">' + (route().filter === 'mine' ? '<a class="up" href="#all">전체 캐릭터</a><span class="sep">/</span><b>받은 일</b>' : '<b>전체 캐릭터</b>') + '</nav>' + picker + pillsO + '<div class="fd-metrics"><span>캐릭터 <b>' + sums.length + '</b>명</span>' + connHTML() + '</div>' + headThemeHTML();
+        const todo = inboxCount();
         if (doc.title !== undefined) doc.title = (todo ? '(' + todo + ') ' : '') + '전체 캐릭터 · Foundry';
         return;
       }
-      let pills = '';
-      if (d) {
-        if (complete()) pills += '<span class="fl-pill ok"><span class="d"></span>완료</span>';
-        else if (notStarted()) pills += '<span class="fl-pill muted"><span class="d"></span>시작 전</span>';
-        else {
-          const c = counts(v);
-          if (c.run) pills += '<span class="fl-pill run"><span class="d"></span>진행 중 ' + c.run + '단계</span>';
-          else if (d.job) pills += '<span class="fl-pill run"><span class="d"></span>작업 준비 중</span>';
-          else if (!c.fail && !c.wait) pills += '<span class="fl-pill muted"><span class="d"></span>멈춰 있음</span>';
-          if (c.fail) pills += '<span class="fl-pill fail"><span class="d"></span>멈춘 단계 ' + c.fail + '</span>';
-          if (c.wait) pills += '<span class="fl-pill wait"><span class="d"></span>사람 할 일 ' + c.wait + '건</span>';
-        }
-      }
+      const s = d ? currentSummary() : null;
       const meta = [];
       if (d && !notStarted()) {
-        meta.push('<span>완료 <b>' + counts(v).done + '</b>/' + state.graph.stages.length + '단계</span>');
-        const el = elapsed(Date.now());
-        if (el) meta.push('<span>' + E(el) + '</span>');
-        if (d.cost) meta.push('<span>추정 비용 <b>' + (d.cost.estUsd == null ? '—' : '$' + Number(d.cost.estUsd).toFixed(2)) + '</b>' + (d.cost.unpricedCalls ? ' · 단가 미확인 ' + d.cost.unpricedCalls + '건 제외' : '') + '</span>');
+        const a = activity();
+        if (a.last != null) meta.push('<span>마지막 작업 <b>' + E(whenText(a.last)) + '</b></span>');
+        if (a.took && s && s.status.status !== 'running') meta.push('<span>걸린 시간 ' + E(a.took) + '</span>');
+        if (d.cost && d.cost.estUsd != null) meta.push('<span title="지금까지 이 캐릭터에 쓴 추정 비용">비용 <b>$' + Number(d.cost.estUsd).toFixed(2) + '</b></span>');
       }
-      meta.push(connHTML());
+      const conn = connHTML();
+      if (conn) meta.push(conn);
       const crumb = d ? '<a class="up" href="#all">전체 캐릭터</a><span class="sep">/</span><b>' + E(nameOf(d)) + '</b>' : '<b>캐릭터</b>';
-      region.top.innerHTML = '<nav class="fd-crumb" aria-label="위치">' + crumb + '</nav>' + picker + pills + '<div class="fd-metrics">' + meta.join('') + '</div>' + headThemeHTML();
+      region.top.innerHTML = '<nav class="fd-crumb" aria-label="위치">' + crumb + '</nav>' + picker + (s ? statusPill(s.status) : '') + '<div class="fd-metrics">' + meta.join('') + '</div>' + headThemeHTML();
       const waiting = d ? Object.keys(v).filter((id) => ['wait', 'confirm', 'fail'].includes(v[id].kind)).length : 0;
       if (doc.title !== undefined) doc.title = (waiting ? '(' + waiting + ') ' : '') + (d ? nameOf(d) + ' · ' : '') + 'Foundry';
     }
@@ -889,70 +1269,113 @@
     // ---- 캔버스 머리 ----
     function titleHTML() {
       const d = state.detail;
+      const s = currentSummary();
+      const motif = isMotif(d);
       const until = currentUntil();
-      const sub = notStarted() ? '아직 실행하지 않았어요' : (until ? '목표 ' + targetLabel(state.graph, until) : '');
+      const sub = motif ? '' : notStarted() ? '아직 실행하지 않았어요' : (until ? '목표 ' + targetLabel(state.graph, until) : '');
       let prog = '';
-      if (!notStarted()) {
-        const s = summaryOf({ id: d.id });
-        const pct = Math.round(s.done / s.total * 100);
-        prog = '<span class="fd-prog-wrap"><span class="fd-prog" role="img" aria-label="' + E('전체 ' + s.total + '단계 중 ' + s.done + '단계 완료, ' + pct + '%') + '">' + s.lanes.map((l) => '<span class="seg ' + l.kind + '" title="' + E(l.label + ' ' + l.done + '/' + l.total) + '"></span>').join('') + '</span>' + s.done + '/' + s.total + '단계 · ' + pct + '%</span>';
+      if (!notStarted() && s) {
+        const g = s.goal;
+        if (motif) {
+          // 모티브는 대화 가능까지 필요한 단계만 센다(16단계 막대를 쓰지 않는다).
+          prog = '<span class="fd-prog-wrap fd-goal">' + E(g.label) + ' <b>' + g.done + '/' + g.total + '</b>단계</span>';
+        } else {
+          const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
+          prog = '<span class="fd-prog-wrap"><span class="fd-prog" role="img" aria-label="' + E('전체 ' + g.total + '단계 중 ' + g.done + '단계 완료, ' + pct + '%') + '">' + s.lanes.map((l) => '<span class="seg ' + l.kind + '" title="' + E(l.label + ' ' + l.done + '/' + l.total) + '"></span>').join('') + '</span>' + g.done + '/' + g.total + '단계 · ' + pct + '%</span>';
+        }
       }
-      const demo = d.origin === 'SOURCE' ? '<span class="fd-demo">' + E(DEMO_NOTE) + '</span>' : '';
-      return '<div class="fd-title"><h1 tabindex="-1">' + E(nameOf(d)) + '</h1>' + trackHTML(d) + (sub ? '<p>' + E(sub) + '</p>' : '') + prog + (nameOf(d) !== d.id ? '<code>' + E(d.id) + '</code>' : '') + demo + '</div>';
+      const demo = motif ? '<span class="fd-demo">' + E(DEMO_NOTE) + '</span>' : '';
+      // 공정 보기에서는 '대화해 보기'가 지금 할 일 카드의 주 버튼이다. 머리에는 다른 보기(모델 만들기)에서만 둔다.
+      const href = chatHref(d);
+      const chat = href && modelMode() ? '<a class="btn fd-chat" href="' + E(href) + '">' + icon('chat') + '대화해 보기</a>' : '';
+      return '<div class="fd-title"><h1 tabindex="-1">' + E(nameOf(d)) + '</h1>' + trackHTML(d) + videoChipHTML(d) + (sub ? '<p>' + E(sub) + '</p>' : '') + prog + demo + chat + moreHTML(d) + '</div>';
+    }
+    // 캐릭터 메뉴: 기술 정보(ID)와 보관하기. 다시 그려도 열린 상태를 유지한다.
+    function archivedNow(d) { const c = characters().find((x) => x.id === d.id); return Boolean((c && c.archived) || d.archived); }
+    function moreHTML(d) {
+      const arch = archivedNow(d);
+      return '<div class="fd-more' + (state.menuOpen ? ' open' : '') + '"><button type="button" class="btn ghost fd-more-btn" data-act="menu" aria-expanded="' + Boolean(state.menuOpen) + '" aria-label="캐릭터 메뉴" title="캐릭터 메뉴">' + icon('more') + '</button>' +
+        (state.menuOpen ? '<div class="fd-menu" role="group" aria-label="캐릭터 메뉴"><button type="button" class="btn block" data-act="archive" data-v="' + (arch ? '0' : '1') + '">' + icon('archive') + (arch ? '보관 풀기' : '보관하기') + '</button><p class="hint">' + (arch ? '다시 목록에 보여요.' : '지우지 않고 목록에서만 숨겨요. 보관함에서 다시 찾을 수 있어요.') + '</p>' +
+          '<div class="fd-menu-tech"><span>캐릭터 ID</span><code>' + E(d.id) + '</code></div></div>' : '') + '</div>';
     }
     function formHTML() {
       const f = state.form;
-      return '<form class="fl-form" data-form><h2>새 캐릭터</h2><p class="hint">등록만 하고 바로 실행하지 않아요. 등록한 뒤 어디까지 돌릴지 고르고 시작해요.</p>' +
-        '<label for="fl-slug">짧은 이름 (영문 소문자·숫자·하이픈)</label><input id="fl-slug" data-slug autocomplete="off" value="' + E(f.slug) + '" placeholder="예: cafe-owner">' +
-        '<label for="fl-brief">브리프</label><textarea id="fl-brief" data-brief placeholder="타깃, 분위기, 성격, 챕터 배경 등을 적어 주세요.">' + E(f.brief) + '</textarea>' +
+      return '<form class="fl-form" data-form><h2>새로 지어내기</h2><p class="hint">지어낸 캐릭터를 브리프로 만들어요. 실존 인물이라면 <a href="sources.html">원문으로 만들기</a>를 써 주세요. 등록만 하고 바로 실행하지 않아요.</p>' +
+        '<label for="fl-brief">어떤 캐릭터인가요</label><textarea id="fl-brief" data-brief placeholder="타깃, 분위기, 성격, 챕터 배경 등을 적어 주세요.">' + E(f.brief) + '</textarea>' +
+        '<details class="fl-adv"' + (f.slug ? ' open' : '') + '><summary>짧은 이름 직접 정하기 (선택)</summary><label for="fl-slug">짧은 이름 (영문 소문자·숫자·하이픈)</label><input id="fl-slug" data-slug autocomplete="off" value="' + E(f.slug) + '" placeholder="비워 두면 자동으로 정해요"></details>' +
         (f.error ? '<p class="err" role="alert">' + E(f.error) + '</p>' : '') +
         '<div class="acts"><button type="submit" class="btn pri"' + (state.busy ? ' disabled' : '') + '>등록하기</button>' + (characters().length ? '<button type="button" class="btn ghost" data-act="cancel-form">취소</button>' : '') + '</div></form>';
     }
     function overviewHTML(filter) {
-      const list = characters();
-      if (!list.length) return emptyHTML();
-      const all = list.map(summaryOf);
+      if (!characters().length) return emptyHTML();
+      const all = visibleSums();
+      const labels = nameLabels(characters());
       const gates = new Map();
       all.forEach((s) => s.tasks.filter((x) => x.kind === 'wait').forEach((x) => gates.set(x.gate, (gates.get(x.gate) || 0) + 1)));
       if (state.ov.gate && !gates.has(state.ov.gate)) state.ov.gate = '';
-      const counts = { all: all.length, mine: all.filter((s) => s.todo).length, run: all.filter((s) => s.running && !s.todo).length, fail: all.filter((s) => s.fail).length, done: all.filter((s) => s.complete).length };
+      const is = (s, st) => s.status.status === st;
+      const match = { all: () => true, mine: (s) => s.todo > 0, run: (s) => is(s, 'running'), chat: (s) => isChatReady(s.c), fail: (s) => is(s, 'failed') };
+      const counts = {};
+      Object.keys(match).forEach((k) => { counts[k] = all.filter(match[k]).length; });
       const q = state.ov.q.trim().toLowerCase();
-      let rows = all.filter((s) => (filter === 'mine' ? s.todo > 0 : filter === 'run' ? s.running && !s.todo : filter === 'fail' ? s.fail > 0 : filter === 'done' ? s.complete : true));
+      let rows = all.filter(match[filter] || match.all);
       if (state.ov.gate) rows = rows.filter((s) => s.tasks.some((x) => x.kind === 'wait' && x.gate === state.ov.gate));
-      if (q) rows = rows.filter((s) => (text(s.c.name) + ' ' + s.c.id + ' ' + text(s.c.persona && s.c.persona.job)).toLowerCase().indexOf(q) >= 0);
-      rows.sort((a, b) => a.rank - b.rank || (a.oldest || Infinity) - (b.oldest || Infinity) || (b.updated || 0) - (a.updated || 0));
-      const tabs = [['all', '전체'], ['mine', '내 차례'], ['run', '진행 중'], ['fail', '멈춤'], ['done', '완료']]
+      if (q) rows = rows.filter((s) => { const l = labels.get(s.c.id) || {}; return (text(l.name) + ' ' + text(l.note) + ' ' + text(s.c.persona && s.c.persona.job)).toLowerCase().indexOf(q) >= 0; });
+      rows.sort((a, b) => a.rank - b.rank || (a.oldest || Infinity) - (b.oldest || Infinity) || b.created - a.created);
+      const tabs = [['all', '전체'], ['mine', '할 일 있음'], ['run', '만드는 중'], ['chat', '대화 가능'], ['fail', '실패']]
         .map((x) => '<a class="ov-tab" href="#all' + (x[0] === 'all' ? '' : '/' + x[0]) + '"' + (x[0] === filter ? ' aria-current="page"' : '') + '>' + x[1] + '<span class="n">' + counts[x[0]] + '명</span></a>').join('');
       const gateSel = gates.size ? '<label class="sr" for="ov-gate">검토 종류</label><select id="ov-gate" data-ov-gate><option value="">검토 종류 전체</option>' + Array.from(gates).map((x) => '<option value="' + E(x[0]) + '"' + (state.ov.gate === x[0] ? ' selected' : '') + '>' + E(gateTitle(x[0])) + ' · ' + x[1] + '건</option>').join('') + '</select>' : '';
       const search = '<label class="sr" for="ov-q">이름으로 찾기</label><input id="ov-q" data-ov-q type="search" placeholder="이름으로 찾기" value="' + E(state.ov.q) + '" autocomplete="off">';
-      const head = '<div class="fd-title"><h1 tabindex="-1">' + (filter === 'mine' ? '받은 일' : '전체 캐릭터') + '</h1><p>' + (filter === 'mine' ? '모든 캐릭터에서 사람이 할 일(멈춤 · 검토 · 유료 확인)이 있는 캐릭터예요. 검토 종류로 거르면 같은 검토를 이어서 할 수 있어요.' : '캐릭터마다 어디까지 왔고 무엇을 기다리는지 봐요. 내 차례인 캐릭터가 위에 와요.') + '</p></div>';
-      const bar = '<div class="ov-bar"><nav class="ov-tabs" aria-label="상태로 거르기">' + tabs + '</nav><div class="ov-tools">' + gateSel + search + '</div></div>';
+      const arch = archivedCount();
+      const archBtn = arch || state.showArchived ? '<button type="button" class="btn ghost" data-act="archived" aria-pressed="' + state.showArchived + '">' + icon('archive') + (state.showArchived ? '보관함 닫기' : '보관함 ' + arch + '명') + '</button>' : '';
+      const title = state.showArchived ? '보관함' : filter === 'mine' ? '받은 일' : '전체 캐릭터';
+      const lead = state.showArchived ? '보관한 캐릭터예요. 열어서 캐릭터 메뉴에서 보관을 풀 수 있어요.' : filter === 'mine' ? '사람이 확인할 일(검토 · 실패 · 비용 확인)이 있는 캐릭터예요. 검토 종류로 거르면 같은 검토를 이어서 할 수 있어요.' : '캐릭터마다 지금 상태와 할 일을 봐요. 확인이 필요한 캐릭터가 위에 와요.';
+      const head = '<div class="fd-title"><h1 tabindex="-1">' + title + '</h1><p>' + lead + '</p></div>';
+      const bar = '<div class="ov-bar"><nav class="ov-tabs" aria-label="상태로 거르기">' + tabs + '</nav><div class="ov-tools">' + gateSel + search + archBtn + '</div></div>';
       if (!rows.length) return head + bar + '<div class="fl-empty sm"><h2>' + (filter === 'mine' && !q && !state.ov.gate ? '지금 사람이 할 일이 없어요' : '조건에 맞는 캐릭터가 없어요') + '</h2>' + (q || state.ov.gate || filter !== 'all' ? '<div class="acts"><button type="button" class="btn" data-act="ov-clear">거르기 지우기</button></div>' : '') + '</div>';
-      return head + bar + '<div class="ov-wrap"><table class="ov-table"><caption class="sr">캐릭터별 진행</caption><thead><tr><th scope="col">캐릭터</th><th scope="col">사람 할 일</th><th scope="col">지금</th><th scope="col">진행</th><th scope="col">마지막 변화</th><th scope="col"><span class="sr">동작</span></th></tr></thead><tbody>' + rows.map(rowHTML).join('') + '</tbody></table></div>';
+      return head + bar + '<div class="ov-wrap"><table class="ov-table"><caption class="sr">캐릭터별 상태</caption><thead><tr><th scope="col">캐릭터</th><th scope="col">상태 · 지금 할 일</th><th scope="col">진행</th><th scope="col">마지막 변화</th><th scope="col"><span class="sr">동작</span></th></tr></thead><tbody>' + rows.map((s, i) => rowHTML(s, i, labels)).join('') + '</tbody></table></div>';
     }
-    function rowHTML(s, i) {
+    function nowText(s) {
+      const st = s.status.status;
+      if (st === 'chat_ready') return chatStatusText(s.review) + ' · 제작 진행은 별도예요';
+      if (st === 'running') return '만드는 중이에요';
+      if (st === 'draft') return s.c.origin === 'SOURCE' ? '원문을 올리는 중이에요' : '아직 실행하지 않았어요';
+      if (st === 'done') return '모든 단계를 마쳤어요';
+      if (s.top) return s.top.title;
+      return '멈춰 있어요';
+    }
+    function rowHTML(s, i, labels) {
       const c = s.c;
-      const name = displayName(c.name, c.id);
+      const l = (labels && labels.get(c.id)) || { name: labelOf(c), note: '' };
       const p = c.persona || {};
       const st = statusDot(s);
-      const badges = (s.fail ? '<span class="fl-pill fail"><span class="d"></span>멈춘 단계 ' + s.fail + '</span>' : '') + (s.review ? '<span class="fl-pill wait"><span class="d"></span>검토 ' + s.review + '건</span>' : '') + (s.paid ? '<span class="fl-pill wait"><span class="d"></span>유료 확인 ' + s.paid + '건</span>' : '') || '<span class="muted">없음</span>';
       const gateTask = state.ov.gate ? s.tasks.find((x) => x.kind === 'wait' && x.gate === state.ov.gate) : null;
-      const top = gateTask || s.top;
-      const now = top ? E(top.title) + (top.age ? '<span class="age"> · ' + E(top.age) + '</span>' : '') : s.complete ? '모든 단계를 마쳤어요' : s.running ? '진행 중이에요' : s.fresh ? '아직 실행하지 않았어요' : '멈춰 있어요 · 이어서 실행할 수 있어요';
-      const pct = Math.round(s.done / s.total * 100);
-      const segs = s.lanes.map((l) => '<span class="seg ' + l.kind + '" title="' + E(l.label + ' ' + l.done + '/' + l.total) + '"></span>').join('');
+      const top = gateTask || (s.todo ? s.top : null);
+      const more = s.todo > 1 ? ' 외 ' + (s.todo - 1) + '건' : '';
+      const now = top ? E(top.title) + (top.age ? '<span class="age"> · ' + E(top.age) + '</span>' : '') + E(more) : E(nowText(s));
+      const g = s.goal;
+      const pct = g.total ? Math.round(g.done / g.total * 100) : 0;
+      const segs = g.ids ? '' : '<span class="segs" role="img" aria-label="' + E('전체 ' + g.total + '단계 중 ' + g.done + '단계 완료, ' + pct + '%') + '">' + s.lanes.map((x) => '<span class="seg ' + x.kind + '" title="' + E(x.label + ' ' + x.done + '/' + x.total) + '"></span>').join('') + '</span>';
       const href = '#c/' + encodeURIComponent(c.id);
-      const act = top && top.kind === 'wait'
-        ? '<button type="button" class="btn' + (i === 0 && s.rank <= 1 ? ' pri' : '') + '" data-act="ov-review" data-id="' + E(c.id) + '" data-gate="' + E(top.gate) + '" data-stage="' + E(top.stage || '') + '">검토하기</button>'
-        : '<a class="btn" href="' + E(href) + '">열기</a>';
-      return '<tr class="' + st + '"><th scope="row"><a class="ov-name" href="' + E(href) + '"><span class="fd-av" aria-hidden="true">' + E(Array.from(name)[0] || '?') + '<span class="st ' + st + '"></span></span><span><b>' + E(name) + trackHTML(c) + '</b><small>' + E([p.job, p.age ? p.age + '세' : ''].filter(Boolean).join(' · ') || '아직 기획 전이에요') + '</small></span></a></th>' +
-        '<td><div class="ov-badges">' + badges + '</div></td><td class="ov-now">' + now + '</td>' +
-        '<td><div class="ov-prog"><span class="segs" role="img" aria-label="' + E('전체 ' + s.total + '단계 중 ' + s.done + '단계 완료, ' + pct + '%') + '">' + segs + '</span><span class="n">' + s.done + '/' + s.total + '단계</span></div></td>' +
-        '<td class="ov-upd">' + (s.updated ? E(clock(new Date(s.updated).toISOString())) : '—') + '</td><td class="ov-act">' + act + '</td></tr>';
+      let act = '<a class="btn" href="' + E(href) + '">열기</a>';
+      if (top && top.kind === 'wait') act = '<button type="button" class="btn' + (i === 0 && s.rank <= 1 ? ' pri' : '') + '" data-act="ov-review" data-id="' + E(c.id) + '" data-gate="' + E(top.gate) + '" data-stage="' + E(top.stage || '') + '">검토하기</button>';
+      else if (s.chat) act = '<a class="btn" href="' + E(s.chat) + '">' + icon('chat') + '대화해 보기</a>';
+      else if (s.status.status === 'draft' && c.origin === 'SOURCE') act = '<a class="btn" href="sources.html#c/' + E(encodeURIComponent(c.id)) + '">이어 하기</a>';
+      const sub = [[l.note, [p.job, p.age ? p.age + '세' : ''].filter(Boolean).join(' · ')].filter(Boolean).join(' · ') || (c.origin === 'SOURCE' ? '' : '아직 기획 전이에요'), videoText(c)].filter(Boolean).join(' · ');
+      return '<tr class="' + st + '"><th scope="row"><a class="ov-name" href="' + E(href) + '"><span class="fd-av" aria-hidden="true">' + E(Array.from(l.name)[0] || '?') + '<span class="st ' + st + '"></span></span><span><b>' + E(l.name) + trackHTML(c) + '</b>' + (sub ? '<small>' + E(sub) + '</small>' : '') + '</span></a></th>' +
+        '<td class="ov-now">' + statusPill(s.status) + '<span class="ov-now-t">' + now + '</span></td>' +
+        '<td><div class="ov-prog">' + segs + '<span class="n">' + (g.ids ? E(g.label) + ' ' : '') + g.done + '/' + g.total + '단계</span></div></td>' +
+        '<td class="ov-upd">' + (s.updated ? E(whenText(s.updated)) : '—') + '</td><td class="ov-act">' + act + '</td></tr>';
     }
     function emptyHTML() {
-      return '<div class="fl-empty"><span class="ic">' + MARK + '</span><h2>아직 만든 캐릭터가 없어요</h2><p>브리프를 넣으면 기획부터 이미지, 영상, 학습 데이터까지 단계별로 만들어요. 중간중간 사람이 고르는 지점이 있어요.</p>' +
-        '<div class="acts"><button type="button" class="btn pri" data-act="new">새 캐릭터 만들기</button><a href="d-ops.html?mode=demo#job/seoha-new/floor">시연 화면으로 둘러보기</a></div></div>';
+      return '<div class="fl-empty"><span class="ic">' + MARK + '</span><h2>아직 만든 캐릭터가 없어요</h2><p>실존 인물은 인터뷰·대화 원문을 올리면 대화할 수 있는 캐릭터로 만들어요. 지어낸 캐릭터는 브리프로 만들어요.</p>' +
+        '<div class="acts"><a class="btn pri" href="sources.html">실존 인물 · 원문으로</a><button type="button" class="btn" data-act="new">새로 지어내기</button></div></div>';
+    }
+    // 시작하지 않은 모티브 초안: 실행 범위를 고르지 않고 원문 화면으로 보낸다(시작은 원문 화면 한 곳에서만 한다).
+    function draftHTML() {
+      const d = state.detail;
+      return '<section class="fl-tasks" aria-label="지금 할 일"><h2>지금 할 일</h2><div class="fl-item"><span class="mk"></span><div class="tx"><div class="t1">원문을 올리는 중인 초안이에요</div><div class="t2">원문 화면에서 올린 파일을 확인하고 만들기를 시작해요. 시작하면 여기에서 진행을 볼 수 있어요.</div></div>' +
+        '<div class="acts"><a class="btn pri" href="sources.html#c/' + E(encodeURIComponent(d.id)) + '">원문 화면에서 이어 하기</a></div></div></section>';
     }
     function setupHTML() {
       const g = state.graph;
@@ -1034,9 +1457,46 @@
     function tasksHTML(v) {
       const d = state.detail;
       const now = Date.now();
-      const tasks = buildTasks(state.graph, d, v, { now, gateViews: state.gateViews, jobActive: Boolean(d.job) || state.busy, goal: notStarted() ? '' : currentUntil() });
+      const goal = currentUntil();
+      // 대화가 준비된 뒤 남은 선택 작업은 직접 시작했을 때만 지금 할 일에 넣는다.
+      const optional = isChatReady(d) && goal === 'sx' && (d.lastJob || {}).until !== goal;
+      const tasks = buildTasks(state.graph, d, v, { now, gateViews: state.gateViews, jobActive: Boolean(d.job) || state.busy, goal: notStarted() || optional ? '' : goal });
       state.notes = state.notes.filter((n) => now - n.at < 15 * 60000);
+      const sum = currentSummary();
+      const st = sum ? sum.status.status : '';
+      const chat = chatHref(d);
+      // 모티브인데 아직 대화할 수 없고 아무것도 돌지 않으면, 대화까지 남은 단계와 이어서 만들 버튼을 먼저 보인다(QA C1).
+      let goalLeft = null;
+      if (!chat && isMotif(d) && !d.job && !tasks.some((t) => t.kind === 'ready')) {
+        const gs = ancestors(state.graph, state.graph.byStage.has('s8c') ? 's8c' : 's8');
+        const preds = predecessors(state.graph);
+        const left = gs ? state.graph.stages.filter((s) => gs.has(s.id) && (v[s.id] || {}).kind === 'todo') : [];
+        // 서버가 마지막 작업에서 시작할 수 없다고 남긴 단계는 권하지 않는다(buildTasks의 '이어서 실행'과 같은 규칙).
+        const blocked = new Set(Array.isArray((d.lastJob || {}).blocked) ? d.lastJob.blocked : []);
+        const canRun = left.some((s) => !blocked.has(s.id) && Array.from(preds.get(s.id) || []).every((p) => ['done', 'skip'].includes((v[p] || {}).kind)));
+        const end = state.graph.byStage.has('s8c') ? 's8c' : 's8';
+        if (canRun) goalLeft = { names: left.map((s) => s.name), end };
+      }
+      // 대화할 수 있으면 '대화해 보기'가 이 화면의 주 버튼이다. 다른 할 일은 그 아래에 보조 버튼으로 남는다.
+      if (chat || goalLeft) tasks.forEach((t) => t.actions.forEach((a) => { a.pri = false; }));
       let html = '<section class="fl-tasks" aria-label="지금 할 일" aria-live="polite"><h2>' + (complete() ? '결과' : '지금 할 일') + (tasks.length ? '<span class="num">' + tasks.length + '</span>' : '') + '</h2>';
+      if (goalLeft) {
+        html += '<div class="fl-item ready"><span class="mk"></span><div class="tx"><div class="t1">대화까지 남은 단계가 있어요</div><div class="t2">' + E(goalLeft.names.join(', ')) + ' 단계가 끝나야 대화해 볼 수 있어요. 이어서 만들면 그 단계까지만 진행해요.</div></div>' +
+          '<div class="acts"><button type="button" class="btn pri" data-act="run-stage" data-stage="' + E(goalLeft.end) + '"' + (state.busy ? ' disabled' : '') + '>대화 준비 이어서 하기</button></div></div>';
+      }
+      if (chat) {
+        const t1 = chatStatusText(tasks.filter((t) => t.kind === 'wait').length);
+        let t2 = st === 'chat_ready' ? '대화할 수 있어요. 전체 제작 완료 여부는 단계별 진행을 확인해 주세요.' : st === 'running' ? '그동안 다른 단계를 더 만들고 있어요.' : '아래 할 일을 마치지 않아도 대화해 볼 수 있어요.';
+        // 영상(약속 5): 만드는 중이면 그렇다고 적고, 영상이 없거나 실패했으면 보조 버튼으로 영상 만들기를 건넨다.
+        if (d.videoStatus === 'making') t2 += ' 영상은 만드는 중이에요. 다 되면 대화할 때 영상이 나와요.';
+        else if (d.videoStatus === 'ready') t2 = st === 'chat_ready' ? '영상도 준비됐어요. 대화해 보기에서 영상과 함께 대화해요. 남은 제작 단계는 진행 화면에서 확인해 주세요.' : t2;
+        else if (d.videoStatus === 'failed') t2 += ' 영상은 만들지 못했어요' + (d.videoError ? ': ' + plainError(d.videoError) : '.');
+        const vOpen = Boolean(state.video && state.video.open);
+        const vBtn = canMakeVideo(d) ? '<button type="button" class="btn" data-act="video-open" aria-expanded="' + vOpen + '">' + icon('video') + (d.videoStatus === 'failed' ? '영상 다시 만들기' : d.videoStatus === 'ready' ? '영상 바꾸기' : '영상 만들기') + '</button>' : '';
+        html += '<div class="fl-item ok"><span class="mk"></span><div class="tx"><div class="t1">' + E(t1) + '</div><div class="t2">' + E(t2) + '</div></div><div class="acts"><a class="btn pri" href="' + E(chat) + '">' + icon('chat') + (d.videoStatus === 'ready' ? '영상과 함께 대화해 보기' : '대화해 보기') + '</a>' + vBtn + '</div>' +
+          (vBtn && vOpen ? videoHTML(d) : '') +
+          (st === 'chat_ready' && !tasks.length && !d.job && !vOpen ? moreBuildHTML() : '') + '</div>';
+      }
       // '다음 검토'는 그릴 때마다 새 상태로 다시 고른다(결정 직후 새 검토가 생길 수 있다).
       state.notes.forEach((n) => { if (n.act === 'next-review') { const nr = nextReviewAfter(n.gate); n.label = nr ? nr.label : ''; } });
       const notesHTML = state.notes.map((n) => '<div class="fl-note' + (n.tone === 'bad' ? ' bad' : '') + '">' + icon(n.tone === 'bad' ? 'x' : 'ok') + '<div>' + E(n.t) + (n.s ? ' <span>' + E(n.s) + '</span>' : '') + '</div>' + (n.act && n.label ? '<button type="button" class="btn" data-act="' + E(n.act) + '"' + (n.gate ? ' data-gate="' + E(n.gate) + '"' : '') + '>' + E(n.label) + '</button>' : '') + '<time>' + E(now - n.at < 60000 ? '방금' : clock(new Date(n.at).toISOString())) + '</time></div>').join('');
@@ -1052,33 +1512,113 @@
       });
       if (notesHTML) html += '<div class="fl-recent"><h3>방금 한 일</h3>' + notesHTML + '</div>';
       if (!tasks.length && !complete()) {
-        html += d.job ? '<div class="fl-note">' + icon('ok') + '<div>지금은 기다리면 돼요. <span>사람이 할 일이 생기면 여기에 나타나요.</span></div></div>'
-          : '<div class="fl-item"><span class="mk"></span><div class="tx"><div class="t1">진행 중인 작업이 없어요</div><div class="t2">멈춘 지점부터 이어서 돌릴 수 있어요.</div></div><div class="acts"><button type="button" class="btn pri" data-act="resume"' + (state.busy ? ' disabled' : '') + '>이어서 실행</button></div></div>';
+        if (d.job) html += '<div class="fl-note">' + icon('ok') + '<div>지금은 기다리면 돼요. <span>사람이 할 일이 생기면 여기에 나타나요.</span></div></div>';
+        else if (!chat && !goalLeft) {
+          const goal = currentUntil() || orchestrator().resumeUntil || 'sx';
+          html += '<div class="fl-item"><span class="mk"></span><div class="tx"><div class="t1">진행 중인 작업이 없어요</div><div class="t2">이어서 실행하면 멈춘 지점부터 ' + E(targetLabel(state.graph, goal)) + ' 진행해요.</div></div><div class="acts"><button type="button" class="btn pri" data-act="resume"' + (state.busy ? ' disabled' : '') + '>이어서 실행</button></div></div>';
+        }
       }
       return html + '</section>';
     }
+    // 영상 만들기 고르기(약속 5). 사진이 없으면 원문 화면으로 보내고, 있으면 등급 카드와 시작 버튼을 보인다.
+    function videoHTML(d) {
+      const v = state.video || {};
+      const src = 'sources.html#c/' + encodeURIComponent(d.id);
+      const photoLink = '<a class="btn" href="' + E(src) + '">원문 화면에서 사진 올리기</a>';
+      const close = '<button type="button" class="btn ghost" data-act="video-cancel">닫기</button>';
+      if (v.photos == null) return '<div class="fl-vid" role="group" aria-label="영상 만들기"><p>올린 사진을 확인하는 중이에요…</p></div>';
+      // 사진은 원문과 함께 처음 만들 때 올린다. 이미 만든 캐릭터에는 사진을 덧붙일 수 없어서 새로 만드는 길을 안내한다.
+      if (v.photos === 0) return '<div class="fl-vid" role="group" aria-label="영상 만들기"><p>이 캐릭터는 만들 때 사진을 올리지 않아서 영상을 만들 수 없어요. 원문 화면에서 사진과 원문을 함께 올려 새로 만들어 주세요.</p><div class="acts"><a class="btn" href="sources.html">원문 화면에서 새로 만들기</a>' + close + '</div></div>';
+      const busy = Boolean(v.busy || state.busy);
+      const sig = v.sig || {};
+      // 시그니처 포즈(D-0165): 모든 등급에 한 편씩. 이미 정했으면 채워 두고 고칠 수 있게 한다.
+      const sigHTML = '<div class="fl-sig" role="group" aria-labelledby="fl-sig-h"><p id="fl-sig-h"><b>시그니처 포즈</b> 모든 등급에 한 편씩 들어가요.</p>' +
+        '<label for="fl-sig-title">이름</label><input id="fl-sig-title" data-sig="title" maxlength="30" autocomplete="off" placeholder="예: 찰칵 세리머니" value="' + E(sig.title || '') + '"' + (busy ? ' disabled' : '') + '>' +
+        '<label for="fl-sig-motion">어떤 동작인가요</label><textarea id="fl-sig-motion" data-sig="motion" rows="2" maxlength="400" placeholder="예: 두 손으로 카메라 모양을 만들어 눈앞에 대고 찰칵 누르는 시늉을 해요."' + (busy ? ' disabled' : '') + '>' + E(sig.motion || '') + '</textarea>' +
+        '<label for="fl-sig-when">언제 나오면 좋을까요 <span class="opt">선택</span></label><input id="fl-sig-when" data-sig="useWhen" maxlength="200" autocomplete="off" placeholder="예: 골이나 축하 얘기를 할 때" value="' + E(sig.useWhen || '') + '"' + (busy ? ' disabled' : '') + '></div>';
+      return '<div class="fl-vid" role="group" aria-label="영상 만들기"><div class="vt-grid" role="radiogroup" aria-label="영상 등급">' + tierCardsHTML('videoTierPick', v.tier, { paidOnly: true, disabled: busy }) + '</div>' + sigHTML +
+        '<p>영상 단계는 비용이 들어요. 시작하면 배경 하나·같은 옷으로 고른 등급의 몸짓 영상을 만들고, 다 되면 대화할 때 영상이 나와요.' + (d.videoStatus === 'ready' ? ' 이미 만든 몸짓은 그대로 두고 새로 생기거나 바뀐 영상만 만들어요.' : '') + ' 후보는 첫 번째로 자동으로 골라요.</p>' +
+        (v.error ? '<p class="err" role="alert">' + E(v.error) + '</p>' : '') +
+        '<div class="acts"><button type="button" class="btn" data-act="video-go"' + (busy ? ' disabled' : '') + '>' + (v.busy ? '시작하는 중…' : E(tierName(v.tier)) + ' 영상 만들기 시작') + '</button>' + (v.noPhoto ? photoLink : '') + '<button type="button" class="btn ghost" data-act="video-cancel">취소</button></div></div>';
+    }
+    async function openVideo() {
+      const d = state.detail;
+      if (!d) return;
+      const id = d.id;
+      const t = tierOf(d.videoTier);
+      const s = d.signaturePose || {};
+      state.video = { open: true, tier: t === 'none' ? 'light' : t, photos: null, busy: false, error: '', sig: { title: text(s.title), motion: text(s.motion), useWhen: text(s.useWhen) } };
+      render();
+      let n = -1; // 원문 초안을 읽지 못하면 모른다(-1). 그때는 고르게 두고 서버가 막으면 그 문장을 보인다.
+      try { n = readyPhotos(await request('GET', '/api/sources/' + encodeURIComponent(id))); } catch (error) { n = -1; }
+      if (state.video && state.detail && state.detail.id === id) { state.video.photos = n; render(); }
+    }
+    async function startVideo() {
+      const d = state.detail;
+      const v = state.video;
+      if (!d || !v || v.busy) return;
+      const tier = tierOf(v.tier) === 'none' ? 'light' : v.tier;
+      const sig = v.sig || {};
+      const signaturePose = { title: text(sig.title).trim(), motion: text(sig.motion).trim(), useWhen: text(sig.useWhen).trim() };
+      if (!signaturePose.title || !signaturePose.motion) {
+        v.error = '시그니처 포즈의 이름과 어떤 동작인지 적어 주세요.';
+        render();
+        const el = doc.querySelector(signaturePose.title ? '#fl-sig-motion' : '#fl-sig-title');
+        if (el) el.focus();
+        return;
+      }
+      v.busy = true;
+      v.error = '';
+      render();
+      try {
+        await request('POST', '/api/characters/' + encodeURIComponent(d.id) + '/videos', { videoTier: tier, signaturePose });
+        state.video = null;
+        state.feedback = { tone: 'ok', text: tierName(tier) + ' 영상을 만들기 시작했어요. 다 되면 대화할 때 영상이 나와요.' };
+      } catch (error) {
+        v.busy = false;
+        v.error = error.status === 404 || error.status === 405 ? '이 서버에서는 아직 영상을 만들 수 없어요.' : error.message;
+        v.noPhoto = /사진/.test(v.error);
+        if (error.network) state.conn = 'offline';
+      }
+      await refresh(false);
+    }
+    function moreBuildHTML() {
+      const next = 'sx';
+      const v = views(null);
+      const left = Array.from(ancestors(state.graph, next)).filter((id) => !['done', 'skip'].includes((v[id] || {}).kind));
+      if (!left.length) return '';
+      const names = state.graph.lanes.filter((lane) => laneIds(lane).some((id) => left.indexOf(id) >= 0)).map((lane) => lane.label);
+      const label = targetLabel(state.graph, next);
+      const open = Boolean(state.moreOpen);
+      return '<div class="fl-more"><button type="button" class="link fl-more-btn" data-act="more" aria-expanded="' + open + '">' + icon(open ? 'up' : 'down') + '더 만들기 (선택)</button>' +
+        (open ? '<div class="fl-more-body"><p>' + E(label) + ' 이어서 만들어요' + (left.length ? ' · 남은 단계 ' + left.length + '개' + (names.length ? '(' + names.join(', ') + ')' : '') : '') + '. 모델을 더 부르기 때문에 비용이 들 수 있어요. 이미지·영상·학습처럼 비용이 큰 단계는 시작하기 전에 한 번 더 물어봐요.</p>' +
+          '<button type="button" class="btn" data-act="resume-more" data-until="' + E(next) + '"' + (state.busy ? ' disabled' : '') + '>' + E(label) + ' 이어서 실행</button></div>' : '') + '</div>';
+    }
 
     // ---- 그래프 ----
-    function cardHTML(lane, v, laneKinds) {
+    function laneIds(lane) { return (lane.stages || []).map((s) => (typeof s === 'string' ? s : s.id)).filter((id) => state.graph.byStage.has(id)); }
+    function cardHTML(lane, v, laneKinds, gv) {
       const area = AREA[lane.id] || lane.id;
-      const ids = (lane.stages || []).map((s) => (typeof s === 'string' ? s : s.id)).filter((id) => state.graph.byStage.has(id));
+      const ids = laneIds(lane).filter((id) => !gv.keep || gv.keep.has(id));
+      if (!ids.length) return '';
       const lk = laneKinds[lane.id];
       const done = ids.filter((id) => v[id].kind === 'done' || v[id].kind === 'skip').length;
       const collapsed = lk === 'done' && !state.open.has(lane.id);
       const outish = lk === 'out' || lk === 'skip';
-      const tag = lk === 'skip' ? '<span class="fl-tag">건너뜀</span>' : lk === 'out' ? '<span class="fl-tag">범위 밖</span>' : '';
+      const tag = lk === 'skip' ? '<span class="fl-tag">건너뜀</span>' : lk === 'out' ? '<span class="fl-tag">' + (gv.ids ? '목표 밖' : '범위 밖') + '</span>' : '';
       let html = '<div class="fl-card' + (collapsed ? ' col' : '') + (outish ? ' out' : '') + '" data-lane="' + E(lane.id) + '" style="grid-area:' + E(area) + '">' +
         '<button type="button" class="fl-ch" data-act="toggle" data-lane="' + E(lane.id) + '" aria-expanded="' + (!collapsed) + '"' + (lk === 'done' ? '' : ' aria-disabled="true"') + '><span class="ld ' + (outish ? 'todo' : lk) + '"></span><span class="ln">' + E(lane.label) + '</span>' + tag +
         '<span class="cnt">' + (outish ? '' : (lk === 'done' ? icon('check') : '') + done + '/' + ids.length + (lk === 'done' ? icon(collapsed ? 'down' : 'up') : '')) + '</span></button>';
       if (!collapsed) {
         ids.forEach((id) => {
           const def = state.graph.byStage.get(id);
-          const x = v[id];
+          // 펼쳐 본 모티브의 목표 밖 단계는 흐리게, 상태 글 없이 보인다.
+          const x = gv.ids && !gv.ids.has(id) && v[id].kind === 'todo' ? { kind: 'out', sub: '' } : v[id];
           const paid = (state.graph.paid.get(id) || []).length;
           const marks = (def.gate ? icon('user', '사람 검토 있음') : '') + (paid && (x.kind === 'todo' || x.kind === 'confirm') ? icon('coins', '유료 단계') : '');
           const sub = x.sub ? '<span class="sb" title="' + E(x.sub) + '">' + (x.retry ? icon('retry') + ' ' : '') + E(x.sub) + '</span>' : '';
           const glyph = x.kind === 'done' ? icon('check') : x.kind === 'fail' ? icon('x') : x.kind === 'confirm' ? icon('coins') : x.kind === 'skip' ? icon('minus') : '';
-          html += '<button type="button" class="fl-row ' + x.kind + '" data-act="select" data-stage="' + E(id) + '" aria-pressed="' + (state.sel === id) + '" aria-label="' + E(def.name + ', ' + KIND_LABEL[x.kind] + (x.sub ? ', ' + x.sub : '') + (def.gate ? ', 사람 검토 있음' : '') + (paid ? ', 유료 단계' : '')) + '">' +
+          html += '<button type="button" class="fl-row ' + x.kind + '" data-act="select" data-stage="' + E(id) + '" aria-pressed="' + (state.sel === id) + '" aria-label="' + E(def.name + ', ' + (x.kind === 'out' && gv.ids ? '목표 밖' : KIND_LABEL[x.kind]) + (x.sub ? ', ' + x.sub : '') + (def.gate ? ', 사람 검토 있음' : '') + (paid ? ', 유료 단계' : '')) + '">' +
             '<span class="si ' + x.kind + '">' + glyph + '</span><span class="nw"><span class="nm">' + stageNameHTML(def.name, marks) + '</span>' + sub + gateSub(def) + '</span></button>';
         });
       }
@@ -1102,11 +1642,32 @@
     function renderGraph(v, scope) {
       if (!state.detail) { region.graph.hidden = true; return; }
       region.graph.hidden = false;
-      const cls = (state.graph.layout || layoutOf(state.graph)).cls;
+      const gv = goalView(state.graph, state.detail, v, state.showOff);
+      let cls = (state.graph.layout || layoutOf(state.graph)).cls;
+      state.goalCell = null;
+      ['--goal-cols', '--goal-areas', '--goal-stack'].forEach((k) => region.grid.style.removeProperty(k));
+      if (gv.keep) {
+        // 접은 그래프는 남은 팀만 한 줄로 순서대로 선다. 휴대폰 폭에서는 한 열로 쌓는다.
+        const areas = state.graph.lanes.filter((lane) => laneIds(lane).some((id) => gv.keep.has(id))).map((lane) => AREA[lane.id] || lane.id);
+        cls += ' goal';
+        region.grid.style.setProperty('--goal-cols', String(Math.max(1, areas.length)));
+        region.grid.style.setProperty('--goal-areas', '"' + areas.join(' ') + '"');
+        region.grid.style.setProperty('--goal-stack', areas.map((a) => '"' + a + '"').join(' '));
+        state.goalCell = {};
+        areas.forEach((a, i) => { state.goalCell[a] = [0, i]; });
+      }
       region.grid.className = 'fl-grid' + (cls ? ' ' + cls : '');
       const laneKinds = {};
-      state.graph.lanes.forEach((lane) => { laneKinds[lane.id] = laneKind((lane.stages || []).map((s) => (typeof s === 'string' ? s : s.id)), v); });
-      region.grid.innerHTML = state.graph.lanes.map((lane) => cardHTML(lane, v, laneKinds)).join('');
+      state.graph.lanes.forEach((lane) => { laneKinds[lane.id] = laneKind(laneIds(lane).filter((id) => !gv.keep || gv.keep.has(id)), v); });
+      region.grid.innerHTML = state.graph.lanes.map((lane) => cardHTML(lane, v, laneKinds, gv)).join('');
+      if (region.offgoal) {
+        const offLanes = gv.ids ? state.graph.lanes.filter((lane) => laneIds(lane).every((id) => !gv.ids.has(id))).map((lane) => lane.label) : [];
+        region.offgoal.innerHTML = gv.ids && gv.hidden ? '<button type="button" class="link" data-act="show-off" aria-expanded="' + Boolean(state.showOff) + '">' + icon(state.showOff ? 'up' : 'down') + (state.showOff ? '목표 밖 단계 접기' : '목표 밖 단계 ' + gv.hidden + '개 보기') + '</button>' + (state.showOff || !offLanes.length ? '' : '<span class="hint">' + E(offLanes.join('·')) + '처럼 대화에 꼭 필요하지 않은 단계예요.</span>') : '';
+        region.offgoal.hidden = !(gv.ids && gv.hidden);
+      }
+      if (region.zoombar) region.zoombar.hidden = Boolean(gv.keep);
+      // 접은 그래프는 팀 몇 개뿐이라 연결선 범례가 필요 없다.
+      region.legend.hidden = Boolean(gv.keep);
       region.legend.innerHTML = scope
         ? '<span><i class="done"></i>이번 실행에 포함</span><span><i class="todo"></i>범위 밖</span><span>' + icon('user') + '사람 검토</span><span>' + icon('coins') + '유료 실행 확인</span>'
         : [['flow', '지금 진행 중'], ['block', '사람을 기다리며 멈춤'], ['stop', '실패로 멈춤']].map((x) => '<span><svg class="lg" viewBox="0 0 24 6" width="24" height="6" aria-hidden="true"><line class="e ' + x[0] + '" x1="1" y1="3" x2="23" y2="3"/></svg>' + x[1] + '</span>').join('') + '<span>' + icon('user') + '사람 검토</span><span>' + icon('coins') + '유료 실행 확인</span>';
@@ -1133,7 +1694,7 @@
       if (!region.zoombar) return;
       const pct = Math.round(zoom.z * 100);
       region.zoombar.innerHTML = '<button type="button" data-act="zoom-out" aria-label="축소" title="축소 (−)"' + (zoom.z <= ZSTEPS[0] ? ' disabled' : '') + '>' + icon('minus') + '</button>' +
-        '<span class="pct" role="status">' + (zoomed() ? pct + '%' : '맞춤') + '</span>' +
+        '<span class="pct" role="status" aria-label="' + pct + '% 크기">' + pct + '%</span>' +
         '<button type="button" data-act="zoom-in" aria-label="확대" title="확대 (+)"' + (zoom.z >= ZSTEPS[ZSTEPS.length - 1] ? ' disabled' : '') + '>' + icon('plus') + '</button>' +
         '<button type="button" data-act="zoom-fit" title="화면에 맞추기 (0)"' + (zoomed() ? '' : ' disabled') + '>맞춤</button><span class="sep" aria-hidden="true"></span>' +
         '<button type="button" data-act="focus" aria-pressed="' + state.focus + '" title="' + (state.focus ? '원래 보기 (Esc)' : '왼쪽 탐색과 할 일을 접고 그래프를 넓게 봐요') + '">' + icon(state.focus ? 'shrink' : 'expand') + (state.focus ? '원래 보기' : '크게 보기') + '</button>';
@@ -1240,7 +1801,7 @@
       svg.setAttribute('width', box.width);
       svg.setAttribute('height', box.height);
       const colour = { flow: 'var(--fd-run-solid)', block: 'var(--fd-attention-solid)', stop: 'var(--fd-danger-solid)', done: 'var(--fd-slate-8)', todo: 'var(--fd-slate-7)', out: 'var(--fd-slate-6)' };
-      const cell = (state.graph.layout || layoutOf(state.graph)).cell;
+      const cell = state.goalCell || (state.graph.layout || layoutOf(state.graph)).cell;
       const cardTop = (lane) => { const el = region.grid.querySelector('.fl-card[data-lane="' + lane + '"]'); return el ? el.getBoundingClientRect().top - box.top : null; };
       let out = '';
       crossLaneEdges(state.graph).forEach(([a, b]) => {
@@ -1275,14 +1836,18 @@
     function historyHTML(id) {
       const hist = (state.detail.history && state.detail.history[id]) || [];
       if (!hist.length) return '';
-      const items = hist.slice().reverse().map((a) => {
+      // 끝내 성공한 단계라면 그 전에 실패한 시도는 '이전 시도 N회' 아래로 접는다.
+      const kind = (views(null)[id] || {}).kind;
+      const parts = splitAttempts(hist, kind === 'done' || kind === 'wait');
+      const item = (a) => {
         const took = parseTime(a.startedAt) != null && parseTime(a.endedAt) != null ? span(parseTime(a.endedAt) - parseTime(a.startedAt)) : '';
         const result = a.result === 'CHECK_FAILED' ? '실패' : a.result === 'AWAITING_HUMAN' ? '검토로 넘김' : a.result === 'APPROVED' ? '완료' : a.result === 'RESTARTED' ? '다시 시작됨' : a.result === 'SKIPPED' ? '건너뜀' : a.result ? a.result : '진행 중';
         const decision = a.decision === 'APPROVED' ? ' → 통과' : a.decision === 'REJECTED' ? ' → 다시 만들기' : '';
         const tone = a.result === 'CHECK_FAILED' ? 'bad' : !a.result ? 'run' : a.decision === 'APPROVED' || a.result === 'APPROVED' ? 'ok' : a.result === 'AWAITING_HUMAN' && !a.decision ? 'wait' : '';
-        return '<li class="' + tone + '"><b>' + E(a.attempt || '?') + '회차</b> · ' + E(result + decision) + '<br>' + E(clock(a.startedAt)) + (took ? ' · ' + E(took) : '') + (a.rev ? ' · ' + E(revLabel(a.rev)) : '') + (a.error ? '<span class="err">' + E(failReason(a.error).summary) + '</span>' : '') + '</li>';
-      });
-      return '<section class="ins-sec"><h3>회차 이력</h3><ul class="fl-hist">' + items.join('') + '</ul></section>';
+        return '<li class="' + tone + '"><b>' + E(a.attempt || '?') + '번째 시도</b> · ' + E(result + decision) + '<br>' + E(clock(a.startedAt)) + (took ? ' · ' + E(took) : '') + (a.rev ? ' · ' + E(revLabel(a.rev)) : '') + (a.error ? '<span class="err">' + E(failReason(a.error).summary) + '</span>' : '') + '</li>';
+      };
+      const earlier = parts.earlier.length ? '<details class="fl-earlier"><summary>이전 시도 ' + parts.earlier.length + '회</summary><ul class="fl-hist">' + parts.earlier.slice().reverse().map(item).join('') + '</ul></details>' : '';
+      return '<section class="ins-sec"><h3>실행 기록</h3><ul class="fl-hist">' + parts.shown.slice().reverse().map(item).join('') + '</ul>' + earlier + '</section>';
     }
     function panelHTML(v) {
       const d = state.detail;
@@ -1297,6 +1862,8 @@
       const prop = (k, val, cls) => { if (val) props.push('<dt>' + E(k) + '</dt><dd' + (cls ? ' class="' + cls + '"' : '') + '>' + val + '</dd>'); };
       if (state.graph.origin === 'SOURCE') prop('하는 일', E(stageHint(def)));
       prop('상태', E(x.sub || KIND_LABEL[x.kind]));
+      const gs = ancestors(state.graph, state.graph.byStage.has('s8c') ? 's8c' : 's8');
+      if (gs && !gs.has(id)) prop('목표', '대화하는 데 꼭 필요한 단계는 아니에요');
       prop('버전', row.rev ? E(revLabel(row.rev)) : '');
       prop('시작', row.startedAt ? E(clock(row.startedAt)) : '');
       prop('걸린 시간', row.startedAt && row.endedAt ? E(span(parseTime(row.endedAt) - parseTime(row.startedAt))) : '');
@@ -1326,10 +1893,17 @@
       if (x.kind === 'fail' && !managed) acts.push('<button type="button" class="btn pri block" data-act="retry" data-stage="' + E(id) + '"' + (busy ? ' disabled' : '') + '>다시 실행</button>');
       if (gate && upper(gate.status) === 'APPROVED') acts.push('<button type="button" class="btn block" data-act="review" data-gate="' + E(def.gate) + '" data-stage="' + E(id) + '" data-readonly="1">결정 기록 보기</button>');
       const mstepOf = { s9s: 'data', s9: 'data', s10t: 'train', s10: 'eval' }[id];
+      const mn = mstepOf ? modelNext(state.graph, d) : null;
+      if (mn && mn.stage === id) {
+        if (mn.input) prop('기다리는 이유', '연결한 모델이 없어요. 모델 만들기에서 연결 파일을 올려 주세요.');
+        acts.unshift(mn.input ? '<button type="button" class="btn pri block" data-act="open-model" data-step="bind">' + E(mn.label) + '</button>' : '<button type="button" class="btn pri block" data-act="model-run" data-stage="' + E(id) + '"' + (busy ? ' disabled' : '') + '>' + E(mn.label) + '</button>');
+      }
       if (mstepOf) acts.push('<button type="button" class="btn block" data-act="open-model" data-step="' + mstepOf + '">모델 만들기에서 보기</button>');
+      const chat = (id === 's8' || id === 's8c') ? chatHref(d) : '';
+      if (chat) acts.push('<a class="btn block" href="' + E(chat) + '">' + icon('chat') + '대화해 보기</a>');
       if (x.kind === 'todo' && def.implemented && !notStarted() && !mstepOf) acts.push('<button type="button" class="btn block" data-act="run-stage" data-stage="' + E(id) + '"' + (busy ? ' disabled' : '') + '>이 단계까지 실행</button>');
       const pill = '<span class="fl-pill ' + (x.kind === 'retry' ? 'run' : x.kind === 'done' ? 'ok' : ['todo', 'out', 'skip'].includes(x.kind) ? 'muted' : x.kind) + '"><span class="d"></span>' + E(KIND_LABEL[x.kind]) + '</span>';
-      return '<div class="ins-head"><span class="ins-kicker">' + E((lane ? lane.label + ' 팀 · ' : '') + def.id) + '</span><div class="ins-title"><h2>' + E(def.name) + '</h2>' + pill + '</div>' + (acts.length ? '<div class="acts" style="flex-direction:column;align-items:stretch">' + acts.join('') + '</div>' : '') + '</div>' +
+      return '<div class="ins-head">' + (lane ? '<span class="ins-kicker">' + E(lane.label) + '</span>' : '') + '<div class="ins-title"><h2>' + E(def.name) + '</h2>' + pill + '</div>' + (acts.length ? '<div class="acts" style="flex-direction:column;align-items:stretch">' + acts.join('') + '</div>' : '') + '</div>' +
         '<section class="ins-sec"><h3>속성</h3><dl class="ins-props">' + props.join('') + '</dl></section>' +
         (thumbs.length ? '<section class="ins-sec"><h3>산출물 미리보기</h3><div class="fl-thumbs">' + thumbs.map((f) => '<img alt="' + E(f.name) + '" src="' + E(R.safeHref(f.url)) + '" loading="lazy">').join('') + '</div></section>' : '') +
         historyHTML(id);
@@ -1339,59 +1913,22 @@
     // ---- 모델 만들기 보기(D-0130): 재료 → 데이터셋 → 학습 → 평가 ----
     function modelMode() { return /^#c\/[^/]+\/model$/.test(text(global.location && global.location.hash)); }
     function viewTabsHTML() {
+      // 프롬프트만 쓰는 모티브는 학습하지 않는다. 모델 만들기 탭 대신 한 줄로 알린다.
+      if (promptOnly(state.detail)) return '<p class="fl-mode-line">학습 없이 프롬프트로 대화해요</p>';
       const id = encodeURIComponent(state.detail.id);
       const m = modelMode();
       return '<nav class="md-tabs" aria-label="보기"><a href="#c/' + id + '"' + (m ? '' : ' aria-current="page"') + '>공정</a><a href="#c/' + id + '/model"' + (m ? ' aria-current="page"' : '') + '>모델 만들기</a></nav>';
     }
     function mp() { return (state.detail && state.detail.modelPath) || {}; }
-    function mActive() {
-      const m = mp();
-      const t = m.training || {};
-      if (['done', 'skip'].includes(t.state)) return 'eval';
-      if (['plan', 'run', 'hold', 'stopped', 'fail', 'pending'].includes(t.state)) return 'train';
-      return m.dataset ? 'data' : 'src';
-    }
+    function mActive() { return modelActive(state.detail); }
+    function mSteps() { return modelSteps(state.detail, views(null)); }
     function shortLabel(s) { return text(s).split(':')[0]; }
-    function mSteps() {
-      const m = mp();
-      const d = m.dataset;
-      const t = m.training || {};
-      const e = m.eval || {};
-      const v = views(null);
-      const steps = [];
-      const mat = m.material;
-      steps.push({ id: 'src', n: 1, ko: '재료', k: mat ? 'ok' : 'todo', s: mat ? mat.used.map((u) => u.label).join(' + ') || '정함' : '데이터 샘플을 만들면 정해져요', done: Boolean(mat) });
-      let dk = 'todo';
-      let ds = '학습 데이터를 만들기 전이에요';
-      if (d) {
-        const g7 = upper(d.gates.G7.status);
-        const g7a = upper(d.gates.G7a.status);
-        if (upper(d.status) === 'APPROVED') { dk = 'ok'; ds = '학습 ' + d.counts.train + '대화 · 승인됨'; }
-        else if (g7 === 'AWAITING_HUMAN') { dk = 'wait'; ds = '데이터셋 승인 대기'; }
-        else if (g7a === 'AWAITING_HUMAN') { dk = 'wait'; ds = '샘플 검토 대기'; }
-        else if (v.s9 && ['run', 'retry'].includes(v.s9.kind)) { dk = 'run'; ds = '만드는 중'; }
-        else if (v.s9 && v.s9.kind === 'fail') { dk = 'fail'; ds = '멈춤'; }
-        else ds = '만드는 중';
-      }
-      steps.push({ id: 'data', n: 2, ko: '데이터셋', k: dk, s: ds, done: dk === 'ok' });
-      const tv = v.s10t || {};
-      const tk = { confirm: 'wait', run: 'run', fail: 'fail', skip: 'ok', done: 'ok', todo: 'todo', wait: 'wait', retry: 'run', out: 'todo' }[tv.kind] || 'todo';
-      const tsub = t.state === 'done' ? (t.adopted ? '학습 모델을 골랐어요' : '학습 모델을 채택하지 않았어요') : t.state === 'locked' ? '데이터셋을 승인하면 열려요' : t.state === 'pending' ? '학습 계획을 세울 차례예요' : tv.sub || KIND_LABEL[tv.kind] || '';
-      steps.push({ id: 'train', n: 3, ko: '학습', k: tk, s: tsub, done: ['done', 'skip'].includes(t.state) });
-      const ev = v.s10 || {};
-      let ek = 'todo';
-      let es = '학습이 끝나면 열려요';
-      if (['done', 'skip'].includes(t.state)) {
-        const gs = upper(e.gate && e.gate.status);
-        if (gs === 'AWAITING_HUMAN') { ek = 'wait'; es = e.promptOnly ? '긴 프롬프트 채택 검토' : '블라인드 20쌍 검토'; }
-        else if (gs === 'APPROVED') { ek = 'ok'; es = e.promptOnly ? '긴 프롬프트로 채택함' : '채택 결정함'; }
-        else if (ev.kind === 'confirm') { ek = 'wait'; es = '평가 비용 확인 대기'; }
-        else if (['run', 'retry'].includes(ev.kind)) { ek = 'run'; es = '답 모으는 중'; }
-        else if (ev.kind === 'fail') { ek = 'fail'; es = '멈춤'; }
-        else es = '이어서 실행하면 시작해요';
-      }
-      steps.push({ id: 'eval', n: 4, ko: '평가', k: ek, s: es, done: ek === 'ok' });
-      return steps;
+    // 모델 단계의 다음 일(QA v5 B-F06): 그 단계 칸에 시작 버튼을 둔다.
+    function nextNoteHTML(step) {
+      const n = modelNext(state.graph, state.detail);
+      if (!n || n.step !== step || n.input) return '';
+      const busy = Boolean(state.detail.job) || state.busy;
+      return '<div class="md-note"><div><b>' + E(n.title) + '</b><p>' + E(n.body) + '</p></div><button type="button" class="btn pri" data-act="model-run" data-stage="' + E(n.stage) + '"' + (busy ? ' disabled' : '') + '>' + E(n.label) + '</button></div>';
     }
     function mTasks() {
       const d = state.detail;
@@ -1412,19 +1949,24 @@
         k = t.kind === 'fail' ? 'bad' : 'wait';
         t1 = t.title;
         t2 = t.body;
-        if (t.gate === 'G8' && (mp().eval || {}).promptOnly) { t1 = '긴 프롬프트 채택 검토'; t2 = '학습 없이 긴 프롬프트로 패키지를 만들지 확인해요.'; }
+        if (t.gate === 'G8' && (mp().eval || {}).promptOnly) {
+          const bind = modelModeOf(state.detail) === 'BIND_EXISTING';
+          t1 = bind ? '연결한 모델 채택 검토' : '긴 프롬프트 채택 검토';
+          t2 = bind ? '비교 결과를 보고 연결한 모델을 쓸지 정해요.' : '학습 없이 긴 프롬프트로 패키지를 만들지 확인해요.';
+        }
         acts = t.actions.filter((a) => !(a.act === 'open-model' && state.mstep === a.step));
       } else if (tr.state === 'run') {
         k = 'run';
         t2 = tr.stopRequested ? '중단을 요청했어요 · GPU를 반납하고 멈춰요' : '학습 중이에요 · 창을 닫아도 계속 돌아요. 끝나면 받은 일에 알려 드려요';
       }
       let html = acts.map((a, i) => '<button type="button" class="btn' + (i === 0 ? ' pri' : '') + '" data-act="' + E(a.act) + '"' + (a.gate ? ' data-gate="' + E(a.gate) + '"' : '') + (a.stage ? ' data-stage="' + E(a.stage) + '"' : '') + (a.step ? ' data-step="' + E(a.step) + '"' : '') + (a.v ? ' data-v="' + E(a.v) + '"' : '') + (a.disabled ? ' disabled' : '') + '>' + E(a.label) + '</button>').join('');
-      if (state.mstep !== act) html += '<button type="button" class="btn ghost" data-act="mstep" data-step="' + act + '">' + E({ src: '재료', data: '데이터셋', train: '학습', eval: '평가' }[act]) + ' 단계 보기</button>';
+      if (state.mstep !== act) html += '<button type="button" class="btn ghost" data-act="mstep" data-step="' + act + '">' + E({ src: '재료', data: '데이터셋', train: '학습', eval: '평가', bind: '모델 연결' }[act]) + ' 단계 보기</button>';
       return '<div class="md-now ' + k + '" role="status" aria-live="polite"><span class="lab">지금 할 일</span><span class="ic">' + icon(k === 'bad' ? 'x' : k === 'wait' ? 'coins' : k === 'run' ? 'retry' : 'ok') + '</span><span class="t1">' + E(t1) + '</span><span class="t2">' + E(t2) + '</span>' + (html ? '<div class="acts">' + html + '</div>' : '') + '</div>';
     }
     function stepperHTML() {
       const act = mActive();
-      return '<div class="md-steps" role="group" aria-label="모델 만들기 단계">' + mSteps().map((s) => {
+      const steps = mSteps();
+      return '<div class="md-steps' + (steps.length < 4 ? ' n' + steps.length : '') + '" role="group" aria-label="모델 만들기 단계">' + steps.map((s) => {
         const tail = s.id === act ? '<em>지금</em>' : s.done ? '<span class="lk" aria-hidden="true">' + LOCK + '</span>' : '';
         return '<button type="button" class="md-st ' + s.k + '" data-act="mstep" data-step="' + s.id + '" aria-pressed="' + (state.mstep === s.id) + '" aria-label="' + E(s.n + '단계 ' + s.ko + ', ' + s.s + (s.id === act ? ', 지금 단계' : '') + (s.done && s.id !== act ? ', 읽기 전용' : '')) + '"><span class="k"><b>' + (s.k === 'ok' ? icon('check') : s.n) + '</b>' + s.n + '단계' + tail + '</span><strong>' + s.ko + '</strong><span class="s">' + E(s.s) + '</span></button>';
       }).join('') + '</div>';
@@ -1442,13 +1984,20 @@
     }
     function srcHTML() {
       const m = mp().material;
-      if (!m) return '<div class="md-pane"><div class="md-h"><h3>재료</h3>' + pill('muted', '아직 정하지 않았어요') + '</div><p class="lead">프롬프트를 승인하면 데이터 샘플을 만들면서 재료를 정해요.</p></div>';
+      if (!m) {
+        const sv = views(null).s9s || {};
+        const making = ['run', 'retry'].includes(sv.kind);
+        const body = nextNoteHTML('src') || (making ? '<div class="md-note run"><div><b>데이터 샘플을 만드는 중이에요</b><p>끝나면 클러스터마다 샘플을 검토할 차례가 와요.</p></div></div>' : '<p class="lead">프롬프트를 승인하면 데이터 샘플을 만들면서 재료를 정해요.</p>');
+        return '<div class="md-pane"><div class="md-h"><h3>재료</h3>' + pill(making ? 'run' : 'muted', making ? '만드는 중' : '아직 정하지 않았어요') + '</div>' + body + '</div>';
+      }
       const used = m.used.map((u) => E(u.label) + ' <span class="num">' + u.conversations + '대화</span>').join('<br>');
+      // 모티브는 출처 묶음에서 승인한 원문 대화만 그대로 쓴다. 대화 창고·다시 쓰기 설명은 오리지널 재료에만 붙인다.
+      const srcOnly = m.planned.length > 0 && m.planned.every((p) => p.kind === 'SOURCE');
       return '<div class="md-pane"><div class="md-h"><h3>재료</h3>' + pill('ok', '정함') + roChip() + '</div>' +
-        '<dl class="md-ro"><dt>가져오는 곳</dt><dd>' + E(m.planned.map((p) => p.label).join(' + ')) + '<small>대화 데이터 창고(말뭉치·SNS 색인)는 아직 연결하지 않았어요</small></dd>' +
+        '<dl class="md-ro"><dt>가져오는 곳</dt><dd>' + E(m.planned.map((p) => p.label).join(' + ')) + '<small>' + (srcOnly ? '출처 묶음에서 승인한 원문을 그대로 써요' : '대화 데이터 창고(말뭉치·SNS 색인)는 아직 연결하지 않았어요') + '</small></dd>' +
         '<dt>쓴 재료</dt><dd>' + (used || '—') + '</dd>' + sourcesRow(m.sources) +
-        rewriteRow(m) +
-        '<dt>합계</dt><dd class="num">' + m.total + '대화</dd></dl>' +
+        (srcOnly ? '<dt>다시 쓰는 방식</dt><dd>다시 쓰지 않아요<small>원문 대화를 그대로 쓰고, 샘플 검토에서 고치거나 버릴 대화는 빼요</small></dd>' : rewriteRow(m)) +
+        '<dt>합계</dt><dd class="num">' + (m.total ? m.total + '대화' : '아직 없어요<small>학습 데이터를 만들면 세요</small>') + '</dd></dl>' +
         '<div class="md-foot"><p>끝난 단계라 여기서 바꿀 수 없어요. 클러스터마다 고른 샘플은 검토 기록에서 볼 수 있어요.</p>' + recordBtn('G7a', '샘플 검토 기록') + '</div></div>';
     }
     // 다시 쓰는 방식(D-0135): 흐름 뼈대만 쓰고 양쪽을 새로 써요. 원문과 겹친 가장 긴 곳과 뼈대 예시.
@@ -1495,7 +2044,7 @@
     }
     function mixHTML(c) {
       const total = Object.values(c.materials).reduce((a, b) => a + b, 0) || 1;
-      const sns = (c.materials.SNS_REWRITE || 0) + (c.materials.NIKL || 0);
+      const sns = (c.materials.SNS_REWRITE || 0) + (c.materials.NIKL || 0) + (c.materials.SOURCE || 0);
       const syn = c.materials.SYNTH || 0;
       return '<div class="md-mix" role="img" aria-label="' + E('실제 대화 ' + sns + ', 합성 ' + syn) + '"><i class="a" style="width:' + (sns / total * 100) + '%"></i><i class="b" style="width:' + (syn / total * 100) + '%"></i></div><div class="md-mixl"><span>실제 대화 ' + sns + '</span><span>합성 ' + syn + '</span></div>';
     }
@@ -1505,9 +2054,10 @@
       const ok = upper(d.status) === 'APPROVED';
       const g7 = upper(d.gates.G7.status);
       const g7a = upper(d.gates.G7a.status);
-      const head = '<div class="md-h"><h3>데이터셋 ' + E(revLabel(d.rev)) + '</h3>' + (ok ? pill('ok', '승인됨' + (d.gates.G7.decidedAt ? ' · ' + clock(d.gates.G7.decidedAt) : '')) + roChip() : g7 === 'AWAITING_HUMAN' || g7a === 'AWAITING_HUMAN' ? pill('wait', '검토 대기') : pill('run', '만드는 중')) + '</div>';
+      const head = '<div class="md-h"><h3>데이터셋 ' + E(revLabel(d.rev)) + '</h3>' + (ok ? pill('ok', '승인됨' + (d.gates.G7.decidedAt ? ' · ' + clock(d.gates.G7.decidedAt) : '')) + roChip() : g7 === 'AWAITING_HUMAN' || g7a === 'AWAITING_HUMAN' ? pill('wait', '검토 대기') : dataPill()) + '</div>';
       const wait = g7a === 'AWAITING_HUMAN' ? '<div class="md-note wait"><div><b>클러스터별 샘플을 검토할 차례예요</b><p>샘플을 채택하거나 고칠 점을 남기면 나머지 대화를 같은 기준으로 만들어요.</p></div>' + reviewBtn('G7a', '샘플 검토하기') + '</div>'
         : g7 === 'AWAITING_HUMAN' ? '<div class="md-note wait"><div><b>데이터셋을 승인할 차례예요</b><p>검사 결과와 표본 20개를 보고 승인하면 학습 계획을 세워요.</p></div>' + reviewBtn('G7', '데이터셋 검토하기') + '</div>' : '';
+      const next = nextNoteHTML('data');
       const rows = d.clusters.map((c) => {
         const s = c.sample || {};
         const adopt = s.ADOPT || 0;
@@ -1517,13 +2067,17 @@
         const st = upper(x[2].status);
         return '<div class="md-gate ' + (st === 'APPROVED' ? 'ok' : st === 'AWAITING_HUMAN' ? 'wait' : '') + '">' + icon(st === 'APPROVED' ? 'ok' : 'user') + '<div>' + x[1] + ' · ' + (st === 'APPROVED' ? '통과' : st === 'AWAITING_HUMAN' ? '검토 대기' : '아직') + '<small>' + (x[2].decidedAt ? E(clock(x[2].decidedAt)) : '') + '</small></div>' + recordBtn(x[0], '기록') + '</div>';
       }).join('') + '</div>';
-      return '<div class="md-pane">' + head + wait +
+      return '<div class="md-pane">' + head + wait + next +
         '<dl class="md-stats"><div><dt>학습</dt><dd>' + d.counts.train + '<small> 대화</small></dd></div><div><dt>검증</dt><dd>' + d.counts.validation + '<small> 대화</small></dd></div><div><dt>평가</dt><dd>' + d.counts.eval + '<small> 대화</small></dd></div><div><dt>나누는 단위</dt><dd><small>같은 장면 뼈대는 한쪽에만 넣어 섞이지 않게 해요</small></dd></div></dl>' +
         '<div class="md-h"><h4>클러스터</h4><span class="sp"></span><span class="md-legend"><span><i class="a"></i>실제 대화</span><span><i class="b"></i>합성</span></span></div>' +
         '<div class="md-scroll"><table class="md-t"><thead><tr><th>클러스터</th><th class="r">비율</th><th class="r">목표</th><th>재료</th><th>샘플 판정</th><th class="r">학습 · 검증 · 평가</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
         ((d.notes || []).length ? d.notes.map((n) => '<div class="md-note wait"><div><b>데이터셋 경고</b><p>' + E(n) + '</p></div></div>').join('') : '') +
         (d.blocking.length ? '<div class="md-note bad"><div><b>막는 문제 ' + d.blocking.length + '건</b><p>' + E(d.blocking.join(' · ')) + '</p></div></div>' : '') + gates +
         (ok ? '<div class="md-foot"><p>승인한 데이터셋은 바꿀 수 없어요. 학습은 이 버전으로 해요.</p></div>' : '') + '</div>';
+    }
+    function dataPill() {
+      const st = mSteps().find((x) => x.id === 'data') || {};
+      return pill({ run: 'run', fail: 'fail', wait: 'wait' }[st.k] || 'muted', { run: '만드는 중', fail: '멈춤' }[st.k] || (st.k === 'wait' ? st.s : '만들기 전'));
     }
     function phasesHTML(tr) {
       const list = tr.phases && tr.phases.length ? tr.phases : [];
@@ -1550,7 +2104,7 @@
       const busy = Boolean(state.detail.job) || state.busy;
       const fake = p0.provider === 'fake';
       if (tr.state === 'locked') return '<div class="md-pane"><div class="md-h"><h3>학습</h3>' + pill('muted', '아직 열리지 않았어요') + '</div><p class="lead">데이터셋을 승인하면 학습 계획(예상 비용·시간)을 세워요.</p></div>';
-      if (tr.state === 'pending') return '<div class="md-pane"><div class="md-h"><h3>학습</h3>' + pill('muted', '계획 전') + '</div><div class="md-note"><div><b>학습 계획을 세울 차례예요</b><p>계획은 비용이 들지 않아요. 계획을 세우면 예상 비용을 보고 시작할지 골라요.</p></div><button type="button" class="btn pri" data-act="resume"' + (busy ? ' disabled' : '') + '>이어서 실행</button></div></div>';
+      if (tr.state === 'pending') return '<div class="md-pane"><div class="md-h"><h3>학습</h3>' + pill('muted', '계획 전') + '</div><div class="md-note"><div><b>학습 계획을 세울 차례예요</b><p>계획은 비용이 들지 않아요. 계획을 세우면 예상 비용을 보고 시작할지 골라요.</p></div><button type="button" class="btn pri" data-act="model-run" data-stage="s10t"' + (busy ? ' disabled' : '') + '>학습 계획 세우기</button></div></div>';
       const confirm = mConfirmHTML(tr);
       if (tr.state === 'skip') {
         const g8 = upper(((mp().eval || {}).gate || {}).status);
@@ -1606,24 +2160,86 @@
       const m = mp();
       const tr = m.training || {};
       const e = m.eval || {};
-      const sets = '<h4>평가 세트</h4><ul class="md-sets"><li><span>고정 이력 질문</span><span>지난 이야기를 기억하는지</span></li><li><span>서운함</span><span>감정 표현과 회복</span></li><li><span>무례·사과 대본</span><span>사과를 받고 풀리는지</span></li><li><span>200턴 대화 · 사용자 4명</span><span>반복과 200턴째 기억</span></li></ul>';
-      if (!['done', 'skip'].includes(tr.state)) return '<div class="md-pane"><div class="md-h"><h3>평가</h3>' + pill('muted', '아직 열리지 않았어요') + '</div><p class="lead">학습이 끝나거나 학습 없이 진행을 고르면 열려요. 긴 프롬프트와 학습 모델에 같은 질문을 하고, 판정 모델 비교 뒤 블라인드 20쌍을 직접 골라요.</p>' + sets + '</div>';
+      const b = m.binding;
+      const bind = modelModeOf(state.detail) === 'BIND_EXISTING';
+      const sets = bind
+        ? '<h4>평가 방법</h4><ul class="md-sets"><li><span>비교 세트</span><span>원문에서 떼어 둔 실제 대화 장면</span></li><li><span>구별 판정</span><span>실제 답과 모델 답을 판정 모델과 가족이 가려요</span></li></ul>'
+        : '<h4>평가 세트</h4><ul class="md-sets"><li><span>고정 이력 질문</span><span>지난 이야기를 기억하는지</span></li><li><span>서운함</span><span>감정 표현과 회복</span></li><li><span>무례·사과 대본</span><span>사과를 받고 풀리는지</span></li><li><span>200턴 대화 · 사용자 4명</span><span>반복과 200턴째 기억</span></li></ul>';
+      if (bind && !b) return '<div class="md-pane"><div class="md-h"><h3>평가</h3>' + pill('muted', '아직 열리지 않았어요') + '</div><div class="md-note wait"><div><b>연결한 모델이 없어 평가를 기다려요</b><p>평가는 긴 프롬프트와 연결한 모델의 답을 비교해요. 먼저 학습된 모델을 연결해 주세요.</p></div><button type="button" class="btn pri" data-act="mstep" data-step="bind">모델 연결하기</button></div>' + sets + '</div>';
+      if (!bind && !['done', 'skip'].includes(tr.state)) return '<div class="md-pane"><div class="md-h"><h3>평가</h3>' + pill('muted', '아직 열리지 않았어요') + '</div><p class="lead">학습이 끝나거나 학습 없이 진행을 고르면 열려요. 긴 프롬프트와 학습 모델에 같은 질문을 하고, 판정 모델 비교 뒤 블라인드 20쌍을 직접 골라요.</p>' + sets + '</div>';
       const v = views(null).s10 || {};
       const gs = upper(e.gate && e.gate.status);
       const busy = Boolean(state.detail.job) || state.busy;
-      const arms = '<div class="md-vs"><div class="md-arm"><b>긴 프롬프트</b><small>학습 없음 · 지금 서비스 방식</small></div><span class="x">대</span><div class="md-arm"><b>' + (tr.state === 'skip' || !tr.adopted ? '학습 모델 없음' : '학습 모델') + '</b><small>' + (tr.state === 'skip' ? '학습 없이 진행해 비교하지 않아요' : tr.adopted ? sftPromptText(e.sftPrompt) : '학습 모델을 채택하지 않았어요') + '</small></div></div>';
+      // 비교 조건은 G8과 같은 수로 보인다(QA v5 C-08). 사전 등록 전이면 긴 프롬프트와 학습(연결) 모델 두 가지다.
+      const LONG = { label: '긴 프롬프트', sub: '학습 없음 · 지금 서비스 방식' };
+      let arms;
+      if (bind) arms = [LONG, { label: '연결한 모델', sub: b.kindLabel + ' · ' + text(b.ref) }];
+      else if ((e.arms || []).length) arms = e.arms.map((a) => (a.id === 'LONG_BASE' ? LONG : { label: a.label, sub: a.bound ? sftPromptText(e.sftPrompt) : '학습 결과가 없어 답을 받지 않아요' }));
+      else arms = [LONG, { label: tr.state === 'skip' || !tr.adopted ? '학습 모델 없음' : '학습 모델', sub: tr.state === 'skip' ? '학습 없이 진행해 비교하지 않아요' : tr.adopted ? sftPromptText(e.sftPrompt) : '쓸 체크포인트가 없어요' }];
+      const vs = '<div class="md-vs' + (arms.length > 2 ? ' n' + arms.length : '') + '">' + arms.map((a) => '<div class="md-arm"><b>' + E(a.label) + '</b><small>' + E(a.sub) + '</small></div>').join('<span class="x">대</span>') + '</div>';
       let act = '';
-      if (gs === 'AWAITING_HUMAN') act = '<div class="md-note wait"><div><b>' + (e.promptOnly ? '긴 프롬프트로 채택할지 확인해요' : '블라인드 20쌍을 고를 차례예요') + '</b><p>' + (e.promptOnly ? '학습 결과 없이 긴 프롬프트로 패키지를 만들어요.' : '지표와 판정 모델 비교를 보고, 어느 쪽 답이 나은지 직접 골라요.') + '</p></div>' + reviewBtn('G8', e.promptOnly ? '채택 검토하기' : '블라인드 20쌍 고르기') + '</div>';
-      else if (gs === 'APPROVED') act = '<div class="md-note ok"><div><b>평가를 마쳤어요</b><p>' + (e.promptOnly ? '긴 프롬프트로 채택했어요.' : '채택 결정을 기록했어요.') + (e.gate.decidedAt ? ' · ' + E(clock(e.gate.decidedAt)) : '') + '</p></div>' + recordBtn('G8', '결정 기록') + '</div>';
-      else if (v.kind === 'confirm') act = state.confirming === 's10' ? confirmHTML('s10') : '<div class="md-note wait"><div><b>학습 모델 답을 받으려면 GPU를 다시 빌려요</b><p>예상 비용을 확인한 뒤 평가를 시작해요.</p></div><button type="button" class="btn pri" data-act="confirm" data-stage="s10"' + (busy ? ' disabled' : '') + '>비용 확인</button></div>';
-      else if (['run', 'retry'].includes(v.kind)) act = '<div class="md-note run"><div><b>답을 모으는 중이에요</b><p>끝나면 블라인드 20쌍 고르기가 열려요.</p></div></div>';
+      if (gs === 'AWAITING_HUMAN') {
+        const t = !e.promptOnly ? ['블라인드 20쌍을 고를 차례예요', '지표와 판정 모델 비교를 보고, 어느 쪽 답이 나은지 직접 골라요.', '블라인드 20쌍 고르기']
+          : bind ? ['연결한 모델로 채택할지 확인해요', '비교 결과를 보고 연결한 모델을 쓸지 정해요.', '채택 검토하기']
+            : ['긴 프롬프트로 채택할지 확인해요', '학습 결과 없이 긴 프롬프트로 패키지를 만들어요.', '채택 검토하기'];
+        act = '<div class="md-note wait"><div><b>' + t[0] + '</b><p>' + t[1] + '</p></div>' + reviewBtn('G8', t[2]) + '</div>';
+      } else if (gs === 'APPROVED') act = '<div class="md-note ok"><div><b>평가를 마쳤어요</b><p>' + (e.adopted ? E(e.adopted.label) + '로 채택했어요.' : '채택 결정을 기록했어요.') + (e.gate.decidedAt ? ' · ' + E(clock(e.gate.decidedAt)) : '') + '</p></div>' + recordBtn('G8', '결정 기록') + '</div>';
+      else if (v.kind === 'confirm') act = state.confirming === 's10' ? confirmHTML('s10') : '<div class="md-note wait"><div><b>' + (bind ? '평가 비용을 확인해 주세요' : '학습 모델 답을 받으려면 GPU를 다시 빌려요') + '</b><p>예상 비용을 확인한 뒤 평가를 시작해요.</p></div><button type="button" class="btn pri" data-act="confirm" data-stage="s10"' + (busy ? ' disabled' : '') + '>비용 확인</button></div>';
+      else if (['run', 'retry'].includes(v.kind)) act = '<div class="md-note run"><div><b>답을 모으는 중이에요</b><p>끝나면 채택 검토가 열려요.</p></div></div>';
       else if (v.kind === 'fail') act = '<div class="md-note bad"><div><b>평가가 멈췄어요</b><p>' + E(failReason((rowsById(state.detail).get('s10') || {}).lastError).summary) + '</p></div><button type="button" class="btn pri" data-act="retry" data-stage="s10"' + (busy ? ' disabled' : '') + '>다시 실행</button></div>';
-      else act = '<div class="md-note"><div><b>평가를 시작할 수 있어요</b><p>이어서 실행하면 평가부터 진행해요.</p></div><button type="button" class="btn pri" data-act="resume"' + (busy ? ' disabled' : '') + '>이어서 실행</button></div>';
-      return '<div class="md-pane"><div class="md-h"><h3>비교할 두 가지</h3>' + (gs === 'APPROVED' ? roChip() : '') + '</div>' + arms + act + '</div><div class="md-pane">' + sets + '</div>';
+      else act = nextNoteHTML('eval');
+      return '<div class="md-pane"><div class="md-h"><h3>' + (bind || (e.arms || []).length ? '비교하는 조건 ' + arms.length + '가지' : '비교') + '</h3>' + (gs === 'APPROVED' ? roChip() : '') + '</div>' + vs + act + '</div><div class="md-pane">' + sets + '</div>';
+    }
+    // 학습된 모델 연결(QA v5 B-F07): 연결 파일을 고르면 서버가 확인하고 기록한다. 평가 검토가 열리기 전까지 바꿀 수 있다.
+    function bindHTML() {
+      const b = mp().binding;
+      const busy = Boolean(state.detail.job) || state.busy;
+      const locked = ['AWAITING_HUMAN', 'APPROVED'].includes(upper(((mp().eval || {}).gate || {}).status));
+      const err = state.bindError ? '<div class="md-note bad" role="alert"><div><b>연결하지 못했어요</b><p>' + E(state.bindError) + '</p></div></div>' : '';
+      const pick = '<button type="button" class="btn' + (b ? '' : ' pri') + '" data-act="bind-pick"' + (busy ? ' disabled' : '') + '>' + (state.binding ? '확인하는 중…' : b ? '다른 모델 연결' : '연결 파일 고르기') + '</button><input type="file" data-bind-file accept=".json,application/json" hidden aria-hidden="true" tabindex="-1">';
+      const guide = '<details class="fd-tech"><summary>연결 파일에 들어가는 것</summary><p>모델 종류(Hugging Face 어댑터 · Vertex 튜닝 모델 · 서빙 주소), 모델 이름, 버전(커밋), 기반 모델과 그 버전, 서빙 경로, 학습한 사람·날, 학습 데이터 설명, 사용 근거예요. 토큰 값은 넣지 않아요.</p></details>';
+      if (!b) return '<div class="md-pane"><div class="md-h"><h3>모델 연결</h3>' + pill('wait', '연결 전') + '</div><p class="lead">이미 학습한 모델을 이 캐릭터에 연결해요. 연결 파일(.json)을 고르면 서버가 확인한 뒤 기록해요. 학습이나 생성은 하지 않아서 비용이 들지 않아요.</p>' + err + '<div class="acts">' + pick + '</div>' + guide + '</div>';
+      const row = (k, val, small) => (val ? '<dt>' + E(k) + '</dt><dd>' + E(val) + (small ? '<small>' + E(small) + '</small>' : '') + '</dd>' : '');
+      return '<div class="md-pane"><div class="md-h"><h3>연결한 모델</h3>' + pill('ok', '연결함') + (locked ? roChip() : '') + '</div>' + err +
+        '<dl class="md-ro">' + row('모델 종류', b.kindLabel) + row('모델', b.ref) + row('버전', b.revision) + row('기반 모델', b.baseModel, b.baseModelRevision ? '버전 ' + b.baseModelRevision : '') + row('서빙 경로', b.servingRoute) + row('확인', b.checkLabel) +
+        row('학습', [b.trainedBy, b.trainedAt].filter(Boolean).join(' · '), b.dataNote) + row('사용 근거', b.usageBasis) + '</dl>' +
+        (locked ? '<div class="md-foot"><p>평가 검토가 열려서 연결한 모델을 바꿀 수 없어요.</p></div>' : '<div class="md-foot"><p>평가 검토가 열리기 전에는 다른 모델로 바꿀 수 있어요.</p>' + pick + '</div>') + '</div>';
+    }
+    async function connectModel(file) {
+      const id = state.detail && state.detail.id;
+      if (!id || !file) return;
+      state.bindError = '';
+      let body;
+      try {
+        if (file.size > 256 * 1024) throw new Error('big');
+        body = JSON.parse(await file.text());
+      } catch (error) {
+        state.bindError = '연결 파일을 읽지 못했어요. 모델 연결용 .json 파일이 맞는지 확인해 주세요.';
+        render();
+        return;
+      }
+      state.binding = true;
+      state.busy = true;
+      state.feedback = null;
+      render();
+      try {
+        const res = await fetch(R.apiPath(apiBase, '/api/characters/' + encodeURIComponent(id) + '/model-binding'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store' });
+        let data = null;
+        try { data = await res.json(); } catch (error) { data = null; }
+        if (!res.ok) state.bindError = text(data && typeof data.detail === 'string' ? data.detail : '연결하지 못했어요 (' + res.status + ').');
+        else { state.feedback = { tone: 'ok', text: '모델을 연결했어요. 이제 평가를 시작할 수 있어요.' }; state.mstep = 'eval'; }
+      } catch (error) {
+        state.bindError = '서버에 연결하지 못했어요. 연결이 돌아오면 다시 골라 주세요.';
+        state.conn = 'offline';
+      }
+      state.binding = false;
+      state.busy = false;
+      await refresh(false);
     }
     function modelHTML() {
       if (!state.mstep) state.mstep = mActive();
-      const body = state.mstep === 'src' ? srcHTML() : state.mstep === 'data' ? dataHTML() : state.mstep === 'train' ? trainHTML() : evalHTML();
+      if (!mSteps().some((x) => x.id === state.mstep)) state.mstep = mActive();
+      const body = state.mstep === 'bind' ? bindHTML() : state.mstep === 'src' ? srcHTML() : state.mstep === 'data' ? dataHTML() : state.mstep === 'train' ? trainHTML() : evalHTML();
       return '<div class="md">' + nowBarHTML() + stepperHTML() + body + '</div>';
     }
     function modelPanelHTML() {
@@ -1651,22 +2267,41 @@
       } else if (st === 'src' && m.material) {
         const total = m.material.total || 0;
         const sns = m.material.used.filter((u) => u.kind !== 'SYNTH').reduce((a, u) => a + u.conversations, 0);
-        prop('재료', E(m.material.used.map((u) => u.label).join(' + ')));
-        prop('실제 대화 비율', E(total ? Math.round(sns / total * 100) + '%' : '—'), total ? sns / total : null, 'acc');
-        prop('대화 데이터 창고', '연결 전');
+        const srcOnly = m.material.planned.length > 0 && m.material.planned.every((p) => p.kind === 'SOURCE');
+        prop('재료', E((m.material.used.length ? m.material.used : m.material.planned).map((u) => u.label).join(' + ')));
+        if (!srcOnly) {
+          prop('실제 대화 비율', E(total ? Math.round(sns / total * 100) + '%' : '—'), total ? sns / total : null, 'acc');
+          prop('대화 데이터 창고', '연결 전');
+        }
       } else if (st === 'data' && m.dataset) {
         prop('전체', E(m.dataset.counts.total + '대화'));
         prop('목표(학습)', E((m.dataset.planned || '—') + '대화'));
         prop('경고', E(m.dataset.warnings.length + '건'));
         if (m.dataset.trainingPrompt) prop('학습용 프롬프트', E((m.dataset.trainingPrompt.longestChars || 0).toLocaleString('ko-KR') + '자 이하 · 관계 ' + m.dataset.trainingPrompt.relationships + ' · 채널 ' + m.dataset.trainingPrompt.channels));
         prop('막는 문제', E(m.dataset.blocking.length + '건'));
+      } else if (st === 'bind' && m.binding) {
+        title = '연결한 모델';
+        prop('모델 종류', E(m.binding.kindLabel));
+        prop('모델', E(m.binding.ref || ''));
+        prop('확인', E(m.binding.checkLabel));
       } else if (st === 'eval') {
-        prop('평가', E(KIND_LABEL[(views(null).s10 || {}).kind] || '—'));
-        prop('블라인드', (m.eval || {}).promptOnly ? '없음 · 학습 없이 진행해 비교하지 않아요' : '20쌍 · 사람이 골라요');
-        prop('판정', '순서를 바꿔 두 번');
+        const ev = m.eval || {};
+        prop('평가', E((mSteps().find((x) => x.id === 'eval') || {}).s || '—'));
+        if (ev.adopted) prop('채택', E(ev.adopted.label));
+        if (modelModeOf(state.detail) === 'BIND_EXISTING') prop('비교 세트', '원문에서 떼어 둔 장면');
+        else {
+          prop('블라인드', ev.promptOnly ? '없음 · 학습 없이 진행해 비교하지 않아요' : '20쌍 · 사람이 골라요');
+          prop('판정', '순서를 바꿔 두 번');
+        }
       }
       return '<div class="ins-head"><span class="ins-kicker">모델 만들기</span><div class="ins-title"><h2>' + E(title) + '</h2></div></div><section class="ins-sec"><dl class="ins-props md-props">' + (props.join('') || '<dt>상태</dt><dd>아직 기록이 없어요</dd>') + '</dl></section>';
     }
+    const MODEL_RUN_OK = {
+      s9s: '데이터 샘플 만들기를 요청했어요. 끝나면 샘플 검토를 알려 드려요.',
+      s9: '학습 데이터 만들기를 요청했어요. 끝나면 데이터셋 승인을 알려 드려요.',
+      s10t: '학습 계획을 세우고 있어요. 계획에는 비용이 들지 않아요.',
+      s10: '평가를 요청했어요. 비용이 드는 평가면 시작하기 전에 다시 물어봐요.'
+    };
     function goModel() {
       if (modelMode()) { render(); return; }
       state.keepStep = true;
@@ -1754,8 +2389,9 @@
     }
     function renderNow() {
       if (state.destroyed || !region.top) return;
+      sumMemo = null;
       const rt = route();
-      state.overview = rt.overview && Boolean(state.graph);
+      state.overview = rt.overview && Boolean(state.graph) && !state.form.open;
       if (region.shell) region.shell.classList.toggle('is-overview', state.overview);
       renderSide();
       if (!state.graph) {
@@ -1767,7 +2403,18 @@
       if (state.overview) {
         renderTop(null);
         renderBanner();
-        region.head.innerHTML = state.form.open ? formHTML() : overviewHTML(rt.filter);
+        region.head.innerHTML = overviewHTML(rt.filter);
+        region.graph.hidden = true;
+        region.panel.hidden = true;
+        if (region.body) region.body.classList.add('no-panel');
+        renderSheet();
+        return;
+      }
+      // 새로 지어내기 입력은 다른 캐릭터 화면 위에 열리지 않는다. 입력만 보인다.
+      if (state.form.open) {
+        renderTop(null);
+        renderBanner();
+        region.head.innerHTML = formHTML();
         region.graph.hidden = true;
         region.panel.hidden = true;
         if (region.body) region.body.classList.add('no-panel');
@@ -1775,16 +2422,20 @@
         return;
       }
       const scope = setupScope();
+      // 시작 장면이 알려지면 S8c 이름을 그 장면에 맞춘다(모티브 기본은 팬 통화).
+      if (state.detail && state.graph.byStage.get('s8c')) state.graph.byStage.get('s8c').name = s8cName(state.detail.origin || state.graph.origin, text(state.detail.chapterTemplate));
       const v = state.detail ? views(scope) : {};
       if (state.detail && !state.sel) {
         const tasks = buildTasks(state.graph, state.detail, v, {});
         const running = Object.keys(v).find((id) => v[id].kind === 'run' || v[id].kind === 'retry');
-        const next = state.graph.stages.find((s) => !['done', 'skip', 'out'].includes(v[s.id].kind));
-        state.sel = (tasks[0] && tasks[0].stage) || running || (next && next.id) || 's11';
-        loadGateViews();
+        const goal = goalStages(state.graph, state.detail);
+        // 모티브는 목표 밖 단계(예: 기준 사진의 '이 단계까지 실행')로 시작하지 않는다. 할 일이 없으면 마지막으로 끝난 단계를 보인다.
+        const next = goal ? lastFinished(goal, v) : state.graph.stages.find((s) => !['done', 'skip', 'out'].includes(v[s.id].kind));
+        state.sel = (tasks[0] && tasks[0].stage) || running || (next && next.id) || (goal ? null : 's11');
+        if (state.sel) loadGateViews();
       }
-      if (state.detail && !state.form.open && modelMode()) {
-        if (!state.wasModel && !state.keepStep) { state.mstep = null; state.mconfirm = null; }
+      if (state.detail && modelMode() && !promptOnly(state.detail)) {
+        if (!state.wasModel && !state.keepStep) { state.mstep = null; state.mconfirm = null; state.bindError = ''; }
         state.wasModel = true;
         state.keepStep = false;
         renderTop(v);
@@ -1800,15 +2451,32 @@
       state.wasModel = false;
       renderTop(v);
       renderBanner();
-      if (state.form.open) region.head.innerHTML = formHTML();
-      else if (state.projects && !characters().length) region.head.innerHTML = emptyHTML();
+      const draft = state.detail && notStarted() && isMotif(state.detail);
+      if (state.projects && !characters().length) region.head.innerHTML = emptyHTML();
       else if (!state.detail) region.head.innerHTML = '';
-      else region.head.innerHTML = titleHTML() + viewTabsHTML() + (notStarted() ? setupHTML() : tasksHTML(v));
-      renderGraph(v, scope);
-      region.panel.hidden = !state.detail;
-      if (region.body) region.body.classList.toggle('no-panel', !state.detail);
-      if (state.detail) region.panel.innerHTML = '<div class="fl-panel">' + panelHTML(v) + '</div>';
+      else region.head.innerHTML = titleHTML() + (draft ? '' : viewTabsHTML()) + (draft ? draftHTML() : notStarted() ? setupHTML() : tasksHTML(v));
+      // 시작하지 않은 모티브 초안은 공정 그래프와 단계 패널을 보이지 않는다(원문 화면에서 시작한다).
+      if (draft) region.graph.hidden = true;
+      else renderGraph(v, scope);
+      const panel = Boolean(state.detail) && !draft;
+      region.panel.hidden = !panel;
+      if (region.body) region.body.classList.toggle('no-panel', !panel);
+      if (panel) region.panel.innerHTML = '<div class="fl-panel">' + panelHTML(v) + '</div>';
       renderSheet();
+    }
+    // 목표 경로에서 가장 늦게 끝난 단계.
+    function lastFinished(goal, v) {
+      const rows = rowsById(state.detail);
+      const hist = state.detail.history || {};
+      let best = null;
+      let bestT = -1;
+      state.graph.stages.forEach((s, i) => {
+        if (!goal.has(s.id) || !['done', 'skip'].includes((v[s.id] || {}).kind)) return;
+        const h = hist[s.id] || [];
+        const t = parseTime((rows.get(s.id) || {}).endedAt) || parseTime((h[h.length - 1] || {}).endedAt) || i;
+        if (t >= bestT) { bestT = t; best = s; }
+      });
+      return best;
     }
 
     // ---- 동작 ----
@@ -1817,7 +2485,8 @@
       state.feedback = null;
       render();
       try {
-        await request('POST', '/api/jobs', payload);
+        const job = await request('POST', '/api/jobs', payload);
+        state.runJobId = payload.action === 'run' ? job.jobId : null;
         state.feedback = okText ? { tone: 'ok', text: okText } : null;
       } catch (error) {
         state.feedback = { tone: 'bad', text: error.message };
@@ -1827,10 +2496,12 @@
       await refresh(false);
     }
     async function create(form) {
-      state.form.slug = form.querySelector('[data-slug]').value;
+      state.form.slug = form.querySelector('[data-slug]').value.trim();
       state.form.brief = form.querySelector('[data-brief]').value;
+      if (!state.form.brief.trim()) { state.form.error = '어떤 캐릭터인지 적어 주세요.'; render(); return; }
+      if (state.form.slug && !/^[a-z0-9][a-z0-9-]{0,40}$/.test(state.form.slug)) { state.form.error = '짧은 이름은 영문 소문자나 숫자로 시작하고, 영문 소문자·숫자·하이픈만 쓸 수 있어요. 비워 두면 자동으로 정해요.'; render(); return; }
       let payload;
-      try { payload = R.createCharacterRequest(state.form.slug, state.form.brief); } catch (error) { state.form.error = error.message; render(); return; }
+      try { payload = R.createCharacterRequest(state.form.slug || autoSlug(state.form.brief), state.form.brief); } catch (error) { state.form.error = error.message; render(); return; }
       state.busy = true;
       state.form.error = '';
       render();
@@ -1841,6 +2512,25 @@
         global.location.hash = '#c/' + encodeURIComponent(data.characterId);
       } catch (error) {
         state.form.error = error.message;
+      }
+      state.busy = false;
+      await refresh(false);
+    }
+    // 보관하기·보관 풀기(3차 약속 3). 지우지 않고 목록 기본 보기에서만 숨긴다.
+    async function setArchived(on) {
+      const id = state.detail && state.detail.id;
+      if (!id) return;
+      state.menuOpen = false;
+      state.busy = true;
+      render();
+      try {
+        await request('POST', '/api/characters/' + encodeURIComponent(id) + '/archive', { archived: on });
+        const c = characters().find((x) => x.id === id);
+        if (c) c.archived = on;
+        state.feedback = { tone: 'ok', text: on ? '보관했어요. 목록 아래 보관함에서 다시 찾을 수 있어요.' : '보관을 풀었어요. 다시 목록에 보여요.' };
+        if (on) { state.showArchived = false; global.location.hash = '#all'; }
+      } catch (error) {
+        state.feedback = { tone: 'bad', text: error.status === 404 || error.status === 405 ? '이 서버에서는 아직 보관할 수 없어요. 서버를 새 버전으로 올린 뒤 다시 해 주세요.' : error.message };
       }
       state.busy = false;
       await refresh(false);
@@ -1858,11 +2548,21 @@
     function onClick(event) {
       if (swallowClick) { swallowClick = false; if (region.view && region.view.contains(event.target)) { event.preventDefault(); return; } }
       if (event.target === region.scrim) { closeSheet(); return; }
+      if (state.menuOpen && !(event.target.closest && event.target.closest('.fd-more'))) { state.menuOpen = false; render(); }
       const el = event.target.closest('[data-act]');
       if (!el || el.disabled || (el.getAttribute('aria-disabled') === 'true' && el.dataset.act === 'toggle')) return;
       const act = el.dataset.act;
       const id = state.detail && state.detail.id;
       if (act === 'select') { state.sel = el.dataset.stage; const lane = laneMap(state.graph).get(state.sel); if (lane) state.open.add(lane); loadGateViews(); render(); }
+      else if (act === 'menu') { state.menuOpen = !state.menuOpen; render(); }
+      else if (act === 'archive') setArchived(el.dataset.v === '1');
+      else if (act === 'archived') { state.showArchived = !state.showArchived; state.form.open = false; if (route().overview) render(); else global.location.hash = '#all'; }
+      else if (act === 'show-off') { state.showOff = !state.showOff; zoomFit(); render(); }
+      else if (act === 'more') { state.moreOpen = !state.moreOpen; render(); }
+      else if (act === 'video-open') { if (state.video && state.video.open) { state.video = null; render(); } else openVideo(); }
+      else if (act === 'video-cancel') { state.video = null; render(); const b = doc.querySelector('[data-act="video-open"]'); if (b) b.focus(); }
+      else if (act === 'video-go') startVideo();
+      else if (act === 'resume-more') { state.moreOpen = false; run(R.runRequest(id, el.dataset.until || 'sx', []), '이어서 실행을 요청했어요. 비용이 큰 단계는 시작하기 전에 다시 물어봐요.'); }
       else if (act === 'toggle') { const lane = el.dataset.lane; if (state.open.has(lane)) state.open.delete(lane); else state.open.add(lane); render(); }
       else if (act === 'review') { state.batch = null; state.opener = el; state.review = { gate: el.dataset.gate, stage: el.dataset.stage || (state.graph.byGate.get(el.dataset.gate) || {}).stage, readonly: el.dataset.readonly === '1' }; state.sel = state.review.stage; render(); }
       else if (act === 'close-review') closeSheet();
@@ -1880,7 +2580,10 @@
       else if (act === 'mconfirm') { state.mconfirm = el.dataset.v; state.mstep = el.dataset.step || state.mstep || 'train'; goModel(); const go = doc.querySelector('.md-confirm .btn:not(.ghost)'); if (go) go.focus(); }
       else if (act === 'mconfirm-cancel') { state.mconfirm = null; render(); }
       else if (act === 'train-go' || act === 'train-retry') { state.mconfirm = null; run({ characterId: id, action: 'train', confirm: ['s10t'], until: 's10t' }, act === 'train-go' ? '학습을 시작했어요. 진행은 학습 단계에서 볼 수 있어요.' : '결과를 다시 받아 오고 있어요.'); }
-      else if (act === 'skip-go') { state.mconfirm = null; run({ characterId: id, action: 'skip-training', until: currentUntil() || orchestrator().resumeUntil || 'sx' }, '학습 없이 진행해요. 평가에서 긴 프롬프트 채택을 확인해 주세요.'); }
+      // 학습 없이 진행은 평가 검토(G8)까지만 이어 간다. 다른 목표 작업을 따라가지 않는다.
+      else if (act === 'skip-go') { state.mconfirm = null; run({ characterId: id, action: 'skip-training', until: 'G8' }, '학습 없이 진행해요. 평가에서 긴 프롬프트 채택을 확인해 주세요.'); }
+      else if (act === 'model-run' && MODEL_RUN_UNTIL[el.dataset.stage]) run(R.runRequest(id, MODEL_RUN_UNTIL[el.dataset.stage], []), MODEL_RUN_OK[el.dataset.stage]);
+      else if (act === 'bind-pick') { const input = doc.querySelector('[data-bind-file]'); if (input) input.click(); }
       else if (act === 'stop-go') { state.mconfirm = null; post('/api/characters/' + encodeURIComponent(id) + '/training/stop', '중단을 요청했어요. GPU를 반납하고 멈춰요.'); }
       else if (act === 'release-go') { state.mconfirm = null; post('/api/characters/' + encodeURIComponent(id) + '/training/release', '결과를 버리고 GPU를 반납했어요.'); }
       else if (act === 'zoom-in') zoomStep(1);
@@ -1891,11 +2594,11 @@
       else if (act === 'ov-clear') { state.ov = { q: '', gate: '' }; if (route().filter !== 'all') global.location.hash = '#all'; else render(); }
       else if (act === 'ov-review') { state.batch = el.dataset.gate; state.pendingReview = { id: el.dataset.id, gate: el.dataset.gate, stage: el.dataset.stage }; global.location.hash = '#c/' + encodeURIComponent(el.dataset.id); }
       else if (act === 'next-batch') { const nb = nextInBatch(); if (nb) { const t = nb.next.tasks.find((x) => x.kind === 'wait' && x.gate === state.batch) || {}; state.pendingReview = { id: nb.next.c.id, gate: state.batch, stage: t.stage }; closeSheet(false); global.location.hash = '#c/' + encodeURIComponent(nb.next.c.id); } }
-      else if (act === 'retry') run(R.runRequest(id, currentUntil() || orchestrator().resumeUntil || el.dataset.stage, []), '다시 실행을 요청했어요. 통과하면 목표까지 이어서 진행해요.');
+      else if (act === 'retry') run(R.runRequest(id, runGoal(state.graph, state.detail, orchestrator().resumeUntil, el.dataset.stage), []), '다시 실행을 요청했어요. 통과하면 목표까지 이어서 진행해요.');
       else if (act === 'run-stage') run(R.runRequest(id, el.dataset.stage, []), '이 단계까지 실행을 요청했어요.');
       else if (act === 'start') run(R.runRequest(id, state.target || defaultTarget(), []), '실행을 시작했어요. 진행 상황은 서버 기록을 따라요.');
-      else if (act === 'resume') run(R.runRequest(id, currentUntil() || orchestrator().resumeUntil || 'sx', []), '이어서 실행을 요청했어요.');
-      else if (act === 'new') { state.form.open = true; render(); const f = doc.querySelector('[data-slug]'); if (f) f.focus(); }
+      else if (act === 'resume') run(R.runRequest(id, el.dataset.stage || currentUntil(), []), '이어서 실행을 요청했어요.');
+      else if (act === 'new') { state.form.open = true; render(); const f = doc.querySelector('[data-brief]'); if (f) f.focus(); }
       else if (act === 'cancel-form') { state.form.open = false; render(); }
       else if (act === 'pick') { state.batch = null; state.form.open = false; global.location.hash = '#c/' + encodeURIComponent(el.dataset.id); }
       else if (act === 'inbox') { state.batch = null; state.form.open = false; global.location.hash = '#all/mine'; }
@@ -1911,7 +2614,7 @@
       others.sort((a, b) => (a.s.oldest || Infinity) - (b.s.oldest || Infinity));
       if (!others.length) return null;
       const o = others[0];
-      return { id: o.s.c.id, gate: o.t.gate, stage: o.t.stage, label: '다음 검토 · ' + displayName(o.s.c.name, o.s.c.id) + ' · ' + o.t.title };
+      return { id: o.s.c.id, gate: o.t.gate, stage: o.t.stage, label: '다음 검토 · ' + labelOf(o.s.c) + ' · ' + o.t.title };
     }
     function openNextTarget() {
       const t = state.nextTarget;
@@ -1930,19 +2633,28 @@
     }
     function onChange(event) {
       const el = event.target;
+      if (el.matches('[data-bind-file]')) { const file = el.files && el.files[0]; connectModel(file); return; }
       if (el.matches('[data-pick]')) {
         if (el.value === '__new') { state.form.open = true; render(); return; }
+        if (el.value === '__src') { global.location.href = 'sources.html'; return; }
         if (el.value === '__all') { global.location.hash = '#all'; return; }
         state.form.open = false;
         global.location.hash = '#c/' + encodeURIComponent(el.value);
       } else if (el.matches('[data-target]')) { state.target = el.value; render(); }
       else if (el.matches('[data-ov-gate]')) { state.ov.gate = el.value; render(); }
+      else if (el.name === 'videoTierPick' && state.video) { state.video.tier = el.value; render(); const r0 = doc.querySelector('[name="videoTierPick"][value="' + el.value + '"]'); if (r0) r0.focus(); }
     }
     function onSubmit(event) {
       if (event.target.matches('[data-form]')) { event.preventDefault(); create(event.target); }
     }
-    function onInput(event) { if (event.target.matches && event.target.matches('[data-ov-q]')) { state.ov.q = event.target.value; render(); } }
+    function onInput(event) {
+      if (!event.target.matches) return;
+      if (event.target.matches('[data-ov-q]')) { state.ov.q = event.target.value; render(); }
+      else if (event.target.matches('[data-side-q]')) { state.sq = event.target.value; render(); }
+      else if (event.target.matches('[data-sig]') && state.video) { state.video.sig = Object.assign({}, state.video.sig, { [event.target.dataset.sig]: event.target.value }); }
+    }
     function onKey(event) {
+      if (event.key === 'Escape' && state.menuOpen) { event.preventDefault(); state.menuOpen = false; render(); const b = doc.querySelector('[data-act="menu"]'); if (b) b.focus(); return; }
       if (event.key === 'Escape' && state.review) { event.preventDefault(); closeSheet(); return; }
       if (event.key === 'Escape' && state.confirming) { event.preventDefault(); state.confirming = null; render(); return; }
       if (event.key === 'Escape' && state.focus) { event.preventDefault(); toggleFocus(false); return; }
@@ -1967,7 +2679,7 @@
           : { t: title + ': 결정을 기록했어요.', s: '' };
       note.at = Date.now();
       const nb = state.batch === m.gate ? nextInBatch() : null;
-      if (nb) { note.act = 'next-batch'; note.label = '다음 건 검토 · ' + displayName(nb.next.c.name, nb.next.c.id) + ' (' + nb.left + '건 남음)'; }
+      if (nb) { note.act = 'next-batch'; note.label = '다음 건 검토 · ' + labelOf(nb.next.c) + ' (' + nb.left + '건 남음)'; }
       else { note.act = 'next-review'; note.gate = m.gate; }
       state.notes = [note].concat(state.notes).slice(0, 3);
       state.decided[m.gate] = Date.now();
@@ -2034,7 +2746,7 @@
     };
   }
 
-  const pure = { since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, MARK, mount };
+  const pure = { chatStatusText, runGoal, runFeedback, plainError, since, span, clock, predecessors, descendants, ancestors, reducedEdges, crossLaneEdges, viewsFor, laneKind, edgeClass, buildTasks, diffNotes, failReason, targetLabel, recommendation, reworkLine, layoutOf, trackLabel, stageNameHTML, s8cName, chatHref, isChatReady, statusOf, STATUS_LABEL, goalStages, goalOf, goalView, nameLabels, labelOf, autoSlug, splitAttempts, MODE_LABEL, MARK, VIDEO_TIERS, tierOf, tierName, tierCardsHTML, videoText, videoTone, canMakeVideo, readyPhotos, modelNext, modelTasks, modelSteps, modelActive, MODEL_RUN_UNTIL, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = pure;
   if (global) global.FactoryFlow = pure;
 })(typeof window !== 'undefined' ? window : null);

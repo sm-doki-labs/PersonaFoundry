@@ -129,7 +129,10 @@ class ProviderLimits:
                     finally:
                         _native_observer.reset(token)
             except Exception as exc:
-                native = getattr(inner, "max_retries", 0) > 0 or inner.name == "xai_video"
+                native = getattr(inner, "max_retries", 0) > 0 or inner.name in {
+                    "xai_video",
+                    "grok_oauth",
+                }
                 if not _rate_limited(exc) or native or attempt == 5:
                     raise
             wait(time.sleep, min(120, 2**attempt))

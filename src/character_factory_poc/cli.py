@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -147,7 +148,30 @@ def cmd_persona_prompts(args) -> int:
     retries = int(ctx.config.stage("s8").get("max_check_retries", 3))
     probes = _read_lines(args.probes)
     if not args.execute:
-        if ctx.text_deck_enabled or ctx.config.stage("s7").get("formation_profile"):
+        from character_factory_poc.pipeline.origin import is_twin
+
+        if is_twin(ctx.character_dir(args.character_id)):
+            if ctx.config.stage("s8").get("motif_compiler", "evidence-v4") in {
+                "evidence-v2",
+                "evidence-v3",
+                "evidence-v4",
+                "evidence-v5",
+            }:
+                from character_factory_poc.stages.s8_prompts.evidence_pipeline import full_plan
+
+                print(format_plan(full_plan(ctx, args.character_id, len(probes))))
+                return 0
+            print(
+                format_plan(
+                    s8.motif_plan_calls(
+                        len(probes),
+                        ctx.config.stage("s8").get("scene_traits", False),
+                        ctx.config.stage("s8").get("trait_method", "focus"),
+                        ctx.config.stage("s8").get("motif_compiler", "evidence-v4"),
+                    )
+                )
+            )
+        elif ctx.text_deck_enabled or ctx.config.stage("s7").get("formation_profile"):
             print("고정 컴파일: 모델 호출0회. 품질 검증은 persona qualify에서 별도로 실행한다.")
         else:
             print(format_plan(s8.plan_calls(retries, len(probes))))
@@ -564,7 +588,18 @@ def cmd_run(args) -> int:
     )
     from character_factory_poc.stages.s3_plan.common import new_character
 
-    ctx = Context.load(_root(args), execute=args.execute, max_calls=args.max_calls)
+    root = _root(args)
+    if os.getenv("CFP_SERVER_MODE") == "1":
+        if getattr(args, "source_pack", None):
+            raise SystemExit("서버에서는 --source-pack 대신 출처 화면을 사용한다")
+        server_root = Path(os.getenv("CFP_ROOT") or root).resolve()
+        if args.root == ".":
+            root = server_root
+        paths = [root, root / "runs" / "characters" / args.character_id]
+        paths.extend(Path(v) for v in (args.brief, args.probes, args.ranking, args.seed) if v)
+        if any(not path.resolve().is_relative_to(server_root) for path in paths):
+            raise SystemExit("서버에서는 공장 루트 밖 경로를 사용할 수 없다")
+    ctx = Context.load(root, execute=args.execute, max_calls=args.max_calls)
     opt = RunOptions(
         until=args.until,
         auto_approve=set(args.auto_approve or []),
@@ -877,6 +912,104 @@ def cmd_export_doki_app(args) -> int:
     for step in result.verification.steps:
         print(f"  {'ok ' if step.ok else 'NG '} {step.name} {step.detail}")
     return 0 if result.verification.status != "FAILED" else 1
+
+
+def _grok_login(args):
+    from character_factory_poc.providers.xai_login import XaiLogin
+
+    extra = _ctx(args).config.provider("video").extra
+    return XaiLogin(
+        store=extra.get("login_file") or None, client_id=str(extra.get("oauth_client_id") or "")
+    )
+
+
+def cmd_grok(args) -> int:
+    """공장 소유 Grok 로그인(D-0184). 영상 1순위 경로의 토큰을 받고 보관·갱신한다."""
+    from character_factory_poc.common.errors import VideoGenerationError
+
+    login = _grok_login(args)
+    try:
+        if args.sub == "login":
+            if args.device:
+                cred = login.login_device(
+                    on_prompt=lambda url, code: print(
+                        f"다른 기기 브라우저에서 {url} 을 열고 코드 {code} 를 입력하세요."
+                    )
+                )
+            else:
+                cred = login.login_browser(
+                    open_browser=not args.no_browser,
+                    on_url=lambda url: print(
+                        "브라우저에서 xAI 로그인을 마쳐 주세요. 창이 안 열리면 이 주소를 여세요:\n"
+                        + url
+                    ),
+                )
+            print(f"로그인됐어요: {cred.email or '이메일 없음'} · {login.store}")
+        elif args.sub == "status":
+            st = login.status()
+            if not st["loggedIn"]:
+                print(f"로그인 안 됨 · {st['store']} · cfp grok login")
+                return 1
+            who = st["email"] or "이메일 없음"
+            print(f"로그인됨: {who} · 토큰 {st['expiresInMin']}분 남음(쓸 때 자동 갱신)")
+            print(f"  저장 위치: {st['store']}")
+            if args.refresh:
+                login.access_token(min_valid_s=10**9)
+                print(f"갱신했어요: 토큰 {login.status()['expiresInMin']}분 남음")
+        elif args.sub == "logout":
+            print("로그아웃했어요." if login.logout() else "로그인 기록이 없어요.")
+    except VideoGenerationError as exc:
+        print(f"실패: {exc}")
+        return 1
+    return 0
+
+
+def cmd_preview_publish(args) -> int:
+    """G9 승인 패키지를 테스터 전용으로 앱에 올린다([publish.preview] 설정)."""
+    from character_factory_poc.common.notify import notify
+    from character_factory_poc.stages.export.preview import publish_preview
+
+    result = publish_preview(_ctx(args), args.character_id)
+    for step in result.steps:
+        print(f"  {'ok ' if step.ok else 'NG '} {step.name} {step.detail}")
+    for warning in result.warnings:
+        print(f"  참고: {warning}")
+    if args.notify:
+        if result.status == "PUBLISHED":
+            lines = [
+                "테스터 계정의 앱 목록에서 볼 수 있어요. 일반 사용자에게는 보이지 않아요.",
+                f"앱 캐릭터 번호 {result.apiCharacterId} · 대상 {result.target}",
+            ]
+            notify(
+                "published", result.name or args.character_id, lines, character_id=args.character_id
+            )
+        else:
+            notify(
+                "failed",
+                result.name or args.character_id,
+                [f"발행에서 멈췄어요: {result.failure[:400]}"],
+                character_id=args.character_id,
+            )
+    print(
+        f"테스터 전용 발행: {result.status}"
+        + (f" · 앱 캐릭터 {result.apiCharacterId}" if result.apiCharacterId else "")
+    )
+    return 0 if result.status == "PUBLISHED" else 1
+
+
+def cmd_demo_mode(args) -> int:
+    from character_factory_poc.pipeline.demo import write_demo_mode
+
+    folder = _ctx(args).character_dir(args.character_id)
+    if not folder.is_dir():
+        print(f"캐릭터가 없다: {args.character_id}")
+        return 1
+    mode = write_demo_mode(folder, enabled=args.state == "on", budget_usd=args.budget)
+    print(
+        f"시연 모드: {'켬' if mode.enabled else '끔'}"
+        + (f" · 예산 상한 ${mode.budgetUsd:.2f}" if mode.enabled else "")
+    )
+    return 0
 
 
 def cmd_web(args) -> int:
@@ -1451,6 +1584,33 @@ def _build_parser() -> argparse.ArgumentParser:
         help="일회용 PostgreSQL에 실제 적재해 확인(CFP_PG_ADMIN_URL)",
     )
     s.set_defaults(fn=cmd_export_doki_app)
+
+    grok = sub.add_parser("grok", help="공장 Grok 로그인(영상 1순위 경로)").add_subparsers(
+        dest="sub", required=True
+    )
+    s = grok.add_parser("login", help="xAI 공식 로그인 화면에서 로그인한다")
+    s.add_argument("--device", action="store_true", help="화면 없는 서버: 기기 코드로 로그인")
+    s.add_argument("--no-browser", action="store_true", help="브라우저를 열지 않고 주소만 보인다")
+    s.set_defaults(fn=cmd_grok)
+    s = grok.add_parser("status", help="로그인 상태(토큰 값은 보이지 않는다)")
+    s.add_argument("--refresh", action="store_true", help="지금 토큰을 갱신해 본다")
+    s.set_defaults(fn=cmd_grok)
+    s = grok.add_parser("logout", help="공장의 Grok 로그인을 지운다")
+    s.set_defaults(fn=cmd_grok)
+
+    preview = sub.add_parser("preview", help="테스터 전용 미리보기 발행").add_subparsers(
+        dest="sub", required=True
+    )
+    s = preview.add_parser("publish", help="G9 승인 패키지를 테스터에게만 보이게 앱에 올린다")
+    s.add_argument("character_id")
+    s.add_argument("--notify", action="store_true", help="결과를 디스코드로 알린다")
+    s.set_defaults(fn=cmd_preview_publish)
+
+    s = sub.add_parser("demo", help="시연 모드: 모든 관문 자동 승인 → 테스터 발행 → 알림")
+    s.add_argument("character_id")
+    s.add_argument("state", choices=["on", "off"])
+    s.add_argument("--budget", type=float, default=15.0, help="시연 예산 상한(달러)")
+    s.set_defaults(fn=cmd_demo_mode)
 
     s = sub.add_parser("web", help="워크숍 웹앱(LLD §6.5)")
     s.add_argument("--port", type=int, default=None)

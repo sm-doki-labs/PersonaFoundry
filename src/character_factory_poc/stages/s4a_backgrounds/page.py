@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 
 from character_factory_poc.contracts.qa import QaSummary
 from character_factory_poc.stages.image_qa import RUBRICS, Rubric
@@ -53,6 +54,7 @@ def page_shell(
     sections: list[str],
     script: str,
     *,
+    chapters=("ch1", "ch2", "ch3"),
     decisions: tuple[str, ...] = ("SELECT", "APPROVE", "REQUEST_CHANGES", "REJECT"),
 ) -> str:
     options = "".join(f"<option>{esc(d)}</option>" for d in decisions)
@@ -102,7 +104,7 @@ def page_shell(
             '<p id="error" role="alert" tabindex="-1"></p>',
             '<label>관문 답 JSON <textarea id="out" readonly></textarea></label>',
             '<p id="copy-status" role="status"></p></form></main><script>',
-            "const CH=['ch1','ch2','ch3'];const $=id=>document.getElementById(id);",
+            f"const CH={json.dumps(chapters)};const $=id=>document.getElementById(id);",
             "function metadata(){return {decision:$('decision').value,"
             "reviewer:$('reviewer').value,",
             "minutes:Number($('minutes').value),reasons:$('reasons').value};}",
@@ -155,6 +157,7 @@ def change_script() -> str:
 
 def render_g4a_page(cid: str, rev: str, backgrounds) -> str:
     sections = ["<p>챕터마다 배경 하나를 고르거나 원하는 배경을 직접 적어 주세요.</p>"]
+    chapters = [ch.chapterId for ch in backgrounds.chapters]
     for ch in backgrounds.chapters:
         cards = []
         for candidate in ch.candidates:
@@ -196,7 +199,7 @@ def render_g4a_page(cid: str, rev: str, backgrounds) -> str:
         "<fieldset><legend>챕터별 수정 요청</legend>"
         "<p>결정을 REQUEST_CHANGES로 고르고 고친 챕터의 메모를 적으면, 그 챕터의 후보·배경 사진만 "
         "새 revision으로 다시 만듭니다.</p>"
-        + "".join(change_control(ch, "배경") for ch in ("ch1", "ch2", "ch3"))
+        + "".join(change_control(ch, "배경") for ch in chapters)
         + "</fieldset>"
     )
     script = change_script() + (
@@ -204,4 +207,4 @@ def render_g4a_page(cid: str, rev: str, backgrounds) -> str:
         "if(o.decision==='REQUEST_CHANGES')return {...o,requestedChanges:changeList()};"
         "return o.decision==='SELECT'?{...o,...choices()}:o;}"
     )
-    return page_shell("G4a 챕터 배경 선택", cid, rev, sections, script)
+    return page_shell("G4a 챕터 배경 선택", cid, rev, sections, script, chapters=chapters)

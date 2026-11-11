@@ -65,6 +65,31 @@ def test_ledger_check_rejects_restating_a_trait_in_the_baseline():
     assert any("t2" in p for p in check_ledger("윤서진")(dup))
 
 
+def test_ledger_check_rejects_praise_first_or_thanks_closing_default():
+    for text in (
+        "인물은 상대가 이미 충분히 잘하고 있다며 편들기부터 한 뒤 짧게 답한다.",
+        "인물은 상대 말을 바로 받아 주고 다정한 감사나 다짐으로 말을 맺는다.",
+    ):
+        problems = check_ledger("윤서진")(_ledger(defaultResponse=text))
+        assert any(p.startswith("defaultResponse: 상대 평가") for p in problems)
+
+
+def test_ledger_check_keeps_speaking_style_out_of_the_baseline():
+    over = {
+        "defaultResponse": (
+            "인물은 화제를 따라가며 경험을 근거로 설명한 뒤 단정을 누그러뜨려 말을 맺는다."
+        ),
+        "reading": "인물은 상대 말을 존댓말로 정중하게 받는다.",
+    }
+    problems = check_ledger("윤서진")(_ledger(**over))
+    assert any(p.startswith("defaultResponse: 말하는 방식") for p in problems)
+    assert any(p.startswith("reading: 말하는 방식") for p in problems)
+    # 계기가 있는 특질의 말 행동(말끝 흐리기 등)은 막지 않는다.
+    ok = _ledger()
+    ok.traits[1].behavior = "인물은 대답을 한두 마디로 끊고 말끝을 흐린다."
+    assert not any("말하는 방식" in p for p in check_ledger("윤서진")(ok))
+
+
 def test_compose_from_ledger_puts_each_trait_once_with_the_base_rate_line():
     plan = dict(v2_plan("cf-20260101-x"), voiceSummary="정갈한 해요체로 짧게 말한다.")
     text, sections = compose_from_ledger(plan, _ledger(), rules_text="")

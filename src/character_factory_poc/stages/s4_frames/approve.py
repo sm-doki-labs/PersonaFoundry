@@ -32,8 +32,9 @@ def approve_g4(ctx: Context, cid: str, answer: dict) -> Path:
     selections, changes = [], []
     approved = None
     if decision in {"APPROVE", "SELECT"}:
+        chapters = sorted({f.chapterId for f in frames})
         selections = (
-            [f"{ch}-f1" for ch in CHAPTERS]
+            [f"{ch}-f1" for ch in chapters]
             if decision == "APPROVE"
             else answer.get("selections", [])
         )
@@ -41,8 +42,8 @@ def approve_g4(ctx: Context, cid: str, answer: dict) -> Path:
             not isinstance(s, str) or s not in by_id for s in selections
         ):
             raise FactoryError("G4: 없는 프레임을 골랐다")
-        if sorted(by_id[s].chapterId for s in selections) != list(CHAPTERS):
-            raise FactoryError("G4: ch1·ch2·ch3에서 프레임을 하나씩 골라야 한다")
+        if sorted(by_id[s].chapterId for s in selections) != chapters:
+            raise FactoryError("각 장면에서 이미지를 하나씩 골라 주세요.")
         picked = sorted((by_id[s] for s in selections), key=lambda f: f.chapterId)
         approved = validate(
             "chapter-frames-approved-v1",

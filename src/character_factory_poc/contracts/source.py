@@ -16,7 +16,15 @@ from character_factory_poc.common.schema import register
 from character_factory_poc.contracts.common import Strict
 
 SubjectKind = Literal["PUBLIC_FIGURE", "PRIVATE_PERSON"]
+ChapterTemplate = Literal["FAN_CALL", "FAMILY_CALL", "FRIEND_CHAT", "INTERVIEW"]
 TextKind = Literal["KAKAO_EXPORT", "INTERVIEW", "ARTICLE", "TRANSCRIPT"]
+Register = Literal["FORMAL", "CASUAL"]
+
+
+def default_register(kind: TextKind) -> Register:
+    return "FORMAL" if kind in {"INTERVIEW", "ARTICLE"} else "CASUAL"
+
+
 Speaker = Literal["SUBJECT", "USER", "OTHER"]
 DigestCategory = Literal["DAILY", "AFFECTION", "CONFLICT", "ADVICE", "HUMOR", "WORK", "OTHER"]
 
@@ -29,7 +37,7 @@ class SourceSubject(Strict):
 
 
 class UsageBasis(Strict):
-    scope: str = Field(default="", description="사용 범위. 예: SW마에스트로 최종 발표")
+    scope: str = Field(default="팀 내부 사용", description="사용 범위. 예: SW마에스트로 최종 발표")
     consentBy: str | None = Field(default=None, description="사인은 동의한 사람")
     consentDate: str | None = Field(default=None, description="사인은 동의한 날짜(YYYY-MM-DD)")
     notes: str = ""
@@ -45,6 +53,8 @@ class SourceText(Strict):
     textId: str = Field(min_length=1, pattern=r"^[A-Za-z0-9_-]+$")
     kind: TextKind
     path: str = Field(min_length=1)
+    register: Register | None = None
+    sourceUrl: str | None = None
     language: str = "ko"
     subjectSpeaker: str | None = Field(
         default=None, description="원문에서 대상 인물의 화자 이름(카톡 표시 이름, 인터뷰 화자)"
@@ -62,14 +72,15 @@ class HoldoutPolicy(Strict):
 class SourcePack(Strict):
     schemaVersion: Literal["source-pack-v1"] = "source-pack-v1"
     subject: SourceSubject
+    factsPath: str | None = Field(default=None, min_length=1, description="공개 사실 JSON 경로")
     knownFacts: dict[str, str] = Field(default_factory=dict)
-    chapterTemplate: Literal["FAN_CALL", "FAMILY_CALL"] = Field(
+    chapterTemplate: ChapterTemplate = Field(
         default_factory=lambda data: (
             "FAN_CALL" if data["subject"].kind == "PUBLIC_FIGURE" else "FAMILY_CALL"
         )
     )
     voiceId: UUID | None = Field(default=None, description="한국어 voice-svc 음성 UUID")
-    usageBasis: UsageBasis
+    usageBasis: UsageBasis = Field(default_factory=UsageBasis)
     photos: list[SourcePhoto] = Field(default_factory=list)
     texts: list[SourceText] = Field(min_length=1)
     holdout: HoldoutPolicy = Field(default_factory=HoldoutPolicy)
@@ -78,6 +89,7 @@ class SourcePack(Strict):
 class TextStats(Strict):
     textId: str
     kind: TextKind
+    register: Register | None = None
     sha256: str
     messages: int
     subjectMessages: int
@@ -100,9 +112,7 @@ class SourceIndex(Strict):
     holdoutMessages: int
     masked: dict[str, int] = Field(default_factory=dict, description="가린 항목 종류별 개수")
     otherParticipants: int = 0
-    usageProblems: list[str] = Field(
-        default_factory=list, description="비어 있지 않으면 G0 승인을 잠근다(D-0120)"
-    )
+    usageProblems: list[str] = Field(default_factory=list, description="이전 판의 사용 근거 안내")
 
 
 class PiiFlag(Strict):

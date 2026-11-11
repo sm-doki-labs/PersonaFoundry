@@ -88,6 +88,7 @@ def render_gate_page(
     gate: str,
     rev: str,
     sections: list[tuple[str, str]],
+    exclude_ids: list[str] | None = None,
     side_by_side: list[tuple[str, str, str]] | None = None,
 ) -> str:
     """정적 HTML 한 장. 결정을 gate-record 답 JSON으로 복사하게 한다. 네트워크 요청 없음."""
@@ -112,6 +113,19 @@ def render_gate_page(
                 f'<p><b>{_esc(sentence)}</b></p><div class="cols"><div class="col">'
                 f'<pre>{_esc(left)}</pre></div><div class="col"><pre>{_esc(right)}</pre></div></div>'
             )
+    if exclude_ids:
+        parts.append("<fieldset><legend>프롬프트에서 뺄 사실</legend>")
+        for fact_id in exclude_ids:
+            parts.append(
+                f'<label><input type="checkbox" name="excludedFact" '
+                f'value="{html.escape(fact_id, quote=True)}"> {_esc(fact_id)} 제외</label>'
+            )
+        parts.append("</fieldset>")
+    exclusions = (
+        "o.excludedFactIds=Array.from(document.querySelectorAll('[name=excludedFact]:checked'),e=>e.value);"
+        if exclude_ids
+        else ""
+    )
     parts.append(
         "<h2>결정</h2>"
         '<label>결정 <select id="decision"><option>APPROVE</option><option>REQUEST_CHANGES</option>'
@@ -125,7 +139,9 @@ def render_gate_page(
         '<pre id="out"></pre>'
         "<script>function copyAnswer(){const o={decision:document.getElementById('decision').value,"
         "reviewer:document.getElementById('reviewer').value,minutes:Number(document.getElementById('minutes').value),"
-        "reasons:document.getElementById('reasons').value};const t=JSON.stringify(o,null,2);"
+        "reasons:document.getElementById('reasons').value};"
+        + exclusions
+        + "const t=JSON.stringify(o,null,2);"
         "document.getElementById('out').textContent=t;if(navigator.clipboard){navigator.clipboard.writeText(t);}}"
         "</script></body></html>"
     )

@@ -15,6 +15,25 @@ def no_network(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def fake_tendency_tags(monkeypatch):
+    """모티브 S3의 원문 경향 표시(D-0148)는 시험이 따로 정하지 않으면 한 칸으로 표시한다.
+
+    시험이 "s3:<ref>"나 ref로 응답을 정했으면 그 응답을 쓴다.
+    """
+    from character_factory_poc.providers.fake import FakeTextModel
+    from tests.support.tendency import fake_tags, is_tagging
+
+    original = FakeTextModel._lookup
+
+    def lookup(self, req):
+        if is_tagging(req) and not {f"{req.stage}:{req.ref}", req.ref} & self.responses.keys():
+            return fake_tags
+        return original(self, req)
+
+    monkeypatch.setattr(FakeTextModel, "_lookup", lookup)
+
+
+@pytest.fixture(autouse=True)
 def known_target_heads(monkeypatch):
     """실제 적재(CFP_PG_ADMIN_URL)가 없으면 대상 저장소 head를 로컬 체크아웃에서 읽지 않는다.
 

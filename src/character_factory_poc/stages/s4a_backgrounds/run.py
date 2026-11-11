@@ -71,11 +71,11 @@ def s4a_config(ctx: Context) -> dict:
     return cfg
 
 
-def plan_calls(ctx: Context) -> list[CallPlan]:
+def plan_calls(ctx: Context, chapter_count: int = 3) -> list[CallPlan]:
     cfg = s4a_config(ctx)
     plans = [CallPlan("s4a", "Location Scout 배경 후보 작성", 1)]
     if cfg["plates"]:
-        n = 3 * cfg["candidates_per_chapter"]
+        n = chapter_count * cfg["candidates_per_chapter"]
         images, judges = worst_case_calls(qa_settings(ctx), n)
         description = f"9:16 배경 plate {n}장"
         if judges:
@@ -139,9 +139,11 @@ def empty_scene_problems(text: str) -> list[str]:
     return []
 
 
-def check_backgrounds(count: int, guard: list[dict]):
+def check_backgrounds(count: int, guard: list[dict], chapters=CHAPTERS):
     def check(out: BackgroundOutput) -> list[str]:
         problems = check_no_names(out, guard)
+        if {ch.chapterId for ch in out.chapters} != set(chapters):
+            problems.append("요청한 챕터를 확인한다")
         for ch in out.chapters:
             expected = {f"{ch.chapterId}-b{i}" for i in range(1, count + 1)}
             if len(ch.candidates) != count or {c.candidateId for c in ch.candidates} != expected:
@@ -161,7 +163,9 @@ def codex_checks(stage: str, workspace: Path) -> tuple[str, list]:
         raise ValueError(f"지원하지 않는 검사 단계: {stage}")
     settings = read_json(workspace / "inputs" / "settings.json")
     guard = read_json(workspace / "inputs" / "name-guard.json")
-    return "background-candidates-output-v1", [check_backgrounds(settings["count"], guard)]
+    return "background-candidates-output-v1", [
+        check_backgrounds(settings["count"], guard, settings.get("chapters", CHAPTERS))
+    ]
 
 
 def call_agent(ctx, cid, budget, stage, role, contract, workspace, inputs, checks, example):
@@ -233,7 +237,7 @@ def make_plate(ctx, cid, budget, stage, rev, rev_dir, plate_id, chapter, guard, 
     return {"id": plate_id, "path": rel, "sha256": sha256_file(rev_dir / rel)}, qa
 
 
-def _example(count: int) -> dict:
+def _example(count: int, chapters=CHAPTERS) -> dict:
     return {
         "chapters": [
             {
@@ -253,7 +257,7 @@ def _example(count: int) -> dict:
                     for i in range(1, count + 1)
                 ],
             }
-            for ch in ("ch1", "ch2", "ch3")
+            for ch in chapters
         ]
     }
 
@@ -293,15 +297,16 @@ def carry_chapter(src_dir: Path, chapter_set: Any, rev_dir: Path) -> dict:
     return carried
 
 
-def run_s4a(ctx: Context, cid: str) -> Path:
+def run_s4a(ctx: Context, cid: str, *, chapters=CHAPTERS) -> Path:
     state = ctx.state(cid)
     state.require_deps("s4a")
     plan, _ = load_approved_plan_v2(ctx, cid)
     appearance, _ = load_appearance_spec(ctx, cid)
     cfg = s4a_config(ctx)
     brief, previous, regenerate = rework_scope(ctx, cid)
+    regenerate = [ch for ch in regenerate if ch in chapters]
     budget = ctx.budget()
-    budget.check_plan(plan_calls(ctx))
+    budget.check_plan(plan_calls(ctx, len(chapters)))
     settings = qa_settings(ctx)
     warning = ensure_judge(ctx, settings)
     rev = next_rev(ctx.character_dir(cid) / "s4a-backgrounds", "bg")
@@ -313,7 +318,7 @@ def run_s4a(ctx: Context, cid: str) -> Path:
         inputs = {
             "plan-summary": plan_summary(plan),
             "appearance": {"era": "현대 한국", "ageRange": appearance.scope.ageRange},
-            "settings": {"count": count},
+            "settings": {"count": count, "chapters": chapters},
             "name-guard": guard,
             "rules.md": (
                 "현실적인 현대 한국 장소를 고른다. 실존 상호·브랜드·작품 이름은 쓰지 않는다. "
@@ -321,6 +326,7 @@ def run_s4a(ctx: Context, cid: str) -> Path:
                 "의미를 지킨다. 외모로 성격을 추정하지 않는다. plateBrief는 인물 없는 빈 장면이다."
             ),
         }
+        inputs["rules.md"] += " settings.chapters에 있는 챕터만 작성한다."
         if brief is not None:
             inputs["revision"] = {
                 "gate": brief.gate,
@@ -343,8 +349,8 @@ def run_s4a(ctx: Context, cid: str) -> Path:
             "background-candidates-output-v1",
             rev_dir / "workspace",
             inputs,
-            [check_backgrounds(count, guard)],
-            _example(count),
+            [check_backgrounds(count, guard, chapters)],
+            _example(count, chapters),
         )
         arc = {c.chapterId: c for c in plan.chapterArc}
         carried: dict[str, Any] = {}
@@ -354,10 +360,10 @@ def run_s4a(ctx: Context, cid: str) -> Path:
             )
             carried = {ch.chapterId: ch for ch in prev_set.chapters}
         fresh = {ch.chapterId: ch for ch in out.chapters}
-        chapters = []
-        for chapter_id in CHAPTERS:
+        result_chapters = []
+        for chapter_id in chapters:
             if previous is not None and chapter_id not in regenerate:
-                chapters.append(carry_chapter(previous, carried[chapter_id], rev_dir))
+                result_chapters.append(carry_chapter(previous, carried[chapter_id], rev_dir))
                 continue
             ch = fresh[chapter_id]
             candidates = []
@@ -382,7 +388,7 @@ def run_s4a(ctx: Context, cid: str) -> Path:
                 candidates.append(
                     dump(candidate) | {"plate": plate, "qa": dump(qa) if qa else None}
                 )
-            chapters.append(
+            result_chapters.append(
                 {
                     "chapterId": ch.chapterId,
                     "title": arc[ch.chapterId].title,
@@ -398,7 +404,7 @@ def run_s4a(ctx: Context, cid: str) -> Path:
                 "planRev": plan.planRev,
                 "appearanceRev": appearance.appearanceRev,
                 "aspectRatio": "9:16",
-                "chapters": chapters,
+                "chapters": result_chapters,
             },
         )
         assert_no_names(result, guard)

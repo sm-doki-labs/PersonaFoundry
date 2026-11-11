@@ -421,6 +421,15 @@ img.intro-hero{max-width:200px;border-radius:8px}
 .action-inner .frame-zoom-foot{align-items:flex-start;flex-wrap:wrap}
 .action-inner .frame-zoom-foot textarea{flex:1;min-width:220px;min-height:40px}
 .action-cell-note.is-new{color:var(--accent,var(--solid));font-weight:600}
+/* 휴대폰 폭(QA v5 C-06): 버튼 줄은 접고, 첫 프레임과 영상은 창 폭 안에서 나눠 쓴다. */
+.action-board .intro-ctrl,.action-col-acts{flex-wrap:wrap}
+@media (max-width:640px){
+  .action-inner .frame-zoom-pair{gap:8px}
+  .action-inner .frame-zoom-pair figure{flex:1 1 0}
+  .action-inner .frame-zoom-pair figure:first-child:not(:last-child){flex:0 0 32%}
+  .action-inner .frame-zoom-pair img,.action-inner .frame-zoom-pair figure:first-child:not(:last-child) img,.action-inner .clip,.action-inner .clip video,.action-inner .clip-broken{width:100%;height:auto;max-height:62dvh}
+  .action-inner .frame-zoom-foot textarea{min-width:0;flex-basis:100%}
+}
 
 /* 데이터 샘플·학습 데이터 받은 편지함(D-0112, D-0113) */
 .sample-guide{margin:10px 0 0}
@@ -540,3 +549,84 @@ img.intro-hero{max-width:200px;border-radius:8px}
 .pres-hits td{vertical-align:top;overflow-wrap:anywhere}
 .pres-hits td:first-child{white-space:nowrap}
 @media (max-width:640px){.pres-hits td:first-child{white-space:normal}}
+
+/* 2차 검토 화면(2026-11-10): G0 사실 카드·원문 요약, G6 대화 표본·추론 특질. 색은 테마 변수만 쓴다(Foundry는 변수 대응으로 따라온다). */
+.fact-cards,.trait-cards{list-style:none;margin:0;padding:0;display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(min(100%,300px),1fr))}
+.fact-card,.trait-card{display:flex;flex-direction:column;gap:8px;min-width:0;padding:12px 14px;border:1px solid var(--line);border-radius:var(--r-card);background:rgba(255,255,255,.025);transition:border-color 150ms,background 150ms}
+.fact-top,.trait-top{display:flex;align-items:center;gap:8px;min-height:22px}
+.fact-cat{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:999px;border:1px solid var(--line-2);font-size:11.5px;font-weight:600;color:var(--muted)}
+.fact-top time{font-size:12px;color:var(--faint);font-variant-numeric:tabular-nums}
+.fact-out-badge{display:none;margin-left:auto;font-size:11.5px;font-weight:600;color:var(--bad)}
+.fact-text{margin:0;font-size:14px;line-height:1.55;font-weight:500;text-wrap:pretty}
+.fact-label{flex:none;font-size:11px;font-weight:600;color:var(--faint)}
+.fact-srcs{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.fact-chip{display:inline-flex;align-items:center;gap:3px;height:22px;max-width:100%;padding:0 8px;border-radius:999px;border:1px solid var(--line-2);font-size:12px;color:var(--muted);text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:1px;transition:color 120ms,border-color 120ms}
+a.fact-chip:hover{color:var(--text);border-color:var(--muted)}
+a.fact-chip:focus-visible{outline:2px solid var(--focus,currentColor);outline-offset:2px}
+.fact-chip [aria-hidden]{font-size:10.5px;opacity:.7}
+.fact-self,.trait-refs{display:flex;flex-direction:column;gap:4px;padding:8px 10px;border-radius:var(--r-inner,8px);background:var(--well,rgba(0,0,0,.16))}
+.fact-self p{margin:0;font-size:12.5px;line-height:1.5;color:var(--muted)}
+.fact-self blockquote,.trait-refs blockquote{margin:2px 0 0;padding:0 0 0 10px;border-left:2px solid var(--line-2);font-size:13px;line-height:1.55;color:var(--text);overflow-wrap:anywhere}
+.fact-self blockquote::before,.trait-refs blockquote::before{content:"“"}
+.fact-self blockquote::after,.trait-refs blockquote::after{content:"”"}
+.fact-toggle{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;height:28px;margin-top:auto;padding:0 10px;border:1px solid var(--line-2);border-radius:999px;font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;user-select:none;transition:background 120ms,color 120ms,border-color 120ms}
+.fact-toggle:hover{color:var(--text)}
+.fact-toggle input{width:14px;height:14px;margin:0;accent-color:var(--bad)}
+.fact-toggle:has(input:focus-visible){outline:2px solid var(--focus,currentColor);outline-offset:2px}
+.fact-toggle:has(input:checked){background:var(--bad-soft);border-color:transparent;color:var(--bad)}
+.fact-toggle:has(input:disabled){cursor:default}
+.fact-card:has([data-exclude-fact]:checked){border-style:dashed}
+.fact-card:has([data-exclude-fact]:checked) .fact-out-badge{display:inline}
+.fact-card:has([data-exclude-fact]:checked) :is(.fact-text,.fact-srcs,.fact-self){opacity:.55}
+.fact-deflect{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.fact-deflect q{display:inline-block;padding:6px 10px;border:1px solid var(--line);border-radius:12px;font-size:13px;line-height:1.45}
+.src-mix{display:flex;flex-direction:column;gap:6px;margin:0 0 10px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-card);font-size:12.5px}
+.src-mix p{margin:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px}
+.src-mix b{min-width:64px;font-weight:600}
+.src-mix span{color:var(--muted);font-variant-numeric:tabular-nums}
+.src-mix-bar{height:6px;border-radius:999px;background:var(--line-2);overflow:hidden}
+.src-mix-bar i{display:block;height:100%;background:var(--solid);border-radius:inherit}
+.src-mix .src-mix-legend span::before,.src-reg::before{content:"";display:inline-block;width:7px;height:7px;margin-right:5px;border-radius:50%;background:var(--line-2);vertical-align:1px}
+.src-mix .src-mix-legend .is-formal::before,.src-reg.is-formal::before{background:var(--solid)}
+.src-reg.is-none::before{display:none}
+.src-table{table-layout:fixed;min-width:780px}
+.src-table .c-name{width:25%}.src-table .c-kind{width:10%}.src-table .c-reg{width:12%}.src-table .c-who{width:20%}.src-table .c-msg{width:14%}.src-table .c-conv{width:7%}.src-table .c-date{width:12%}
+.src-table td{overflow:hidden;text-overflow:ellipsis}
+.src-table th.num,.src-table td.num{text-align:right}
+.src-name{font-weight:500}
+.src-table .fact-chip{height:20px;font-size:11px;padding:0 6px;max-width:130px}
+.src-more{margin-top:6px}
+.src-more>summary,.src-notes>summary{cursor:pointer;min-height:28px;display:flex;align-items:center;font-size:12.5px;font-weight:600;color:var(--muted)}
+.src-notes p,.src-notes-text{margin:6px 0 0;font-size:12.5px;line-height:1.6;color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}
+.src-check-more{margin-top:4px}
+.src-check-more>summary{cursor:pointer;font-size:12px;font-weight:600;color:var(--muted)}
+.src-check-more[open]{overflow-wrap:anywhere;font-size:12px;line-height:1.55;color:var(--faint)}
+.chat-samples-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:4px}
+.chat-samples-head h2{margin:0;font-size:16px;font-weight:700;letter-spacing:-.01em}
+.chat-samples-head .btn{text-decoration:none}
+.chat-samples{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,340px),1fr))}
+.chat-sample{display:flex;flex-direction:column;gap:8px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:var(--r-card)}
+.chat-sample h3{margin:0;display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:13.5px;font-weight:600}
+.chat-sample h3 span{font-size:11.5px;font-weight:500;color:var(--faint);font-variant-numeric:tabular-nums}
+.chat-log{display:flex;flex-direction:column;gap:6px}
+.chat-log .bubble{max-width:86%}
+.chat-log .bubble.is-none{color:var(--faint)}
+.trait-card{box-shadow:inset 2px 0 0 var(--warn)}
+.trait-top b{font-size:13.5px;font-weight:600}
+.trait-top .badge-chip{margin-left:auto;font-size:11px;padding:1px 7px}
+.trait-when{margin:0;font-size:12.5px;line-height:1.5;color:var(--muted)}
+.trait-do{margin:0;font-size:13.5px;line-height:1.6}
+@media (prefers-reduced-motion:reduce){.fact-card,.fact-toggle,.fact-chip{transition:none}}
+/* 결정 기록(읽기 전용): 결정 버튼·입력칸·메모·단축키 안내를 숨기고, 맨 위 요약 카드만 남긴다(QA F06). */
+body.gate-record .side-hint,body.gate-record .side-actions,body.gate-record .side-status,body.gate-record .side-keys,body.gate-record .side-more{display:none}
+body.gate-record.gate-side-empty .gate-side{display:none}
+body.gate-record.gate-side-empty div.gate-wrap{grid-template-columns:minmax(0,1fr)}
+.gate-record-card .record-facts{display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 14px;margin:6px 0 0}
+.gate-record-card .record-facts dt{color:var(--muted)}
+.gate-record-card .record-facts dd{margin:0;overflow-wrap:anywhere}
+.gate-record-card .record-later-title{margin:10px 0 2px;font-weight:600}
+.gate-record-card .record-later{margin:0;padding-left:18px}
+/* 기획안이 하나일 때: 비교 표가 아니라 항목·값 카드로 읽힌다(QA F07). */
+.plan-table.is-single tr.is-same td{color:var(--text)}
+.doc-block.is-single{grid-template-columns:minmax(0,1fr)}
+.plan-tech{margin-top:12px}

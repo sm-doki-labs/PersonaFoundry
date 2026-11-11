@@ -20,6 +20,22 @@ def approve_g6(ctx: Context, cid: str, answer: dict) -> Path:
     rev_dir = char_dir / "s8-prompts" / rev
     shown = [rev_dir / "prompt-pair.json", rev_dir / "prompt-probe.json"]
     pair = load_prompt_pair(rev_dir / "prompt-pair.json")
+    from character_factory_poc.stages.s8_prompts.evidence_pipeline import is_evidence, verify_review
+
+    if is_evidence(rev_dir):
+        if answer["decision"] in {"APPROVE", "SELECT"}:
+            if answer.get("evidenceReviewed") is not True:
+                raise ValueError("원문 근거와 적용 조건을 직접 검토한 확인이 필요하다")
+            verify_review(ctx, cid, rev_dir)
+        shown += [
+            rev_dir / name
+            for name in (
+                "evidence-binding.json",
+                "evidence-packet.json",
+                "evidence-review.json",
+                "assembly.json",
+            )
+        ]
     tr = state.stage("s7").currentRev
     if isinstance(pair, PromptPairV2) or (rev_dir / "persona-bundle.json").exists():
         from character_factory_poc.stages.s8_prompts.formation import verify_bundle

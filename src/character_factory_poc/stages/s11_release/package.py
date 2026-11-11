@@ -134,6 +134,10 @@ def load_persona(
     if not pair_path.exists():
         pair_path = prompt_dir / "prompt-pair.json"
     pair = load_prompt_pair(pair_path)
+    from character_factory_poc.stages.s8_prompts.evidence_pipeline import is_evidence, verify_review
+
+    if is_evidence(prompt_dir):
+        verify_review(ctx, cid, prompt_dir, approved=True)
     if isinstance(pair, PromptPairV2) or (prompt_dir / "persona-bundle.json").exists():
         from character_factory_poc.stages.s8_prompts.formation import verify_approved_pair
 
@@ -524,7 +528,8 @@ def _consistency(
         problems.append("동작 영상의 외모 revision이 다르다")
     if actions.frameRev != frames.frameRev:
         problems.append("동작 영상의 프레임 revision이 다르다")
-    for chapter_id in CHAPTERS:
+    # 모티브는 한 장면(ch1)만 만든다(D-0164). 승인 프레임에 있는 장면만 본다.
+    for chapter_id in scene_ids(frames):
         frame = next(f for f in frames.frames if f.chapterId == chapter_id)
         if not (frames_dir / frame.path).is_file():
             problems.append(f"{chapter_id}: 승인 프레임 파일이 없다")
@@ -559,6 +564,12 @@ def _facts(chapter) -> dict:
     return payload
 
 
+def scene_ids(frames) -> tuple[str, ...]:
+    """승인 프레임이 있는 장면만, ch1→ch3 순서로. 오리지널은 세 장면, 모티브는 ch1 하나다."""
+    have = {f.chapterId for f in frames.frames}
+    return tuple(ch for ch in CHAPTERS if ch in have)
+
+
 def build_package(ctx: Context, cid: str) -> Path:
     """승인된 revision에서 character-package-v1을 만들고 G9 대기로 둔다."""
     for gate in REQUIRED_GATES:
@@ -591,7 +602,26 @@ def build_package(ctx: Context, cid: str) -> Path:
             sft.adoptedBinding,
             [item.src for item in sft_sources if item.label == "training-run"],
         )
+        original_long = long_text
         long_text = quotes.public_prompt(long_text)
+        if pair.systemRulesRef in {
+            "builtin:evidence-pipeline-v1",
+            "builtin:evidence-pipeline-v2",
+            "builtin:evidence-pipeline-v3",
+            "builtin:evidence-pipeline-v4",
+            "builtin:evidence-pipeline-v5",
+        }:
+            from character_factory_poc.stages.s11_release.presentation import CHAT_DISCLOSURE
+
+            expected = original_long.rstrip("\n") + "\n\n" + CHAT_DISCLOSURE + "\n"
+            if long_text != expected:
+                raise CheckFailed(
+                    "s11",
+                    [
+                        "원문 공개 검사에서 표준 본문이 달라진다. "
+                        "사실·규칙을 재검토하며 조용히 삭제하지 않는다"
+                    ],
+                )
         short_text = quotes.public_prompt(short_text) if short_text else None
         # prompt-pair와 형성 자료에는 승인 원문이 있다. 앱이 쓰는 특질과 대사 지침만 전달한다.
         persona_sources = [item for item in persona_sources if item.label == "trait-sheet"]
@@ -641,7 +671,7 @@ def build_package(ctx: Context, cid: str) -> Path:
     by_frame = {frame.chapterId: frame for frame in frames.frames}
     arc = {chapter.chapterId: chapter for chapter in plan.chapterArc}
     chapters: list[Chapter] = []
-    for chapter_no, chapter_id in enumerate(CHAPTERS, start=1):
+    for chapter_no, chapter_id in enumerate(scene_ids(frames), start=1):
         scene_chapter, frame = by_scene[chapter_id], by_frame[chapter_id]
         plate = scene_chapter.plate
         sources.append(
@@ -768,7 +798,7 @@ def build_package(ctx: Context, cid: str) -> Path:
         )
 
         chapter_start = load_latest_chapter_start(char_dir)
-        for chapter_id in CHAPTERS:
+        for chapter_id in scene_ids(frames):
             facts = _facts(by_scene[chapter_id])
             if chapter_start:
                 # D-0089: 공장이 만든 챕터 시작 설정을 사실 파일에 함께 담아 내보내기가 쓰게 한다.
@@ -779,6 +809,21 @@ def build_package(ctx: Context, cid: str) -> Path:
                 quotes.check(facts, f"chapters/{chapter_id}/facts.json")
             write_once_json(rev_dir / f"chapters/{chapter_id}/facts.json", facts)
         write_once_text(rev_dir / persona.longPrompt, long_text)
+        if pair.systemRulesRef in {
+            "builtin:evidence-pipeline-v1",
+            "builtin:evidence-pipeline-v2",
+            "builtin:evidence-pipeline-v3",
+            "builtin:evidence-pipeline-v4",
+            "builtin:evidence-pipeline-v5",
+        }:
+            write_once_json(
+                rev_dir / "persona/prompt-compiler.json",
+                dict(
+                    systemRulesRef=pair.systemRulesRef,
+                    personaVersion=persona.personaVersion,
+                    longPromptSha256=sha256_file(rev_dir / persona.longPrompt),
+                ),
+            )
         if persona.shortPrompt is not None and short_text is not None:
             write_once_text(rev_dir / persona.shortPrompt, short_text)
         if public_run is not None:

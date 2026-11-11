@@ -97,3 +97,17 @@ def approve_gate(ctx: Context, cid: str, gate: str, answer: dict) -> Path:
         ctx.ledger(cid).record_human(gate="G3", minutes=rec.minutes, ref=f"{cid}/{g.rev}")
         return rev_dir
     raise ValueError(f"{gate} 관문 승인은 아직 구현되지 않았다")
+
+
+def approve_text_gate(ctx: Context, cid: str, gate: str) -> Path:
+    """모티브 자동 진행도 사람이 검토할 때와 같은 결정 기록을 남긴다."""
+    from character_factory_poc.common.store import read_json
+
+    answer = {"decision": "APPROVE", "reviewer": "자동 진행"}
+    if gate == "G3":
+        folder = ctx.character_dir(cid) / "s3-plan" / ctx.state(cid).gate(gate).rev
+        first = read_json(folder / "variants.json")["candidates"][0]
+        answer.update(decision="SELECT", selections=[first["variantId"]])
+    elif gate not in {"G0", "G6"}:
+        raise FactoryError("자동으로 결정할 수 없는 검토 단계예요.")
+    return approve_gate(ctx, cid, gate, answer)

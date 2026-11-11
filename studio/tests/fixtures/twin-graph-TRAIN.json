@@ -137,6 +137,20 @@
    "paid": []
   },
   {
+   "id": "s8c",
+   "name": "챕터 시작 설정",
+   "deps": [
+    "G3"
+   ],
+   "needs": [],
+   "after": [
+    "s8"
+   ],
+   "gate": null,
+   "implemented": true,
+   "paid": []
+  },
+  {
    "id": "s9s",
    "name": "데이터 샘플",
    "deps": [
@@ -341,7 +355,8 @@
    "label": "페르소나",
    "stages": [
     "s7",
-    "s8"
+    "s8",
+    "s8c"
    ]
   },
   {
