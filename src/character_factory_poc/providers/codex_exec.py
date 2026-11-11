@@ -51,6 +51,11 @@ def find_tainted_paths(commands: list[str], workspace: Path, allow: list[Path]) 
                     bad.append(p)
                 continue
             if not any(p == a or p.startswith(a + "/") for a in allowed):
+                # sed 치환식 같은 글자 속 '/out'은 경로가 아니다(2026-11-10 실제 실행 오탐).
+                # 맨 앞 폴더가 이 컴퓨터에 없으면 밖으로 나간 경로로 보지 않는다.
+                top = "/" + p.lstrip("/").split("/", 1)[0]
+                if not Path(top).exists():
+                    continue
                 bad.append(p)
     return sorted(set(bad))
 

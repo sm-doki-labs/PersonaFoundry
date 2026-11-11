@@ -1,4 +1,4 @@
-"""트윈 G3 → 공통 S7/S8: 합성 원문과 가짜 모델만 쓴다."""
+"""모티브 G3 → 공통 S7/S8: 합성 원문과 가짜 모델만 쓴다."""
 
 from pathlib import Path
 
@@ -10,11 +10,11 @@ from character_factory_poc.pipeline.context import Context
 from character_factory_poc.stages.s3_plan.twin import run_s3_twin
 from character_factory_poc.stages.s7_traits.sheet import run_s7
 from character_factory_poc.stages.s8_prompts.build import run_s8
-from tests.support.synthetic import prompter_output
+from tests.support.synthetic import assembly_answer
 from tests.support.web_gates import trait_sheet_for
+from tests.test_motif_choices import demo_ledger
 from tests.test_text_model_deck import configured
-from tests.test_trait_ledger import _ledger
-from tests.test_twin_s3 import CANARY, LINES, _answer, _ready
+from tests.test_twin_s3 import CANARY, LINES, _answer, _input, _ready
 
 
 @pytest.mark.parametrize(
@@ -56,7 +56,9 @@ def test_approved_subject_voice_reaches_both_prompts(tmp_path, monkeypatch, temp
     model.add(
         "AGENT",
         lambda req: (
-            _ledger(characterId=cid).model_dump()
+            demo_ledger(
+                cid, _input(req, "character-plan")["evidence"]["choices"][0]["ref"]
+            ).model_dump()
             if "/ledger" in req.ref
             else trait_sheet_for(ctx, cid)
         ),
@@ -64,20 +66,37 @@ def test_approved_subject_voice_reaches_both_prompts(tmp_path, monkeypatch, temp
     ctx.config.stages["s7"] = {"formation_profile": "ko-text-choice-voice-long-v2"}
     sheet = run_s7(ctx, cid)
     assert (sheet.parent / "trait-ledger.json").is_file() == deck
-    model.add("AGENT", prompter_output())
+    model.add("AGENT", assembly_answer)
+    ctx.config.stages.setdefault("s8", {})["motif_compiler"] = "v3"
+    ctx.config.stages.setdefault("s8", {})["example_turns"] = 2 if deck else 0
     folder = run_s8(ctx, cid, [])
     source = read_json(folder / "source-plan.json")
     assert source["plan"]["chapterArc"][0]["title"] == title
     assert source["plan"]["job"] == "제본사"
     assert source["sourceVoice"]["speechEndings"]["politeEnding"] == 3
     pair = read_json(folder / "prompt-pair.json")
-    for mode in ("long", "short"):
-        voice = pair[mode]["text"].split("[PERSONA / VOICE]\n")[1].split("\n\n[")[0]
-        assert "기본 말높임: 존댓말" in voice
-        assert all(v in voice for v in [*source["plan"]["voiceExamples"], LINES[1][1]])
-        assert f'말투 예시: "{excerpt}"' in voice
-        assert "제본사" not in voice
-        assert all(q not in voice for q, _ in LINES)
+    inputs = read_json(folder / "assembler-input.json")
+    assembly = read_json(folder / "assembly.json")
+    assert pair["systemRulesRef"] == "builtin:motif-assembler-v3"
+    assert "한 문장으로 먼저 제안한다." in inputs["analysis"]["voice"]
+    assert "실제 본인은 아니다" in pair["long"]["text"]
+    assert pair["short"] == pair["long"]
+    assert pair["long"]["text"].endswith(inputs["examples"][assembly["ids"][0]])
+    assert pair["long"]["text"].startswith(assembly["frame"])
+    example_file = folder / "example-turns.json"
+    assert example_file.is_file() == deck
+    if deck:
+        examples = read_json(example_file)
+        corpus = (root / "s0-source/sp1/corpus.jsonl").read_text("utf-8")
+        assert (
+            examples["system"].startswith(assembly["frame"]) and examples["sameMedium"]
+        )  # 합성 원문은 카톡이라 장면과 매체가 같다
+        assert examples["turns"] and all(t["msgId"] in corpus for t in examples["turns"])
+    if deck:
+        assert "INFERRED" in (folder / "gate-G6.html").read_text("utf-8")
+        assert "INFERRED" not in str(inputs["analysis"]["observedTraits"])
+    assert excerpt in [e["quote"] for e in source["sourceVoice"]["examples"]]
+    assert source["sourceVoice"]["speechProfile"]["schemaVersion"] == "speech-profile-v1"
     for directory in (sheet.parent, folder):
         assert verify_manifest(directory) == []
         assert all(
@@ -111,3 +130,13 @@ def test_g3_voice_still_has_to_match_approved_subject(tmp_path, bad):
     plan.voiceExamples[0] = ref.quote
     with pytest.raises(ValueError, match="본인 발화"):
         approved_voice(ctx, cid, plan)
+
+
+@pytest.mark.parametrize("ids", [[], ["missing"], ["a", "a"], ["a", "b", "c", "d"]])
+def test_assembler_rejects_unavailable_or_duplicate_quotes(ids):
+    from character_factory_poc.providers.fake import FakeTextModel
+    from character_factory_poc.stages.s8_prompts.motif_v3 import assemble
+
+    model = FakeTextModel(responses={"AGENT": {"frame": "대답한다.", "ids": ids}})
+    with pytest.raises(ValueError, match="원문 예시 키"):
+        assemble(model, {"facts": "", "examples": {"a": "응."}}, "test")

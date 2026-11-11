@@ -38,7 +38,7 @@ def _scenes(rows: list[dict], limit: int):
 def run_s9h(ctx: Context, cid: str) -> Path:
     char_dir = ctx.character_dir(cid)
     if read_origin(char_dir) != SOURCE:
-        raise FactoryError("s9h 비교 세트는 트윈에서만 만든다")
+        raise FactoryError("s9h 비교 세트는 모티브에서만 만든다")
     state = ctx.state(cid)
     state.require_deps("s9h")
     root = char_dir / "s9h-holdout"

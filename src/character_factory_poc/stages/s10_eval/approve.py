@@ -141,7 +141,7 @@ def approve_g8(ctx: Context, cid: str, answer: dict[str, Any]) -> Path:
 
     is_twin = read_origin(char_dir) == SOURCE
     if is_twin and not (rev_dir / blind.BASE).is_file():
-        raise FactoryError("트윈 TRAIN G8에는 비교 실행 보고가 필요하다")
+        raise FactoryError("모티브 TRAIN G8에는 비교 실행 보고가 필요하다")
     if is_twin:
         blind.verify_evidence(rev_dir)
     prereg, digest = read_prereg(rev_dir)

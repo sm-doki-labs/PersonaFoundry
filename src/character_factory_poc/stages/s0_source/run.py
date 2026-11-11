@@ -1,4 +1,4 @@
-"""트윈 s0: 출처 묶음 정리 → 출처 정리 에이전트 → G0 대기 (계획 §4, D-0120, D-0128).
+"""모티브 s0: 출처 묶음 정리 → 출처 정리 에이전트 → G0 대기 (계획 §4, D-0120, D-0128).
 
 결정적 정리(읽기·화자·가리기·대화 나누기·비교 세트 분리·사용 근거)는 코드가 하고, 판단이 필요한 일
 (화자 지정 확인, 놓친 개인정보 표시, 대표 메시지, 말투 관찰)은 에이전트가 한다. 에이전트 출력은
@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -19,12 +20,18 @@ from character_factory_poc.common.canonical import sha256_file
 from character_factory_poc.common.errors import CheckFailed, FactoryError, NeedsInputError
 from character_factory_poc.common.schema import dump, validate
 from character_factory_poc.common.store import next_rev, read_json, write_manifest
-from character_factory_poc.contracts.source import SourceDigest, SourceIndex, SourcePack, TextStats
+from character_factory_poc.contracts.source import (
+    SourceDigest,
+    SourceIndex,
+    SourcePack,
+    TextStats,
+    default_register,
+)
 from character_factory_poc.pipeline.agent import AgentSpec, run_agent
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.gates import render_gate_page
 from character_factory_poc.pipeline.graph import SOURCE
-from character_factory_poc.stages.s0_source import parse
+from character_factory_poc.stages.s0_source import facts, parse
 
 STAGE_DIR = "s0-source"
 SETTINGS = {
@@ -40,10 +47,12 @@ def _settings(ctx: Context) -> dict[str, int]:
     return {k: int(cfg.get(k, v)) for k, v in SETTINGS.items()}
 
 
-def plan_calls(ctx: Context) -> list[CallPlan]:
+def plan_calls(ctx: Context, *, public: bool = True) -> list[CallPlan]:
     cfg = _settings(ctx)
     n = 1 + cfg["max_check_retries"] + cfg["max_format_retries"]
-    return [CallPlan("s0", f"출처 정리 에이전트 (재시도 포함 최대 {n}회)", n)]
+    return [CallPlan("s0", f"출처 정리 에이전트 (재시도 포함 최대 {n}회)", n)] + (
+        [CallPlan("s0", "공인 공개 사실 검색·원문 대조 (최대 2회)", 2, None)] if public else []
+    )
 
 
 def _latest_rev_dir(ctx: Context, cid: str) -> Path | None:
@@ -56,18 +65,33 @@ def _load_pack(ctx: Context, cid: str, pack_path: Path | None) -> tuple[SourcePa
     """출처 묶음을 읽고 상대 경로를 묶음 파일 기준 절대 경로로 바꾼다."""
     if pack_path is None:
         last = _latest_rev_dir(ctx, cid)
-        if last is None or not (last / "source-pack.json").exists():
+        submitted = ctx.character_dir(cid) / "source-pack.json"
+        if last is not None and (last / "source-pack.json").exists():
+            pack_path = last / "source-pack.json"
+        elif submitted.is_file():
+            pack_path = submitted
+        else:
             raise NeedsInputError(
-                "트윈 s0: 출처 묶음이 필요하다(cfp run ... --source-pack pack.json)"
+                "모티브 s0: 출처 묶음이 필요하다(cfp run ... --source-pack pack.json)"
             )
-        raw = read_json(last / "source-pack.json")
-        return validate("source-pack-v1", raw), raw  # type: ignore[return-value]
     pack_path = Path(pack_path).resolve()
+
+    def guard(path: Path) -> None:
+        if os.getenv("CFP_SERVER_MODE") == "1" and not (
+            path.resolve().is_relative_to(ctx.character_dir(cid).resolve())
+            and path.resolve().is_relative_to(ctx.config.root.resolve())
+        ):
+            raise CheckFailed("s0", ["캐릭터 폴더 밖 출처는 서버에서 읽을 수 없다"])
+
+    guard(pack_path)
     raw = json.loads(pack_path.read_text("utf-8"))
     base = pack_path.parent
+    if isinstance(raw.get("factsPath"), str):
+        raw["factsPath"] = str(facts.manual_path(raw["factsPath"], base, ctx.character_dir(cid)))
     for key in ("photos", "texts"):
         for item in raw.get(key, []):
             p = Path(item.get("path", ""))
+            guard(base / p)
             item["path"] = str(p if p.is_absolute() else (base / p).resolve())
     pack: SourcePack = validate("source-pack-v1", raw)  # type: ignore[assignment]
     ids = [t.textId for t in pack.texts]
@@ -87,15 +111,7 @@ def _read_all(pack: SourcePack) -> tuple[list[parse.Msg], list[TextStats], dict[
     for spec in pack.texts:
         raw = Path(spec.path).read_text("utf-8")
         try:
-            if spec.kind == "KAKAO_EXPORT":
-                part = parse.read_kakao(spec.textId, raw)
-            elif spec.kind == "ARTICLE":
-                part = parse.read_article(spec.textId, raw, spec.date, subject_name)
-            else:
-                part = parse.read_dialogue(spec.textId, raw, spec.date)
-            if not part:
-                raise parse.SourceError(f"{spec.textId}: 읽은 메시지가 없다(형식 확인)")
-            parse.assign_speakers(part, spec, subject_name)
+            part = parse.read_source(spec, raw, subject_name)
         except parse.SourceError as e:
             raise CheckFailed("s0", [str(e)]) from None
         for key, n in parse.mask(part).items():
@@ -106,6 +122,7 @@ def _read_all(pack: SourcePack) -> tuple[list[parse.Msg], list[TextStats], dict[
             TextStats(
                 textId=spec.textId,
                 kind=spec.kind,
+                register=spec.register or default_register(spec.kind),
                 sha256=sha256_file(Path(spec.path)),
                 messages=len(part),
                 subjectMessages=sum(m.speaker == "SUBJECT" for m in part),
@@ -213,16 +230,11 @@ def _page(
     index: SourceIndex,
     digest: SourceDigest,
     sample: list[dict],
+    reviewed=None,
 ) -> str:
     by_id = {r["msgId"]: r for r in sample}
-    lock = (
-        "승인 잠김 — 다음을 채운 출처 묶음으로 다시 돌린다:\n- " + "\n- ".join(index.usageProblems)
-        if index.usageProblems
-        else "사용 근거가 채워져 있다."
-    )
     basis = pack.usageBasis
     sections = [
-        ("승인 조건", lock),
         (
             "대상과 사용 근거",
             f"대상: {pack.subject.displayName} ({pack.subject.kind})\n"
@@ -269,7 +281,30 @@ def _page(
         ),
         ("에이전트: 자료 품질", "\n".join(f"- {n}" for n in digest.qualityNotes) or "-"),
     ]
+    if reviewed is not None:
+        for item in reviewed.items:
+            lines = [item.line(), *(f"{s.title} {s.url}" for s in item.sources)]
+            if item.selfView:
+                q = item.selfView
+                lines += [f"본인 시점: {q.paraphrase}", f"원문 {q.msgId}: {q.quote}"]
+            if item.excluded:
+                lines.append("입력에서 제외됨")
+            sections.append((f"공개 사실 · {item.factId}", "\n".join(lines)))
+        sections.append(
+            (
+                "사적인 질문을 넘기는 말",
+                "\n".join(
+                    [f"{q.msgId}: {q.quote}" for q in reviewed.deflections]
+                    + [
+                        f"기본 표현: {s}"
+                        for s in reviewed.phrases()
+                        if s not in {q.quote for q in reviewed.deflections}
+                    ]
+                ),
+            )
+        )
     return render_gate_page(
+        exclude_ids=[f.factId for f in reviewed.items if not f.excluded] if reviewed else [],
         title=f"G0 출처 확인 · {pack.subject.displayName}",
         subject_id=cid,
         gate="G0",
@@ -282,13 +317,13 @@ def run_s0(ctx: Context, cid: str, pack_path: Path | None = None) -> Path:
     from character_factory_poc.pipeline.origin import read_origin
 
     if read_origin(ctx.character_dir(cid)) != SOURCE:
-        raise FactoryError(f"{cid}: s0은 트윈 캐릭터에만 있다")
+        raise FactoryError(f"{cid}: s0은 모티브 캐릭터에만 있다")
     state = ctx.state(cid)
     state.require_deps("s0")
     cfg = _settings(ctx)
     budget = ctx.budget()
-    budget.check_plan(plan_calls(ctx))
     pack, pack_raw = _load_pack(ctx, cid, pack_path)
+    budget.check_plan(plan_calls(ctx, public=pack.subject.kind == "PUBLIC_FIGURE"))
     rev = next_rev(ctx.character_dir(cid) / STAGE_DIR, "sp")
     rev_dir = ctx.character_dir(cid) / STAGE_DIR / rev
     rev_dir.mkdir(parents=True, exist_ok=True)
@@ -309,7 +344,6 @@ def run_s0(ctx: Context, cid: str, pack_path: Path | None = None) -> Path:
         holdoutMessages=len(held),
         masked=masked,
         otherParticipants=other,
-        usageProblems=parse.usage_problems(pack),
     )
     if index.corpusSubjectMessages == 0:
         raise CheckFailed("s0", ["비교 세트를 빼고 나니 대상 인물 메시지가 없다"])
@@ -368,8 +402,19 @@ def run_s0(ctx: Context, cid: str, pack_path: Path | None = None) -> Path:
     (rev_dir / "digest.json").write_text(
         json.dumps(dump(digest), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+    flagged = {f.msgId for f in digest.piiFlags}
+    reviewed = facts.collect_for_gate(
+        ctx,
+        cid,
+        pack,
+        rev_dir,
+        # 본인 발화 대조는 표본이 아니라 승인 대상 원문 전체에서 후보를 추린다.
+        [r for r in corpus_rows if r["msgId"] not in flagged],
+        {m.as_row()["msgId"] for m in held},
+        budget,
+    )
     (rev_dir / "gate-G0.html").write_text(
-        _page(cid, rev, pack, index, digest, corpus_rows), encoding="utf-8"
+        _page(cid, rev, pack, index, digest, corpus_rows, reviewed), encoding="utf-8"
     )
     write_manifest(rev_dir)
     state.transition("s0", "AWAITING_HUMAN", rev=rev)

@@ -292,6 +292,7 @@ class OpenAICompatTextModel:
         max_retries: int = 3,
         reasoning_effort: str | None = None,
         stream: bool = False,
+        token_provider=None,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -300,14 +301,21 @@ class OpenAICompatTextModel:
         self.max_retries = max_retries
         self.reasoning_effort = reasoning_effort
         self.stream = stream
+        # D-0149: Vertex처럼 만료되는 접근 토큰을 쓰는 경로. get()·refresh()가 있는 객체다.
+        self.token_provider = token_provider
 
     def streaming(self) -> bool:
         """스트리밍은 공식 API 형식에서만 켠다. 중계·테스트 서버 본문은 그대로 둔다(D-0084)."""
         return self.stream and request_dialect(self.base_url) in {"openai", "gemini"}
 
+    def _secret(self) -> str | None:
+        if self.token_provider is not None:
+            return self.token_provider.get()
+        return _secret(self._api_key_env)
+
     def _headers(self) -> dict[str, str]:
         h = {"Content-Type": "application/json", "User-Agent": "character-factory-poc/0.1"}
-        key = _secret(self._api_key_env)
+        key = self._secret()
         if key:
             h["Authorization"] = f"Bearer {key}"
         return h
@@ -361,6 +369,16 @@ class OpenAICompatTextModel:
         return body
 
     def complete(self, request: ChatRequest) -> ChatResponse:
+        try:
+            return self._complete(request)
+        except ProviderRequestError as exc:
+            # 만료된 토큰이면 한 번만 새로 받아 다시 보낸다.
+            if exc.status != 401 or self.token_provider is None:
+                raise
+            self.token_provider.refresh()
+            return self._complete(request)
+
+    def _complete(self, request: ChatRequest) -> ChatResponse:
         def post(url: str, **kw) -> httpx.Response:
             with httpx.Client(timeout=self.timeout) as client:
                 return client.post(url, **kw)
@@ -369,7 +387,7 @@ class OpenAICompatTextModel:
         common = dict(
             max_retries=self.max_retries,
             sleep=time.sleep,
-            secret=_secret(self._api_key_env),
+            secret=self._secret(),
             failure="공급자 호출 실패",
         )
         if self.streaming():

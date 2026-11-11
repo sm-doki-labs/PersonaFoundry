@@ -418,7 +418,7 @@
 - 이전 9명(v7·v8·v9): 두 번 모두 4유형(침묵·철수 3, 일방 통제 3, 농담 회피 2, 논리 우선 1). 새 9명: 두 번 모두 6유형(방식·정답 통제 3, 과잉 보호·대신 해결 2, 갈등 회피 1, 허세 1, 농담 방어 1, 애정 독점·질투 1). 통제형은 2·3·2번 후보로 흩어져 순번별 원형 고정이 깨졌다.
 - 브리프 성격은 9명 모두 핵심 성격 첫 문장에 꼼꼼·책임감과 관찰력을 함께 가졌다. 이름은 모두 새것, 음식은 짬뽕·갈치조림·감자탕·국물 떡볶이·돼지국밥 등으로 갈렸고, 내력은 프로게이머 연습생, 원양어선 조리 보조, 탄광촌에서 동생 학비를 대는 사람처럼 달라졌다.
 - 남은 수렴: 결점 단서가 고집이나 경쟁심이면 셋 모두 통제형이 됐다. 브리프의 꼼꼼·책임감이 결점을 통제 쪽으로 끈다. 세 실행을 동시에 돌려 서로를 피할 목록에 넣지 못했고 단서가 실행마다 따로 뽑혀 천체 망원경·전통주·클라이밍·부산 영도가 겹쳤다. 최근 실행이 받은 단서를 빼고 뽑게 고쳤다(시험 `tests/test_diversity.py`, 경로 오프셋 버그를 시험이 잡아 수정).
-- 원장: 기획 3회 1.25달러, 판정 0.08달러(단가표 추정). `uv run pytest -q` → **1222 passed, 1 skipped**.
+- 원장: 기획 3회 1.25달러, 판정 0.08달러(단가표 추정). `uv run pytest -q` → **1231 passed, 1 skipped**.
 
 ## 2026-11-07 진행 화면과 단계 이력(D-0101)
 
@@ -594,3 +594,133 @@
 - 서버 시험 **1265 passed, 1 skipped**(학습 모델 조건이 학습용 프롬프트로 평가되고 실행이 그 system을 그대로 보냄, 옛 데이터셋은 짧은 프롬프트, 서빙 기록에 같은 프롬프트·조립 규칙, 화면 읽기 모델 학습용 프롬프트 요약), 화면 노드 44 passed, ruff·format·node --check·git diff --check 통과.
 - 가짜 공급자 흐름(`serve.py --polls 3 --collect-failures 1`, 학습 → 결과 받기 실패 → 다시 받기 → 평가): 사전 등록의 LONG_BASE는 `s8-prompts/pv1/long.md`, 학습 모델 두 조건은 `s10-eval/ev1/prompts/sft-system-ds1-strongly_favorable.md`(1,546자). 밝은·어두운 화면 평가 단계 비교 카드에 '학습 때와 같은 짧은 프롬프트(1,546자 · 아주 가까운 사이 · 영상통화) + 학습한 말투'가 보였다. 캡처 `work/training-ui-20261108/shots/ev/*`, 페이지 오류 0.
 - 실제 GPU 어댑터로 평가하거나 실제 서빙으로 어댑터를 부르지는 않았다. 서빙 기록은 시험의 가짜 어댑터 파일로만 만들었다.
+
+### 2026-11-10 — 모티브 V3 원문 재생성·동일 질문 비교 (D-0163)
+
+- 내장 조립 지시 SHA-256: 857d85656fd37e52b5e81029652096528809430b2d6662860c998a3a9b7713f8 (로컬 추천판과 동일). 공장 입력에는 확인된 AI 정체성과 장면을 명시했다.
+- 로컬 QA 명령: v3-factory-qa/run generate.py son 또는 friend, 이어 evaluate.py 대상 final, report.py. 두 출처의 S0/G0부터 새로 시작했고 재시도 시 새로 만든 원문 분류만 재사용했다. 원문 비교 세트를 생성에 제공하지 않았다. 공개 사실은 이전에 만든 G0 사실 입력을 사용했다.
+- 분류: 인터뷰 등 126개 파일에서 838/838, 카톡 CSV에서 5,318/5,318. 편집·판정 OpenCodex gpt-6.1-sol, 대화 Vertex Gemini 3.8 Flash. 기존 V3 답변과 함께 동일 기준 익명 재채점. 인물별 행동·말투·근거(각 /16): 인터뷰 14·14·13 vs 기존 13·13·12; 카톡 12·8·14 vs 기존 두 판 모두 16·15·16. 사람 블라인드나 운영계 성능 검증은 하지 않았다.
+- 전체 합성 테스트: PYTHONPATH=src .venv/bin/python -m pytest -q → 1537 passed, 5 skipped. 원문 기획 지시 변경 후 S3 전용 18개 검사와 실모델 기획·근거 검사도 실행했다.
+- 팀 로컬 산출물: v3-factory-qa/비교결과.md, comparison/grades/locked-final, runs/characters/*/s8-prompts. 원문·실제 대사는 저장소에 포함하지 않는다.
+
+## 2026-11-10 — 모티브의 반응 특질 추출 실험(D-0169)
+
+기존 G0·G3·S7을 복사한 로컬 실험 작업공간에서 S8만 실행했다. 발견·편집 OpenCodex gpt-6.1-sol, 별도 검토 Gemini 3.8 Flash. 카톡 마지막 실행은 발견 116/별도 검토 128장면, 후보 2개·채택 0개, 두 묶음에서 확인된 조건부 빈도 차이 0개. 인터뷰는 연속 네 말차례 0개. 조립 입력은 기존판과 동일했다. 사용하지 않은 카톡 네 장면×2턴×2반복을 Gemini 3.8 Flash로 생성해 판 이름을 가리고 원문과 주된 행동을 대조했다. 두 판 모두 각 반복 1/8, 합계 2/16. 로컬 v3-factory-qa/response-lab/{live.py,bench.py,judged.json,특질-검증.md}.
+
+기존 S3 상황 분류에서 기타는 친구 카톡 3,567/5,318개(67.1%), 인터뷰 118/838개(14.1%)였다. 카톡 답 531개에 ‘되묻기’ 표시가 있지만 무엇을 되묻는지는 이 행동명만으로 구분할 수 없다. 이는 기존 분류의 한계이며, 별도로 원문을 읽은 S8 후보가 기각된 유일한 이유로 확인된 것은 아니다.
+
+코드 검사: pytest -q 전체 1,544개 통과·5개 생략·영상 상태 전환(test_light) 1개 실패(기대 failed, 관찰 making). 해당 검사와 새 특질 검사 8개를 함께 다시 돌려 9개 통과했다. 전체 실행에서의 일시 실패 원인은 확인하지 않았다. 특질 관련 ruff 검사와 git diff --check 통과.
+
+## 2026-11-10 — 두 말차례의 관심 대상·대응 (D-0170)
+
+생성용 원문으로 발견·대조 각각 160쌍/인물. OpenCodex 발견 및 기존 V3 조립, Vertex Gemini 3.8 Flash 독립 대조. 카톡 후보 3개 중 1개, 인터뷰 3개 중 2개 채택. 두 인물 모두 원래 조립 입력과 대조해 분석 필드 외 차이 없음 확인. 이전 평가와 다른 장면 각 6개를 Flash(온도 0.8)로 판별 2회씩, 총 48답 생성. 익명 모델 판정: 관심/대응/엄격(각 12개) 카톡 기존 3/2/2 → 실험 4/2/2; 인터뷰 기존 0/2/0 → 실험 2/2/0. 엄격 일치는 두 번 모두 카톡 각 1/6, 인터뷰 각 0/6. 단일 모델 판정이며 사람 식별력이나 배포 효과가 아니다. 로컬 v3-factory-qa/focus-pairs/final_run.py, confirmed-{friend,son}/{locked,observations,judged}.json, 두-말차례-비교.md. 집중 검사 30개 통과. 원문은 저장소에 넣지 않았다.
+
+## 2026-11-11 — 대조 특질을 다음 답을 가린 상태에서 검증 (D-0171)
+
+기존 G0·G3·S7과 V3 조립기 지시를 고정하고 로컬 S8만 실행했다. 생성용 원문에서 160쌍씩 발견했다. 첫 대조 실행은 별도 표본 160쌍, 다음 실행은 동일한 발견 후보를 고정하고 별도 원문 전체(카톡 1,415쌍·인터뷰 427쌍)에서 상대 발화만으로 각 128쌍을 선별했다. 발견·예측은 OpenCodex, 실제 답 판정은 Vertex Gemini 3.8 Flash. 카톡 2후보는 두 갈래 예측이 모두 확보되지 않았다. 인터뷰 1후보는 과장 해석 축소 0/4, 응원에 감사 2/4. 둘 다 채택 0. 비교할 후보가 없다는 것은 인물에게 그 성향이 없다는 의미가 아니다. 자동 검사(진입 경로·개인정보 제외·답 가림·양쪽 근거 및 호출 수 포함) 40개 통과, ruff 및 git diff --check 통과. 팀 로컬 비교 자료: v3-factory-qa/contrast-validation. 예측 재현 근거와 기각 사유는 각 observations.json에 있다.
+
+이전과 같은 실제 장면(인물별 6개×2회)을 고정했다. 대화는 Vertex Gemini 3.8 Flash, 온도 0.8. 기존 V3·직전 focus판의 저장 답변과 이번 대조판 새 답변을 익명으로 섞어 OpenCodex와 Flash가 각각 재채점했다. 두 사람·두 판정자 모두 세 판의 관심 대상과 대응이 모두 일치한 수는 각 2/12(반복마다 1/6)였다. 대조판과 기본 V3는 분석 입력이 같아서 세 번의 채점 결과를 일반적인 성능 추정으로 확대하지 않는다. 보고서: 로컬 v3-factory-qa/contrast-validation/반응-대조-결과.md. 시간 초과로 누락된 카톡 답 하나는 같은 모델·설정의 비스트리밍 응답으로 복구했다.
+
+## 2026-11-11 — 원문 기반 페르소나 설계 자문
+
+개인 카톡 원문을 제외한 인계 문서를 Claude CLI(도구 비활성, 세션 비저장)에 입력했다. 모델 claude-fable-5-2, effort high 요청, 응답 메타데이터에서 해당 모델과 success 확인. [회신 원문](../research/2026-11-11-persona-oneclick-fable-review.md). V3 예시 입력이 직전 상대 말과 대상 답을 묶는지 코드에서 확인했다. 실험안의 품질·비용은 미측정이다.
+
+## 2026-11-11 — 예시 주입 방식 비교 (D-0172 제안)
+
+공장 V3 프롬프트(카톡·인터뷰 각 1개)를 기준으로 예시 넣는 방식만 바꾼 판을 코드로 만들었다(원문 분석 호출 없음). 평가 장면은 생성에 쓰지 않은 대화에서 고정 시드로 뽑은 카톡 40개·인터뷰 30개이고 이전 진단 장면을 뺐다. Vertex Gemini 3.8 Flash(온도 0.8, thinking low)로 장면마다 1회, 카톡 8개 판·인터뷰 9개 판, 합계 590답. 익명 맞대결 채점은 gpt-6.1-sol과 Claude Fable 5.2 각 106묶음(6건씩), 근거 없는 주장 판정은 gpt-6.1-sol 29묶음. 결과 수치와 한계는 [인계](handoffs/handoff-2026-11-11-example-turns.md)에 있다. 두 채점자의 판정 일치는 카톡 반응 78%·말투 71%, 인터뷰 반응 86%·말투 71%였다. 로컬 v3-factory-qa/scene-examples/{exp.py,exp2.py,exp3.py,report.py,예시-비교-결과.md}. 저장소 코드는 바꾸지 않았다.
+
+## 2026-11-11 — 이전 턴 선택 기능(D-0173)과 팬 통화 대본 비교
+
+손흥민 팬 통화 대본 8개 × 2회를 V27과 이전 턴 판 세 묶음으로 실행했다(판마다 74턴, 합계 296턴, Vertex Gemini 3.8 Flash). 익명 통화 맞대결은 묶음마다 16쌍을 gpt-6.1-sol과 Claude Fable 5.2가 각각 채점했고(2쌍씩 8묶음 × 3 × 2), 근거 없는 주장은 통화마다 gpt-6.1-sol 1회(64회), 본인 사칭 판정 3회. 수치는 [인계](handoffs/handoff-2026-11-11-example-turns-option.md)에 있다. 세 번째 묶음은 공장 코드(stages/s8_prompts/example_turns.py)가 실제 생성용 원문에서 만든 것이다.
+
+코드 검사: .venv/bin/python -m pytest -q → 1564 passed, 5 skipped. 새 검사는 뽑는 규칙(출처별 순환, 길이 제한, 개인정보·제3자·시간 공백 제외, 시드 재현), S8이 켰을 때만 파일을 남기는지, 대화 요청이 문답을 이전 턴으로 보내는지와 파일이 비면 기존 경로로 돌아가는지를 본다. 바꾼 파일의 ruff check 통과. 실제 공장 실행(S8 --execute)으로는 돌리지 않았다.
+
+## 2026-11-11 — 팬 통화: 고정 장면 틀·자동 말버릇 정의 (채점 일부 미완)
+
+손흥민 팬 통화 대본 16개 × 2회를 9개 판으로 생성했다(Vertex Gemini 3.8 Flash, 합계 1,173턴). 맞대결·근거 없는 주장·본인 사칭 채점은 로컬 opencodex의 gpt-6-astra(fast 모델 ID, 로그에서 우선 처리 적용 확인)와 gpt-6.1-sol로 했다. 앞의 다섯 후보 판은 144쌍씩 두 채점자 모두 끝났다. 뒤의 세 판은 주 계정 사용량 잠금(HTTP 429)으로 멈췄다. 수치와 채점 수는 [인계](handoffs/handoff-2026-11-11-scene-template.md)와 로컬 v3-factory-qa/scene-examples/장면틀-비교.md에 있다. 저장소 코드는 바꾸지 않았다.
+
+## 2026-11-11 팬 통화 비교 최종 판정 (K-0115)
+
+자동 말버릇을 넣은 판은 V27과의 32쌍 비교에서 통화 적합성은 앞섰지만(Astra 24승 5패 3무, sol 25승 4패 3무), 인물다움은 사전 기준인 두 채점자 각각 승 ≥ 패에 미달했다(Astra 15승 17패, sol 13승 19패). 본인이라고 단정한 답은 0/4건이었다(V27 4/4건). 주어진 자료에 근거가 없는 개인 사실을 단정한 답은 43/138건이었다(V27 48/138건). 응답 시간 중앙값은 2.6초였다(V27 3.1초). 기존 생성물을 그대로 사용했다. 총 272개 통화, 1,173턴의 근거 판정과 두 모델 각각 240쌍의 비교 결과를 대조했다.
+
+- 2026-11-11 · 네 말차례 후속 반응: scripts/evidence_workflow/test_followup.py 2건 통과. 실제 S0에서 앞 세 턴과 네 번째 실제 반응을 분리한 1,946개 창의 ID·문맥을 대조했다. 개인별 분기는 반복 기준 미달로 미승인. [인계](handoffs/handoff-2026-11-11-followup-evidence.md).
+
+## 2026-11-11 원문 근거 표준 공장 연결(D-0174)
+
+- 명령: `.venv/bin/python -m pytest tests/test_evidence_pipeline.py tests/test_evidence_source.py tests/test_evidence_compiler.py tests/test_evidence_export.py tests/test_web_evidence_review.py tests/test_oc2_flow.py tests/test_twin_persona.py tests/test_motif_facts.py tests/test_twin_export.py tests/test_twin_presentation_check.py tests/test_v_make.py tests/test_chapter_start.py tests/test_demo_chat.py tests/test_persona_compiler.py tests/test_rework.py tests/test_web_auto_resume.py tests/test_agentic.py -k 'not test_real_layout' -q --tb=short`
+- 결과: 231 passed, 3 skipped, 1 deselected, 46 subtests passed (17.76초). 합성 원문과 fake provider만 사용. 실제 로컬 원문을 읽는 test_real_layout 제외.
+- 원문·사실·장면·검토·본문 변경 차단, 예시 설정 거부, 중단 후 후보 재사용, G6 명시 확인, 새 S8에 S8c 재생성, S11→chat-svc 8섹션 일치 확인. 원문은 공개 산출물에 복사되지 않음.
+- 변경 코드 Ruff, `node --check src/character_factory_poc/web/static/shared/gate.js` 통과.
+- 보존한 합성 증거: `/Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/work/evidence-pipeline-proof/`.
+- 실제 새 자동 추출 품질·배포·실제 음성/영상 품질은 이번 검사 범위가 아님.
+
+- 최종 보완 검사: 작은따옴표 예시 차단·사실표 고유명사 따옴표 보존, 대상 통화 장면이 원문 형식보다 우선, 인물별 장면 분리, 낡은 S8 자동 재사용 차단까지 포함한 최종 결과 231 passed. G6 화면은 합성 자료로 1280px/390px 브라우저 확인했고, 후속 맥락 표시·확인란은 추가 동작 테스트로 확인했다.
+
+
+## 2026-11-11 원문 근거 공정 실제 실행 (n8n 없음)
+
+입력은 승인 sp1/pr4/tr1의 격리 사본, 모델은 google/gemini-3.8-flash다. `/Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/work/evidence-live/run.py --execute`로 실제 S8 생성 1회, `evaluate.py --execute`와 실패 한 건 재시도로 비교 응답 8개를 생성했다. 총 10시도 중 성공 9·180초 timeout 1이다. 호출 예산 16회/$2, 실패 예약 포함 가정 단가 합계 약 $0.126(실제 청구액 아님).
+
+`/Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/work/evidence-live/verify.py` 통과: 원본 3개 해시 보존, 새 pv2 manifest 오류 0, 현재 입력 결속, 사실표 보존, 예시 대화 파일 없음, G6 AWAITING_HUMAN, 일반 시연 차단. 내부 review_preview로만 응답 생성했다. 원문 15개와 생성 응답 8개는 Codex가 직접 읽었다. 새 자동 추출은 과잉 일반화·rule 한계 누락 때문에 품질 승인하지 않았다. 기존 표준판도 한 장면에 근거 없는 졸업 추정이 있어 정답 기준으로 취급하지 않았다. 평가 자료 네 장면은 재사용 회귀 자료이며 새로운 일반화 검증이 아니다.
+
+결과: `/Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/outputs/공정_실행검증/실행검증_보고서.md`, `실행검증_기록.json`. 재현 명령·원시 기록은 `/Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/work/evidence-live`에 있고 비공개 원문을 저장소 테스트 자료에 넣지 않았다. 이번 턴은 실행·검토와 문서 정정이며 공정 코드를 추가 수정하지 않았다. 앞선 231개 오프라인 테스트 결과와 이번 실제 실행을 구별한다.
+
+
+## 2026-11-11 전체 원문 공정 구현·실행·Gemini 비교(D-0176)
+
+- 입력: 기존 승인 sp1/pr4/tr1의 격리 사본. 생성용 10,254개 중 허용 10,180개, 제외 74개(사유와 ID 보존), 평가용 1,651개는 저작 입력에서 분리. 32묶음, 184관찰, 10후보×32묶음=320대조. 기계적 통과 9·보류 1이며 의미 승인 아님.
+- 실제 실행: `.venv/bin/python /Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/work/evidence-full-live/run.py --execute`, 같은 명령으로 미완료 한 건 재개. 실제 공장 run_s8/Vertex google/gemini-3.8-flash를 호출했다. pv4, 8섹션 2,790자, 조건 5항목 보존, 예시 없음, G6 AWAITING_HUMAN. 앞 단계 재생성·서비스 배포는 하지 않았다.
+- 검증: `.venv/bin/python /Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/work/evidence-full-live/verify.py`와 `integrity.json`. 원본 해시·새 manifest·현재 결속·전체 포함/제외 분할·사실·조건·일반 시연 차단·내부 미리보기 본문 일치 확인.
+- 비교: `.venv/bin/python /Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/work/evidence-full-live/evaluate.py --execute`. 사전 고정 12장면(재사용 4·추가 실제 4·진단 4), 후속 3개×2판=30응답. 두 판 같은 Gemini 온도0.8/low, 원답 미제공. Codex 직접 읽기 결과 `evaluation/direct-blind-review.json`. A/B 판정 저장 후 키 확인이나 평가자는 두 프롬프트를 알고 있어 독립 사람 블라인드 아님. 새 판 대체 권고 없음. 두 판의 미확인 과거 창작 실패 확인.
+- 원문 검토: 채택 후보 9개마다 서로 다른 unit 지지 2개씩, 보류 후보의 반례와 추가 지지를 직접 읽었다. 부분 지지의 과잉 인정·저축/소비 혼동이 남았다(K-0116).
+- 총 96시도=분석 성공65+비교 성공30+180초 timeout1. 실패 예약 유지. 가정 단가 합계 $3.05047, 청구액 미확인. 보완 전 시작한 중단 캐시64개의 원본을 `cache-before-canonical-fix`에 보존하고 요청 키 순서만 정규화했다(`cache-migration.json`). 모델 응답 불변과 원천 결속 확인 후 미완료 한 건만 재호출.
+- 오프라인 전체 회귀: `.venv/bin/python -m pytest -q` → 1743 passed, 5 skipped, 46 subtests passed(188.42초), `/tmp/cf-full-suite-final2.log`. 새 검사는 합성 자료·가짜 공급자로 전체 범위/경계·조건 보존·반례 보류·중단 재개·수정 지시·USER-only 복사·v1/v2 승인/패키지/내보내기를 확인한다. 변경 코드 Ruff, `git diff --check` 통과.
+- 결과: `/Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/outputs/전체원문_공정_검증/결과_보고서.md`, `Gemini_30응답_직접비교.md`, `오익준_전체원문판_미승인.md`, `실행_검증기록.json`.
+
+
+## 2026-11-11 원자 특징·독립 확인 공정(D-0177)
+
+- 코드: evidence_atomic.py, evidence-pipeline-v3.md, 기존 S8/시연/패키지/내보내기 v3 연결. 실제 익준 검증 실패로 기본은 v2 유지, v3는 명시 설정이다.
+- 실제 실행: `.venv/bin/python /Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/work/evidence-atomic-live/run.py --execute`와 동일 명령으로 미완료 요청 재개. 생성용 허용 10,180메시지, 개발 121unit/27묶음, 확인 40unit/25묶음, 관찰191→후보12→첫대조324/재대조324/확인300. 결과 pv5 CHECK_FAILED,12HELD,정식 long/prompt-pair 없음.
+- 실제 결과 검증: `.venv/bin/python /Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/work/evidence-atomic-live/verify_held.py` 및 integrity.json. 원본 해시·원천 결속·분석 산출물 해시·전체 범위·단위 분리·확인 전 후보 잠금·일반시연 차단 통과. 진단판의 사실/조건/예시 부재 확인.
+- 진단: diagnostic.py로 보류 후보 12개를 별도 8섹션 3,625자에 조립했다. 이 파일은 공정 통과물이 아니다. baseline.py와 evaluate.py --execute로 동일한 Gemini 3.8 Flash/0.8/low 30응답. 기존 회귀 질문 재사용, 원답 미제공, Codex 직접 평가. 자료는 evaluation/direct-blind-review.json, direct-review.json, initial-source-review.json, final-source-review.json.
+- 155요청: 유효 분석108+비교30+형식 탈락 응답9+미확정 예약8(시간초과5,중단 당시3). 상한200회/$20, 가정 단가 합계 $7.068622, 실제 청구 미확인. 초기 무결성 보완 전 캐시53개는 pre-receipt-checkpoint에 원본 보존 후 checkpoint-migration.json에 해시 기록; 출력 변경 없음. 마지막 지연 요청 후 transport timeout만180→300초로 연장했다.
+- `.venv/bin/pytest -q` → 1759 passed, 5 skipped, 46 subtests passed,104.04초(`/tmp/cf-atomic-final6-suite.log`). 합성 자료로 v1/v2/v3 실제 단계→승인→패키지→서비스 트리 통합 확인. 실제 서비스 배포/내보내기·음성/영상 미실행. 변경 코드 Ruff와 git diff --check 확인.
+- 결과: `/Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/outputs/원자특징_표준화_검증/결과_보고서.md`, `Gemini_30응답_직접비교.md`, `오익준_보류후보_진단용.md`, `실행_검증기록.json`.
+
+
+## 2026-11-11 조건부 기능·말투 공정과 실제 Gemini 비교(D-0178)
+
+- 수정 전 회귀 검사: `tests/test_evidence_tendencies.py` 5실패, compiler 변경 시 불변 revision 충돌 1실패, v4 내보내기 표식 1실패, 오류 인용 격리 누락 1실패를 각각 확인하고 보완했다. 로그는 /Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/work/evidence-tendency-live에 있다.
+- `.venv/bin/python -m pytest -q`: 최종 1,768 passed·5 skipped·46 subtests passed, 92.30초. 기존 경고3개. `tests-complete.log`. 새 버전 S8→G6→시연과 합성 공개 패키지→서비스 변환에서 본문 보존을 포함한다.
+- 변경 코드/테스트 ruff 검사와 `git diff --check` 통과. 기존 unrelated 변경은 보존했다.
+- 실제 실행 `run.py --execute`: 생성용10,254 중10,180메시지,32원문묶음/157단위/2,393응답. 발견27·통합1·개발대조27·확인25의 유효분석80개. 첫 실행은 잘못된 조건 인용으로 CHECK_FAILED; 오류 격리 보완 후 같은 공유 예산과 성공 캐시로 재개했다. 분석 호출91(정상 분석80·별도 거절응답11). 모두 원본 기록 보존.
+- `inspect_result.py`: pv6 12 mixed카드,8섹션,5,178자. 사실표 동일, 모든 조건/한계 보존, 예시 artifact 없음, 시연 본문은 종단 줄바꿈 제외 동일, 원천 해시 동일. 잘못된 인용59건을 집계에서 제외했다.
+- `evaluate.py --execute`: Gemini google/gemini-3.8-flash,0.8,low,15장면48응답. 사례·기준·프롬프트 고정, 실제 이전 응답을 이어받는 꼬리질문. `direct-review-blind.json` 판독 고정 후 key를 공개해 새3·기존1·차이불명확11. 사람 평가가 아니다.
+- 공유 예산139회/180회, 가정 단가 기준약$7.68/$15,139건 모두 SETTLED. 최초 분석 계획90회보다 재개 과정에서1회 더 썼으나 전체 상한은 유지했다. 실제 청구 확인값은 아니다.
+- G6는 AWAITING_HUMAN. 실제 승인·배포·음성영상·commit/push 없음. 새 모델 경로를 전역 기본으로 승격하지 않았다. 결과: /Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/outputs/조건부말투_공정_Gemini_비교/결과_보고서.md.
+
+
+## 2026-11-11 — D-0179 사용 조건 추출 표준
+
+- 전체 pytest: 1,785 passed·5 skipped·46 subtests passed·3기존 warnings (141.65초). 변경12개 Python 파일 ruff 및 git diff --check 통과. /tmp/usage-all-verified.log.
+- 실제 native S8 pv7·624후보/묶음 대조·11카드·8섹션·5,046자. 사실/역할/장면 동일, 원천해시와 조건보존, 예시없음 검증. G6 미승인.
+- Gemini 96최종응답(2가드 거절 추가) 직접 A/B판독30쌍: 기존pv6 12·pv7 4·차이불명확14. 재사용회귀이며 독립합격아님. 원문30개 직접 읽어 의미오독 잔존 확인.
+- 181호출 미확정0, 가정비용$7.405498. 모델답변 형식 오류/검증기 오류는 저장캐시로 복구했고 원장상한 유지. 초기실패1건 원문미보관 한계 명시.
+- 사용자 결과: /Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/outputs/오익준_조건추출_공정_pv7_비교
+- 상세 인계: [사용 조건](handoffs/handoff-2026-11-11-register-conditions.md).
+
+
+## 2026-11-11 — D-0180 pv6 현행 표준
+
+- `.venv/bin/pytest -q tests/test_evidence_usage.py tests/test_evidence_tendencies.py tests/test_evidence_pipeline.py tests/test_evidence_full_pipeline.py tests/test_evidence_export.py tests/test_oc2_flow.py`: 89 passed·3기존 warnings, /tmp/pv6-standard-tests.log. 처음에는 v5를 기본값으로 가정한 테스트1건이 실패했고 명시적 v5 경로로 변경하여 실험 재현 검증을 유지했다. 기본 무설정 경로는 v4이며 전체 흐름 검사로 검증했다.
+- 변경 Python파일 ruff / git diff --check 통과.
+- 로컬 ReviewScene.compose가 비교 기준 pv6와 정확히 같고 예시 메시지0개·슬랭 오버레이 없음 확인. HTTP chat/meta: 익준pv6 ready, 손흥민pv2 ready. 기존 서버 정상 종료 대기가 끝나지 않아 확인된 해당 로컬 프로세스만 종료하고 새 프로세스로 복구했다.
+- 사용자 결과: /Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/outputs/현행_표준_pv6
+
+
+## D-0181 프론트 생성 공정·대화 기록 (2026-11-11)
+
+최종 전체 Python: **1,897 passed, 5 skipped, 46 subtests passed**, 기존 경고3개. 프론트 Node: **154 passed**. Ruff/diff 검사 통과. 중간에 chapterTemplate을 그래프 공용 메타데이터에 넣어 기존 계약 검사4개가 실패했으며, 캐릭터 요약/상세에만 전달하도록 고친 뒤 전체 재검사를 통과했다.
+
+실제 Foundry UI로 합성 친구·인터뷰 각 288메시지 입력→생성용224/보류64→evidence-v4 무예시8섹션→표본12턴→원문 검토 기록→5/5→Gemini채팅을 완료했다. 새대화 후 이전 기록 선택, 서버 재시작 후 새탭 복원을 확인했다. 기존1269파일 SHA 변경0/누락0. 영상 렌더링은 실제 호출하지 않았으며 G6 대기/재개는 합성 검사로 검증했다. 자세한 범위는 D-0181 인계 참고.

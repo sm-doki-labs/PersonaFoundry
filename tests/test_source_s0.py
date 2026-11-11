@@ -1,4 +1,4 @@
-"""트윈 s0 출처 묶음과 G0 (D-0120, D-0126, D-0128). 원문은 모두 테스트가 만든 합성 자료다."""
+"""모티브 s0 출처 묶음과 G0 (D-0120, D-0126, D-0128). 원문은 모두 테스트가 만든 합성 자료다."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from character_factory_poc.common.errors import CheckFailed, FactoryError
+from character_factory_poc.common.errors import CheckFailed
 from character_factory_poc.pipeline.approve import approve_gate
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.orchestrator import RunOptions, run_until
@@ -187,15 +187,11 @@ def test_run_s0_keeps_holdout_out_of_agent_and_corpus(ctx: Context, tmp_path: Pa
     assert "010-1234-5678" not in corpus_text
 
 
-def test_g0_locked_without_consent(ctx: Context, tmp_path: Path) -> None:
+def test_g0_approves_without_consent(ctx: Context, tmp_path: Path) -> None:
     cid = _twin(ctx)
     run_s0(ctx, cid, _write_pack(tmp_path, consent=False))
-    with pytest.raises(FactoryError, match="사용 근거"):
-        approve_gate(ctx, cid, "G0", {"decision": "APPROVE", "reviewer": "u"})
-    approve_gate(
-        ctx, cid, "G0", {"decision": "REQUEST_CHANGES", "reviewer": "u", "reasons": "동의 받기"}
-    )
-    assert ctx.state(cid).gate("G0").status == "REJECTED"
+    approve_gate(ctx, cid, "G0", {"decision": "APPROVE", "reviewer": "u"})
+    assert ctx.state(cid).gate("G0").status == "APPROVED"
 
 
 def test_g0_approval_unblocks_twin_front(ctx: Context, tmp_path: Path) -> None:

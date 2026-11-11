@@ -35,7 +35,7 @@ class ModelBindingImport(Strict):
     def pinned_hf_adapter(self) -> ModelBindingImport:
         if self.provider == "HF_ADAPTER":
             if not re.fullmatch(r"[0-9a-fA-F]{40}", self.revision):
-                raise ValueError("HF revision은 40자리 커밋 해시여야 한다")
+                raise ValueError("Hugging Face 어댑터의 버전은 40자리 커밋 해시여야 해요.")
             if not re.fullmatch(r"[\w.-]+/[\w.-]+", self.ref, re.ASCII):
-                raise ValueError("HF ref는 소유자/저장소 이름이어야 한다")
+                raise ValueError("Hugging Face 어댑터의 모델 이름은 '소유자/저장소' 꼴이어야 해요.")
         return self

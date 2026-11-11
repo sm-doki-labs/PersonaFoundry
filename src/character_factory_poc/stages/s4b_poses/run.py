@@ -48,10 +48,10 @@ def s4b_config(ctx: Context) -> dict:
     return config_for(ctx, "s4b", DEFAULTS)
 
 
-def plan_calls(ctx: Context) -> list[CallPlan]:
+def plan_calls(ctx: Context, chapter_count: int = 3) -> list[CallPlan]:
     s4b_config(ctx)
-    images, judges = worst_case_calls(qa_settings(ctx), 3)
-    description = "직접 정의한 배경 plate 최대 3장"
+    images, judges = worst_case_calls(qa_settings(ctx), chapter_count)
+    description = f"직접 정의한 배경 plate 최대 {chapter_count}장"
     if judges:
         description += f" (자동 검사 포함 최대 {images}장)"
     plans = [
@@ -73,6 +73,8 @@ def check_scenes(chosen: list[dict], guard: list[dict]):
 
     def check(out: SceneWriterOutput) -> list[str]:
         problems = check_no_names(out, guard)
+        if {ch.chapterId for ch in out.chapters} != set(by_chapter):
+            return ["요청한 챕터를 확인한다"]
         for chapter in out.chapters:
             src = by_chapter[chapter.chapterId]
             if src["source"] == "CANDIDATE":
@@ -100,9 +102,11 @@ def check_scenes(chosen: list[dict], guard: list[dict]):
     return check
 
 
-def check_poses(count: int, guard: list[dict]):
+def check_poses(count: int, guard: list[dict], chapters=CHAPTERS):
     def check(out: PoseOutput) -> list[str]:
         problems = check_no_names(out, guard)
+        if {ch.chapterId for ch in out.chapters} != set(chapters):
+            return ["요청한 챕터를 확인한다"]
         for chapter in out.chapters:
             expected = {f"{chapter.chapterId}-p{i}" for i in range(1, count + 1)}
             if (
@@ -129,8 +133,10 @@ def codex_checks(stage: str, workspace: Path) -> tuple[str, list]:
             check_scenes(read_json(inputs / "chosen-backgrounds.json"), guard)
         ]
     if stage == "s4b-pose":
-        count = read_json(inputs / "settings.json")["count"]
-        return "pose-candidates-output-v1", [check_poses(count, guard)]
+        settings = read_json(inputs / "settings.json")
+        return "pose-candidates-output-v1", [
+            check_poses(settings["count"], guard, settings.get("chapters", CHAPTERS))
+        ]
     raise ValueError(f"지원하지 않는 검사 단계: {stage}")
 
 
@@ -158,7 +164,7 @@ def _scene_example(chosen: list[dict]) -> dict:
     }
 
 
-def _pose_example(count: int) -> dict:
+def _pose_example(count: int, chapters=CHAPTERS) -> dict:
     return {
         "chapters": [
             {
@@ -180,7 +186,7 @@ def _pose_example(count: int) -> dict:
                     for i in range(1, count + 1)
                 ],
             }
-            for ch in ("ch1", "ch2", "ch3")
+            for ch in chapters
         ]
     }
 
@@ -239,7 +245,7 @@ def run_s4b(ctx: Context, cid: str) -> Path:
     cfg = s4b_config(ctx)
     brief, previous, regenerate = rework_scope(ctx, cid)
     budget = ctx.budget()
-    budget.check_plan(plan_calls(ctx))
+    budget.check_plan(plan_calls(ctx, len(backgrounds.chapters)))
     settings = qa_settings(ctx)
     warning = ensure_judge(ctx, settings)
     rev = next_rev(ctx.character_dir(cid) / "s4b-poses", "ps")
@@ -250,6 +256,8 @@ def run_s4b(ctx: Context, cid: str) -> Path:
         chosen = []
         by_chapter = {ch.chapterId: ch for ch in backgrounds.chapters}
         for arc in plan.chapterArc:
+            if arc.chapterId not in by_chapter:
+                continue
             chapter = arc.chapterId
             if chapter in selection.picks:
                 candidate = next(
@@ -298,7 +306,7 @@ def run_s4b(ctx: Context, cid: str) -> Path:
             prior_scene = {ch.chapterId: ch for ch in prev_plan.chapters}
         fresh_scene = {ch.chapterId: ch for ch in scene.chapters}
         chapters = []
-        for chapter_id in CHAPTERS:
+        for chapter_id in by_chapter:
             if previous is not None and chapter_id not in regenerate:
                 chapters.append(carry_scene_chapter(previous, prior_scene[chapter_id], rev_dir))
                 continue
@@ -344,13 +352,13 @@ def run_s4b(ctx: Context, cid: str) -> Path:
         write_once_json(rev_dir / "scene-plan.json", dump(scene_plan))
         pose_inputs = {
             "scene-plan": dump(scene_plan),
-            "chapterArc": [dump(c) for c in plan.chapterArc],
+            "chapterArc": [dump(c) for c in plan.chapterArc if c.chapterId in by_chapter],
             "personality": {
                 "coreTraits": plan.coreTraits,
                 "contrastTrait": plan.contrastTrait,
                 "choices": [dump(c) for c in plan.choices],
             },
-            "settings": {"count": cfg["candidates_per_chapter"]},
+            "settings": {"count": cfg["candidates_per_chapter"], "chapters": list(by_chapter)},
             "name-guard": guard,
         }
         if brief is not None:
@@ -364,8 +372,8 @@ def run_s4b(ctx: Context, cid: str) -> Path:
             "pose-candidates-output-v1",
             rev_dir / "workspace-pose",
             pose_inputs,
-            [check_poses(cfg["candidates_per_chapter"], guard)],
-            _pose_example(cfg["candidates_per_chapter"]),
+            [check_poses(cfg["candidates_per_chapter"], guard, by_chapter)],
+            _pose_example(cfg["candidates_per_chapter"], by_chapter),
         )
         prior_pose: dict[str, object] = {}
         if previous is not None:
@@ -375,7 +383,7 @@ def run_s4b(ctx: Context, cid: str) -> Path:
             prior_pose = {ch.chapterId: ch for ch in prev_pose_set.chapters}
         fresh_pose = {ch.chapterId: ch for ch in pose_out.chapters}
         pose_chapters = []
-        for chapter_id in CHAPTERS:
+        for chapter_id in by_chapter:
             if previous is not None and chapter_id not in regenerate:
                 pose_chapters.append(dump(prior_pose[chapter_id]))
             else:

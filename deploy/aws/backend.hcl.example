@@ -1,0 +1,5 @@
+bucket = "REPLACE-WITH-FACTORY-STATE-BUCKET"
+key = "factory/dev/factory.tfstate"
+region = "ap-northeast-2"
+encrypt = true
+use_lockfile = true

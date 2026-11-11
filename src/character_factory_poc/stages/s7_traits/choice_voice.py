@@ -54,6 +54,7 @@ def recipe(ctx):
         base / "resources/actor-system-rules-v2.md",
         base / "resources/actor-system-rules-v3.md",
         base / "resources/actor-system-rules-v4.md",
+        base / "resources/actor-system-rules-v4-motif.md",
     ]
     return dict(
         code={str(p.relative_to(base)): sha256_file(p) for p in sorted(paths) if p.exists()},

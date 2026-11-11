@@ -136,7 +136,7 @@ class StateFile:
         """의존 관문·단계가 승인됐고 선행 단계가 끝났는지 (FR-02, D-0042)."""
         from character_factory_poc.pipeline.origin import stage_def
 
-        # D-0128: 트윈 캐릭터는 갈래 그래프의 의존을 본다. 오리지널은 STAGES 그대로다.
+        # D-0128: 모티브 캐릭터는 갈래 그래프의 의존을 본다. 오리지널은 STAGES 그대로다.
         s = stage_def(self.path.parent, sid)
         for g in sorted(s.deps):
             if self.gate(g).status != "APPROVED":

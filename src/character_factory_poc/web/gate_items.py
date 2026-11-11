@@ -11,6 +11,7 @@ S9~S11(G7a·G7·G8·G9)은 단계 코드가 없어 `reads.GATE_META`가 connecte
 from __future__ import annotations
 
 import json
+import re
 from importlib import resources
 from pathlib import Path
 from typing import Any
@@ -205,6 +206,29 @@ def faces(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[s
     }
 
 
+_EXAMPLES = "상대가 하는 말 예:"
+
+
+def plain_use_when(text: Any) -> str:
+    """동작의 '이럴 때' 규칙(모델용 원문)을 검토자가 읽는 한 줄로 줄인다(QA v5 C-07).
+
+    원문은 '<이름> — 상황. … 상대가 하는 말 예: 「…」 · 「…」. 틀지 않는다: … → key' 꼴이다.
+    상대가 하는 말 예가 있으면 그 예만, 없으면 영어가 섞이지 않은 첫 문장만 쓴다. 원문은
+    대화 중 영상 고르기에 그대로 쓰이고 화면에만 이 글을 보인다.
+    """
+    s = " ".join(str(text or "").split()).split("틀지 않는다", 1)[0]
+    head, sep, rest = s.partition(" — ")
+    situation, _, examples = (rest if sep else head).partition(_EXAMPLES)
+    quotes = re.findall(r"「[^」]+」", examples)
+    if quotes:
+        return "이런 말에 나와요: " + " · ".join(quotes)
+    for sentence in re.split(r"(?<=[.!?])\s+", situation):
+        line = sentence.strip().rstrip(".")
+        if line and not re.search(r"[A-Za-z]", line):
+            return "이럴 때: " + line
+    return ""
+
+
 def _plain_rationale(candidate: dict[str, Any], fallback: str) -> str:
     """외모군 근거를 검토자가 읽는 말로 바꾼다. 원래 근거(백분위·IQR)는 보고서에 그대로 남는다."""
     lists = candidate.get("listCount")
@@ -224,6 +248,41 @@ def _plain_rationale(candidate: dict[str, Any], fallback: str) -> str:
     else:
         text += " 목록이 짧아 순위를 비교하지 못했어요."
     return text
+
+
+# 기획안 말투 칸에 섞여 들어오는 원문 통계 문장(예: "종결형은 높임 459, 반말 0, 미분류 379였다").
+# 화면에는 캐릭터 설명만 두고, 통계는 접힌 '기술 정보'로 옮긴다. 원래 칸 값은 그대로 둔다.
+_STAT_SENTENCE = re.compile(r"(종결형|미분류|높임\s*\d|반말\s*\d|\d+(?:\.\d+)?\s*%)")
+_SENTENCE_END = re.compile(r"(?<=[.!?。])\s+")
+
+
+def split_stat_sentences(text: Any) -> tuple[str, list[str]]:
+    """글을 문장으로 나눠 통계 문장과 나머지를 가른다. 화면 표시용이다."""
+    if not isinstance(text, str) or not text.strip():
+        return (text if isinstance(text, str) else ""), []
+    keep: list[str] = []
+    stats: list[str] = []
+    for sentence in _SENTENCE_END.split(text.strip()):
+        (stats if _STAT_SENTENCE.search(sentence) else keep).append(sentence)
+    if not keep:
+        # 문장을 나누지 못해 설명까지 통계로 보이면 원래 글을 그대로 둔다.
+        return text, []
+    return " ".join(keep), stats
+
+
+def _plan_display(candidates: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    out = {}
+    for c in candidates:
+        voice, stats = split_stat_sentences(c.get("voiceSummary"))
+        if stats:
+            out[str(c.get("variantId"))] = {"voiceSummary": voice, "voiceStats": stats}
+    return out
+
+
+def _same_prompt(long: Any, short: Any) -> bool:
+    a = long.get("text") if isinstance(long, dict) else None
+    b = short.get("text") if isinstance(short, dict) else None
+    return bool(a) and a == b
 
 
 def plan_variants(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[str, Any]:
@@ -283,6 +342,8 @@ def plan_variants(char_dir: Path, character_id: str, stage_dir: str, rev: str) -
         "seedRev": seed_rev,
         "editableFields": list(EDITABLE_FIELDS),
         "candidates": candidates,
+        # 화면 표시용: 말투 칸의 통계 문장을 뺀 글과 뺀 문장(기술 정보로 접는다).
+        "planDisplay": _plan_display(candidates),
         "selection": selection,
         "approvedPlan": plan,
         "helper": (
@@ -586,6 +647,7 @@ def actions(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict
                     "title": spec.get("title", ""),
                     "description": spec.get("description", ""),
                     "useWhen": spec.get("useWhen", ""),
+                    "whenText": plain_use_when(spec.get("useWhen", "")),
                     "duration": spec.get("duration"),
                     "prompt": spec.get("prompt", ""),
                     "reviewNote": spec.get("reviewNote", ""),
@@ -651,11 +713,61 @@ def _latest_trait_sheet(char_dir: Path, character_id: str) -> dict[str, Any] | N
     }
 
 
+def _motif_review(char_dir: Path, pair: dict, rev: str) -> dict:
+    import re
+
+    from character_factory_poc.common.canonical import sha256_file
+    from character_factory_poc.common.demo_chat import Scene, latest, resource
+    from character_factory_poc.pipeline.origin import is_twin
+
+    if not is_twin(char_dir):
+        return {}
+    scene = Scene.read(char_dir)
+    result = {"inferredTraits": []}
+    if scene.prompt and scene.prompt.name == rev and (samples := scene.samples()):
+        result["samples"] = samples
+    traits = char_dir / "s7-traits"
+    folder = latest(traits, "tr")
+    if digest := pair.get("traitSheetSha256"):
+        # 지금 검토하는 프롬프트에 실제로 쓰인 특질만 보여 준다.
+        folder = next(
+            (p.parent for p in traits.glob("tr*/trait-sheet.json") if sha256_file(p) == digest),
+            None,
+        )
+    if folder is None:
+        return result
+    entries = (read_json(folder / "trait-ledger.json") or {}).get("traits", [])
+    inferred = [t for t in entries if t.get("basis") == "INFERRED"]
+    gate = (read_json(char_dir / "state.json") or {}).get("gates", {}).get("G0", {})
+    rows = {}
+    if gate.get("status") == "APPROVED" and re.fullmatch(r"sp[0-9]+", gate.get("rev") or ""):
+        rows = _corpus_rows(
+            char_dir / "s0-source" / gate["rev"] / "corpus.jsonl",
+            {t.get("sourceRef") for t in inferred},
+        )
+    names = resource("motif-demo-situations-v1.json")
+    for t in inferred:
+        situation = t.get("demoSituation")
+        msg = t.get("sourceRef")
+        refs = [{"msgId": msg, "quote": rows[msg]["text"]}] if msg in rows else []
+        result["inferredTraits"].append(
+            dict(
+                situation=situation,
+                situationKo=names.get(situation, "그 밖의 상황"),
+                behavior=t["behavior"],
+                refs=refs,
+            )
+        )
+    return result
+
+
 def prompts(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[str, Any]:
     """G6: 긴·짧은 프롬프트와 표본 응답."""
     folder = Path(char_dir) / stage_dir / rev
     pair = read_json(folder / "prompt-pair.json")
     probe = read_json(folder / "prompt-probe.json")
+    # Private dialogue stays in this gate view, pinned to the displayed S8 revision.
+    evidence_review = read_json(folder / "evidence-review.json")
     if pair is None:
         return _empty("prompts", ["prompt-pair.json이 없다. S8을 먼저 돌린다"])
     bundle = read_json(folder / "persona-bundle.json")
@@ -675,6 +787,7 @@ def prompts(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict
         }
     return {
         **extras,
+        **_motif_review(char_dir, pair, rev),
         "kind": "prompts",
         "source": "artifacts",
         "problems": [] if probe is not None else ["prompt-probe.json이 없다(표본 응답 없음)"],
@@ -682,6 +795,8 @@ def prompts(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict
         "sections": pair.get("sections", []),
         "long": pair.get("long"),
         "short": pair.get("short"),
+        # 화면 표시용: 긴·짧은 프롬프트 글이 같으면 하나만 보여 준다.
+        "samePrompt": _same_prompt(pair.get("long"), pair.get("short")),
         "systemRulesRef": pair.get("systemRulesRef", ""),
         "systemRulesSha256": pair.get("systemRulesSha256", ""),
         "shortAdopted": pair.get("shortAdopted", False),
@@ -689,8 +804,12 @@ def prompts(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict
         "judgeModel": (probe or {}).get("judgeModel", ""),
         "probeNote": (probe or {}).get("note", ""),
         "traitSheet": trait,
+        "evidenceReview": evidence_review,
         "helper": (
-            "긴 프롬프트·짧은 프롬프트·표본 응답을 비교하고 승인하거나 고칠 점을 적는다. "
+            "자동 구조 검사만 통과했어요. 원문 근거가 규칙과 적용 조건을 의미상 뒷받침하는지는 "
+            "사람이 읽고 확인해야 해요. 원문은 내부 검토용이에요."
+            if evidence_review is not None
+            else "긴 프롬프트·짧은 프롬프트·표본 응답을 비교하고 승인하거나 고칠 점을 적는다. "
             "판정은 참고용이고 승인은 사람이 한다."
         ),
     }
@@ -768,7 +887,10 @@ def data_dataset(char_dir: Path, character_id: str, stage_dir: str, rev: str) ->
     notes = [
         f"차단 실패 {dataset.get('blockingFailures', 0)}건, 경고 {dataset.get('warnings', 0)}건"
     ]
-    notes += [str(n) for n in report.get("warnings", [])][:5] if isinstance(report, dict) else []
+    if isinstance(report, dict):
+        from character_factory_poc.web.model_path import plain_note
+
+        notes += [plain_note(str(n)) for n in report.get("warnings", [])][:5]
     plan = read_json(rev_dir / "plan.json") or {}
     labels = {
         str(c.get("clusterId")): str(c.get("label") or c.get("clusterId"))
@@ -850,7 +972,7 @@ def eval_report(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> 
 def twin_comparison(
     char_dir: Path, character_id: str, stage_dir: str, rev: str
 ) -> dict[str, Any] | None:
-    """트윈 G8의 실제 답 비교 요약(twin-comparison-v1). 없으면 None이다.
+    """모티브 G8의 실제 답 비교 요약(twin-comparison-v1). 없으면 None이다.
 
     장면별 정답 키(trials)와 원문은 넣지 않는다. 가족 블라인드 파일은 조건 이름 없이 판 번호로만
     알리고, 실제 답과 생성 답을 나란히 보이는 시연 화면은 그 판의 가족 판정을 가져온 뒤에만 연다.
@@ -927,7 +1049,7 @@ def twin_comparison(
     }
 
 
-# ---------------------------------------------------------------- G0·G1s (트윈 갈래)
+# ---------------------------------------------------------------- G0·G1s (모티브 갈래)
 
 
 def _corpus_rows(path: Path, wanted: set[str]) -> dict[str, dict[str, Any]]:
@@ -986,6 +1108,8 @@ def source_pack(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> 
                 "subjectSpeaker": spec.get("subjectSpeaker"),
                 "userSpeaker": spec.get("userSpeaker"),
                 "date": spec.get("date"),
+                "register": t.get("register") or spec.get("register"),
+                "sourceUrl": spec.get("sourceUrl"),
             }
         )
     reps = [r for r in digest.get("representative", []) if isinstance(r, dict)]
@@ -1002,6 +1126,7 @@ def source_pack(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> 
     check = digest.get("speakerCheck") if isinstance(digest.get("speakerCheck"), dict) else {}
     return {
         "kind": "sourcePack",
+        "publicFacts": read_json(folder / "facts.json"),
         "source": "artifacts",
         "problems": problems,
         "sourceRev": index.get("sourceRev"),
@@ -1064,7 +1189,7 @@ def source_photos(char_dir: Path, character_id: str, stage_dir: str, rev: str) -
     folder = Path(char_dir) / stage_dir / rev
     doc = read_json(folder / "photo-options.json")
     if doc is None:
-        return _empty("sourcePhotos", ["photo-options.json이 없다. 트윈 s2를 먼저 돌린다"])
+        return _empty("sourcePhotos", ["photo-options.json이 없다. 모티브 s2를 먼저 돌린다"])
     photos = []
     for i, option in enumerate(doc.get("options", [])):
         if not isinstance(option, dict):
@@ -1119,7 +1244,7 @@ def release_package(char_dir: Path, character_id: str, stage_dir: str, rev: str)
         "verification": {"status": "NOT_RUN", "disposableDb": True, "steps": []},
         "page": asset(char_dir, character_id, stage_dir, rev, "gate-G9.html"),
     }
-    # D-0126: 트윈만 발표 점검(자동 결과·사람 확인 항목)을 붙인다. 오리지널 G9는 그대로다.
+    # D-0126: 모티브만 발표 점검(자동 결과·사람 확인 항목)을 붙인다. 오리지널 G9는 그대로다.
     from character_factory_poc.stages.s11_release.presentation import view
 
     check = view(rev_dir, package)

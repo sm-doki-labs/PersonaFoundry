@@ -63,7 +63,7 @@ def render_g4b_page(cid: str, rev: str, scene, poses) -> str:
         "<fieldset><legend>챕터별 수정 요청</legend>"
         "<p>결정을 REQUEST_CHANGES로 고르고 고친 챕터의 메모를 적으면, 그 챕터의 장면 사실·자세 "
         "후보만 새 revision으로 다시 만듭니다.</p>"
-        + "".join(change_control(ch, "장면·자세") for ch in ("ch1", "ch2", "ch3"))
+        + "".join(change_control(ch, "장면·자세") for ch in by_chapter)
         + "</fieldset>"
     )
     script = change_script() + (
@@ -76,4 +76,6 @@ def render_g4b_page(cid: str, rev: str, scene, poses) -> str:
         "if(v)changes[field]=v;}if(Object.keys(changes).length)tweaks[ch]=changes;}"
         "return {...o,picks,custom,tweaks};}"
     )
-    return page_shell("G4b 장면 확인과 자세 선택", cid, rev, sections, script)
+    return page_shell(
+        "G4b 장면 확인과 자세 선택", cid, rev, sections, script, chapters=list(by_chapter)
+    )

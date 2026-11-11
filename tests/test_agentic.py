@@ -178,6 +178,11 @@ def test_taint_detection(tmp_path):
         "/tmp/gen.py",
         "~",
     ]
+    # sed 치환식 속 '/out' 같은 글자는 경로가 아니다(2026-11-10 실제 실행 오탐)
+    sed = [
+        "/bin/zsh -lc \"sed -i '' -e \\\"s/out\\['notes'\\]=.*/out['notes']=''/\\\" scratch/a.py\""
+    ]
+    assert find_tainted_paths(sed, ws, []) == []
 
 
 def test_codex_backend_retries_with_feedback(ctx, tmp_path):

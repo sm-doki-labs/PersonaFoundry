@@ -15,12 +15,15 @@ from typing import Annotated, Any
 from fastapi import Body, FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import StrictBool
 
 from character_factory_poc.common.config import load_config
 from character_factory_poc.common.errors import FactoryError
 from character_factory_poc.pipeline.approve import approve_gate
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.origin import set_archived
 from character_factory_poc.web import reads
+from character_factory_poc.web.demo_chat import install_demo_routes
 from character_factory_poc.web.errors import WebError
 from character_factory_poc.web.events import EventHub, format_sse
 from character_factory_poc.web.jobs import JobManager
@@ -50,6 +53,8 @@ class _StudioStaticFiles(_DevStaticFiles):
             ".",
             "index.html",
             "factory.html",
+            "sources.html",
+            "chat.html",
             "d-ops.html",
             "c-glass.html",
             "a-studio.html",
@@ -69,6 +74,7 @@ def create_app(
     """공장 루트 하나에 붙는 워크숍 앱을 만든다. runner는 시험에서 작업 실행 함수를 바꿀 때 쓴다."""
     root = Path(root).expanduser().resolve()
     conf = load_settings(root, config_path)
+    root = conf.root
     if jobs_dir is not None:
         conf = replace(conf, jobs_dir=Path(jobs_dir))
     hub = EventHub()
@@ -83,6 +89,10 @@ def create_app(
     app.state.settings = conf
     app.state.hub = hub
     app.state.jobs = jobs
+    from character_factory_poc.web.sources import install_source_routes
+
+    install_source_routes(app, conf, jobs)
+    install_demo_routes(app, root, conf)
     from character_factory_poc.web.trait_authoring import install_authoring_routes
 
     install_authoring_routes(app, root, conf, jobs)
@@ -92,6 +102,9 @@ def create_app(
     from character_factory_poc.web.runtime import install_runtime_routes
 
     install_runtime_routes(app, root, conf, jobs)
+    from character_factory_poc.web.model_binding import install_binding_routes
+
+    install_binding_routes(app, root, conf, jobs)
 
     @app.exception_handler(WebError)
     async def _web_error(_request: Request, exc: WebError) -> JSONResponse:  # pragma: no cover
@@ -112,12 +125,13 @@ def create_app(
         }
 
     @app.get("/api/projects")
-    def projects() -> dict[str, Any]:
-        data = reads.list_projects(root)
+    def projects(includeArchived: bool = False) -> dict[str, Any]:
+        data = reads.list_projects(root, include_archived=includeArchived)
         for character in data["characters"]:
             character["job"] = jobs.active_for(character["id"])
             recent = jobs.list(character_id=character["id"], limit=1)
             character["lastJob"] = recent[0] if recent else None
+            reads.job_status(character, character["job"], character["lastJob"])
             # 개요·받은 일이 모든 캐릭터의 유료 확인 대기를 상세 화면과 같은 기준으로 센다.
             character["held"] = _held(character["id"], character["lastJob"])
         data["totals"]["runningJobs"] = len(jobs.active_jobs())
@@ -131,8 +145,15 @@ def create_app(
         data["jobs"] = jobs.list(character_id=character_id, limit=10)
         data["lastJob"] = data["jobs"][0] if data["jobs"] else None
         data["held"] = _held(character_id, data["lastJob"])
+        reads.job_status(data["summary"], data["job"], data["lastJob"])
+        data.update({k: data["summary"][k] for k in ("status", "statusLabel")})
         data["modelPath"] = _model_path(character_id)
         return data
+
+    @app.post("/api/characters/{character_id}/archive")
+    def archive(character_id: str, archived: Annotated[StrictBool, Body(embed=True)]):
+        set_archived(reads.character_dir(root, character_id), archived)
+        return {"archived": archived}
 
     def _model_path(character_id: str) -> dict[str, Any]:
         from character_factory_poc.web.model_path import model_path

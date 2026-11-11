@@ -242,27 +242,37 @@ body.fl{font-family:var(--fd-font);font-size:var(--fd-fs-3);line-height:1.5;lett
 .fd-sheet-note{margin:0;padding:8px 16px;font-size:var(--fd-fs-2);color:var(--fd-fg-muted);border-bottom:1px solid var(--fd-line);background:var(--fd-bg-surface)}
 .fl-frame{flex:1;width:100%;border:0;background:var(--fd-bg-app)}
 
-/* 반응형: 넓음 3-pane → 중간은 사이드바 레일 → 좁음은 사이드바 숨김·인스펙터 아래로 */
+/* 반응형(3차 QA): 노트북 폭에서도 사이드바에 이름이 보인다. 넓음 3-pane → 1439 이하는 사이드바·인스펙터를 줄임 →
+   1099 이하는 인스펙터를 아래로 → 899 이하에서만 첫 글자 레일 → 640 이하는 사이드바 숨김·선택 상자 */
 @media (max-width:1439px){
-  .fd-shell{grid-template-columns:60px minmax(0,1fr)}
-  .fd-word,.fd-side h2,.fd-nav .lbl,.fd-nav .num:not(.attn),.fd-nav .num .u,.fd-foot-links,.fd-side-actions .lbl{display:none}
-  .fd-brand{justify-content:center;padding:14px 0 10px}
-  .fd-side-actions{padding:4px 10px 8px}
-  .fd-side-actions .btn{width:100%;padding:0}
-  .fd-nav{justify-content:center;padding:0;position:relative}
-  .fd-nav .num.attn{position:absolute;top:-2px;right:2px;min-width:16px;height:16px;font-size:10px;padding:0 4px}
-  .fd-theme{grid-template-columns:1fr}
+  .fd-shell{grid-template-columns:200px minmax(0,1fr)}
+  .fd-body{grid-template-columns:minmax(0,1fr) 272px}
+  .fd-canvas{padding-left:var(--fd-space-5);padding-right:var(--fd-space-5)}
 }
 @media (max-width:1099px){
   body.fl{overflow:auto}
-  .fd-shell{grid-template-columns:minmax(0,1fr);height:auto;min-height:100dvh}
-  .fd-side{display:none}
-  .fd-pick{display:inline-block}
+  .fd-shell{height:auto;min-height:100dvh}
+  .fd-side{position:sticky;top:0;height:100dvh}
   .fd-body{grid-template-columns:minmax(0,1fr)}
   .fd-canvas{overflow:visible;padding:16px}
   .fd-inspector{border-left:0;border-top:1px solid var(--fd-line)}
   .fd-metrics{margin-left:0;width:100%}
   .fd-metrics>span:first-child{padding-left:0}
+}
+@media (max-width:899px){
+  .fd-shell{grid-template-columns:60px minmax(0,1fr)}
+  .fd-word,.fd-side h2,.fd-nav .lbl,.fd-nav .num:not(.attn),.fd-nav .num .u,.fd-foot-links,.fd-side-actions .lbl,.fd-side-q,.fd-side-empty{display:none}
+  .fd-brand{justify-content:center;padding:14px 0 10px}
+  .fd-side-actions{padding:4px 10px 8px}
+  .fd-side-actions .btn{width:100%;padding:0}
+  .fd-nav,.fd-nav.two{justify-content:center;padding:0;position:relative;min-height:32px}
+  .fd-nav .num.attn{position:absolute;top:-2px;right:2px;min-width:16px;height:16px;font-size:10px;padding:0 4px}
+  .fd-theme{grid-template-columns:1fr}
+}
+@media (max-width:640px){
+  .fd-shell{grid-template-columns:minmax(0,1fr)}
+  .fd-side{display:none}
+  .fd-pick{display:inline-block}
   .fd-head{padding:8px 56px 8px 16px;position:relative}
   .fd-head-theme{display:grid;position:absolute;top:10px;right:16px;margin:0}
 }
@@ -329,8 +339,6 @@ body.fl{font-family:var(--fd-font);font-size:var(--fd-fs-3);line-height:1.5;lett
 .ov-name{display:flex;align-items:center;gap:10px;color:var(--fd-fg)!important}
 .ov-name b{display:block;font-weight:600}
 .ov-name small{display:block;color:var(--fd-fg-muted);font-size:var(--fd-fs-2)}
-.ov-badges{display:flex;flex-wrap:wrap;gap:4px}
-.ov-badges .muted{color:var(--fd-fg-subtle)}
 .ov-now .age{color:var(--fd-attention-fg)}
 .ov-prog{display:flex;align-items:center;gap:8px}
 .ov-prog .n{font-variant-numeric:tabular-nums;color:var(--fd-fg-muted);font-size:var(--fd-fs-2)}
@@ -372,10 +380,10 @@ body.fl{font-family:var(--fd-font);font-size:var(--fd-fs-3);line-height:1.5;lett
 .fd-help{display:inline-grid;place-items:center;width:28px;height:28px;margin:0 auto 8px;border:1px solid var(--fd-line-strong);border-radius:50%;color:var(--fd-fg-muted);font-weight:700;font-size:13px;text-decoration:none}
 .fd-help:hover{background:var(--fd-bg-hover);color:var(--fd-fg)}
 .fd-side-foot .fd-help{display:none}
-@media (max-width:1439px){.fd-side-foot .fd-help{display:inline-grid}}
+@media (max-width:899px){.fd-side-foot .fd-help{display:inline-grid}}
 .fd-nav .num{white-space:nowrap}
 
-/* 트윈 갈래(D-0128): 맨 앞 열에 출처 팀이 두 줄 가운데 선다. 학습하지 않는 방식이면 데이터 열이 빠진다.
+/* 모티브 갈래(D-0128): 맨 앞 열에 출처 팀이 두 줄 가운데 선다. 학습하지 않는 방식이면 데이터 열이 빠진다.
    6열은 칸이 좁아서 열 너비를 단계 이름 길이에 맞춰 나눈다: 출처(상태 글 'N분째 검토 대기')·장면(긴 이름)은 조금 넓게, 학습(짧은 이름)은 조금 좁게. */
 .fl-grid.tw{grid-template-columns:minmax(0,1.08fr) minmax(0,1.04fr) minmax(0,1.12fr) minmax(0,1fr) minmax(0,.8fr) minmax(0,1.1fr);column-gap:24px;grid-template-areas:"so ap sc vd . pk" "so pl ps dt tr pk"}
 .fl-grid.tw.nt{grid-template-columns:repeat(5,minmax(0,1fr));column-gap:32px;grid-template-areas:"so ap sc vd pk" "so pl ps tr pk"}
@@ -388,7 +396,7 @@ body.fl{font-family:var(--fd-font);font-size:var(--fd-fs-3);line-height:1.5;lett
   .fl-grid.tw:not(.nt) .fl-row{padding:6px 8px;gap:6px}
   .fl-grid.tw:not(.nt) .fl-row .nm svg{margin-left:3px}
 }
-/* 단계 이름 뒤 아이콘은 마지막 낱말과 함께 줄을 바꾼다. 트윈 칸의 상태 글은 낱말 단위로 최대 두 줄,
+/* 단계 이름 뒤 아이콘은 마지막 낱말과 함께 줄을 바꾼다. 모티브 칸의 상태 글은 낱말 단위로 최대 두 줄,
    설명(받은 사진에서…·검토: …)은 한 줄 말줄임이다. 전체 글은 title과 인스펙터에서 본다 */
 .fl-row .nm .nb{white-space:nowrap}
 .fl-grid.tw .fl-row .sb{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
@@ -402,7 +410,12 @@ body.fl{font-family:var(--fd-font);font-size:var(--fd-fs-3);line-height:1.5;lett
 .fd-track .d{width:6px;height:6px;border-radius:50%;flex:none;background:var(--fd-slate-8)}
 .fd-track.tw{color:var(--fd-fg)}
 .fd-track.tw .d{background:var(--fd-fg)}
+/* 사이드바 캐릭터 줄의 모티브 표시(2차). 좁은 사이드바에서는 이름과 함께 숨는다. */
+.fd-nav .fd-org{flex:none;height:18px;padding:0 6px;border:1px solid var(--fd-line-strong);border-radius:999px;display:inline-flex;align-items:center;font-size:11px;font-weight:500;color:var(--fd-fg-muted);line-height:1}
+@media (max-width:1439px){.fd-nav .fd-org{display:none}}
 .fd-title .fd-track{align-self:center}
+.fd-title .fd-chat{margin-left:auto;align-self:center;text-decoration:none}
+.fd-title .fd-chat:hover{text-decoration:none}
 .ov-name .fd-track{margin-left:6px}
 .fd-demo{font-size:var(--fd-fs-2);color:var(--fd-fg-subtle)}
 
@@ -422,6 +435,7 @@ body.fl{font-family:var(--fd-font);font-size:var(--fd-fs-3);line-height:1.5;lett
 .md-now.wait{border-color:var(--fd-attention-line);background:var(--fd-attention-bg)}.md-now.wait .ic,.md-now.wait .lab{color:var(--fd-attention-fg)}.md-now.wait .lab{border-color:var(--fd-attention-line)}
 .md-now.run .ic{color:var(--fd-run-fg)}.md-now.idle .ic{color:var(--fd-success-fg)}
 .md-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.md-steps.n2{grid-template-columns:repeat(2,minmax(0,1fr))}
 .md-st{display:flex;flex-direction:column;align-items:stretch;gap:3px;padding:10px 12px;border:1px solid var(--fd-line);border-radius:var(--fd-r-4);background:var(--fd-bg-surface);color:var(--fd-fg);text-align:left;min-width:0;font:inherit}
 .md-st:hover{border-color:var(--fd-line-strong)}
 .md-st[aria-pressed="true"]{border-color:var(--fd-accent);box-shadow:inset 0 0 0 1px var(--fd-accent)}
@@ -522,6 +536,7 @@ body.fl{font-family:var(--fd-font);font-size:var(--fd-fs-3);line-height:1.5;lett
 .md-confirm{flex:none}
 .md-confirm p{margin:0 0 6px}
 .md-vs{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center}
+.md-vs.n3{grid-template-columns:1fr auto 1fr auto 1fr}
 .md-vs .x{color:var(--fd-fg-subtle);font-size:var(--fd-fs-2)}
 .md-arm{display:flex;flex-direction:column;gap:2px;padding:12px;border:1px solid var(--fd-line);border-radius:var(--fd-r-3)}
 .md-arm small{color:var(--fd-fg-muted)}
@@ -535,7 +550,7 @@ body.fl{font-family:var(--fd-font);font-size:var(--fd-fs-3);line-height:1.5;lett
   .md-ro{grid-template-columns:minmax(0,1fr)}
   .md-ro dt{padding-bottom:0;border-bottom:0}
   .md-now .lab{display:none}
-  .md-vs{grid-template-columns:minmax(0,1fr)}
+  .md-vs,.md-vs.n3{grid-template-columns:minmax(0,1fr)}
   .md-vs .x{display:none}
 }
 .md-flow{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
@@ -550,3 +565,96 @@ body.fl{font-family:var(--fd-font);font-size:var(--fd-fs-3);line-height:1.5;lett
 .md-src b{color:var(--fd-fg);font-weight:600}
 .md-src em{font-style:normal;color:var(--fd-fg-subtle);font-size:12px}
 .md-ro dd.warn{color:var(--fd-attention-fg)}
+
+/* 3차 QA: 사이드바 두 줄(이름 · 상태와 구분 정보), 검색, 보관함, 운영 설정 */
+.fd-nav.two{height:auto;min-height:40px;padding:4px 8px}
+.fd-nav.two .lbl{display:flex;flex-direction:column;line-height:1.25}
+.fd-nav.two .nm{display:flex;align-items:center;gap:6px;min-width:0}
+.fd-nav.two .nm .tx{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fd-fg)}
+.fd-nav.two[aria-current="page"] .nm .tx{color:inherit}
+.fd-nav.two small{font-size:var(--fd-fs-1);font-weight:400;color:var(--fd-fg-subtle);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fd-side-q{padding:2px 0 6px}
+.fd-side-q input{width:100%;height:30px;font:inherit;font-size:var(--fd-fs-2);color:var(--fd-fg);background:var(--fd-bg-surface);border:1px solid var(--fd-line-strong);border-radius:var(--fd-r-2);padding:0 8px}
+.fd-side-empty{padding:0 8px}
+.fd-arch{margin-top:6px;border-top:1px solid var(--fd-line);border-radius:0;padding-top:4px;height:36px}
+.fd-foot-links{align-items:center}
+.fd-foot-links .fd-ops{margin-left:auto;display:inline-grid;place-items:center;width:24px;height:24px;border-radius:var(--fd-r-1);color:var(--fd-fg-subtle)}
+.fd-foot-links .fd-ops:hover{background:var(--fd-bg-hover);color:var(--fd-fg)}
+
+/* 캐릭터 머리: 목표 진행, 캐릭터 메뉴(기술 정보·보관) */
+.fd-prog-wrap.fd-goal{display:inline;white-space:nowrap}
+.fd-goal b{color:var(--fd-fg);font-weight:600}
+.fd-more{position:relative;align-self:center}
+.fd-title .fd-more{margin-left:auto}
+.fd-title .fd-chat~.fd-more{margin-left:0}
+.fd-more-btn{width:30px;height:30px;padding:0;display:inline-grid;place-items:center}
+.fd-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:5;width:260px;padding:10px;display:flex;flex-direction:column;gap:8px;background:var(--fd-bg-surface);border:1px solid var(--fd-line);border-radius:var(--fd-r-3);box-shadow:var(--fd-shadow-lg)}
+.fd-menu .btn{justify-content:flex-start;gap:8px}
+.fd-menu .hint{margin:0}
+.fd-menu-tech{display:flex;flex-direction:column;gap:2px;padding-top:8px;border-top:1px solid var(--fd-line);font-size:var(--fd-fs-1);color:var(--fd-fg-subtle)}
+.fd-menu-tech code{word-break:break-all;font-size:var(--fd-fs-1)}
+.fl-mode-line{margin:0;font-size:var(--fd-fs-2);color:var(--fd-fg-muted)}
+
+/* 지금 할 일: 대화 가능 뒤 '더 만들기'는 접힌 보조 항목 */
+.fl-more{flex-basis:100%;padding-left:20px}
+.fl-more-btn{display:inline-flex;align-items:center;gap:4px;font-weight:500;font-size:var(--fd-fs-2);color:var(--fd-fg-muted);text-decoration:none}
+.fl-more-body{margin-top:6px;display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.fl-more-body p{margin:0;color:var(--fd-fg-muted);font-size:var(--fd-fs-2);max-width:62ch}
+
+/* 새로 지어내기: 짧은 이름은 고급 설정으로 접는다 */
+.fl-adv summary{cursor:pointer;font-size:var(--fd-fs-2);color:var(--fd-fg-muted)}
+.fl-adv[open]{display:flex;flex-direction:column;gap:6px}
+
+/* 인스펙터: 끝내 성공한 단계의 이전 실패 시도 */
+.fl-earlier{margin-top:2px}
+.fl-earlier summary{cursor:pointer;font-size:var(--fd-fs-2);color:var(--fd-fg-muted);margin-bottom:8px}
+
+/* 개요 표: 상태 점·글자와 지금 할 일을 한 칸에 */
+.ov-now .fl-pill{margin-right:8px}
+.ov-now-t{color:var(--fd-fg-muted)}
+.ov-prog .n{white-space:nowrap}
+
+/* 모티브 목표 경로만 보이는 그래프: 남은 팀만 한 줄로, 휴대폰 폭은 한 열 */
+.fl-grid.tw.goal{grid-template-columns:repeat(var(--goal-cols),minmax(0,1fr));grid-template-areas:var(--goal-areas);column-gap:32px}
+.fl-grid.tw.goal .fl-card[data-lane="source"]{align-self:start}
+.fl-off{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;padding:14px 2px 0}
+.fl-off .link{display:inline-flex;align-items:center;gap:4px;font-size:var(--fd-fs-2)}
+@container canvas (max-width:760px){
+  .fl-grid.tw.goal{grid-template-columns:minmax(0,1fr);grid-template-areas:var(--goal-stack)}
+}
+/* 영상 등급 카드(계획 4차 약속 5). 원문 화면과 진행 화면의 영상 만들기가 같은 카드를 쓴다. 개수는 쓰지 않고 시간·비용을 네 칸으로 견준다. */
+.vt-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px}
+.vt-opt{position:relative;display:flex;padding:10px 12px;border:1px solid var(--fd-line);border-radius:var(--fd-r-3);background:var(--fd-bg-surface);cursor:pointer;transition:border-color var(--fd-dur-1),background var(--fd-dur-1)}
+.vt-opt:hover{background:var(--fd-bg-hover)}
+.vt-opt:has(input:checked){border-color:var(--fd-accent);background:var(--fd-accent-bg)}
+.vt-opt:has(input:focus-visible){outline:2px solid var(--fd-focus);outline-offset:2px}
+.vt-opt:has(input:disabled){cursor:default;opacity:.6}
+.vt-opt input{position:absolute;opacity:0;pointer-events:none}
+.vt-tx{display:flex;flex-direction:column;gap:4px;min-width:0}
+.vt-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.vt-top b{font-weight:600}
+.vt-tx small{color:var(--fd-fg-muted);font-size:var(--fd-fs-2);line-height:1.45;text-wrap:pretty}
+.vt-cost{display:inline-flex;gap:2px;flex:none}
+.vt-cost i{width:4px;height:10px;border-radius:1px;background:var(--fd-slate-6)}
+.vt-cost i.on{background:var(--fd-fg-muted)}
+.vt-opt:has(input:checked) .vt-cost i.on{background:var(--fd-accent)}
+/* 캐릭터 머리·목록의 영상 상태 한 줄 */
+.fd-vid{display:inline-flex;align-items:center;gap:6px;font-size:var(--fd-fs-2);font-weight:400;color:var(--fd-fg-muted);white-space:nowrap;align-self:center}
+.fd-vid .d{width:6px;height:6px;border-radius:50%;flex:none;background:var(--fd-slate-8)}
+.fd-vid.run .d{background:var(--fd-run-solid)}
+.fd-vid.ok .d{background:var(--fd-success-solid)}
+.fd-vid.fail{color:var(--fd-danger-fg)}
+.fd-vid.fail .d{background:var(--fd-danger-solid)}
+/* 대화 가능 카드 안의 영상 만들기 */
+.fl-vid{flex-basis:100%;padding-left:20px;display:flex;flex-direction:column;gap:8px}
+.fl-vid>p{margin:0;color:var(--fd-fg-muted);font-size:var(--fd-fs-2);max-width:62ch}
+.fl-vid .acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.fl-vid .err{color:var(--fd-danger-fg)}
+.fl-vid .btn{text-decoration:none}
+.fl-sig{display:flex;flex-direction:column;gap:4px;max-width:62ch;padding-top:4px}
+.fl-sig>p{margin:0 0 4px;color:var(--fd-fg-muted);font-size:var(--fd-fs-2)}
+.fl-sig>p b{color:var(--fd-fg);font-weight:600;margin-right:4px}
+.fl-sig label{font-size:var(--fd-fs-2);font-weight:500;color:var(--fd-fg-muted);margin-top:4px}
+.fl-sig .opt{font-weight:400;color:var(--fd-fg-subtle);margin-left:4px}
+.fl-sig input,.fl-sig textarea{font:inherit;color:var(--fd-fg);background:var(--fd-bg-surface);border:1px solid var(--fd-line-strong);border-radius:var(--fd-r-2);padding:6px 10px;width:100%}
+.fl-sig textarea{resize:vertical}

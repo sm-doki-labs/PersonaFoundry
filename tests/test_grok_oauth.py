@@ -253,12 +253,18 @@ def test_token_source_from_helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert TokenSource.from_env("CFP_TEST_XAI_HELPER").token() == "helper-token-123456"
 
 
-def test_default_token_path_is_lazy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """모델을 만들 때 실제 ~/.opencodex/auth.json을 읽지 않는다."""
-    missing = tmp_path / "missing-auth.json"
-    target = "character_factory_poc.providers.grok_oauth.default_token_file"
-    monkeypatch.setattr(target, lambda: missing)
+def test_default_token_is_factory_login_not_opencodex(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """기본 경로는 공장 소유 로그인이다. opencodex auth.json을 읽지 않는다(D-0184)."""
+    from character_factory_poc.providers.grok_oauth import FactoryTokenSource
+
+    def forbidden():
+        raise AssertionError("opencodex 파일을 읽으면 안 된다")
+
+    monkeypatch.setattr("character_factory_poc.providers.grok_oauth.default_token_file", forbidden)
+    monkeypatch.setenv("CFP_XAI_OAUTH_FILE", str(tmp_path / "missing-login.json"))
     m = _model()
-    assert m.token_source.token_file == missing
-    with pytest.raises(VideoGenerationError, match="인증 파일을 읽지 못했다"):
+    assert isinstance(m.token_source, FactoryTokenSource)
+    with pytest.raises(VideoGenerationError, match="cfp grok login"):
         m.submit(_req(tmp_path))

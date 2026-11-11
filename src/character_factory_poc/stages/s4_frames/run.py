@@ -149,7 +149,8 @@ def run_s4(ctx: Context, cid: str) -> Path:
     previous, notes = _partial_source(
         ctx, cid, appearance.appearanceRev, plan.planRev, scene.sceneRev
     )
-    regenerate = [ch for ch in CHAPTERS if ch in notes] if previous else list(CHAPTERS)
+    chapters = [ch.chapterId for ch in scene.chapters]
+    regenerate = [ch for ch in chapters if ch in notes] if previous else chapters
     budget = ctx.budget()
     budget.check_plan(_image_plans(ctx, len(regenerate)))
     settings = qa_settings(ctx)
@@ -207,7 +208,7 @@ def run_s4(ctx: Context, cid: str) -> Path:
                 )
         frames = []
         old = {f.chapterId: f for f in load_frames(previous)} if previous else {}
-        for chapter in CHAPTERS:
+        for chapter in chapters:
             if chapter in regenerate:
                 continue
             frame = old[chapter]

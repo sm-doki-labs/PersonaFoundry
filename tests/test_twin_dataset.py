@@ -1,4 +1,4 @@
-"""트윈 데이터: 합성 카톡 원문 → 실제 관문 → 가짜 공급자의 학습 계획."""
+"""모티브 데이터: 합성 카톡 원문 → 실제 관문 → 가짜 공급자의 학습 계획."""
 
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ def test_only_train_twins(tmp_path, mode):
     if mode != "original":
         write_model_mode(ctx.character_dir(cid), mode)
     for run in (run_s9s_twin, run_s9_twin):
-        with pytest.raises(FactoryError, match="TRAIN 방식의 트윈"):
+        with pytest.raises(FactoryError, match="TRAIN 방식의 모티브"):
             run(ctx, cid)
     assert not model.requests
     assert not (ctx.character_dir(cid) / "s9-data").exists()
@@ -157,8 +157,9 @@ def test_source_to_review_to_training_plan(tmp_path):
     assert report["metrics"]["noExchangeConversations"] == 1
     assert dataset["warnings"] == len(report["warnings"]) > 0
     assert (
-        "PROMPT_ONLY" in report["warnings"][0]
-        and "PROMPT_ONLY" in (folder / "gate-G7.html").read_text()
+        "프롬프트만" in report["warnings"][0]
+        and "PROMPT_ONLY" not in report["warnings"][0]
+        and "프롬프트만" in (folder / "gate-G7.html").read_text()
     )
     approve_gate(ctx, cid, "G7", {"decision": "APPROVE", "reviewer": "u"})
     planned = plan_s10t(ctx, cid, ["fake"])

@@ -256,6 +256,7 @@ def test_job_queue_runs_orchestrator_with_fake_providers(tmp_path):
         assert job["status"] == "succeeded", job
         assert job["result"]["stoppedAt"] == "G3"
         assert "G3" in job["result"]["waiting"]
+        assert job["ranStages"] == []  # 이미 검토 중인 결과를 다시 만들지 않는다
         assert job["log"], job
         assert any("s3" in line for line in job["log"])
         assert client.get("/api/jobs").json()["jobs"]

@@ -1,9 +1,9 @@
-"""트윈 관문 화면 API 테스트: G0 출처 확인, G1s 기준 사진, 트윈 G8 비교 요약.
+"""모티브 관문 화면 API 테스트: G0 출처 확인, G1s 기준 사진, 모티브 G8 비교 요약.
 
 합성 출처(테스트가 만든 카톡 형식 문장·단색 사진)와 가짜 공급자만 쓴다. 실존 인물·실제 대화는 없다.
 비교 세트 원문은 관문 화면 응답·파일 목록·파일 열기 어디에도 나오지 않아야 한다(D-0120).
 
-결정 경로: 지금 app.py의 결정 API는 reads.known_gates()(오리지널 관문)만 받는다. 트윈 관문 결정은
+결정 경로: 지금 app.py의 결정 API는 reads.known_gates()(오리지널 관문)만 받는다. 모티브 관문 결정은
 reads.decision_gates()로 바꿔야 열리므로, 여기서는 그 연결을 monkeypatch로 붙여 화면이 만드는 답
 모양이 기존 approve 경로를 그대로 통과하는지 확인한다.
 """
@@ -87,6 +87,9 @@ def test_g0_view_shows_source_summary_without_holdout_text(tmp_path, twin_decisi
         assert items["usageProblems"] == [] and items["usage"]["consentBy"]
         assert items["texts"][0]["subjectSpeaker"] == "엄마"
         assert items["texts"][0]["userSpeaker"] == "나"
+        # 말한 자리는 G0 원문 표에 보인다. 묶음에 적지 않았으면 종류 기본값(카톡 → 캐주얼)이다.
+        assert items["texts"][0]["register"] == "CASUAL"
+        assert items["texts"][0]["sourceUrl"] is None
         assert items["agent"]["speakerCheck"]["confirmed"] is True
         reps = items["agent"]["representative"]
         assert reps and all(r["text"] for r in reps)
@@ -103,14 +106,12 @@ def test_g0_view_shows_source_summary_without_holdout_text(tmp_path, twin_decisi
     assert ctx.state(cid).gate("G0").status == "APPROVED"
 
 
-def test_g0_usage_lock_and_change_request(tmp_path, twin_decisions):
+def test_g0_optional_usage_and_change_request(tmp_path, twin_decisions):
     ctx, cid, _ = _s0(tmp_path, consent=False)
     with _client(tmp_path) as client:
         view = _view(client, cid, "G0")
-        assert len(view["items"]["usageProblems"]) == 2
+        assert view["items"]["usageProblems"] == []
         url = f"/api/characters/{cid}/gates/G0/decision"
-        res = client.post(url, json={"decision": "APPROVE", "reviewer": "u"})
-        assert res.status_code == 409 and "사용 근거" in res.text
         res = client.post(
             url,
             json={
@@ -167,7 +168,7 @@ def _no_answer_key(raw: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "mode,label", [("PROMPT_ONLY", "긴 프롬프트로 진행"), ("BIND_EXISTING", "연결한 모델로 진행")]
+    "mode,label", [("PROMPT_ONLY", "프롬프트만 사용해요"), ("BIND_EXISTING", "연결한 모델로 진행")]
 )
 def test_twin_g8_adopt_label_and_comparison_summary(
     tmp_path, monkeypatch, twin_decisions, mode, label

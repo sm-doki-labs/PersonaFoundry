@@ -14,7 +14,7 @@ from pydantic import Field
 
 from character_factory_poc.common.schema import register
 from character_factory_poc.contracts.common import ArtifactRef, Strict
-from character_factory_poc.contracts.source import SubjectKind
+from character_factory_poc.contracts.source import ChapterTemplate, SubjectKind
 
 
 class PackageFile(Strict):
@@ -167,13 +167,14 @@ class GateRef(Strict):
 
 class TwinRelease(Strict):
     origin: Literal["SOURCE"] = "SOURCE"
-    originLabel: Literal["트윈"] = "트윈"
+    # D-0144에서 표시 이름을 모티브로 바꿨다. 그 전에 만든 패키지의 "트윈"도 읽는다.
+    originLabel: Literal["모티브", "트윈"] = "모티브"
     sourcePackSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     subjectKind: SubjectKind
     usageScope: str
     consentRecorded: bool
     modelMode: Literal["TRAIN", "BIND_EXISTING", "PROMPT_ONLY"]
-    chapterTemplate: Literal["FAN_CALL", "FAMILY_CALL"]
+    chapterTemplate: ChapterTemplate
     startButtonLabel: str
     voiceId: UUID | None = None
     # OpenAI 호환 서빙에서 요청 model로 쓰는 공개 별칭. 주소나 키를 받지 않는다.

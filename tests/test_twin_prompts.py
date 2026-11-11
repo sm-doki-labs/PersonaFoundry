@@ -1,4 +1,4 @@
-"""트윈 이미지·영상 프롬프트에 '가상 인물' 문구가 들어가지 않는지, 성별이 고정되지 않는지 본다."""
+"""모티브 이미지·영상 프롬프트에 '가상 인물' 문구가 들어가지 않는지, 성별이 고정되지 않는지 본다."""
 
 from pathlib import Path
 
@@ -33,5 +33,5 @@ def test_twin_flow_saved_prompts_have_no_fiction(tmp_path: Path):
         for p in (root / stage).rglob("*.json")
     ]
     prompts = [t for t in texts if "Keep the person's identity exactly" in t]
-    assert prompts, "트윈 이미지 프롬프트 기록을 찾지 못했다"
+    assert prompts, "모티브 이미지 프롬프트 기록을 찾지 못했다"
     assert not any(word in t for t in texts for word in FICTION)

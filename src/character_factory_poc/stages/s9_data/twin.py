@@ -1,4 +1,4 @@
-"""트윈 TRAIN의 G7a·G7. 승인 원문에서 턴을 조립하며 모델을 호출하지 않는다."""
+"""모티브 TRAIN의 G7a·G7. 승인 원문에서 턴을 조립하며 모델을 호출하지 않는다."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ _OTHER_NOTE = (
 def _require(ctx: Context, cid: str, stage: str):
     char = ctx.character_dir(cid)
     if read_origin(char) != SOURCE or read_model_mode(char) != TRAIN:
-        raise FactoryError(f"{stage}: TRAIN 방식의 트윈만 원문 학습 데이터를 만든다")
+        raise FactoryError(f"{stage}: TRAIN 방식의 모티브만 원문 학습 데이터를 만든다")
     state = ctx.state(cid)
     state.require_deps(stage)
     return state
@@ -221,7 +221,7 @@ def run_s9s_twin(ctx: Context, cid: str) -> Path:
             targetTrainConversations=target,
             clusters=[cluster],
             validation=ValidationPlan(baseConversations=cfg.validation_base, augmentedShare=0),
-            guideRef="트윈 갈래 계획 §7 · G0 승인 원문",
+            guideRef="모티브 갈래 계획 §7 · G0 승인 원문",
             writerModel="",
         )
         write_once_json(folder / "plan.json", dump(plan))
@@ -309,8 +309,8 @@ def run_s9_twin(ctx: Context, cid: str) -> Path:
         if train < 50:
             warnings.insert(
                 0,
-                f"학습 예시가 {train}개로 50개 미만이다. "
-                "원문을 외워 되풀이할 위험이 커서 PROMPT_ONLY를 권장한다.",
+                f"학습 예시가 {train}개로 50개보다 적어요. "
+                "원문을 외워 그대로 되풀이할 위험이 커서 학습 대신 '프롬프트만' 방식을 권해요.",
             )
         write_once_json(folder / "plan.json", dump(plan))
         for conv in convs:

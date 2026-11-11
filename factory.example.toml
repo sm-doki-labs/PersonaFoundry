@@ -2,6 +2,7 @@
 # 모델 이름과 수치는 전부 제안값이다(docs/status/decisions.md).
 
 [providers.text]
+# 모티브 V3의 최종 편집에도 사용한다. 아래 모델은 로컬 비교에 쓴 편집 모델이다.
 adapter = "openai_compat"
 base_url = "http://127.0.0.1:10100/v1"
 model = "gpt-6.1-sol"
@@ -21,6 +22,16 @@ max_cost_usd_per_command = 20.0
 max_check_retries = 3
 
 [stages.s8]
+motif_compiler = "evidence-v4" # 현행 표준: 익준 pv6 생성 공정. evidence-v5는 명시적 실험용이다.
+# evidence_scenes = { "character-id" = "친구끼리 메신저로 이야기한다." } # 인물별 장면이 공통값보다 우선
+evidence_max_records = 80 # evidence-v1 전용 표본 상한(2~160). 기본 evidence-v4는 전체 처리
+# evidence_scene = "인터뷰어의 질문에 답한다. 원문에 맞는 말높임을 쓴다." # 필요할 때 장면 명시
+scene_traits = false  # V3 비교 경로만: 두 말차례의 관심·대응 추가 분석
+trait_method = "focus"  # focus: 최대 2회. contrast: 반응을 가르는 단서 예측·검토, 최대 3회
+evidence_chunk_chars = 24000 # 모든 자료를 나눠 전달하는 호출별 크기 상한
+evidence_workers = 2
+example_turns = 0  # evidence-v1/v2/v3는 반드시 0. V3 비교 경로에서만 실제 문답 주입 가능
+motif_demo_chat_temperature = 0.8  # 모티브 대화 표본의 발화에만 적용
 long_prompt_max_chars = 8000  # 덱의 무압축 정본 상한
 short_prompt_max_chars = 2400  # 섹션 예산 합계(1550) + 시스템 규칙·출력 규칙·헤더 여유
 # 긴 프롬프트의 시스템 규칙 원문 경로 (Q-0006). 비우면 내장 기본 규칙(resources/system-rules-default-v1.md)을 쓴다.
@@ -65,12 +76,19 @@ base_photo = "picked"
 image_size = "1024x1024"
 
 
-# S5 소개 영상(D-0028). 어댑터는 xai_video(공식 API, 유료) / grok_web(웹, 기본 꺼짐) / fake.
-# 이 절이 없으면 fake다. 실제 호출은 --execute와 사용자 지시가 있을 때만 한다.
+# S5·S6 영상(D-0028). 어댑터는 grok(기본: Grok 로그인 먼저, 안 되면 API 키) / grok_oauth(로그인만) /
+# xai_video(API 키만) / grok_web(웹, 기본 꺼짐) / fake. 이 절이 없으면 fake다.
+# grok은 공장이 직접 로그인한 xAI 계정 토큰을 먼저 쓰고(cfp grok login, D-0184), 로그인이 없거나
+# 갱신할 수 없거나 401·402·403으로 거절되면 XAI_API_KEY로 넘어간다(D-0183). 토큰은 공장 전용 파일
+# (~/.character-factory/xai-oauth.json)에 두고 만료 5분 전에 공장이 갱신한다. opencodex는 쓰지 않는다.
+# 로그인 화면은 xAI 공식 페이지이고 client_id는 Grok CLI 공개 클라이언트다. 공식 문서가 보장하는 경로는 아니다.
 [providers.video]
-adapter = "xai_video"
+adapter = "grok"
+order = ["grok_oauth", "xai_video"]
 model = "grok-imagine-video-1.5-lite"  # 720p 1초 $0.03 + 입력 이미지 $0.01 (2026-10-21 공식 단가)
 api_key_env = "XAI_API_KEY"
+# login_file = "~/.character-factory/xai-oauth.json"  # 기본값(CFP_XAI_OAUTH_FILE로도 바꾼다)
+# oauth_client_id = ""  # 비우면 Grok CLI 공개 클라이언트
 poll_interval_s = 5
 timeout_s = 600
 # 단가가 바뀌면 덮어쓴다. 모델 → 해상도 → 1초당 USD. 입력 이미지 $0.01은 따로 더한다.
@@ -91,13 +109,14 @@ timeout_s = 600
 # 화면 선택자는 2026-10-21 한국어 UI에 맞춘 기본값이 있다. 화면이 바뀌면 [providers.video.selectors]로 덮어쓴다
 # (키: video_mode, option, audio, upload, uploaded, prompt, submit).
 
-# grok_oauth는 같은 xAI 영상 API를 opencodex의 xAI OAuth 로그인 토큰으로 부른다(D-0044 (3)).
-# 토큰을 Bearer로 받는지, 이용 조건에 맞는지는 실제 호출 전 미확인이다. 토큰 값은 출력·기록하지 않는다.
+# grok_oauth는 같은 xAI 영상 API를 공장 Grok 로그인 토큰으로만 부른다(API 키로 넘어가지 않는다).
+# 2026-11-12 실제 호출로 로그인 토큰이 Bearer로 받아들여짐을 확인했다(D-0183). 토큰 값은 출력·기록하지 않는다.
+# token_file·token_env를 직접 적으면 그 외부 토큰(옛 opencodex 파일 등)을 읽는다. 기본은 공장 로그인이다.
 # [providers.video]
 # adapter = "grok_oauth"
 # model = "grok-imagine-video-1.5-lite"
 # base_url = "https://api.x.ai/v1"
-# token_file = "~/.opencodex/auth.json"    # 활성 xAI 계정의 credential.access
+# # token_file = "~/.opencodex/auth.json"  # 옛 경로: 직접 적을 때만 읽는다
 # # token_env = "XAI_OAUTH_ACCESS_TOKEN"   # 있으면 token_file보다 먼저 쓴다
 # poll_interval_s = 5
 # timeout_s = 600
@@ -287,3 +306,31 @@ untrained = "ask"
 inference = "vast"               # SHORT_GEMMA_SFT 답을 받을 때 GPU를 빌려 어댑터 서버를 띄운다
 gpu_seconds_per_turn = 10
 gpu_budget_usd = 5.0
+
+[providers.demo_chat]
+adapter = "openai_compat"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+model = "gemini-3.8-flash"
+api_key_env = "GEMINI_API_KEY"
+reasoning_effort = "low"
+max_retries = 2
+# 로컬에서 다른 지역을 쓰면 project와 location을 함께 지정한다.
+location = "global"
+
+# 원문 조건부 경향 공정은 [stages.s8]의 motif_compiler = "evidence-v4"로 선택한다.
+# 기능·언어 형식 분리와 혼합 근거 보존을 적용하며 G6 검토를 유지한다.
+
+# 테스터 전용 미리보기 발행(cfp preview publish, 시연 모드). 순서: 읽기 점검 → id 예약 →
+# content.segments preview 지정·대기 → 사진·영상 업로드 → api-svc 등록 → chat-svc 발행 → 대화 켜기 →
+# 로그인 없는 목록·검색에 없는지 확인. 접속 정보는 .env(CFP_PREVIEW_*)에만 둔다.
+[publish.preview]
+target = "test"                                 # test | live
+api_svc_repo = "~/projects/_wt/api-svc-live"    # 실서비스 배포 판 체크아웃(.venv 포함)
+chat_svc_repo = "~/projects/_wt/chat-svc-live"  # 실서비스 배포 판 체크아웃(data/ = 실서비스 발행본)
+api_base_url = "http://127.0.0.1:8899"          # api-svc 주소(/api/v1 앞)
+storage = "none"                                # none(시험) | s3(실서비스)
+s3_bucket = ""
+aws_profile = ""
+wait_seconds = 35                               # api-svc 설정 캐시(30초)보다 길게
+allow_live = false
+

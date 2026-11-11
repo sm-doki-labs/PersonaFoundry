@@ -43,5 +43,6 @@ def render_g4_page(*, subject_id, rev, inputs, frames, name):
         rev,
         sections,
         script,
+        chapters=[f.chapterId for f in frames],
         decisions=("APPROVE", "REJECT"),
     )

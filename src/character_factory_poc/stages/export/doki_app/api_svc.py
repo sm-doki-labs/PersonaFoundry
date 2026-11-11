@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 import struct
 from collections import Counter
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -25,6 +26,7 @@ from character_factory_poc.stages.export.doki_app.naming import (
     slug_for,
 )
 from character_factory_poc.stages.s6_actions.app_clips import APP_CLIPS
+from character_factory_poc.stages.s6_actions.catalog import SIGNATURE_KEY
 
 FORMAT = "dokilabs-seed/1"
 
@@ -52,6 +54,8 @@ class ApiSeed:
     bundle: dict[str, Any]
     mapping: list[tuple[str, str, str]]
     unmapped: list[str]
+    #: file_store.key → 패키지 안 원본 파일. 미리보기 발행이 업로드할 때 쓴다.
+    files: dict[str, Path] = field(default_factory=dict)
 
 
 def _png_size(data: bytes) -> tuple[int, int] | None:
@@ -112,14 +116,17 @@ def build_seed(
     exported_at: str,
     alembic_revision: str,
     default_voice_id: str | None = None,
+    row_id: Callable[[str, int], int] | None = None,
 ) -> ApiSeed:
     # 정식 패키지는 characters/<cid>/s11-release/pkN 아래 있다. 동시에 내보내도
     # 이미 생성된 캐릭터 폴더 이름만 대조하면 된다(다른 캐릭터의 출처는 읽지 않는다).
-    release = package_dir.parent
-    peers = ()
-    if release.name == "s11-release" and release.parent.name == package.characterId:
-        peers = (p.name for p in release.parent.parent.iterdir() if p.is_dir())
-    row_id = api_seed_ids(package.characterId, peers)
+    # 실서비스 미리보기 발행은 대상 DB 시퀀스에서 예약한 번호를 row_id로 넘긴다.
+    if row_id is None:
+        release = package_dir.parent
+        peers = ()
+        if release.name == "s11-release" and release.parent.name == package.characterId:
+            peers = (p.name for p in release.parent.parent.iterdir() if p.is_dir())
+        row_id = api_seed_ids(package.characterId, peers)
     character_id = row_id("character", 0)
     slug = slug_for(package.characterId)
     uid = str(character_uid(package.characterId))
@@ -338,6 +345,7 @@ def build_seed(
     )
 
     media_no = 0
+    files: dict[str, Path] = {}
 
     def add_media(path: Path, media_type: str, rel: str) -> int:
         nonlocal media_no
@@ -347,6 +355,7 @@ def build_seed(
         data = path.read_bytes()
         size = _png_size(data) if media_type == "image" else None
         key = f"api-svc/protected/characters/{character_id}/{slug}/{rel}"
+        files[key] = path
         builder.add("media", ["id", "media_type", "status"], [media_id, media_type, "ready"])
         builder.add(
             "file_store",
@@ -597,7 +606,7 @@ def build_seed(
         ]
     )
     unmapped.extend(clip_count_warnings(builder.bundle))
-    return ApiSeed(bundle=builder.bundle, mapping=mapping, unmapped=unmapped)
+    return ApiSeed(bundle=builder.bundle, mapping=mapping, unmapped=unmapped, files=files)
 
 
 def _mood(video: Video) -> str:
@@ -613,7 +622,8 @@ def _pick_role(video: Video) -> str | None:
 #: §D-0040의 감정 세트 이름(대기·감정 반응). 그 밖의 이름은 특별 행동으로 본다.
 #: S6 앱 카탈로그(APP_CLIPS)는 api-svc 감정 세트 사본이라 전부 감정이다. 여기서 빠지면
 #: pick_role=special로 나가 서버의 답변 뒤 몸짓 후보(followup-clip)에서 사라진다.
-_EMOTION_KEYS = frozenset({clip["key"] for clip in APP_CLIPS}) | frozenset(
+#: 모티브 시그니처 포즈(D-0165)도 '이럴 때'를 보고 자동으로 고르는 감정 반응으로 내보낸다.
+_EMOTION_KEYS = frozenset({clip["key"] for clip in APP_CLIPS} | {SIGNATURE_KEY}) | frozenset(
     {
         "idle_good",
         "idle_bad",

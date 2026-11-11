@@ -254,7 +254,7 @@ def test_train_appends_without_replacing_existing_g8(tmp_path, monkeypatch):
             "humanPicks": [{"pairId": pid, "pick": "A"} for pid in pairs["humanPairIds"]],
         },
     )
-    assert "트윈 비교 평가" in (folder / "gate-G8.html").read_text()
+    assert "모티브 비교 평가" in (folder / "gate-G8.html").read_text()
     assert (folder / "report-final.json").exists() and verify_manifest(folder) == []
     assert any(
         r["ref"].endswith(blind.BASE)

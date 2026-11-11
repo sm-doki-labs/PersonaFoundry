@@ -1,4 +1,4 @@
-"""두 합성 트윈을 한 앱에 넣고 다시 넣어도 각자의 콘텐츠를 읽을 수 있다."""
+"""두 합성 모티브를 한 앱에 넣고 다시 넣어도 각자의 콘텐츠를 읽을 수 있다."""
 
 import os
 from contextlib import ExitStack

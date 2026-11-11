@@ -1,4 +1,4 @@
-"""트윈 S3의 인용 검증과 기존 G3 선택 경로. 모든 발화는 합성 자료다."""
+"""모티브 S3의 인용 검증과 기존 G3 선택 경로. 모든 발화는 합성 자료다."""
 
 from __future__ import annotations
 
@@ -126,7 +126,7 @@ def _answer(req):
 
 def test_origin_and_g0_before_any_agent(tmp_path):
     ctx, model = _ctx(tmp_path)
-    with pytest.raises(FactoryError, match="트윈"):
+    with pytest.raises(FactoryError, match="모티브"):
         run_s3_twin(ctx, "original")
     cid = _twin(ctx)
     with pytest.raises(GateNotApprovedError, match="G0"):
@@ -176,6 +176,8 @@ def test_select_approved_twin_without_holdout(tmp_path, monkeypatch, kind, templ
     guard = read_json(folder / "workspace/inputs/name-guard.json")
     assert name_guard(["엄마"])[0] not in guard and name_guard(["합성인명"])[0] in guard
     page = (folder / "gate-G3.html").read_text("utf-8")
+    assert "원문 말버릇 통계" in page
+    assert read_json(folder / "speech-profile.json")["schemaVersion"] == "speech-profile-v1"
     assert "원문 또는 출처" in page and "knownFacts.age" in page
     for choice, ref in zip(
         variants["candidates"][0]["choices"],
@@ -303,3 +305,11 @@ def test_required_facts_without_known_facts(tmp_path, stated):
             run_s3_twin(ctx, cid)
         assert all(f"knownFacts.{key}" in str(exc.value) for key in ("age", "gender", "job"))
         assert ctx.state(cid).gate("G3").status == "PENDING"
+
+
+def test_anonymous_counterpart_label_is_not_a_person_name(tmp_path):
+    from character_factory_poc.stages.s3_plan.check_v2 import name_guard
+    from character_factory_poc.stages.s3_plan.twin import _guard
+
+    rows = [{"name": name, "speaker": "USER"} for name in ["상대", "상대방", "가상화자명"]]
+    assert _guard(tmp_path, rows, "주인공") == name_guard(["가상화자명"])

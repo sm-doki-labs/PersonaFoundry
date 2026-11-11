@@ -11,10 +11,12 @@ dependencies = [
     "opencv-python-headless>=4.8,<5",
     "fastapi>=0.115,<1",
     "uvicorn>=0.32,<1",
+    "boto3>=1.35,<2",
 ]
 
 [project.scripts]
 cfp = "character_factory_poc.cli:main"
+cfp-compile-evidence = "character_factory_poc.stages.s8_prompts.evidence_compiler:main"
 
 [project.optional-dependencies]
 # grok_web 어댑터(D-0029, 기본 꺼짐). 기존 Chrome에 CDP로 붙으므로 브라우저 다운로드는 필요 없다.

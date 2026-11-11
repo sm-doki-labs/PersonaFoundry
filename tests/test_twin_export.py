@@ -30,8 +30,9 @@ from character_factory_poc.stages.s10_eval.twin import run_s10_twin
 from character_factory_poc.stages.s11_release.package import build_package
 from tests.support.export_flow import approve_package, write_json
 from tests.support.flow import make_ctx
-from tests.support.synthetic import prompter_output
+from tests.support.synthetic import assembly_answer
 from tests.support.web_gates import trait_sheet_for
+from tests.test_evidence_pipeline import candidate
 from tests.test_model_prep import Hub, _path
 from tests.test_s11_export import _settings
 from tests.test_s11_serving import _gemma_run
@@ -43,8 +44,31 @@ from tests.test_twin_s3 import CANARY, LINES, _answer
 VOICE = "b8196023-6358-4960-934c-46a372df8712"
 
 
-def _approved(tmp, mode):
+def _approved(
+    tmp,
+    mode,
+    one_scene=False,
+    *,
+    legacy_v3=False,
+    full_evidence=False,
+    atomic_evidence=False,
+    tendency_evidence=False,
+):
+    """Keep shared callers on the default; historical V3 cases must opt in."""
     ctx, agents = make_ctx(tmp)
+    ctx.config.stages.setdefault("s8", {})["motif_compiler"] = (
+        "v3"
+        if legacy_v3
+        else (
+            "evidence-v4"
+            if tendency_evidence
+            else "evidence-v3"
+            if atomic_evidence
+            else "evidence-v2"
+            if full_evidence
+            else "evidence-v1"
+        )
+    )
     ctx.use_vision(FakeVisionModel(responder=lambda req: {"faceShape": "oval"}))
     cid = _twin(ctx, "cf-20261108-test")
     write_model_mode(ctx.character_dir(cid), mode)
@@ -61,9 +85,27 @@ def _approved(tmp, mode):
         ("s4b-scene", scenes),
         ("s4b-pose", poses),
         ("s7", lambda req: trait_sheet_for(ctx, cid)),
-        ("s8", lambda req: prompter_output()),
+        ("s8", assembly_answer if legacy_v3 else candidate),
     ]:
         agents.set(stage, fn)
+    if one_scene:
+        # D-0164·D-0165: 모티브 영상은 한 장면(ch1)에 등급 몸짓과 시그니처 포즈를 만든다.
+        from character_factory_poc.pipeline.origin import write_signature, write_video_tier
+        from tests.test_scene_flow import agent_input
+
+        def scoped(fn):
+            def respond(req):
+                wanted = agent_input(req, "settings")["chapters"]
+                return {"chapters": [c for c in fn(req)["chapters"] if c["chapterId"] in wanted]}
+
+            return respond
+
+        write_video_tier(ctx.character_dir(cid), "light")
+        write_signature(
+            ctx.character_dir(cid), {"title": "찰칵", "motion": "카메라 손", "useWhen": ""}
+        )
+        agents.set("s4a", scoped(backgrounds))
+        agents.set("s4b-pose", scoped(poses))
 
     def approve(gate, decision="APPROVE", **fields):
         approve_gate(ctx, cid, gate, {"decision": decision, "reviewer": "u", **fields})
@@ -75,7 +117,16 @@ def _approved(tmp, mode):
     run_s3_twin(ctx, cid)
     approve("G3", "SELECT", selections=["v1"])
     ctx.use_vision(FakeVisionModel())
-    through_pose(ctx, cid)
+    if one_scene:
+        from character_factory_poc.stages.s4a_backgrounds.run import run_s4a
+        from character_factory_poc.stages.s4b_poses.run import run_s4b
+
+        run_s4a(ctx, cid, chapters=("ch1",))
+        approve("G4a")
+        run_s4b(ctx, cid)
+        approve("G4b")
+    else:
+        through_pose(ctx, cid)
     run_s4(ctx, cid)
     approve("G4")
     run_s5(ctx, cid)
@@ -84,7 +135,7 @@ def _approved(tmp, mode):
     approve("G5b")
     run_s7(ctx, cid)
     run_s8(ctx, cid, [])
-    approve("G6")
+    approve("G6", **({} if legacy_v3 else {"evidenceReviewed": True}))
     run_s9h(ctx, cid)
     if mode == "TRAIN":
         folder, adopted = _gemma_run(ctx, cid)
@@ -104,9 +155,21 @@ def _approved(tmp, mode):
     return ctx, cid, ev, adopted
 
 
+def test_export_setup_keeps_default_evidence_pipeline(tmp_path):
+    ctx, cid, _, _ = _approved(tmp_path, "PROMPT_ONLY")
+    state = ctx.state(cid)
+    folder = ctx.character_dir(cid) / "s8-prompts" / state.gate("G6").rev
+    pair = read_json(folder / "prompt-pair.json")
+    assert pair["systemRulesRef"] == "builtin:evidence-pipeline-v1"
+    assert state.gate("G6").status == "APPROVED"
+    assert read_json(folder / "persona-version.json")["long"] == pair["long"]
+    assert (folder / "evidence-review.json").is_file()
+    assert not (folder / "example-turns.json").exists()
+
+
 @pytest.mark.parametrize("mode", ["PROMPT_ONLY", "BIND_EXISTING"])
 def test_twin_export(tmp_path: Path, mode: str, monkeypatch):
-    ctx, cid, ev, adopted = _approved(tmp_path, mode)
+    ctx, cid, ev, adopted = _approved(tmp_path, mode, legacy_v3=True)
     root = ctx.character_dir(cid)
     bind = mode == "BIND_EXISTING"
     assert (ev / "twin-comparison.json").is_file()
@@ -118,7 +181,9 @@ def test_twin_export(tmp_path: Path, mode: str, monkeypatch):
 
     monkeypatch.setattr(Path, "open", guarded_open)
     pk = build_package(ctx, cid)
-    assert "해요체로 먼저 제안한다." in (pk / "persona/long-prompt.txt").read_text()
+    published = (pk / "persona/long-prompt.txt").read_text()
+    assert read_json(root / "s8-prompts/pv1/assembly.json")["frame"] in published
+    assert "[자료에서 고른 발화 참고]" not in published
     approve_package(ctx, cid)
     settings = replace(_settings(tmp_path), default_voice_id="5d8d907a-826d-419c-8567-685618d0b650")
     result, ex = export_doki_app(
@@ -130,7 +195,7 @@ def test_twin_export(tmp_path: Path, mode: str, monkeypatch):
     assert meta["sourcePackSha256"] == sha256_file(pack_path)
     assert (meta["origin"], meta["originLabel"], meta["subjectKind"]) == (
         "SOURCE",
-        "트윈",
+        "모티브",
         "PRIVATE_PERSON",
     )
     assert meta["usageScope"] == read_json(pack_path)["usageBasis"]["scope"]
@@ -184,7 +249,7 @@ def test_twin_export(tmp_path: Path, mode: str, monkeypatch):
 
 
 def test_train_exports_only_g8_checkpoint(tmp_path):
-    ctx, cid, folder, ref = _approved(tmp_path, "TRAIN")
+    ctx, cid, folder, ref = _approved(tmp_path, "TRAIN", legacy_v3=True)
     raw = read_json(folder / "training-run.json")
     root = ctx.character_dir(cid)
     # 같은 공급자에서 더 최근에 만든 모델은 G8이 선택하지 않았다.
@@ -210,7 +275,7 @@ def test_train_exports_only_g8_checkpoint(tmp_path):
 
 
 def test_binding_changed_after_g8_blocks_package(tmp_path):
-    ctx, cid, _, ref = _approved(tmp_path, "BIND_EXISTING")
+    ctx, cid, _, ref = _approved(tmp_path, "BIND_EXISTING", legacy_v3=True)
     root = ctx.character_dir(cid)
     path = root / ref
     binding = dict(read_json(path), servingRoute="other-adapter")
@@ -230,7 +295,7 @@ def test_binding_changed_after_g8_blocks_package(tmp_path):
 )
 @pytest.mark.parametrize("mode", ["PROMPT_ONLY", "BIND_EXISTING", "TRAIN"])
 def test_twin_real_load_into_disposable_postgres(tmp_path: Path, mode: str):
-    """순서 10 완료 기준: 트윈 캐릭터가 일회용 PostgreSQL 두 개에 실제로 적재된다."""
+    """순서 10 완료 기준: 모티브 캐릭터가 일회용 PostgreSQL 두 개에 실제로 적재된다."""
     from character_factory_poc.stages.export.settings import load_export_settings
 
     ctx, cid, _, _ = _approved(tmp_path, mode)
@@ -247,3 +312,14 @@ def test_twin_real_load_into_disposable_postgres(tmp_path: Path, mode: str):
     assert any(name.startswith("api-svc") for name in steps)
     assert sum(1 for name in steps if name.startswith("drop")) == 2
     assert (rev_dir / "export-result.json").is_file()
+
+
+def test_one_scene_motif_package(tmp_path: Path):
+    """QA v5 F05: 한 장면 모티브도 패키지를 만든다(장면 세 개를 가정하지 않는다)."""
+    ctx, cid, _, _ = _approved(tmp_path, "PROMPT_ONLY", one_scene=True)
+    pk = build_package(ctx, cid)
+    pkg = read_json(pk / "package.json")
+    assert [c["chapterId"] for c in pkg["chapters"]] == ["ch1"]
+    assert (pk / "chapters/ch1/facts.json").is_file() and not (pk / "chapters/ch2").exists()
+    keys = {v.get("clipKey") for v in pkg["videos"]}
+    assert "signature_good" in keys

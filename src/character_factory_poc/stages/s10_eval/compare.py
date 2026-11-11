@@ -75,7 +75,7 @@ def _inputs(ctx, cid):
     char = ctx.character_dir(cid)
     state = ctx.state(cid)
     if read_origin(char) != SOURCE:
-        raise FactoryError("비교 평가는 트윈에서만 실행한다")
+        raise FactoryError("비교 평가는 모티브에서만 실행한다")
     ho, g0, g6 = state.stage("s9h"), state.gate("G0"), state.gate("G6")
     if any(s.status != "APPROVED" for s in (ho, g0, g6)) or not ho.currentRev or not g6.rev:
         raise FactoryError("비교 평가에는 승인된 G0·s9h·G6이 필요하다")
@@ -467,7 +467,7 @@ def append_twin_comparison(
         or gate.status != "AWAITING_HUMAN"
         or not gate.rev
     ):
-        raise FactoryError("트윈 TRAIN 보고가 연 G8이 필요하다")
+        raise FactoryError("모티브 TRAIN 보고가 연 G8이 필요하다")
     folder = char / "s10-eval" / gate.rev
     if not (folder / "report.json").is_file():
         raise FactoryError("기존 s10 보고서를 먼저 만든다")

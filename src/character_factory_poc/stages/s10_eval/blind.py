@@ -150,7 +150,7 @@ def decorate(page: str, folder: Path) -> str:
     report = TwinComparison.model_validate(read_json(path))
     block = [
         START,
-        "<section><h2>트윈 비교 평가</h2>",
+        "<section><h2>모티브 비교 평가</h2>",
         f"<p>비교 세트 {report.sceneCount}장면 · 예상 호출 {report.plannedCalls}회. "
         "구별률은 실제 답을 맞힌 비율이에요. 50%에 가까우면 우연히 고를 때와 비슷해요. "
         "장면 수가 적거나 같은 대화가 반복되면 차이를 일반화하기 어려워요.</p>",
@@ -200,7 +200,7 @@ def import_blind_answers(ctx: Context, cid: str, path: Path) -> Path:
     char = ctx.character_dir(cid)
     gate = ctx.state(cid).gate("G8")
     if read_origin(char) != SOURCE or gate.status != "AWAITING_HUMAN" or not gate.rev:
-        raise FactoryError("열린 트윈 G8에만 가족 판정을 들여올 수 있다")
+        raise FactoryError("열린 모티브 G8에만 가족 판정을 들여올 수 있다")
     folder = char / "s10-eval" / gate.rev
     if not (folder / BASE).exists():
         raise FactoryError("실행한 비교 보고가 없다")

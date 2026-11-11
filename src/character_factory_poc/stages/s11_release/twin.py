@@ -1,4 +1,4 @@
-"""트윈 릴리즈에 공개할 G0·G8 요약. 비교 세트와 비교 보고 본문은 읽지 않는다."""
+"""모티브 릴리즈에 공개할 G0·G8 요약. 비교 세트와 비교 보고 본문은 읽지 않는다."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _route(root: Path, cid: str, mode: str, adopted: str | None, runs: list[Path
     if adopted == "LONG_BASE":
         return None
     if not adopted or mode == "PROMPT_ONLY":
-        raise CheckFailed("s11", ["트윈 G8의 채택 기록이 없거나 모델 준비 방식과 다르다"])
+        raise CheckFailed("s11", ["모티브 G8의 채택 기록이 없거나 모델 준비 방식과 다르다"])
     matches = []
     for path in runs:
         run = TrainingRun.model_validate(read_json(path))
@@ -57,6 +57,8 @@ class SourceQuotes:
     pattern: re.Pattern[str]
 
     def public_prompt(self, text: str) -> str:
+        # V3의 마지막 칸은 검토용 실제 대화다. 짧은 발화도 공개 패키지로 복사하지 않는다.
+        text = text.partition("\n\n[자료에서 고른 발화 참고]\n")[0]
         body = "\n".join(
             line
             for line in text.splitlines()

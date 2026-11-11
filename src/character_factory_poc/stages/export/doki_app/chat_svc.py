@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -46,6 +47,24 @@ PERSONA_SECTIONS = (
     "choices",
     "voice",
     "boundaries",
+)
+
+EVIDENCE_COMPILERS = {
+    "builtin:evidence-pipeline-v1",
+    "builtin:evidence-pipeline-v2",
+    "builtin:evidence-pipeline-v3",
+    "builtin:evidence-pipeline-v4",
+    "builtin:evidence-pipeline-v5",
+}
+EVIDENCE_HEADERS = (
+    "FACTS",
+    "LIFE_AND_TASTES",
+    "DISPOSITION",
+    "WANTS_AND_FEARS",
+    "READING_AND_TENSION",
+    "CHOICES",
+    "VOICE",
+    "KNOWS_AND_LIMITS",
 )
 
 #: 챕터 자리별 런타임 계약(chat-svc 규칙표 이름). 챕터 구조는 코드가 소유하고,
@@ -104,12 +123,30 @@ def build_tree(package: CharacterPackage, package_dir: Path) -> ChatTree:
     quest_rev = f"{prefix}-quest-{version}"
     sheet = _read_json(relative_file(package_dir, package.persona.traitSheet))
     scene = _scene_facts(package, package_dir)
-    persona = _persona(package, slug, persona_rev, sheet)
+    prompt = relative_file(package_dir, package.persona.longPrompt).read_text("utf-8")
+    evidence = _evidence_sections(package, package_dir, prompt)
+    persona = (
+        _evidence_persona(package, slug, persona_rev, evidence)
+        if evidence is not None
+        else _persona(package, slug, persona_rev, sheet)
+    )
+    if evidence is not None:
+        # Relationship profiles and writer contracts must not reintroduce S7 guesses either.
+        voice = "\n".join(evidence["voice"])
+        sheet = {
+            "choice": {"primaryResponse": "\n".join(evidence["choices"])},
+            "card": {
+                "stance": "\n".join(evidence["disposition"]),
+                "dialogueHabits": {"order": voice, "directness": voice},
+            },
+        }
 
     files: dict[str, dict[str, Any]] = {f"personas/{persona_rev}.json": persona}
     mapping: list[tuple[str, str, str]] = [
         (
-            "profile + persona.traitSheet",
+            "persona.longPrompt (evidence-pipeline-v1)"
+            if evidence is not None
+            else "profile + persona.traitSheet",
             f"chat-svc personas/{persona_rev}.json(character-persona-v6 여덟 섹션)",
             "긴 프롬프트를 여덟 섹션으로 나눠 적는다",
         )
@@ -118,7 +155,7 @@ def build_tree(package: CharacterPackage, package_dir: Path) -> ChatTree:
     if package.twin:
         adopted, route = package.sft.adoptedBinding, package.twin.servingRoute
         if not adopted or (adopted == "LONG_BASE") != (route is None):
-            raise ValueError("트윈 G8 채택 대상과 패키지 서빙 경로가 일치하지 않는다")
+            raise ValueError("모티브 G8 채택 대상과 패키지 서빙 경로가 일치하지 않는다")
         if route:
             dialogue_model = f"{prefix}-dialogue-{version}"
             files[f"models/{dialogue_model}.json"] = {
@@ -145,7 +182,6 @@ def build_tree(package: CharacterPackage, package_dir: Path) -> ChatTree:
                 else dialogue_model,
             )
         )
-    prompt = relative_file(package_dir, package.persona.longPrompt).read_text("utf-8")
     speech_level = _persona_speech_level(prompt, sheet)
     bindings: list[dict[str, str]] = []
     chapter_uids: dict[str, str] = {}
@@ -264,6 +300,107 @@ def _scene_facts(package: CharacterPackage, package_dir: Path) -> dict[str, dict
     for chapter in package.chapters:
         out[chapter.chapterId] = _read_json(relative_file(package_dir, chapter.facts))
     return out
+
+
+def _evidence_sections(package: CharacterPackage, root: Path, prompt: str) -> dict | None:
+    """Use only package-pinned compiler identity, never infer it from prose headers.
+
+    S11 may omit the private prompt pair. In that case it must manifest-list
+    persona/prompt-compiler.json with systemRulesRef, personaVersion and the
+    SHA256 of the public longPrompt bytes. No source/review files are followed.
+    """
+    from character_factory_poc.stages.s11_release.presentation import CHAT_DISCLOSURE
+
+    documents = {}
+    for rel in ("persona/prompt-compiler.json", "persona/prompt-pair.json"):
+        path = relative_file(root, rel)
+        if path.exists() or any(item.path == rel for item in package.files):
+            try:
+                documents[rel] = _read_json(path)
+            except (OSError, ValueError) as exc:
+                raise ValueError("evidence compiler metadata is unreadable") from exc
+    metadata = documents.get("persona/prompt-compiler.json")
+    if metadata is not None and metadata.get("systemRulesRef") not in EVIDENCE_COMPILERS:
+        raise ValueError("evidence compiler metadata has an unsupported marker")
+    if not any(doc.get("systemRulesRef") in EVIDENCE_COMPILERS for doc in documents.values()):
+        return None
+
+    def pinned(rel):
+        matches = [item for item in package.files if item.path == rel]
+        if len(matches) != 1:
+            raise ValueError("evidence compiler input is not pinned in package.files")
+        data = relative_file(root, rel).read_bytes()
+        if hashlib.sha256(data).hexdigest() != matches[0].sha256 or len(data) != matches[0].bytes:
+            raise ValueError("evidence compiler input hash mismatch")
+        return data
+
+    public_digest = hashlib.sha256(pinned(package.persona.longPrompt)).hexdigest()
+    for rel, doc in documents.items():
+        pinned(rel)
+        if doc.get("systemRulesRef") not in EVIDENCE_COMPILERS:
+            raise ValueError("evidence compiler metadata disagrees")
+        if doc.get("personaVersion") != package.persona.personaVersion:
+            raise ValueError("evidence compiler persona revision mismatch")
+        if rel.endswith("prompt-compiler.json"):
+            if set(doc) != {"systemRulesRef", "personaVersion", "longPromptSha256"}:
+                raise ValueError("evidence compiler metadata has unexpected fields")
+            if doc["longPromptSha256"] != public_digest:
+                raise ValueError("evidence public prompt hash mismatch")
+        else:
+            original = doc.get("long") or {}
+            text = original.get("text")
+            if (
+                doc.get("characterId") != package.characterId
+                or not isinstance(text, str)
+                or hashlib.sha256(text.encode()).hexdigest() != original.get("sha256")
+            ):
+                raise ValueError("evidence source pair identity or hash mismatch")
+            if prompt.rstrip() not in {text.rstrip(), text.rstrip() + "\n\n" + CHAT_DISCLOSURE}:
+                raise ValueError("evidence public prompt differs from source pair")
+
+    body = prompt.rstrip()
+    disclosure = body.endswith("\n\n" + CHAT_DISCLOSURE)
+    if disclosure:
+        body = body[: -len("\n\n" + CHAT_DISCLOSURE)]
+    first = re.search(r"^\[FACTS\]$", body, re.M)
+    if first is None or not body[: first.start()].strip():
+        raise ValueError("evidence prompt needs a preamble and eight sections")
+    preamble = body[: first.start()].strip()
+    text = body[first.start() :]
+    headers = list(re.finditer(r"^\[([^\]\n]+)\][ \t]*$", text, re.M))
+    if tuple(match[1] for match in headers) != EVIDENCE_HEADERS:
+        raise ValueError("evidence prompt sections are missing, duplicated or out of order")
+    sections = {}
+    for i, (match, field) in enumerate(zip(headers, PERSONA_SECTIONS, strict=True)):
+        end = headers[i + 1].start() if i + 1 < len(headers) else len(text)
+        value = text[match.end() : end].strip()
+        if not value:
+            raise ValueError("evidence prompt section is empty")
+        sections[field] = [value]
+    sections["boundaries"] = [preamble, *sections["boundaries"]]
+    if disclosure:
+        sections["boundaries"].append(CHAT_DISCLOSURE)
+    return sections
+
+
+def _evidence_persona(package, slug, revision, sections):
+    # The target requires a positive numeric age; do not silently invent age 20.
+    age = re.fullmatch(r"\s*(\d{1,3})\s*(?:세|살)?\s*", package.profile.age)
+    if age is None or not 1 <= int(age[1]) <= 120:
+        raise ValueError("evidence persona needs an explicit age for the target schema")
+    return {
+        "schemaVersion": "character-persona-v6",
+        "personaId": slug,
+        "revision": revision,
+        "displayName": package.profile.name,
+        "identity": {
+            "age": int(age[1]),
+            "occupation": package.profile.job.strip() or "미상",
+            "homeBase": "미상",
+        },
+        "qualityScenarioIds": [f"{slug}-{chapter.chapterId}" for chapter in package.chapters],
+        **sections,
+    }
 
 
 def _persona(

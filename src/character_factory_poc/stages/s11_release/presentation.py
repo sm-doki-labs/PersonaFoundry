@@ -1,4 +1,4 @@
-"""트윈 발표 점검(D-0126, 계획 §12 순서 12).
+"""모티브 발표 점검(D-0126, 계획 §12 순서 12).
 
 패키지를 만들 때 코드로 확인할 수 있는 필수 항목을 검사해 `presentation-check.json`
 (`twin-presentation-check-v1`)을 G9 검토 페이지 옆에 남긴다.
@@ -193,10 +193,10 @@ def _check(id_: str, title: str, ok: bool, detail: str, **extra: Any) -> dict[st
 
 
 def run_checks(ctx: Context, cid: str, rev_dir: Path, package: CharacterPackage) -> dict[str, Any]:
-    """트윈 패키지의 자동 점검. 파일은 쓰지 않는다."""
+    """모티브 패키지의 자동 점검. 파일은 쓰지 않는다."""
     twin = package.twin
     if twin is None:
-        raise FactoryError(f"{cid}: 발표 점검은 트윈 패키지에만 한다")
+        raise FactoryError(f"{cid}: 발표 점검은 모티브 패키지에만 한다")
     root = ctx.character_dir(cid)
     gate = ctx.state(cid).gate("G0")
     source_dir = root / "s0-source" / str(gate.rev)
@@ -306,7 +306,7 @@ def run_checks(ctx: Context, cid: str, rev_dir: Path, package: CharacterPackage)
 
 
 def write_check(ctx: Context, cid: str, rev_dir: Path, package: CharacterPackage) -> Path:
-    """S11이 트윈 패키지를 만든 직후 부른다. 필수 항목이 실패해도 파일만 남기고 G9가 막는다."""
+    """S11이 모티브 패키지를 만든 직후 부른다. 필수 항목이 실패해도 파일만 남기고 G9가 막는다."""
     path = rev_dir / CHECK_FILE
     write_once_json(path, run_checks(ctx, cid, rev_dir, package))
     return path
@@ -337,7 +337,7 @@ def view(rev_dir: Path, package: dict[str, Any]) -> dict[str, Any] | None:
 def guard_g9(
     ctx: Context, cid: str, rev_dir: Path, answer: dict[str, Any]
 ) -> tuple[list[Path], str]:
-    """G9 결정 전에 부른다. 트윈 APPROVE는 필수 점검이 통과해야 받는다.
+    """G9 결정 전에 부른다. 모티브 APPROVE는 필수 점검이 통과해야 받는다.
 
     돌려주는 값: 결정 기록 shownArtifacts에 더할 파일, reasons에 붙일 사람 확인 요약.
     오리지널 패키지는 ([], "")라 기존 G9가 그대로다.

@@ -240,8 +240,22 @@ body.fd .side-keys kbd,body.fd .keys-list kbd{border-color:var(--fd-line-strong)
 body.fd .scroll-hint{color:var(--fd-fg-subtle)}
 body.fd .side-status.is-wait{color:var(--fd-attention-fg)}
 body.fd .metric-help,body.fd .action-undo{color:var(--fd-fg-muted)}
-/* 트윈 관문(2026-11-08) */
+/* 모티브 관문(2026-11-08) */
 body.fd .pkg-check.src-check:hover{background:transparent}
 body.fd .twin-ballot{border-color:var(--fd-line);border-radius:var(--fd-r-2);background:var(--fd-bg-surface)}
 body.fd .twin-path{font-family:var(--fd-mono);color:var(--fd-fg-muted)}
 body.fd .twin-sub,body.fd .src-why{color:var(--fd-fg-subtle)}
+/* 2차 검토 화면(2026-11-10) */
+body.fd .fact-card,body.fd .trait-card,body.fd .chat-sample,body.fd .src-mix{background:var(--fd-bg-surface);border-color:var(--fd-line);border-radius:var(--fd-r-3)}
+body.fd .fact-self,body.fd .trait-refs{background:var(--fd-bg-subtle)}
+body.fd .fact-cat,body.fd .fact-chip{border-color:var(--fd-line);background:var(--fd-bg-subtle);color:var(--fd-fg-muted)}
+body.fd a.fact-chip:hover{background:var(--fd-bg-hover);color:var(--fd-fg)}
+body.fd .fact-toggle{border-color:var(--fd-line-strong);color:var(--fd-fg-muted)}
+body.fd .fact-toggle:has(input:checked){background:var(--fd-danger-bg);color:var(--fd-danger-fg)}
+body.fd .src-mix-bar{background:var(--fd-slate-6)}
+body.fd .src-mix-bar i,body.fd .src-mix .src-mix-legend .is-formal::before,body.fd .src-reg.is-formal::before{background:var(--fd-slate-11)}
+body.fd .src-mix .src-mix-legend span::before,body.fd .src-reg::before{background:var(--fd-slate-6)}
+body.fd .trait-card{box-shadow:inset 2px 0 0 var(--fd-attention-solid)}
+body.fd .chat-samples-head h2{font-size:var(--fd-fs-5);font-weight:600}
+body.fd .gate-record-card .record-facts dt{color:var(--fd-fg-muted)}
+body.fd .plan-table.is-single tr.is-same td{color:var(--fd-fg)}
