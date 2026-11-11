@@ -25,7 +25,12 @@ class LedgerTrait(Strict):
     rarity: Literal["rare", "sometimes"]
     #: D-0148: 모티브만 쓴다. 이 특질이 나온 원문 경향 칸(상황/반응). 대화 프롬프트에는 넣지 않는다.
     basis: str | None = Field(
-        default=None, pattern=r"^[A-Z_]+/[A-Z_]+$", exclude_if=lambda v: v is None
+        default=None, pattern=r"^(INFERRED|[A-Z_]+/[A-Z_]+)$", exclude_if=lambda v: v is None
+    )
+
+    sourceRef: str | None = Field(default=None, min_length=1, exclude_if=lambda v: v is None)
+    demoSituation: Literal["TEASE", "WORRY", "CRITICISM", "UNKNOWN", "PRIVATE"] | None = Field(
+        default=None, exclude_if=lambda v: v is None
     )
 
 

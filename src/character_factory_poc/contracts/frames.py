@@ -68,12 +68,12 @@ class ApprovedFrames(Strict):
     frameRev: str = Field(pattern=r"^fr\d+$")
     appearanceRev: str
     planRev: str
-    frames: list[ApprovedFrame] = Field(min_length=3, max_length=3)
+    frames: list[ApprovedFrame] = Field(min_length=1, max_length=3)
     notes: str = ""
 
     @field_validator("frames")
     @classmethod
     def _one_per_chapter(cls, v: list[ApprovedFrame]) -> list[ApprovedFrame]:
-        if sorted(f.chapterId for f in v) != ["ch1", "ch2", "ch3"]:
-            raise ValueError("frames는 ch1, ch2, ch3 각각 하나씩이어야 한다")
+        if sorted(f.chapterId for f in v) not in (["ch1"], ["ch1", "ch2", "ch3"]):
+            raise ValueError("첫 챕터만 담거나 세 챕터를 하나씩 담아야 한다")
         return v

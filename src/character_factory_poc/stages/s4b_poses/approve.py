@@ -8,7 +8,6 @@ from character_factory_poc.common.errors import FactoryError, GateNotApprovedErr
 from character_factory_poc.common.schema import dump, validate
 from character_factory_poc.common.store import read_json, write_manifest, write_once_json
 from character_factory_poc.contracts.scene import (
-    CHAPTERS,
     POSE_FIELDS,
     PosePlan,
     PoseSelection,
@@ -39,7 +38,9 @@ def approve_g4b(ctx: Context, cid: str, answer: dict) -> Path:
     if decision in {"SELECT", "APPROVE"}:
         by_chapter = {ch.chapterId: {p.poseId: p for p in ch.candidates} for ch in poses.chapters}
         options = {ch: set(candidates) for ch, candidates in by_chapter.items()}
-        choices = answer if decision == "SELECT" else {"picks": {ch: f"{ch}-p1" for ch in CHAPTERS}}
+        choices = (
+            answer if decision == "SELECT" else {"picks": {ch: f"{ch}-p1" for ch in by_chapter}}
+        )
         picks, custom = validate_choices(choices, options, "G4b")
         tweaks = choices.get("tweaks", {})
         if not isinstance(tweaks, dict) or not set(tweaks) <= set(picks):
@@ -50,7 +51,7 @@ def approve_g4b(ctx: Context, cid: str, answer: dict) -> Path:
             if any(not isinstance(value, str) for value in change.values()):
                 raise FactoryError("G4b: 수정할 값은 문자열이어야 한다")
         chapters = []
-        for chapter in CHAPTERS:
+        for chapter in by_chapter:
             if chapter in custom:
                 chapters.append(
                     {"chapterId": chapter, "source": "USER", "customText": custom[chapter]}

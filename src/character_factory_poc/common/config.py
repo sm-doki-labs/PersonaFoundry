@@ -71,6 +71,10 @@ class FactoryConfig:
     def stage(self, name: str) -> dict[str, Any]:
         return dict(self.stages.get(name, {}))
 
+    def demo_chat_temperature(self, motif: bool) -> float:
+        """모티브 시연의 발화에만 설정 온도를 쓰고 기존 대화 표본의 온도는 유지한다."""
+        return float(self.stage("s8").get("motif_demo_chat_temperature", 0.8)) if motif else 0.8
+
     @property
     def runs_dir(self) -> Path:
         return self.root / "runs"

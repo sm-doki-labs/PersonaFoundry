@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -20,10 +21,59 @@ from character_factory_poc.common.store import next_rev, write_manifest, write_o
 from character_factory_poc.contracts.chapter_start import ChapterStartSet
 from character_factory_poc.pipeline.agent import AgentSpec, run_agent
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.origin import SOURCE, read_origin
+from character_factory_poc.stages.s0_source.run import load_approved_source
 from character_factory_poc.stages.s3_plan.importer import load_approved_plan
 from character_factory_poc.stages.s7_traits.check import _plan_speech_level
 
 QUOTES = re.compile(r"[\"'“”‘’「」]")
+
+# 선택한 관계·채널·진행 주체는 생성 모델이 다른 장면으로 바꾸지 않는다.
+_SCENE_FRAMES = {
+    "FRIEND_CHAT": {
+        "sceneFacts": [
+            "상대는 오래된 친구다.",
+            "인물과 상대는 메신저에서 문자 메시지를 주고받는다.",
+        ],
+        "sceneBoundaries": [
+            "메신저에 보낼 인물의 말만 쓰고 해설·행동 지문·메모를 쓰지 않는다.",
+            "확인되지 않은 공동 기억이나 개인사를 만들지 않는다.",
+        ],
+        "relationship": {
+            "addresseeStance": (
+                "오래된 친구로 대하되 기획의 말높임을 따른다. "
+                "친구라는 이유만으로 반말이나 특정 호칭을 강제하지 않는다."
+            ),
+            "entryPosture": ["오래된 친구와 메신저 메시지를 주고받고 있다."],
+            "presenceReason": "오래된 친구와 메신저로 대화하고 있다.",
+            "initiativePolicy": (
+                "서로 일상 주제를 꺼내거나 상대의 이야기에 답할 수 있다. "
+                "답이 늦거나 상대가 마무리하려 하면 재촉하지 않는다."
+            ),
+            "sceneWant": "친구와 지금 나누고 싶은 이야기를 편하게 주고받는다.",
+        },
+    },
+    "INTERVIEW": {
+        "sceneFacts": [
+            "상대는 인터뷰를 진행하는 질문자다.",
+            "인물은 인터뷰 대상이며 질문자가 정한 주제와 질문에 답한다.",
+        ],
+        "sceneBoundaries": [
+            "인물의 답변만 쓰고 질문자의 대사·해설·행동 지문을 대신 쓰지 않는다.",
+            "확인되지 않은 경력이나 개인사를 만들지 않는다.",
+        ],
+        "relationship": {
+            "addresseeStance": "상대를 인터뷰 질문자로 대하며 기획의 말높임을 따른다.",
+            "entryPosture": ["질문자가 진행하는 인터뷰에 응답자로 참여하고 있다."],
+            "presenceReason": "질문자가 진행하는 인터뷰에서 질문에 답하기 위해 참여한다.",
+            "initiativePolicy": (
+                "질문자가 주제와 진행 순서를 정하고 인물은 질문에 답한다. "
+                "질문이 불명확할 때만 확인하며 다음 질문을 대신 만들거나 진행을 맡지 않는다."
+            ),
+            "sceneWant": "질문자가 묻는 내용을 이해하고 확인된 범위에서 답한다.",
+        },
+    },
+}
 
 
 def plan_calls() -> list[CallPlan]:
@@ -122,6 +172,43 @@ def _example(cid: str, plan_rev: str) -> dict[str, Any]:
     }
 
 
+def _fan_call_frame(out: ChapterStartSet, template: str | None, name: str) -> ChapterStartSet:
+    if template != "FAN_CALL":
+        return out
+    from character_factory_poc.stages.s3_plan.speech_profile import _josa
+
+    subject = name + _josa(name, "이", "가")
+    frame = (
+        f"지금부터 너의 출력은 {subject} 영상통화에서 소리 내어 하는 말 그 자체다. "
+        f"계획, 메모, 규칙 요약, 따옴표로 묶은 초안은 쓰지 않고 첫 글자부터 {name}의 말로 시작한다."
+    )
+    for ch in out.chapters:
+        ch.relationship.initiativePolicy = (
+            "통화를 시작하는 첫인사 때 한 번 상대의 하루를 물을 수 있고, "
+            "그 뒤로는 상대가 꺼낸 이야기에 답하며 대화를 이어 간다. "
+            "상대가 답하기 어려워하거나 통화를 마무리하려 하면 그 뜻을 따른다."
+        )
+        # 경계는 최대 세 칸이다. 이미 세 칸이면 마지막 두 선을 합쳐 모두 보존한다.
+        boundaries = ch.sceneBoundaries
+        if len(boundaries) == 3:
+            boundaries = [boundaries[0], " ".join(boundaries[1:])]
+        ch.sceneBoundaries = [*boundaries, frame]
+    return out
+
+
+def _scene_frame(out: ChapterStartSet, template: str | None, name: str) -> ChapterStartSet:
+    frame = _SCENE_FRAMES.get(template)
+    if frame is None:
+        return _fan_call_frame(out, template, name)
+    for ch in out.chapters:
+        ch.sceneFacts = list(frame["sceneFacts"])
+        # 기존 경계도 보존하되 계약의 최대 세 칸을 지킨다.
+        ch.sceneBoundaries = [" ".join(ch.sceneBoundaries), *frame["sceneBoundaries"]]
+        for key, value in frame["relationship"].items():
+            setattr(ch.relationship, key, list(value) if isinstance(value, list) else value)
+    return out
+
+
 def run_chapter_start(ctx: Context, cid: str) -> Path:
     from character_factory_poc.stages.s8_prompts.build import load_latest_trait_sheet
 
@@ -142,6 +229,21 @@ def run_chapter_start(ctx: Context, cid: str) -> Path:
         or {k: dump(sheet)[k] for k in ("choice", "card")},
         "brief-notes.md": _seed_notes(ctx, cid, plan.seedRev) or "(브리프 없음)",
     }
+    template = None
+    if read_origin(char_dir) == SOURCE:
+        pack, _, _ = load_approved_source(ctx, cid)
+        template = pack.chapterTemplate
+    if template == "FAN_CALL":
+        inputs["fan-call.md"] = (
+            resources.files("character_factory_poc.prompts")
+            .joinpath("chapter_start_fan.md")
+            .read_text("utf-8")
+        )
+    elif template in _SCENE_FRAMES:
+        inputs["scene-template"] = {
+            "chapterTemplate": template,
+            **_SCENE_FRAMES[template],
+        }
     result = run_agent(
         AgentSpec("chapter_start", "chapter-start-v1", "s8c", max_check_retries=1),
         rev_dir / "workspace",
@@ -154,18 +256,43 @@ def run_chapter_start(ctx: Context, cid: str) -> Path:
     )
     if not result.ok:
         raise SystemExit("챕터 시작 설정 검사 실패:\n- " + "\n- ".join(result.problems))
-    out: ChapterStartSet = result.output
+    out = _scene_frame(result.output, template, plan.name)
     write_once_json(rev_dir / "chapter-start.json", dump(out))
+    pinned_inputs = {
+        "planRev": plan.planRev,
+        "traitSheet": sheet_path.relative_to(char_dir).as_posix(),
+    }
+    from character_factory_poc.stages.s8_prompts.evidence_pipeline import is_evidence
+
+    prompt_rev = ctx.state(cid).stage("s8").currentRev
+    prompt_dir = char_dir / "s8-prompts" / str(prompt_rev)
+    if is_evidence(prompt_dir):
+        from character_factory_poc.common.canonical import sha256_file
+
+        pinned_inputs.update(
+            promptRevision=prompt_rev, promptPairSha256=sha256_file(prompt_dir / "prompt-pair.json")
+        )
     (rev_dir / "inputs.json").write_text(
-        json.dumps(
-            {"planRev": plan.planRev, "traitSheet": sheet_path.relative_to(char_dir).as_posix()},
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
+        json.dumps(pinned_inputs, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     write_manifest(rev_dir)
     return rev_dir / "chapter-start.json"
+
+
+def run_s8c(ctx: Context, cid: str) -> Path:
+    state = ctx.state(cid)
+    state.require_deps("s8c")
+    state.transition("s8c", "RUNNING")
+    chapter = run_chapter_start(ctx, cid)
+    try:
+        from character_factory_poc.common.demo_chat import run_samples
+    except ImportError:
+        run_samples = None
+    if run_samples is not None:
+        run_samples(ctx, cid)
+        write_manifest(chapter.parent)
+    state.transition("s8c", "APPROVED", rev=chapter.parent.name)
+    return chapter
 
 
 def load_latest_chapter_start(char_dir: Path) -> dict | None:

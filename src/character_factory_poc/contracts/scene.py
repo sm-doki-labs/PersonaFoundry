@@ -20,9 +20,9 @@ from character_factory_poc.contracts.qa import QaSummary
 CHAPTERS = ("ch1", "ch2", "ch3")
 
 
-def _three(v: list) -> list:
-    if sorted(c.chapterId for c in v) != list(CHAPTERS):
-        raise ValueError("ch1, ch2, ch3 각각 하나씩이어야 한다")
+def _video_chapters(v: list) -> list:
+    if sorted(c.chapterId for c in v) not in (["ch1"], list(CHAPTERS)):
+        raise ValueError("첫 챕터만 담거나 세 챕터를 하나씩 담아야 한다")
     return sorted(v, key=lambda c: c.chapterId)
 
 
@@ -48,9 +48,9 @@ class BackgroundOutput(Strict):
     """Location Scout 에이전트 출력."""
 
     schemaVersion: Literal["background-candidates-output-v1"] = "background-candidates-output-v1"
-    chapters: list[ChapterBackgrounds] = Field(min_length=3, max_length=3)
+    chapters: list[ChapterBackgrounds] = Field(min_length=1, max_length=3)
 
-    _v = field_validator("chapters")(classmethod(lambda cls, v: _three(v)))
+    _v = field_validator("chapters")(classmethod(lambda cls, v: _video_chapters(v)))
 
 
 class PlatedCandidate(BackgroundCandidate):
@@ -75,9 +75,9 @@ class BackgroundSet(Strict):
     planRev: str
     appearanceRev: str
     aspectRatio: str
-    chapters: list[ChapterBackgroundSet] = Field(min_length=3, max_length=3)
+    chapters: list[ChapterBackgroundSet] = Field(min_length=1, max_length=3)
 
-    _v = field_validator("chapters")(classmethod(lambda cls, v: _three(v)))
+    _v = field_validator("chapters")(classmethod(lambda cls, v: _video_chapters(v)))
 
 
 @register("background-selection-v1")
@@ -110,9 +110,9 @@ class SceneWriterOutput(Strict):
     """Scene Writer 에이전트 출력: 고른 배경으로 챕터 사실을 이어서 쓴다."""
 
     schemaVersion: Literal["scene-writer-output-v1"] = "scene-writer-output-v1"
-    chapters: list[SceneChapter] = Field(min_length=3, max_length=3)
+    chapters: list[SceneChapter] = Field(min_length=1, max_length=3)
 
-    _v = field_validator("chapters")(classmethod(lambda cls, v: _three(v)))
+    _v = field_validator("chapters")(classmethod(lambda cls, v: _video_chapters(v)))
 
 
 class PlatedScene(SceneChapter):
@@ -130,9 +130,9 @@ class ScenePlan(Strict):
     backgroundRev: str
     planRev: str
     aspectRatio: str
-    chapters: list[PlatedScene] = Field(min_length=3, max_length=3)
+    chapters: list[PlatedScene] = Field(min_length=1, max_length=3)
 
-    _v = field_validator("chapters")(classmethod(lambda cls, v: _three(v)))
+    _v = field_validator("chapters")(classmethod(lambda cls, v: _video_chapters(v)))
 
 
 POSE_FIELDS = ("body", "hands", "props", "gaze", "expression", "shot", "outfit", "motionHint")
@@ -160,9 +160,9 @@ class ChapterPoses(Strict):
 @register("pose-candidates-output-v1")
 class PoseOutput(Strict):
     schemaVersion: Literal["pose-candidates-output-v1"] = "pose-candidates-output-v1"
-    chapters: list[ChapterPoses] = Field(min_length=3, max_length=3)
+    chapters: list[ChapterPoses] = Field(min_length=1, max_length=3)
 
-    _v = field_validator("chapters")(classmethod(lambda cls, v: _three(v)))
+    _v = field_validator("chapters")(classmethod(lambda cls, v: _video_chapters(v)))
 
 
 @register("pose-candidates-v1")
@@ -170,9 +170,9 @@ class PoseSet(Strict):
     schemaVersion: Literal["pose-candidates-v1"] = "pose-candidates-v1"
     characterId: str
     sceneRev: str
-    chapters: list[ChapterPoses] = Field(min_length=3, max_length=3)
+    chapters: list[ChapterPoses] = Field(min_length=1, max_length=3)
 
-    _v = field_validator("chapters")(classmethod(lambda cls, v: _three(v)))
+    _v = field_validator("chapters")(classmethod(lambda cls, v: _video_chapters(v)))
 
 
 @register("pose-selection-v1")
@@ -208,9 +208,9 @@ class PosePlan(Strict):
     schemaVersion: Literal["pose-plan-v1"] = "pose-plan-v1"
     characterId: str
     sceneRev: str
-    chapters: list[ResolvedPose] = Field(min_length=3, max_length=3)
+    chapters: list[ResolvedPose] = Field(min_length=1, max_length=3)
 
-    _v = field_validator("chapters")(classmethod(lambda cls, v: _three(v)))
+    _v = field_validator("chapters")(classmethod(lambda cls, v: _video_chapters(v)))
 
 
 @register("frames-inputs-v2")

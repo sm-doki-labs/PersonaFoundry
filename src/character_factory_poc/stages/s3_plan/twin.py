@@ -36,6 +36,7 @@ from character_factory_poc.stages.s3_plan.speech_profile import (
     MIN_SENTENCES,
     build_speech_profile,
     render_voice_definition,
+    source_registers,
 )
 
 _ARCS = {
@@ -48,6 +49,16 @@ _ARCS = {
         ("안부", "가족끼리 안부를 묻는다."),
         ("일상", "오늘 있었던 일을 함께 이야기한다."),
         ("속마음", "나누고 싶은 마음을 편하게 이야기한다."),
+    ),
+    "FRIEND_CHAT": (
+        ("친구의 안부", "오래된 친구와 메신저로 안부를 나눈다."),
+        ("일상 수다", "오래된 친구와 메신저로 일상 이야기를 주고받는다."),
+        ("속마음 나누기", "오래된 친구와 메신저로 나누고 싶은 마음을 이야기한다."),
+    ),
+    "INTERVIEW": (
+        ("인터뷰 시작", "질문자가 인터뷰를 시작하고 인물은 질문에 답한다."),
+        ("주제 탐색", "질문자가 정한 주제와 후속 질문에 인물이 답한다."),
+        ("인터뷰 마무리", "질문자의 마지막 질문에 답하고 인터뷰를 마무리한다."),
     ),
 }
 _LABELS = {
@@ -136,7 +147,7 @@ def _speech_endings(rows: list[dict]) -> dict[str, int]:
 
 def _guard(char_dir: Path, rows: list[dict], display: str) -> list[dict]:
     # 모티브는 S1이 없어도 실행한다. 다른 캐릭터의 순위·원문은 열지 않는다.
-    role_names = {"user", "other", "나", "기자", "질문자", "사용자"}
+    role_names = {"user", "other", "나", "상대", "상대방", "기자", "질문자", "사용자"}
     names = {
         r["name"]
         for r in rows
@@ -341,7 +352,7 @@ def _profile_section(profile: dict | None, summary: str) -> str:
     note = (
         "원문 문장이 적어 말투 칸은 아래 말투 요약을 쓴다."
         if profile["sentences"] < MIN_SENTENCES
-        else "말투 칸은 아래 문장으로 들어간다. 말투 예시 문장은 대화 프롬프트에 넣지 않는다."
+        else "말투 칸은 아래 문장으로 들어간다. 일상 답에서 고른 견본이 있으면 함께 보여 준다."
     )
     preview = "\n".join(render_voice_definition(profile, summary))
     return (
@@ -557,7 +568,12 @@ def run_s3_twin(ctx: Context, cid: str) -> Path:
         )
         write_once_json(folder / "variants.json", dump(variants))
         # D-0145: S8 말투 칸과 같은 함수로 계산한다. 비교 세트는 corpus에 없다.
-        profile = build_speech_profile(corpus, kinds)
+        profile = build_speech_profile(
+            corpus,
+            kinds,
+            source_registers(index.texts),
+            ctx.config.stage("s8").get("model_habit_words"),
+        )
         write_once_json(folder / "speech-profile.json", profile)
         write_once_text(folder / "gate-G3.html", _page(plan, source, profile, agg))
         write_manifest(folder)

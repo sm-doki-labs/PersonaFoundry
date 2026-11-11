@@ -67,3 +67,36 @@ def test_voice_summary_must_pick_one_speech_level():
 
     problems = mixed_speech_levels(Out())
     assert len(problems) == 1 and problems[0].startswith("v1.voiceSummary")
+
+
+FACE_FIRST_BRIEF = """핵심 성격: 조용하지만 단단함
+직업: 책방 직원
+나이: 24세
+동네 책방에서 일하며 손님이 고른 책으로 대화를 연다."""
+
+
+def test_face_first_character_plans_from_its_registered_brief(tmp_path):
+    """얼굴부터 고른 캐릭터도 등록한 브리프가 기획 씨앗이 된다(QA v5 C-13).
+
+    웹 실행은 creator-input/brief-r1.md를 brief_text로 넘기고 고정 씨앗은 넘기지 않는다.
+    """
+    import json
+
+    from character_factory_poc.pipeline.orchestrator import RunOptions, run_until
+    from character_factory_poc.stages.s3_plan.seed import load_latest_seed
+    from tests.support.flow import make_ctx, through_s2
+    from tests.test_plan_variants import output as plan_variants
+
+    ctx, agents = make_ctx(tmp_path)
+    cid = through_s2(ctx, "brief-face")
+    agents.set("s3-variants", lambda req: plan_variants(cid))
+    run_until(ctx, cid, RunOptions(until="G3", brief_text=FACE_FIRST_BRIEF))
+    seed = load_latest_seed(ctx, cid)
+    assert seed is not None
+    assert seed.notes == FACE_FIRST_BRIEF
+    assert (seed.personality, seed.job, seed.age) == ("조용하지만 단단함", "책방 직원", 24)
+    # 브리프에 성별이 없으면 승인한 외모의 성별을 쓴다.
+    assert seed.gender in {"female", "male"}
+    assert ctx.state(cid).gate("G3").status == "AWAITING_HUMAN"
+    inputs = ctx.character_dir(cid) / "s3-plan" / "pr1" / "workspace" / "inputs" / "seed.json"
+    assert json.loads(inputs.read_text("utf-8"))["notes"] == FACE_FIRST_BRIEF

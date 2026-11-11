@@ -8,6 +8,7 @@ from character_factory_poc.contracts import (  # noqa: F401
     common,
     dataset,
     dialogue_beats,
+    facts,
     formation,
     frames,
     hero,

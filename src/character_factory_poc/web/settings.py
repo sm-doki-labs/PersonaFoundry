@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,11 @@ class WebSettings:
     config_path: Path | None = None
     studio_dir: Path | None = None
 
+    server_mode: bool = False
+    source_store: str = "local"
+    source_bucket: str = ""
+    source_prefix: str = "sources/"
+
     @property
     def static_path(self) -> Path:
         """화면 파일 폴더. 상대 경로면 공장 루트 기준으로 푼다."""
@@ -45,7 +51,10 @@ class WebSettings:
     @property
     def jobs_path(self) -> Path:
         """작업 기록 저장 위치. 상대 경로면 공장 루트 기준으로 푼다."""
-        return _absolute(self.root, self.jobs_dir)
+        path = _absolute(self.root, self.jobs_dir)
+        if self.server_mode and not path.resolve().is_relative_to(self.root):
+            raise ValueError("작업 기록 경로가 공장 루트 밖이다")
+        return path
 
     def as_dict(self) -> dict[str, Any]:
         """GET /api/health에 싣는 설정 요약. 비밀값은 담지 않는다."""
@@ -92,7 +101,13 @@ def _port(value: Any) -> int:
 
 def load_settings(root: Path, config_path: Path | None = None) -> WebSettings:
     """공장 루트와 설정 파일에서 화면·작업 큐 설정을 읽는다."""
-    root = Path(root).expanduser().resolve()
+    root = Path(os.getenv("CFP_ROOT") or root).expanduser().resolve()
+    if not config_path and os.getenv("CFP_CONFIG"):
+        config_path = Path(os.environ["CFP_CONFIG"])
+    store = os.getenv("CFP_SOURCE_STORE", "local")
+    bucket = os.getenv("CFP_SOURCE_BUCKET", "")
+    if store not in {"local", "s3"} or (store == "s3" and not bucket):
+        raise ValueError("출처 저장소 종류와 버킷 설정을 확인한다")
     table = _web_table(root, config_path)
     static_raw = table.get("static_dir") or DEFAULT_STATIC_DIR
     jobs_raw = table.get("jobs_dir") or DEFAULT_JOBS_DIR
@@ -101,6 +116,10 @@ def load_settings(root: Path, config_path: Path | None = None) -> WebSettings:
         raise ValueError(f"[web] sse_heartbeat_s는 0보다 커야 한다: {heartbeat}")
     return WebSettings(
         root=root,
+        server_mode=os.getenv("CFP_SERVER_MODE") == "1",
+        source_store=store,
+        source_bucket=bucket,
+        source_prefix=os.getenv("CFP_SOURCE_PREFIX", "sources/"),
         host=str(table.get("host") or DEFAULT_HOST),
         port=_port(table.get("port") or DEFAULT_PORT),
         static_dir=_absolute(root, static_raw),

@@ -13,11 +13,14 @@ from pathlib import Path
 from typing import Any
 
 from character_factory_poc.common.config import load_config
+from character_factory_poc.common.demo_chat import Scene
 from character_factory_poc.common.ledger import Ledger
 from character_factory_poc.pipeline.graph import CREATED, GATES, STAGES, gates_for
 from character_factory_poc.pipeline.origin import (
     graph_for_dir,
     origin_label,
+    read_archived,
+    read_auto_review,
     read_model_mode,
     read_origin,
 )
@@ -57,6 +60,7 @@ STAGE_DIRS = {
     "s6": "s6-actions",
     "s7": "s7-traits",
     "s8": "s8-prompts",
+    "s8c": "s8-chapters",
     "s9s": "s9-data",
     "s9": "s9-data",
     "s10t": "s10-train",
@@ -425,6 +429,8 @@ def graph_lanes(graph):
     lanes = []
     for lane in [SOURCE_LANE, *LANES]:
         ids = ("s9h", *lane["stages"]) if lane["id"] == "training" else lane["stages"]
+        if "s8" in ids:
+            ids = (*ids, "s8c")
         kept = [sid for sid in ids if sid in graph]
         if kept:
             label = "평가" if lane["id"] == "training" and "s10t" not in graph else lane["label"]
@@ -542,6 +548,154 @@ def _persona(char_dir: Path) -> dict[str, Any] | None:
     return None
 
 
+QA_FIELDS = ("displayName", "status", "statusLabel", "chatReady", "goal", "createdAt", "archived")
+STATUS_LABELS = dict(
+    draft="시작 전",
+    running="만드는 중",
+    needs_review="확인 필요",
+    chat_ready="대화 가능",
+    failed="실패",
+    stopped="멈춤",
+)
+
+
+def display_name(persona, intake):
+    return (
+        (persona or {}).get("name")
+        or (intake or {}).get("subject", {}).get("displayName")
+        or "이름 미정"
+    )
+
+
+def _demo_summary(char_dir: Path) -> dict | None:
+    """시연 모드(자동 승인·테스터 발행) 상태. 꺼져 있으면 None."""
+    from character_factory_poc.pipeline.demo import read_demo_mode
+
+    try:
+        mode = read_demo_mode(char_dir)
+    except (OSError, ValueError):
+        return None
+    if mode is None:
+        return None
+    status = read_json_file(char_dir / "demo-status.json") or {}
+    return {
+        "enabled": True,
+        "budgetUsd": mode.budgetUsd,
+        "phase": status.get("phase", "ready"),
+        "detail": status.get("detail", ""),
+        "apiCharacterId": status.get("apiCharacterId"),
+        "at": status.get("at"),
+    }
+
+
+def created_at(folder, intake):
+    intake = intake or {}
+    origin = read_json_file(folder / "origin.json") or {}
+    stat = folder.stat()
+    return (
+        intake.get("createdAt")
+        or origin.get("setAt")
+        or datetime.fromtimestamp(getattr(stat, "st_birthtime", stat.st_mtime), UTC).isoformat()
+    )
+
+
+def is_draft(intake, stages):
+    return bool(
+        intake
+        and not intake.get("jobId")
+        and all(s.get("status", "PENDING") == "PENDING" for s in stages if isinstance(s, dict))
+    )
+
+
+def visible_folders(root, *, include_archived=False):
+    base = characters_root(root)
+    if base.is_dir():
+        for folder in sorted(base.iterdir()):
+            if (
+                _ID_RE.fullmatch(folder.name)
+                and not folder.is_symlink()
+                and folder.is_dir()
+                and (include_archived or not read_archived(folder))
+            ):
+                yield folder
+
+
+def chat_characters(root):
+    items = []
+    for folder in visible_folders(root):
+        intake = read_json_file(folder / "s0-source/intake.json")
+        name = display_name(_persona(folder), intake)
+        if Scene.read(folder, name=name).readiness()["ready"]:
+            items.append(
+                dict(
+                    characterId=folder.name,
+                    displayName=name,
+                    createdAt=created_at(folder, intake),
+                    origin=read_origin(folder),
+                )
+            )
+    return sorted(items, key=lambda r: r["createdAt"], reverse=True)
+
+
+def job_status(row, job, last):
+    status = row["status"]
+    if (
+        job
+        and job["status"] == "running"
+        and not (row.get("chatReady") and job.get("trigger") in {"videos", "videos-with-chat"})
+    ):
+        status = "running"
+    elif status != "needs_review" and last and last["status"] == "failed":
+        status = "failed"
+    row.update(status=status, statusLabel=STATUS_LABELS[status])
+
+
+def video_fields(folder, state):
+    from character_factory_poc.pipeline.origin import is_twin, read_signature, read_video_tier
+    from character_factory_poc.stages.s6_actions.catalog import signature_matches
+
+    tier = read_video_tier(folder)
+    signature = read_signature(folder)
+    gate = state.get("gates", {}).get("G5b", {})
+    approved = gate.get("rev") if gate.get("status") == "APPROVED" else None
+    preset = ""
+    inputs = {}
+    if approved:
+        inputs = read_json_file(folder / "s6-actions" / approved / "inputs.json") or {}
+        preset = inputs.get("preset", "")
+    # D-0165: 모티브는 시그니처 포즈를 바꾸면 영상을 다시 만들어야 한다.
+    same_signature = not tier or not is_twin(folder) or signature_matches(inputs, signature)
+    job = read_json_file(folder / "video-job.json") or {}
+    status = "none"
+    if not tier and not preset.startswith("tier:"):
+        # 영상 등급이 없는 캐릭터(오리지널 등)는 영상 칩을 띄우지 않는다(QA v5 E7).
+        status = "none"
+    elif tier != "none" and approved and (not tier or preset == f"tier:{tier}") and same_signature:
+        status = "ready"
+    elif tier and tier == job.get("tier"):
+        if job.get("status") in ("queued", "running"):
+            status = "making"
+        elif job.get("status") == "failed":
+            status = "failed"
+    labels = {
+        "none": "아직 영상이 없어요",
+        "making": "영상을 만들고 있어요",
+        "ready": "영상을 볼 수 있어요",
+        "failed": "영상을 만들지 못했어요",
+    }
+    # 영상 작업이 실패했으면 까닭을 사람 말 한 줄로 싣는다(QA v5 E13). 예외 이름은 뗀다.
+    error = ""
+    if status == "failed":
+        error = re.sub(r"^[A-Za-z_]*(Error|Exception): ", "", str(job.get("error") or "")).strip()
+    return dict(
+        videoTier=tier or (preset.removeprefix("tier:") if preset.startswith("tier:") else "none"),
+        videoStatus=status,
+        videoLabel=labels[status],
+        videoError=error[:200],
+        signaturePose=signature,
+    )
+
+
 def character_summary(char_dir: Path) -> dict[str, Any]:
     """캐릭터 한 명의 목록용 요약. 단계·관문 상태와 지금 기다리는 관문을 담는다."""
     char_dir = Path(char_dir)
@@ -553,11 +707,52 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
     _add_times(char_dir, stages, gates)
     persona = _persona(char_dir)
     pending = [g for g in gates if g["status"] == "AWAITING_HUMAN"]
+    intake = read_json_file(char_dir / "s0-source/intake.json")
+    display = display_name(persona, intake)
+    chat = False if error else Scene.read(char_dir, name=display).readiness()["ready"]
+    goal_stages = stages
+    if meta["origin"] != CREATED:
+        ids = {"s0", "s3", "s7", "s8", "s8c"}
+        if meta["modelMode"] == "TRAIN":
+            ids.update(("s9s", "s9", "s10t"))
+        goal_stages = [s for s in stages if s["id"] in ids]
+    goal = _progress(goal_stages)
+    # 대화 가능 여부는 별도 기능이다. 실패·검토와 실제 완료 수를 덮지 않는다(D-0181).
+    # 수정 요청(REJECTED)은 실패가 아니라 다시 확인할 일이다(QA 3차).
+    if any(s["status"] == "CHECK_FAILED" for s in stages):
+        status = "failed"
+    elif pending or any(s["status"] == "REJECTED" for s in stages):
+        status = "needs_review"
+    elif chat:
+        status = "chat_ready"
+    elif is_draft(intake, stages):
+        status = "draft"
+    else:
+        status = "stopped"
     return {
         "id": cid,
         "kind": "character",
         **meta,
         "name": (persona or {}).get("name") or cid,
+        "displayName": display,
+        "status": status,
+        "statusLabel": STATUS_LABELS[status],
+        "chatReady": chat,
+        "chapterTemplate": (read_json_file(char_dir / "source-pack.json") or {}).get(
+            "chapterTemplate", ""
+        ),
+        **video_fields(char_dir, state),
+        "createdAt": created_at(char_dir, intake),
+        "archived": read_archived(char_dir),
+        "goal": dict(
+            label="전체 단계"
+            if meta["origin"] == CREATED
+            else "대화와 학습 준비"
+            if meta["modelMode"] == "TRAIN"
+            else "대화 제작 단계",
+            done=goal["done"],
+            total=goal["total"],
+        ),
         "persona": persona,
         "dir": f"{CHARACTERS_DIR}/{cid}",
         "stateError": error,
@@ -639,7 +834,23 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
         "state": state,
         "stateError": error,
         "summary": summary,
-        **{k: summary[k] for k in ("origin", "originLabel", "modelMode")},
+        **{
+            k: summary[k]
+            for k in (
+                "origin",
+                "originLabel",
+                "modelMode",
+                "chapterTemplate",
+                "videoTier",
+                "videoStatus",
+                "videoLabel",
+                "signaturePose",
+                "videoError",
+                *QA_FIELDS,
+            )
+        },
+        "autoReview": read_auto_review(char_dir),
+        "demo": _demo_summary(char_dir),
         "persona": summary["persona"],
         "stages": summary["stages"],
         "gates": summary["gates"],
@@ -769,6 +980,15 @@ def gate_view(root: Path, character_id: str, gate: str) -> dict[str, Any]:
             items.update(
                 title="연결한 모델 채택", adoptLabel="연결한 모델로 진행", adoptTarget=options[0]
             )
+    if gate == "G0" and "usageProblems" in items:
+        # 이전 판에 남은 사용 근거 안내도 승인을 막지 않아요.
+        items["usageProblems"] = []
+    if (
+        gate == "G8"
+        and metadata["modelMode"] == "PROMPT_ONLY"
+        and items.get("viewKind") == "promptOnly"
+    ):
+        items.update(title="프롬프트만", adoptLabel="프롬프트만 사용해요")
     missing = list(items.get("problems", []))
     if meta["connected"] and rev_dir is None:
         missing.append(
@@ -844,36 +1064,42 @@ def _brief_summary(folder: Path) -> dict[str, Any]:
     }
 
 
-def list_projects(root: Path) -> dict[str, Any]:
+def list_projects(root: Path, *, include_archived=False) -> dict[str, Any]:
     """runs/characters/* 와 runs/briefs/* 목록 (GET /api/projects)."""
     root = Path(root)
-    chars_dir = characters_root(root)
     briefs_dir = briefs_root(root)
     characters: list[dict[str, Any]] = []
-    if chars_dir.is_dir():
-        for folder in sorted(chars_dir.iterdir()):
-            if not folder.is_dir() or folder.name.startswith("."):
-                continue
-            try:
-                characters.append(character_summary(folder))
-            except OSError as exc:  # 권한 등으로 읽지 못한 폴더는 목록에 사유만 남긴다
-                characters.append(
-                    {
-                        "id": folder.name,
-                        "kind": "character",
-                        "name": folder.name,
-                        "persona": None,
-                        "dir": f"{CHARACTERS_DIR}/{folder.name}",
-                        "stateError": f"폴더를 읽지 못했다: {exc}",
-                        "stages": [],
-                        "gates": [],
-                        "pendingGates": [],
-                        "queue": [],
-                        "progress": {"done": 0, "total": 0, "percent": 0, "currentStage": None},
-                        "awaitingHuman": False,
-                        "updatedAt": None,
-                    }
-                )
+    for folder in visible_folders(root, include_archived=include_archived):
+        try:
+            characters.append(character_summary(folder))
+        except OSError as exc:  # 권한 등으로 읽지 못한 폴더는 목록에 사유만 남긴다
+            characters.append(
+                {
+                    "id": folder.name,
+                    "kind": "character",
+                    "name": folder.name,
+                    "displayName": "이름 미정",
+                    "status": "failed",
+                    "statusLabel": STATUS_LABELS["failed"],
+                    "chatReady": False,
+                    "videoTier": "none",
+                    "videoStatus": "none",
+                    "videoLabel": "아직 영상이 없어요",
+                    "goal": dict(label="전체 단계", done=0, total=0),
+                    "createdAt": _mtime_iso(folder),
+                    "archived": read_archived(folder),
+                    "persona": None,
+                    "dir": f"{CHARACTERS_DIR}/{folder.name}",
+                    "stateError": f"폴더를 읽지 못했다: {exc}",
+                    "stages": [],
+                    "gates": [],
+                    "pendingGates": [],
+                    "queue": [],
+                    "progress": {"done": 0, "total": 0, "percent": 0, "currentStage": None},
+                    "awaitingHuman": False,
+                    "updatedAt": None,
+                }
+            )
     briefs: list[dict[str, Any]] = []
     if briefs_dir.is_dir():
         for folder in sorted(briefs_dir.iterdir()):

@@ -1,4 +1,5 @@
-"""한 챕터만 만드는 light 등급의 S6 계약. 기존 v2 파일은 3챕터 계약으로 검증한다."""
+"""한 챕터만 만드는 S6 계약. 오리지널 light와 모티브의 모든 등급(D-0163)이 쓴다.
+기존 v2 파일은 3챕터 계약으로 검증한다. 스키마 이름은 이미 쓴 파일과 맞추려고 그대로 둔다."""
 
 from pathlib import Path
 from typing import Literal
@@ -25,7 +26,7 @@ class LightChapter(ActionChapter):
 @register(LIGHT_INPUTS)
 class LightInputs(ActionInputs):
     schemaVersion: Literal["action-inputs-light-v1"] = LIGHT_INPUTS
-    preset: Literal["tier:light"] = "tier:light"
+    preset: Literal["tier:light", "tier:standard", "tier:pro", "tier:max"] = "tier:light"
     chapters: list[LightChapter] = Field(min_length=1, max_length=1)
 
 
@@ -38,7 +39,7 @@ class LightApprovedActions(ApprovedActions):
     @classmethod
     def _every_chapter(cls, clips: list[ApprovedClip]) -> list[ApprovedClip]:
         if any(c.chapterId != "ch1" for c in clips):
-            raise ValueError("light는 ch1 영상만 승인할 수 있다")
+            raise ValueError("한 장면 영상은 ch1 영상만 승인할 수 있다")
         if len({c.actionId for c in clips}) != len(clips):
             raise ValueError("한 동작에서 영상은 하나만 고른다")
         return clips

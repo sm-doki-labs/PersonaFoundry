@@ -35,10 +35,13 @@ from character_factory_poc.stages.s6_actions.catalog import (
     CATALOG,
     NEUTRAL_NEGATIVE,
     PRESETS,
-    STAGE_NOTES,
-    VIDEO_TIERS,
+    SIGNATURE_KEY,
     build_prompt,
+    clip_of,
     neutral_prompt,
+    signature_matches,
+    stage_note,
+    video_tiers,
 )
 from character_factory_poc.stages.s6_actions.light import LIGHT_INPUTS, read_inputs
 from character_factory_poc.stages.s6_actions.page import render_g5b_page
@@ -60,11 +63,17 @@ def _resolve_config(settings: dict[str, Any]) -> dict[str, Any]:
     preset, actions = cfg["preset"], cfg["actions"]
     if "video_tier" in cfg:
         tier = cfg["video_tier"]
-        if not isinstance(tier, str) or tier not in VIDEO_TIERS:
+        tiers = video_tiers(bool(cfg.get("motif")))
+        if not isinstance(tier, str) or tier not in tiers:
             raise CheckFailed("s6", ["video_tier는 light·standard·pro·max 중 하나다"])
-        cfg["chapters"] = VIDEO_TIERS[tier].chapters
-        cfg["actions"] = list(VIDEO_TIERS[tier].actions)
+        cfg["chapters"] = tiers[tier].chapters
+        cfg["actions"] = list(tiers[tier].actions)
         cfg["preset"] = f"tier:{tier}"
+        if cfg.get("motif"):
+            # D-0165: 모티브는 등급마다 유저가 정한 시그니처 포즈를 한 편 더한다.
+            if not cfg.get("signature"):
+                raise CheckFailed("s6", ["영상을 만들려면 시그니처 포즈를 정해 주세요."])
+            cfg["actions"].append(SIGNATURE_KEY)
     else:
         if preset == "standard":
             preset = "full37"
@@ -111,12 +120,23 @@ def _resolve_config(settings: dict[str, Any]) -> dict[str, Any]:
     return cfg
 
 
-def s6_config(ctx: Context) -> dict[str, Any]:
-    return _resolve_config(ctx.config.stage("s6"))
+def s6_config(ctx: Context, cid: str | None = None) -> dict[str, Any]:
+    from character_factory_poc.pipeline.origin import read_signature, read_video_tier
+
+    settings = dict(ctx.config.stage("s6"))
+    tier = read_video_tier(ctx.character_dir(cid)) if cid else None
+    if tier == "none":
+        raise CheckFailed("s6", ["영상 없이 만들기로 정했어요."])
+    if tier:
+        settings["video_tier"] = tier
+        settings["motif"] = is_twin(ctx.character_dir(cid))
+        if settings["motif"]:
+            settings["signature"] = read_signature(ctx.character_dir(cid))
+    return _resolve_config(settings)
 
 
 def _duration(cfg: dict, key: str) -> int:
-    return cfg["durations"][CATALOG[key]["pickRole"] or "idle"]
+    return cfg["durations"][clip_of(key, cfg)["pickRole"] or "idle"]
 
 
 def estimate(ctx: Context, cfg: dict[str, Any], calls: int = 1) -> float:
@@ -170,10 +190,63 @@ def _partial(ctx: Context, cid: str, cfg: dict) -> tuple[str | None, dict[str, s
     return (gate.rev, changes) if changes else (None, {})
 
 
+def _carry(ctx: Context, cid: str, cfg: dict) -> tuple[str | None, dict[str, str]]:
+    """모티브 등급 올리기·시그니처 바꾸기(D-0166). 승인된 판에서 같은 첫 화면·같은 지시의 몸짓은
+    그대로 옮겨 오고, 새로 생기거나 바뀐 몸짓만 다시 만든다. 파일을 쓰지 않는다."""
+    if not (cfg.get("motif") and cfg.get("video_tier")):
+        return None, {}
+    state = ctx.state(cid)
+    gate, frame_gate = state.gate("G5b"), state.gate("G4")
+    if gate.status != "APPROVED" or not gate.rev or frame_gate.status != "APPROVED":
+        return None, {}
+    inputs_path = ctx.character_dir(cid) / "s6-actions" / gate.rev / "inputs.json"
+    clips_path = inputs_path.with_name("clips.json")
+    if not inputs_path.exists() or not clips_path.exists():
+        return None, {}
+    previous: ActionInputs = read_inputs(inputs_path)
+    settings = {
+        "resolution": previous.resolution,
+        "aspect_ratio": previous.aspectRatio,
+        "generate_audio": previous.generateAudio,
+        "candidates": previous.candidates,
+    }
+    if previous.frameRev != frame_gate.rev or any(cfg[k] != v for k, v in settings.items()):
+        return None, {}
+    if tuple(ch.chapterId for ch in previous.chapters) != tuple(cfg["chapters"]):
+        return None, {}
+    changes = {}
+    for chapter in previous.chapters:
+        old = {a.actionKey: a for a in chapter.actions}
+        for key in cfg["actions"]:
+            clip = clip_of(key, cfg)
+            prompt = build_prompt(key, chapter.chapterId, motif=True, clip=clip)
+            was = old.get(key)
+            same = was is not None and (
+                was.prompt == prompt
+                and was.duration == _duration(cfg, key)
+                and (was.title, was.description, was.useWhen)
+                == (clip["title"], clip["description"], clip["useWhen"])
+            )
+            if not same:
+                changes[f"{chapter.chapterId}-{key}"] = ""
+    # 바뀐 것이 없어도 새 판으로 묶는다(등급 표시만 바뀐 경우). 영상은 하나도 새로 만들지 않는다.
+    return gate.rev, changes
+
+
+def _has_bad_frames(ctx: Context, cid: str, rev: str) -> bool:
+    inputs = read_inputs(ctx.character_dir(cid) / "s6-actions" / rev / "inputs.json")
+    return all(ch.badFrame is not None for ch in inputs.chapters)
+
+
+def _reuse(ctx: Context, cid: str, cfg: dict) -> tuple[str | None, dict[str, str]]:
+    previous, changes = _partial(ctx, cid, cfg)
+    return (previous, changes) if previous else _carry(ctx, cid, cfg)
+
+
 def plan_calls(ctx: Context, cfg: dict[str, Any], cid: str | None = None) -> list[CallPlan]:
     # cfg는 s6_config의 정규화 결과다. 여기서는 쓰기 없이 유효성만 다시 검사한다.
     _resolve_config(cfg)
-    previous, changes = _partial(ctx, cid, cfg) if cid is not None else (None, {})
+    previous, changes = _reuse(ctx, cid, cfg) if cid is not None else (None, {})
     pending = _pending_rev(ctx, cid) if cid is not None else None
     durations = []
     bad_frames = 0
@@ -201,7 +274,9 @@ def plan_calls(ctx: Context, cfg: dict[str, Any], cid: str | None = None) -> lis
             for key in cfg["actions"]:
                 if not previous or f"{ch}-{key}" in changes:
                     durations.extend([_duration(cfg, key)] * cfg["candidates"])
-        if not previous and any(CATALOG[key]["mood"] == "bad" for key in cfg["actions"]):
+        if any(clip_of(key, cfg)["mood"] == "bad" for key in cfg["actions"]) and not (
+            previous and _has_bad_frames(ctx, cid, previous)
+        ):
             bad_frames = chapter_count
         resolution = cfg["resolution"]
     pcfg = ctx.config.provider("video")
@@ -234,11 +309,24 @@ def _pending_rev(ctx: Context, cid: str) -> str | None:
     if stage.status not in {"CHECK_FAILED", "RUNNING"} or not stage.currentRev:
         return None
     path = ctx.character_dir(cid) / "s6-actions" / stage.currentRev / "inputs.json"
-    return stage.currentRev if path.exists() else None
+    if not path.exists():
+        return None
+    from character_factory_poc.pipeline.origin import read_signature, read_video_tier
+
+    tier = read_video_tier(ctx.character_dir(cid))
+    if tier:
+        inputs = read_inputs(path)
+        if inputs.preset != f"tier:{tier}" or inputs.frameRev != ctx.state(cid).gate("G4").rev:
+            return None
+        if is_twin(ctx.character_dir(cid)) and not signature_matches(
+            dump(inputs), read_signature(ctx.character_dir(cid))
+        ):
+            return None
+    return stage.currentRev
 
 
 def run_s6(ctx: Context, cid: str) -> Path:
-    cfg = s6_config(ctx)  # 잘못된 설정은 상태·산출물·공급자를 건드리기 전에 거절한다.
+    cfg = s6_config(ctx, cid)  # 잘못된 설정은 상태·산출물·공급자를 건드리기 전에 거절한다.
     state = ctx.state(cid)
     state.require_deps("s6")
     frames, frame_dir = load_approved_frames(ctx, cid)
@@ -261,7 +349,7 @@ def run_s6(ctx: Context, cid: str) -> Path:
         for frame in frames.frames:
             if sha256_file(frame_dir / frame.path) != frame.sha256:
                 raise CheckFailed("s6", [f"{frame.frameId}: G4 승인 이미지의 sha256이 다르다"])
-        previous, changes = _partial(ctx, cid, cfg) if not inputs_path.exists() else (None, {})
+        previous, changes = _reuse(ctx, cid, cfg) if not inputs_path.exists() else (None, {})
         state.transition("s6", "RUNNING", rev=rev)
         if not inputs_path.exists():
             inputs = _make_inputs(
@@ -304,10 +392,19 @@ def _first_frames(ctx, cid, rev, rev_dir, frame, frame_dir, needs_bad, cfg, budg
             raw_path = f"first-frames/{frame.chapterId}-bad-raw.png"
             write_once_bytes(rev_dir / raw_path, (previous_dir / raw_path).read_bytes())
             source = dump(chapter.badFrameSource.model_copy(update={"reusedFrom": previous}))
-        return dump(chapter.goodFrame), dump(chapter.badFrame) if chapter.badFrame else None, source
-    write_once_bytes(rev_dir / good["path"], (frame_dir / frame.path).read_bytes())
-    if not needs_bad:
-        return good, None, None
+        if chapter.badFrame or not needs_bad:
+            return (
+                dump(chapter.goodFrame),
+                dump(chapter.badFrame) if chapter.badFrame else None,
+                source,
+            )
+        # 이전 판(라이트)에는 무표정 첫 화면이 없었다.
+        # 영상은 옮겨 오고 그 한 장만 새로 만든다(D-0167).
+        good = dump(chapter.goodFrame)
+    else:
+        write_once_bytes(rev_dir / good["path"], (frame_dir / frame.path).read_bytes())
+        if not needs_bad:
+            return good, None, None
     ratio = parse_ratio(cfg["aspect_ratio"])
     neutral = neutral_prompt(twin=is_twin(ctx.character_dir(cid)))
     result = ctx.image_model(cid, budget).generate(
@@ -361,7 +458,7 @@ def _make_inputs(ctx, cid, rev, rev_dir, frames, frame_dir, cfg, video, budget, 
             if previous and aid not in changes:
                 actions.append(dump(carried[aid]))
                 continue
-            clip = CATALOG[key]
+            clip = clip_of(key, cfg)
             note = changes.get(aid, "")
             actions.append(
                 {
@@ -376,7 +473,9 @@ def _make_inputs(ctx, cid, rev, rev_dir, frames, frame_dir, cfg, video, budget, 
                     "useWhen": clip["useWhen"],
                     "duration": _duration(cfg, key),
                     "reviewNote": note,
-                    "prompt": build_prompt(key, frame.chapterId, note),
+                    "prompt": build_prompt(
+                        key, frame.chapterId, note, motif=bool(cfg.get("motif")), clip=clip
+                    ),
                 }
             )
         good, bad, source = _first_frames(
@@ -395,7 +494,7 @@ def _make_inputs(ctx, cid, rev, rev_dir, frames, frame_dir, cfg, video, budget, 
             {
                 "chapterId": frame.chapterId,
                 "frameId": frame.frameId,
-                "stageNote": STAGE_NOTES[frame.chapterId],
+                "stageNote": stage_note(frame.chapterId, motif=bool(cfg.get("motif"))),
                 "goodFrame": good,
                 "badFrame": bad,
                 "badFrameSource": source,
@@ -403,7 +502,9 @@ def _make_inputs(ctx, cid, rev, rev_dir, frames, frame_dir, cfg, video, budget, 
             }
         )
     return validate(
-        LIGHT_INPUTS if cfg.get("video_tier") == "light" else "action-inputs-v2",
+        LIGHT_INPUTS
+        if cfg.get("video_tier") and tuple(cfg["chapters"]) == ("ch1",)
+        else "action-inputs-v2",
         {
             "frameRev": frames.frameRev,
             "appearanceRev": frames.appearanceRev,

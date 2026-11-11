@@ -80,7 +80,12 @@ def _voice_lines(lines):
     return result
 
 
-def load_actor_rules(ctx=None):
+def load_actor_rules(ctx=None, *, origin=None):
+    if origin == "SOURCE":
+        name = "actor-system-rules-v4-motif"
+        return files("character_factory_poc.resources").joinpath(name + ".md").read_text(), (
+            "builtin:" + name
+        )
     custom = (
         (
             ctx.config.stage("s8").get("actor_system_rules_path")
@@ -242,7 +247,7 @@ def _choice_lines(sheet) -> list[str]:
     return lines
 
 
-def compose_approved_sheet(plan, sheet, *, rules_text, voice=None, limits=None):
+def compose_approved_sheet(plan, sheet, *, rules_text, voice=None, limits=None, facts=None):
     """Compile the legacy approved sheet using the current actor section contract."""
     p = _raw(plan)
     # D-0080: 기획서에 없는 칸을 빈 섹션으로 조립하지 않는다(구형 character-plan-v1 등).
@@ -263,6 +268,7 @@ def compose_approved_sheet(plan, sheet, *, rules_text, voice=None, limits=None):
             [
                 f"{p['name']}{_topic(p['name'])} {p['age']}세 {gender} {p['job']}이다.",
                 p.get("background", ""),
+                *(facts or []),
             ]
         ),
         lifeAndTastes=_unique(p.get("lifeAndTastes", [])),
@@ -306,7 +312,7 @@ def _ledger_line(t) -> str:
     return line
 
 
-def compose_from_ledger(plan, ledger, *, rules_text, voice=None, limits=None):
+def compose_from_ledger(plan, ledger, *, rules_text, voice=None, limits=None, facts=None):
     """D-0091: 특질 장부에서 조립한다. 한 특질은 한 칸에 한 번만 들어간다(MD-1.4)."""
     p = _raw(plan)
     gender = {"female": "여성", "male": "남성", "other": ""}.get(p.get("gender"), "")
@@ -315,6 +321,7 @@ def compose_from_ledger(plan, ledger, *, rules_text, voice=None, limits=None):
             [
                 f"{p['name']}{_topic(p['name'])} {p['age']}세 {gender} {p['job']}이다.",
                 p.get("background", ""),
+                *(facts or []),
             ]
         ),
         lifeAndTastes=_unique(p.get("lifeAndTastes", [])[:5]),

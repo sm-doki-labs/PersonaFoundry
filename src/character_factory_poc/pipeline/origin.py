@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 from character_factory_poc.common.errors import FactoryError
 from character_factory_poc.pipeline.graph import (
@@ -44,6 +45,43 @@ __all__ = [
 ]
 
 
+VideoTier = Literal["none", "light", "standard", "pro", "max"]
+VIDEO_STAGES = ("s2", "s4a", "s4b", "s4", "s6")
+
+
+def read_video_tier(char_dir: Path) -> str | None:
+    path = char_dir / "video-settings.json"
+    return json.loads(path.read_text("utf-8"))["videoTier"] if path.exists() else None
+
+
+def _video_settings(char_dir: Path) -> dict:
+    path = char_dir / "video-settings.json"
+    return json.loads(path.read_text("utf-8")) if path.exists() else {}
+
+
+def _write_video_settings(char_dir: Path, data: dict) -> None:
+    from character_factory_poc.common.source_store import atomic_write, inside
+
+    atomic_write(
+        inside(char_dir, "video-settings.json"), json.dumps(data, ensure_ascii=False).encode()
+    )
+
+
+def write_video_tier(char_dir: Path, tier: VideoTier) -> None:
+    _write_video_settings(char_dir, _video_settings(char_dir) | {"videoTier": tier})
+
+
+def read_signature(char_dir: Path) -> dict | None:
+    """모티브 시그니처 포즈 {title, motion, useWhen}(D-0165). 유저가 정하고, 없으면 None."""
+    return _video_settings(char_dir).get("signature") or None
+
+
+def write_signature(char_dir: Path, signature: dict) -> None:
+    data = _video_settings(char_dir)
+    data.setdefault("videoTier", "none")
+    _write_video_settings(char_dir, data | {"signature": signature})
+
+
 def origin_label(origin: str) -> str:
     return LABELS[origin]
 
@@ -59,12 +97,32 @@ def read_origin(char_dir: Path) -> str:
     return origin
 
 
+def read_archived(char_dir: Path) -> bool:
+    return (char_dir / ".archived").is_file()
+
+
+def set_archived(char_dir: Path, archived: bool) -> None:
+    marker = char_dir / ".archived"
+    if archived:
+        marker.touch(exist_ok=True)
+    else:
+        marker.unlink(missing_ok=True)
+
+
 def is_twin(char_dir: Path) -> bool:
     """모티브(실존 인물 기반) 캐릭터인가. 이미지·영상 프롬프트가 '가상 인물' 문구를 뺄 때 쓴다."""
     return read_origin(char_dir) == SOURCE
 
 
-def write_origin(char_dir: Path, origin: str) -> None:
+def read_auto_review(char_dir: Path) -> bool:
+    path = Path(char_dir) / ORIGIN_FILE
+    if not path.is_file():
+        return False
+    data = json.loads(path.read_text("utf-8"))
+    return data.get("origin") == SOURCE and data.get("autoReview") is True
+
+
+def write_origin(char_dir: Path, origin: str, *, auto_review: bool = False) -> None:
     """출신을 처음 한 번 쓴다. 같은 값이면 그대로 두고, 다른 값이면 거절한다."""
     if origin not in ORIGINS:
         raise FactoryError(f"알 수 없는 출신: {origin}")
@@ -83,6 +141,8 @@ def write_origin(char_dir: Path, origin: str) -> None:
         "label": origin_label(origin),
         "setAt": datetime.now(UTC).isoformat(timespec="seconds"),
     }
+    if origin == SOURCE:
+        record["autoReview"] = auto_review
     path.write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 

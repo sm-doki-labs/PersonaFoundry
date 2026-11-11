@@ -33,7 +33,7 @@ def _twin(tmp: Path, monkeypatch, mode: str = "PROMPT_ONLY", **pack_changes):
         return path
 
     monkeypatch.setattr(flow, "_pack", pack)
-    ctx, cid, _ev, _adopted = flow._approved(tmp, mode)
+    ctx, cid, _ev, _adopted = flow._approved(tmp, mode, legacy_v3=True)
     rev_dir = build_package(ctx, cid)
     return ctx, cid, rev_dir
 
@@ -119,8 +119,8 @@ def test_parent_scope_without_presentation_blocks_approve(tmp_path, monkeypatch)
 def test_banned_terms_come_from_config_and_cover_video_prompts(tmp_path, monkeypatch):
     original = flow._approved
 
-    def approved(tmp, mode):
-        ctx, *rest = original(tmp, mode)
+    def approved(tmp, mode, *, legacy_v3=False):
+        ctx, *rest = original(tmp, mode, legacy_v3=legacy_v3)
         # 합성 영상 프롬프트에 늘 있는 낱말을 금지어로 두어 영상 프롬프트까지 읽는지 본다.
         ctx.config.stages["s11"] = {"presentation_banned_terms": ["camera", "제본사"]}
         return (ctx, *rest)
@@ -140,7 +140,8 @@ def test_default_terms_catch_endorsement_but_skip_shared_rule(tmp_path, monkeypa
     ctx, cid, rev_dir = _twin(tmp_path, monkeypatch)
     package = presentation.CharacterPackage.model_validate(read_json(rev_dir / "package.json"))
     # 모든 프롬프트에 붙는 공통 규칙("매 턴 채울 공식이 아니다")은 걸리지 않는다.
-    assert "채울 공식" in (rev_dir / "persona/long-prompt.txt").read_text("utf-8")
+    prompt = rev_dir / "persona/long-prompt.txt"
+    prompt.write_text(prompt.read_text("utf-8") + "\n매 턴 채울 공식이 아니다.\n", "utf-8")
     assert _by_id(_check(rev_dir))["endorsement"]["ok"]
     tagged = package.model_copy(
         update={
