@@ -331,7 +331,7 @@ test('chat page copy: one name 대화해 보기, settings folded, a fix link, he
   assert.ok(!/대화 테스트/.test(html + js), 'no second name for the page');
   assert.ok(html.includes('<title>대화해 보기 · Foundry</title>'));
   assert.ok(js.includes('<summary data-key="sum:set">설정 보기</summary>'), 'model and temperature sit in a folded 설정 보기');
-  assert.ok(js.includes('고칠 점 적기') && js.includes("'factory.html#c/'"));
+  assert.ok(!js.includes('>고칠 점 적기<') && js.includes("'factory.html#c/'"), 'no dead-end feedback link (QA v5 D-03)');
   assert.ok(js.includes('class="fd-help"') && js.includes('ch-head-help'), 'the same ? help entry as the factory');
   assert.ok(!js.includes('ch-sidebtn') && !js.includes("icon('back')"), 'the back button that looked like a sidebar toggle is gone');
   assert.ok(js.includes('새 대화로 시작해요'), 'scenario buttons say they start a new conversation');

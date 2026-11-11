@@ -26,6 +26,7 @@ from character_factory_poc.stages.export.doki_app.naming import (
     slug_for,
 )
 from character_factory_poc.stages.s6_actions.app_clips import APP_CLIPS
+from character_factory_poc.stages.s6_actions.catalog import SIGNATURE_KEY
 
 FORMAT = "dokilabs-seed/1"
 
@@ -621,7 +622,8 @@ def _pick_role(video: Video) -> str | None:
 #: §D-0040의 감정 세트 이름(대기·감정 반응). 그 밖의 이름은 특별 행동으로 본다.
 #: S6 앱 카탈로그(APP_CLIPS)는 api-svc 감정 세트 사본이라 전부 감정이다. 여기서 빠지면
 #: pick_role=special로 나가 서버의 답변 뒤 몸짓 후보(followup-clip)에서 사라진다.
-_EMOTION_KEYS = frozenset({clip["key"] for clip in APP_CLIPS}) | frozenset(
+#: 모티브 시그니처 포즈(D-0165)도 '이럴 때'를 보고 자동으로 고르는 감정 반응으로 내보낸다.
+_EMOTION_KEYS = frozenset({clip["key"] for clip in APP_CLIPS} | {SIGNATURE_KEY}) | frozenset(
     {
         "idle_good",
         "idle_bad",

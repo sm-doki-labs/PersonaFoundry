@@ -40,6 +40,12 @@ const tap = (p, sel) => p.$eval(sel, (el) => el.click());
 // 진행 화면은 자주 다시 그려서 요소 손잡이가 떨어진다. 그 순간의 자리로 화면을 잘라 찍는다.
 // has를 주면 그 글이 들어간 요소를 고른다(다시 그려도 같은 요소를 찾는다).
 async function snap(p, sel, name, has) {
+  // 진행 화면은 다시 그리는 사이 요소가 잠깐 없어질 수 있다. 몇 번 다시 잡는다.
+  for (let i = 0; ; i += 1) {
+    try { return await snap1(p, sel, name, has); } catch (e) { if (i >= 5) throw e; await sleep(400); }
+  }
+}
+async function snap1(p, sel, name, has) {
   const find = (els, h) => els.find((e) => e.offsetParent !== null && e.getBoundingClientRect().height > 4 && (!h || e.innerText.includes(h)));
   await p.$$eval(sel, (els, h, f) => { const el = new Function('return ' + f)()(els, h); el.scrollIntoView({ block: 'center', behavior: 'instant' }); }, has || '', find.toString());
   await sleep(300);
@@ -80,6 +86,9 @@ function draftServer() {
       assert.ok(!/\d/.test(await text(p, '[data-tier-cards]')), 'no numbers on the cards');
       await p.click('[data-tier-cards] input[value="light"]');
       assert.ok(await shown(p, '[data-tier-hint]'));
+      assert.ok(await shown(p, '[data-sig]'), 'picking a tier opens the signature pose fields (D-0165)');
+      await p.type('[name="sigTitle"]', '찰칵 세리머니');
+      await p.type('[name="sigMotion"]', '두 손으로 카메라 모양을 만들어 눈앞에 대고 찰칵 누르는 시늉을 해요.');
       const fs = await p.$('[data-tier-choice]');
       await fs.screenshot({ path: shot('1-form-tiers') });
       await p.setViewport({ width: 390, height: 900 });
@@ -149,9 +158,10 @@ function draftServer() {
       await p.goto(base + '/studio/factory.html#c/' + encodeURIComponent(cid), { waitUntil: 'domcontentloaded' });
       await p.waitForSelector('[data-act="video-open"]', { timeout: 8000 });
       await tap(p, '[data-act="video-open"]');
-      await p.waitForFunction(() => /원문 화면에서 사진 올리기/.test(document.body.innerText), { timeout: 5000 });
+      // 사진은 처음 만들 때만 올린다(D-0160). 사진 없이 만든 캐릭터는 원문 화면에서 새로 만들게 안내한다.
+      await p.waitForFunction(() => /만들 때 사진을 올리지 않아서/.test(document.body.innerText), { timeout: 5000 });
       const href = await p.$eval('.fl-vid a.btn', (a) => a.getAttribute('href'));
-      assert.equal(href, 'sources.html#c/' + encodeURIComponent(cid));
+      assert.equal(href, 'sources.html');
       await snap(p, '.fl-tasks', '6-factory-no-photo');
       state.photos = true;
       await tap(p, '[data-act="video-cancel"]');
@@ -160,11 +170,15 @@ function draftServer() {
       assert.deepEqual(await p.$$eval('[name="videoTierPick"]', (els) => els.map((e) => e.value)), ['light', 'standard', 'pro', 'max']);
       await tap(p, '[name="videoTierPick"][value="pro"]');
       await sleep(100);
+      await tap(p, '[data-act="video-go"]');
+      await p.waitForFunction(() => /시그니처 포즈의 이름과 어떤 동작인지/.test(document.body.innerText), { timeout: 3000 });
+      await p.type('#fl-sig-title', '찰칵 세리머니');
+      await p.type('#fl-sig-motion', '두 손으로 카메라 모양을 만든다.');
       assert.match(await text(p, '[data-act="video-go"]'), /프로 영상 만들기 시작/);
       await snap(p, '.fl-tasks', '7-factory-chooser');
       await tap(p, '[data-act="video-go"]');
       await p.waitForFunction(() => /영상 만드는 중 · 프로/.test(document.querySelector('.fd-title').innerText), { timeout: 5000 });
-      assert.deepEqual(state.posted, { videoTier: 'pro' });
+      assert.deepEqual(state.posted, { videoTier: 'pro', signaturePose: { title: '찰칵 세리머니', motion: '두 손으로 카메라 모양을 만든다.', useWhen: '' } });
       await snap(p, '.fd-title', '8-factory-header-making');
       await snap(p, '.fl-tasks', '8b-factory-tasks-making');
       await p.goto(base + '/studio/factory.html#all', { waitUntil: 'domcontentloaded' });

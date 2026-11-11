@@ -27,6 +27,8 @@ MATERIAL_KO = {
     "SNS_REWRITE": "실제 대화(SNS·말뭉치) 다시 쓰기",
     "SYNTH": "합성",
     "NIKL": "국립국어원 말뭉치",
+    # 모티브 학습 데이터는 G0에서 승인한 원문 대화를 그대로 쓴다(QA v5 B-F22).
+    "SOURCE": "원문 대화",
 }
 SOURCE_KO = {"SNS": "SNS(문자)", "NIKL": "말뭉치(통화)"}
 DROP_KO = {
@@ -55,6 +57,34 @@ PHASES = (
     ("collect", "결과 받기·GPU 반납", "받은 파일을 확인하고 바로 반납해요"),
     ("select", "체크포인트 고르기", "판정 모델이 짝으로 비교해요"),
 )
+# 연결한 모델 종류와 연결 전 확인 결과를 화면 말로(QA v5 B-F07).
+BIND_KIND_KO = {
+    "HF_ADAPTER": "Hugging Face 어댑터",
+    "VERTEX_TUNED": "Vertex 튜닝 모델",
+    "ENDPOINT": "서빙 주소",
+}
+CHECK_KO = {
+    "PASSED": "저장소 주인·커밋·기반 모델을 확인했어요",
+    "SKIPPED": "연결 정보만 기록했어요(미리 확인하지 않음)",
+}
+# 평가 조건 이름(QA v5 C-08). 화면은 관문 G8과 같은 조건 수를 센다.
+ARM_KO = {
+    "LONG_BASE": "긴 프롬프트",
+    "SHORT_GEMMA_SFT": "Gemma 학습 모델",
+    "SHORT_GEMINI_SFT": "Gemini 학습 모델",
+}
+# 옛 기록에 남은 내부 코드 문구를 화면 말로 바꾼다(QA v5 B-F22).
+_PLAIN = (
+    ("개로 50개 미만이다.", "개로 50개보다 적어요."),
+    ("PROMPT_ONLY를 권장한다", "학습 대신 '프롬프트만' 방식을 권해요"),
+    ("PROMPT_ONLY", "'프롬프트만' 방식"),
+)
+
+
+def plain_note(text: str) -> str:
+    for old, new in _PLAIN:
+        text = text.replace(old, new)
+    return text
 
 
 def _json(path: Path) -> Any:
@@ -122,6 +152,7 @@ def _gate_record(char_dir: Path, gates: dict[str, Any], gate: str) -> dict[str, 
     rec = _dict(_json(char_dir / ref)) if isinstance(ref, str) else {}
     out["decidedAt"] = rec.get("decidedAt")
     out["decision"] = rec.get("decision")
+    out["selections"] = [s for s in rec.get("selections") or [] if isinstance(s, str)]
     return out
 
 
@@ -137,7 +168,7 @@ def dataset_view(char_dir: Path, state: dict[str, Any]) -> dict[str, Any] | None
     plan = _dict(_json(rev_dir / "plan.json"))
     index = _jsonl(rev_dir / "index.jsonl")
     report = _dict(_json(rev_dir / "check-report.json"))
-    warnings = [w for w in report.get("warnings") or [] if isinstance(w, str)]
+    warnings = [plain_note(w) for w in report.get("warnings") or [] if isinstance(w, str)]
     by_cluster: dict[str, Counter] = {}
     materials: dict[str, Counter] = {}
     for row in index:
@@ -616,14 +647,85 @@ def eval_view(char_dir: Path, state: dict[str, Any]) -> dict[str, Any]:
     s10 = _dict(_dict(state.get("stages")).get("s10"))
     rev_dir = _latest(char_dir / "s10-eval", "ev", s10.get("currentRev"))
     report = _dict(_json(rev_dir / "report.json")) if rev_dir else {}
+    gate = _gate_record(char_dir, _dict(state.get("gates")), "G8")
+    arms = _arms(rev_dir)
     return {
         "status": s10.get("status", "PENDING"),
         "rev": rev_dir.name if rev_dir else None,
         "promptOnly": bool(rev_dir and (rev_dir / "prompt-only.json").is_file()),
-        "gate": _gate_record(char_dir, _dict(state.get("gates")), "G8"),
+        "gate": gate,
         "decision": report.get("decision"),
         "recommendation": report.get("recommendation"),
         "sftPrompt": _sft_prompt(char_dir, rev_dir),
+        "arms": arms,
+        "adopted": _adopted(gate, arms),
+    }
+
+
+def _arms(rev_dir: Path | None) -> list[dict[str, Any]]:
+    """G8이 비교하는 조건(사전 등록 순서). 학습 결과가 없는 조건은 bound=False다."""
+    prereg = _dict(_json(rev_dir / "prereg.json")) if rev_dir else {}
+    out = []
+    for a in prereg.get("arms") or []:
+        arm = _dict(a)
+        arm_id = str(arm.get("armId") or "")
+        model = str(arm.get("model") or "")
+        out.append(
+            {
+                "id": arm_id,
+                "label": ARM_KO.get(arm_id, "학습 모델"),
+                "model": model,
+                "bound": not model.startswith("UNBOUND:"),
+            }
+        )
+    return out
+
+
+def _adopted(gate: dict[str, Any], arms: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """G8에서 채택한 조건. 승인 전이면 None이다."""
+    if gate.get("status") != "APPROVED" or not gate.get("selections"):
+        return None
+    value = gate["selections"][0]
+    if value == "LONG_BASE":
+        return {"value": value, "label": ARM_KO["LONG_BASE"]}
+    arm = next((a for a in arms if a["model"] == value), None)
+    if arm:
+        return {"value": value, "label": arm["label"]}
+    if value.startswith("model-prep/"):
+        return {"value": value, "label": "연결한 모델"}
+    return {"value": value, "label": "학습 모델"}
+
+
+def binding_view(char_dir: Path) -> dict[str, Any] | None:
+    """학습된 모델 연결(BIND_EXISTING): 최신 학습 기록 폴더의 연결 기록. 없으면 None.
+
+    s10 평가가 쓰는 규칙(stages.s10_eval.twin)과 같게, 최신 tr 폴더의 IMPORTED-mb* 하나만 본다.
+    """
+    rev_dir = _latest(char_dir / "s10-train", "tr")
+    paths = sorted(rev_dir.glob("IMPORTED-mb*/training-run.json")) if rev_dir else []
+    if len(paths) != 1:
+        return None
+    run = _dict(_json(paths[0]))
+    applied = _dict(run.get("appliedConfig"))
+    b = _dict(applied.get("binding"))
+    check = _dict(applied.get("preflight"))
+    prov = _dict(b.get("provenance"))
+    status = str(check.get("status") or "")
+    return {
+        "rev": str(run.get("provider") or "").removeprefix("IMPORTED-"),
+        "kind": b.get("provider"),
+        "kindLabel": BIND_KIND_KO.get(str(b.get("provider")), "학습된 모델"),
+        "ref": b.get("ref"),
+        "revision": b.get("revision"),
+        "baseModel": b.get("baseModel"),
+        "baseModelRevision": b.get("baseModelRevision"),
+        "servingRoute": b.get("servingRoute"),
+        "trainedBy": prov.get("trainedBy"),
+        "trainedAt": prov.get("trainedAt"),
+        "dataNote": prov.get("dataNote"),
+        "usageBasis": prov.get("usageBasis"),
+        "check": status,
+        "checkLabel": CHECK_KO.get(status, "확인 결과를 읽지 못했어요"),
     }
 
 
@@ -646,10 +748,19 @@ def model_path(
     char_dir: Path, state: dict[str, Any], now: datetime | None = None
 ) -> dict[str, Any]:
     """GET /api/characters/{id}/model-path와 캐릭터 상세의 modelPath."""
+    from character_factory_poc.pipeline.graph import BIND_EXISTING
+    from character_factory_poc.pipeline.origin import read_model_mode
+
+    try:
+        mode = read_model_mode(char_dir)
+    except Exception:
+        mode = None
     dataset = dataset_view(char_dir, state)
     return {
+        "mode": mode,
         "material": material_view(dataset),
         "dataset": dataset,
         "training": training_view(char_dir, state, now),
         "eval": eval_view(char_dir, state),
+        "binding": binding_view(char_dir) if mode == BIND_EXISTING else None,
     }

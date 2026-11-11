@@ -651,19 +651,26 @@ def job_status(row, job, last):
 
 
 def video_fields(folder, state):
-    from character_factory_poc.pipeline.origin import read_video_tier
+    from character_factory_poc.pipeline.origin import is_twin, read_signature, read_video_tier
+    from character_factory_poc.stages.s6_actions.catalog import signature_matches
 
     tier = read_video_tier(folder)
+    signature = read_signature(folder)
     gate = state.get("gates", {}).get("G5b", {})
     approved = gate.get("rev") if gate.get("status") == "APPROVED" else None
     preset = ""
+    inputs = {}
     if approved:
-        preset = (read_json_file(folder / "s6-actions" / approved / "inputs.json") or {}).get(
-            "preset", ""
-        )
+        inputs = read_json_file(folder / "s6-actions" / approved / "inputs.json") or {}
+        preset = inputs.get("preset", "")
+    # D-0165: 모티브는 시그니처 포즈를 바꾸면 영상을 다시 만들어야 한다.
+    same_signature = not tier or not is_twin(folder) or signature_matches(inputs, signature)
     job = read_json_file(folder / "video-job.json") or {}
     status = "none"
-    if tier != "none" and approved and (not tier or preset == f"tier:{tier}"):
+    if not tier and not preset.startswith("tier:"):
+        # 영상 등급이 없는 캐릭터(오리지널 등)는 영상 칩을 띄우지 않는다(QA v5 E7).
+        status = "none"
+    elif tier != "none" and approved and (not tier or preset == f"tier:{tier}") and same_signature:
         status = "ready"
     elif tier and tier == job.get("tier"):
         if job.get("status") in ("queued", "running"):
@@ -676,10 +683,16 @@ def video_fields(folder, state):
         "ready": "영상을 볼 수 있어요",
         "failed": "영상을 만들지 못했어요",
     }
+    # 영상 작업이 실패했으면 까닭을 사람 말 한 줄로 싣는다(QA v5 E13). 예외 이름은 뗀다.
+    error = ""
+    if status == "failed":
+        error = re.sub(r"^[A-Za-z_]*(Error|Exception): ", "", str(job.get("error") or "")).strip()
     return dict(
         videoTier=tier or (preset.removeprefix("tier:") if preset.startswith("tier:") else "none"),
         videoStatus=status,
         videoLabel=labels[status],
+        videoError=error[:200],
+        signaturePose=signature,
     )
 
 
@@ -704,10 +717,11 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
             ids.update(("s9s", "s9", "s10t"))
         goal_stages = [s for s in stages if s["id"] in ids]
     goal = _progress(goal_stages)
-    # 대화 가능 여부는 별도 기능이다. 실패·검토와 실제 완료 수를 덮지 않는다.
-    if any(s["status"] in {"CHECK_FAILED", "REJECTED"} for s in stages):
+    # 대화 가능 여부는 별도 기능이다. 실패·검토와 실제 완료 수를 덮지 않는다(D-0181).
+    # 수정 요청(REJECTED)은 실패가 아니라 다시 확인할 일이다(QA 3차).
+    if any(s["status"] == "CHECK_FAILED" for s in stages):
         status = "failed"
-    elif pending:
+    elif pending or any(s["status"] == "REJECTED" for s in stages):
         status = "needs_review"
     elif chat:
         status = "chat_ready"
@@ -731,7 +745,11 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
         "createdAt": created_at(char_dir, intake),
         "archived": read_archived(char_dir),
         "goal": dict(
-            label="전체 단계" if meta["origin"] == CREATED else "대화 제작 단계",
+            label="전체 단계"
+            if meta["origin"] == CREATED
+            else "대화와 학습 준비"
+            if meta["modelMode"] == "TRAIN"
+            else "대화 제작 단계",
             done=goal["done"],
             total=goal["total"],
         ),
@@ -826,6 +844,8 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
                 "videoTier",
                 "videoStatus",
                 "videoLabel",
+                "signaturePose",
+                "videoError",
                 *QA_FIELDS,
             )
         },

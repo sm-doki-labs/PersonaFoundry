@@ -58,6 +58,44 @@ def test_old_standard_is_a_preset_only(tmp_path):
         s6_config(ctx)
 
 
+@pytest.mark.parametrize(
+    ("tier", "total", "seconds"),
+    [("light", 5, 55), ("standard", 20, 210), ("pro", 28, 290), ("max", 37, 380)],
+)
+def test_motif_tiers_are_one_scene(tmp_path, tier, total, seconds):
+    """D-0164·D-0167: 모티브는 배경 하나·같은 옷. 등급은 몸짓 수로만 갈린다. 라이트는 5+1편이고
+    무표정 대기가 없어 무표정 첫 화면을 만들지 않는다."""
+    from character_factory_poc.stages.s6_actions.catalog import MOTIF_VIDEO_TIERS
+    from character_factory_poc.stages.s6_actions.run import _resolve_config
+
+    ctx, _ = make_ctx(tmp_path)
+    with pytest.raises(CheckFailed, match="시그니처 포즈"):
+        _resolve_config({"video_tier": tier, "motif": True})
+    pose = {"title": "찰칵", "motion": "카메라 모양 손", "useWhen": ""}
+    cfg = _resolve_config({"video_tier": tier, "motif": True, "signature": pose})
+    # D-0165: 모든 등급에 시그니처 포즈가 한 편 더 붙는다.
+    assert cfg["chapters"] == ("ch1",) and len(cfg["actions"]) == total + 1
+    assert cfg["actions"][-1] == "signature_good"
+    tier_keys = cfg["actions"][:-1]
+    assert set(MOTIF_VIDEO_TIERS["light"].actions) <= set(tier_keys) <= set(APP_KEYS)
+    assert len(set(tier_keys)) == total
+    *image, video = plan_calls(ctx, cfg)
+    assert [p.calls for p in image] == ([] if tier == "light" else [1])
+    assert video.calls == total + 1
+    assert (
+        sum(cfg["durations"]["idle" if k.startswith("idle") else "emotion"] for k in cfg["actions"])
+        == seconds + 10
+    )
+
+
+def test_motif_prompt_drops_relationship_stage():
+    from character_factory_poc.stages.s6_actions.catalog import MOTIF_STAGE_NOTE, build_prompt
+
+    prompt = build_prompt("glad_good", "ch1", motif=True)
+    assert MOTIF_STAGE_NOTE in prompt and "Relationship stage" not in prompt
+    assert "Relationship stage 1" in build_prompt("glad_good", "ch1")
+
+
 def test_light_generates_and_approves_only_ch1(flow):  # noqa: F811
     ctx, cid, video = flow
     ctx.config.stages["s6"] = {"video_tier": "light"}
@@ -97,3 +135,17 @@ def test_export_reports_short_stages_without_blocking(tmp_path):
     warnings = clip_count_warnings(read_json(out / "doki-app/api-svc/seed.json"))
     assert len(warnings) == 3 and set(warnings) <= set(result.unmapped)
     assert ctx.state(cid).stage("sx").status == "APPROVED"
+
+
+def test_original_without_tier_shows_no_video_chip(flow):  # noqa: F811
+    """QA v5 E7: 등급 없이(l2) 만든 오리지널 영상에 "영상 있음 · 영상 없이"를 띄우지 않는다."""
+    from character_factory_poc.web import reads
+
+    ctx, cid, _ = flow
+    run_s6(ctx, cid)
+    approve_gate(ctx, cid, "G5b", {"decision": "APPROVE"})
+    folder = ctx.character_dir(cid)
+    state, _ = reads.read_state(folder)
+    fields = reads.video_fields(folder, state)
+    assert fields["videoTier"] == "none" and fields["videoStatus"] == "none"
+    assert fields["videoError"] == ""

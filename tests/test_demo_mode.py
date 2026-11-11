@@ -57,6 +57,11 @@ def _motif(tmp_path, monkeypatch=None):
     )
     cid = _twin(ctx, "cf-20261112-demo")
     write_model_mode(ctx.character_dir(cid), "PROMPT_ONLY")
+    # 웹에서 만든 모티브처럼 영상 등급과 시그니처 포즈를 정해 둔다(D-0164·D-0165).
+    from character_factory_poc.pipeline.origin import write_signature, write_video_tier
+
+    write_video_tier(ctx.character_dir(cid), "light")
+    write_signature(ctx.character_dir(cid), {"title": "찰칵", "motion": "카메라 손", "useWhen": ""})
     for stage, fn in [
         ("s0", _good_digest),
         ("s3-twin", _answer),
@@ -68,6 +73,18 @@ def _motif(tmp_path, monkeypatch=None):
         ("s8c", lambda req: _start().model_dump() | {"characterId": cid}),
     ]:
         agents.set(stage, fn)
+    from tests.test_scene_flow import agent_input
+
+    def scoped(fn):
+        # 모티브는 요청한 챕터만 만든다(D-0164). 가짜 응답도 요청 챕터로 줄인다.
+        def respond(req):
+            wanted = agent_input(req, "settings")["chapters"]
+            return {"chapters": [c for c in fn(req)["chapters"] if c["chapterId"] in wanted]}
+
+        return respond
+
+    for stage, fn in [("s4a", backgrounds), ("s4b-pose", poses)]:
+        agents.set(stage, scoped(fn))
     return ctx, cid
 
 

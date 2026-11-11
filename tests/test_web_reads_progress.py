@@ -13,7 +13,8 @@ from character_factory_poc.web import reads
     ("stage_status", "gate_status", "expected", "done"),
     [
         ("CHECK_FAILED", "PENDING", "failed", 4),
-        ("REJECTED", "PENDING", "failed", 4),
+        # 수정 요청은 실패가 아니라 다시 확인할 일이다(QA 3차).
+        ("REJECTED", "PENDING", "needs_review", 4),
         ("AWAITING_HUMAN", "AWAITING_HUMAN", "needs_review", 4),
         ("APPROVED", "APPROVED", "chat_ready", 5),
     ],

@@ -1,8 +1,61 @@
 // 관문 상세 화면. 서버의 관문 항목을 읽어 고르기·승인·수정 요청 화면을 만들고,
 // 결정은 POST /api/characters/{id}/gates/{gate}/decision 한 곳으로 보낸다(cfp gate import와 같은 답).
+
+// 화면 없이 확인할 수 있는 판단(이름·지난 요청·관문 목록·반려 안내). node 시험이 그대로 불러 쓴다.
+(function (root) {
+  'use strict';
+  function arr(value) { return Array.isArray(value) ? value : []; }
+  // 이름: 기획에서 정한 이름 → 원문에서 정한 표시 이름 → '이름 미정 · slug (11/7)'. 내부 ID는 이름으로 쓰지 않는다.
+  function characterName(summary, id) {
+    var s = summary || {};
+    var cid = String(id || '');
+    var pick = [s.displayName, s.persona && s.persona.name, s.name].filter(function (n) {
+      var t = String(n || '').trim();
+      return t && t !== cid && t !== '이름 미정';
+    })[0];
+    if (pick) return String(pick).trim();
+    var m = /^cf-(\d{4})(\d{2})(\d{2})-(.+)$/.exec(cid);
+    return m ? '이름 미정 · ' + m[4] + ' (' + Number(m[2]) + '/' + Number(m[3]) + ')' : cid;
+  }
+  // 다시 만든 버전이면 바로 앞 버전에 남긴 수정 요청 글. 앞 결정이 수정 요청이 아니면 null.
+  function previousAsk(view) {
+    var v = view || {};
+    var recs = arr(v.records).map(function (r) { return r && r.record; }).filter(function (r) {
+      return r && r.rev && r.rev !== v.rev;
+    });
+    recs.sort(function (x, y) { return String(x.decidedAt || '').localeCompare(String(y.decidedAt || '')); });
+    var last = recs[recs.length - 1];
+    if (!last || last.decision !== 'REQUEST_CHANGES') return null;
+    var notes = arr(last.requestedChanges).map(function (c) {
+      var note = String((c && c.note) || '').trim();
+      var ch = /^ch(\d+)$/.exec(String((c && c.field) || ''));
+      return note ? (ch ? ch[1] + '장: ' : '') + note : '';
+    }).filter(Boolean);
+    var text = notes.length ? notes.join(' / ') : String(last.reasons || '').trim();
+    return text || null;
+  }
+  // 출시 전 점검에서 결정 기록을 확인할 관문: 이 캐릭터 그래프의 관문(G9와 건너뛴 관문 제외).
+  var ORIGINAL_GATES = ['G1', 'G3', 'G4a', 'G4b', 'G4', 'G5', 'G5b', 'G6', 'G7a', 'G7', 'G8'];
+  function packageGates(gates) {
+    var rows = arr(gates).filter(function (g) { return g && g.id; });
+    if (!rows.length) return ORIGINAL_GATES.slice();
+    return rows.filter(function (g) { return g.id !== 'G9' && g.status !== 'SKIPPED'; }).map(function (g) { return g.id; });
+  }
+  // 반려해도 그대로 남는 것: 이미 승인한 다른 관문. 없으면(첫 관문) 빈 목록이다.
+  function keptOnReject(gates, current) {
+    return arr(gates).filter(function (g) { return g && g.id !== current && g.status === 'APPROVED'; })
+      .map(function (g) { return g.title || g.id; });
+  }
+  var helpers = { characterName: characterName, previousAsk: previousAsk, packageGates: packageGates, keptOnReject: keptOnReject };
+  if (typeof module !== 'undefined' && module.exports) module.exports = helpers;
+  if (root) root.CF_GATE = helpers;
+})(typeof window !== 'undefined' ? window : null);
+
 (function () {
   'use strict';
+  if (typeof window === 'undefined') return;
   var api = window.CF_API;
+  var H = window.CF_GATE;
   if (!api) return;
   var params = new URLSearchParams(location.search);
   if (params.get('embedded') === '1') document.body.classList.add('gate-embedded');
@@ -112,6 +165,10 @@
   function revLabel(rev) {
     var m = /^[a-z]+(\d+)$/i.exec(String(rev || ''));
     return m ? '버전 ' + m[1] : String(rev || '-');
+  }
+  // 모티브(받은 사진·원문에서 만든 캐릭터)는 얼굴 고르기 대신 기준 사진 선택을 거친다.
+  function isMotif() {
+    return (state.view || {}).origin === 'SOURCE';
   }
   var GATE_KO = {
     G0: '출처 확인', G1s: '기준 사진', G1: '얼굴 고르기', G3: '기획안 고르기', G4a: '챕터 배경', G4b: '장면·자세', G4: '완성 이미지',
@@ -860,17 +917,20 @@
       '<p class="section-sub">고른 안에서 바꿀 칸만 고쳐 주세요. 목록 칸은 한 줄에 하나씩 적어요. ' +
       '바꾼 칸만 결정에 담겨요.</p>' +
       (items.mode === 'own'
-        ? '<p class="section-sub">사람이 직접 쓴 글을 정리한 안(u1)이에요. 후보를 고르거나 ' +
+        ? '<p class="section-sub">사람이 직접 쓴 글을 정리한 안이에요. 후보를 고르거나 ' +
           '칸을 고쳐 확정해요.</p>'
-        : '<p class="section-sub">직접 쓴 안을 쓰려면 작업실에서 직접 쓴 안을 등록한 뒤 이 화면을 ' +
-          '다시 열어 주세요. 그 안이 후보로 나타나요.</p>') +
+        : '') +
       '<div class="field-list" data-plan-fields><p class="empty">후보를 고르면 고칠 칸이 열려요.</p>' +
       '</div>' + (items.requireExplicitSelection ?
         '<p class="section-sub">수정한 내용은 새 버전에서 다시 검토해요. 원래 요구를 바꿀 때만 아래에서 그 요구를 골라 주세요.</p>' +
         list(items.seedRequirements).map(function (r) {
           return '<label class="pick-line"><input type="checkbox" data-replace-requirement="' +
             esc(r.id) + '"> ' + esc(r.quote) + '</label>';
-        }).join('') : '') + '</details></section>'
+        }).join('') : '') + '</details></section>' +
+      // 수정 요청은 고칠 점이 있어야 보낸다(G0·G1·G6와 같은 규칙, QA v5 B-F10).
+      '<section class="gate-section"><h2>수정 요청 (선택)</h2>' +
+      '<p class="section-sub">안을 다시 만들어 달라고 할 때만 적어 주세요.</p>' +
+      '<textarea data-plan-note placeholder="예: 직업을 더 평범하게, 말투를 덜 딱딱하게"></textarea></section>'
     );
   }
   function paintPlans() {
@@ -970,7 +1030,15 @@
       var value = plan[field];
       var orig = esc(JSON.stringify(value === undefined ? null : value));
       var label = esc(FIELD_KO[field] || field);
-      if (value == null || typeof value === 'string') {
+      if (field === 'gender' && (value == null || typeof value === 'string')) {
+        // 성별은 저장 값(female·male)을 그대로 보이지 않고 여성·남성 중에서 고른다(QA v5 C-11).
+        var genders = Object.keys(GENDER_KO);
+        if (value && genders.indexOf(value) < 0) genders.push(value);
+        simple.push('<div class="field"><span>' + label + '</span><select data-edit="gender" data-edit-kind="text" data-orig="' + orig + '">' +
+          (value ? '' : '<option value="" selected>정하지 않음</option>') +
+          genders.map(function (g) { return '<option value="' + esc(g) + '"' + (g === value ? ' selected' : '') + '>' + esc(GENDER_KO[g] || g) + '</option>'; }).join('') +
+          '</select></div>');
+      } else if (value == null || typeof value === 'string') {
         var t = value == null ? '' : value;
         simple.push('<div class="field"><span>' + label + '</span>' + (t.length > 70
           ? '<textarea data-edit="' + esc(field) + '" data-edit-kind="text" data-orig="' + orig + '">' + esc(t) + '</textarea>'
@@ -996,6 +1064,8 @@
       var kind = node.getAttribute('data-edit-kind') || 'text';
       var raw = node.value;
       var value = raw;
+      // 원래 비어 있던 칸을 그대로 두면 바꾼 칸으로 담지 않는다.
+      if (kind === 'text' && raw === '' && orig === 'null') return;
       if (kind === 'lines') {
         value = raw.split('\n').map(function (x) { return x.trim(); }).filter(Boolean);
       } else if (kind === 'number') {
@@ -1029,7 +1099,15 @@
           throw Error('기존 요구를 바꾸려면 수정 내용도 함께 적어 주세요.');
       }
     }
-    return Object.assign(answer, details());
+    if (decision === 'REQUEST_CHANGES') {
+      var box = q('[data-plan-note]');
+      var note = box ? box.value.trim() : '';
+      if (!note) { focusField(box); throw Error('아래 수정 요청 칸에 고칠 점을 적어 주세요.'); }
+      answer.requestedChanges = [{ field: 'plan', note: note }];
+    }
+    var more = details();
+    if (answer.requestedChanges && !more.reasons) more.reasons = answer.requestedChanges[0].note;
+    return Object.assign(answer, more);
   }
 
   // ---------------------------------------------------------------- G4a
@@ -1500,6 +1578,15 @@
     state.posePicks[ch] = value;
     state.poseTab = ch;
     setStatus('');
+    if (value !== 'custom') {
+      // G4a처럼 다 고르지 않은 다음 챕터로 넘어간다. 모두 골랐으면 그 자리에 둔다(QA v5 C-16).
+      var ids = poseChapters().map(function (c) { return c.chapterId; });
+      var start = ids.indexOf(ch);
+      for (var step = 1; step < ids.length; step += 1) {
+        var next = ids[(start + step) % ids.length];
+        if (!poseDone(next)) { poseTab(next); return; }
+      }
+    }
     paintPoses();
     if (value === 'custom') {
       var box = q('[data-pose-custom="' + ch + '"]');
@@ -1614,7 +1701,7 @@
         : '기준 얼굴과 같은 사람인지, 장면·자세가 맞는지 보고 챕터마다 골라 주세요. 이미지를 누르면 기준 얼굴과 나란히 크게 볼 수 있어요.') + '</p>' +
       '<div class="frame-ref">' + (items.identityReference && items.identityReference.url
         ? '<button type="button" class="frame-ref-img" data-frame-zoom="__ref">' + image(items.identityReference) + '</button>' : '') +
-      '<div><b>기준 얼굴</b><p class="section-sub">얼굴 고르기에서 고른 얼굴로 만든 기준 사진이에요. 모든 챕터 이미지가 이 사람이어야 해요.</p>' +
+      '<div><b>기준 얼굴</b><p class="section-sub">' + (isMotif() ? '기준 사진 선택에서 고른 사진이에요.' : '얼굴 고르기에서 고른 얼굴로 만든 기준 사진이에요.') + ' 모든 챕터 이미지가 이 사람이어야 해요.</p>' +
       '<details class="card-tech"><summary>만든 근거</summary>' + facts([
         ['외모', items.appearanceRev], ['장면', items.sceneRev], ['얼굴 참조', items.referenceCrop], ['참조 메모', items.cropNote]
       ]) + '</details></div></div>' +
@@ -2071,7 +2158,9 @@
       '<div class="frame-zoom-head"><span class="bg-ch">' + esc(bgLabel(chapter)) + '</span><b>' + esc(a.title || a.actionKey) + '</b>' +
       '<span class="bg-keys">' + (locked ? '' : (cands.length > 1 ? '<kbd>1</kbd>~<kbd>' + Math.min(9, cands.length) + '</kbd>' : '<kbd>1</kbd>') + ' 쓰기 · <kbd>X</kbd> 빼기 · ') + NAV_KEYS + ' 칸 · <kbd>Esc</kbd> 닫기</span>' +
       '<button type="button" class="btn btn--ghost" data-action-close>닫기</button></div>' +
-      '<p class="section-sub">' + esc(a.description || '') + (a.useWhen ? ' · 언제: ' + esc(a.useWhen) : '') + ' · ' + (a.mood === 'good' ? '미소 출발' : '무표정 출발') + ' · ' + esc(a.duration) + '초</p>' +
+      // '이럴 때' 규칙 원문은 모델용이라 서버가 사람용으로 줄인 글(whenText)만 보인다(QA v5 C-07).
+      '<p class="section-sub">' + esc(a.description || '') + ' · ' + (a.mood === 'good' ? '미소 출발' : '무표정 출발') + ' · ' + esc(a.duration) + '초</p>' +
+      (a.whenText ? '<p class="section-sub">' + esc(a.whenText) + '</p>' : '') +
       (a.reviewNote ? '<p class="qa-note is-ask"><b>다시 만든 동작</b> 지난 요청: ' + esc(a.reviewNote) + '</p>' : '') +
       '<div class="frame-zoom-pair">' + (frame && frame.url ? '<figure>' + image(frame) + '<figcaption>첫 프레임</figcaption></figure>' : '') +
       cands.map(function (c, i) {
@@ -2652,7 +2741,7 @@
         var w = Math.round(Number(r.conversations || 0) / most * 100);
         return '<tr><td>' + esc((items.clusterLabels || {})[k] || k) + '</td><td><span class="dataset-bar"><i style="width:' + w + '%"></i></span><span class="num">' + esc(num(r.conversations)) + '</span></td><td class="num">' + esc(num(r.replies)) + '</td><td class="num">' + esc(num(r.supervisedTokens)) + '</td></tr>';
       }).join('') + '</tbody></table>' +
-      '<details class="gate-more"><summary>분할 파일 · ' + esc(dataset.datasetRev || '') + '</summary><table class="metric-table"><thead><tr><th>분할</th><th>파일</th><th class="num">대화</th></tr></thead><tbody>' +
+      '<details class="gate-more"><summary>분할 파일 · ' + esc(revLabel(dataset.datasetRev)) + '</summary><table class="metric-table"><thead><tr><th>분할</th><th>파일</th><th class="num">대화</th></tr></thead><tbody>' +
       list(dataset.files).map(function (f) { return '<tr><td>' + esc(f.split) + '</td><td><code>' + esc(f.path) + '</code></td><td class="num">' + esc(f.conversations) + '</td></tr>'; }).join('') +
       '</tbody></table></details></section>' +
       '<section class="gate-section sample-board"><h2>무작위 표본 ' + list(items.samples).length + '개</h2>' +
@@ -2948,26 +3037,30 @@
 
   // ---------------------------------------------------------------- G9
   // ---------------------------------------------------------------- G8(학습 없이 진행, K-0038)
+  // 학습 환경·상태는 내부 코드(gemma_qlora·PLANNED) 대신 쉬운 말로 보인다(QA v5 B-F22).
+  var TRAIN_ENV_KO = { gemma_qlora: 'Gemma 학습(임대 GPU)', vertex_gemini: 'Gemini 학습(Vertex)', fake: '시험용 가짜 학습' };
+  var TRAIN_STATUS_KO = { PLANNED: '계획만 세움', SUBMITTED: '시작함', RUNNING: '학습 중', SUCCEEDED: '끝남', FAILED: '실패', CANCELLED: '멈춤' };
   function renderPromptOnly(items) {
     var doc = items.decision || {};
     if (isTwinDecision(items)) return renderTwinAdopt(items);
     var runs = list(doc.trainingRuns)
       .map(function (run) {
         var usd = run.estimateUsd == null ? '-' : '$' + Number(run.estimateUsd).toFixed(2);
-        return '<tr><td>' + esc(run.provider) + '</td><td>' + esc(run.status) + '</td><td>' +
+        return '<tr><td>' + esc(TRAIN_ENV_KO[run.provider] || run.provider) + '</td><td>' + esc(TRAIN_STATUS_KO[run.status] || run.status) + '</td><td>' +
           (run.dryRun ? '계획만' : '실행') + '</td><td class="num">' + esc(usd) +
           '</td></tr>';
       })
       .join('');
+    // 기록의 까닭 문장(doc.reason)은 개발 말투라 화면에 싣지 않는다. 기술 정보 · 결정 기록 원문에 그대로 있다.
     return (
       '<section class="gate-section"><h2>학습 결과가 없어요</h2>' +
-      '<p class="section-sub">' + esc(doc.reason || '') + '</p>' +
+      '<p class="section-sub">학습한 모델이 아직 없어서 학습 모델과 비교할 수 없어요. 아래는 지금까지 세운 학습 계획이에요.</p>' +
       '<table class="metric-table"><thead><tr><th>학습 환경</th><th>상태</th><th>실행</th>' +
       '<th>추정 비용</th></tr></thead><tbody>' +
       (runs || '<tr><td colspan="4">학습 계획 없음</td></tr>') + '</tbody></table></section>' +
       '<section class="gate-section"><h2>이렇게 진행돼요</h2>' +
       '<p class="section-sub"><b>' + esc(items.adoptLabel || '긴 프롬프트로 진행') + '</b>을 누르면 학습 모델 평가 없이 패키지를 만들고, ' +
-      '패키지에는 긴 프롬프트·짧은 프롬프트·데이터셋(' + esc(doc.datasetRev || '없음') +
+      '패키지에는 긴 프롬프트·짧은 프롬프트·데이터셋(' + esc(doc.datasetRev ? revLabel(doc.datasetRev) : '없음') +
       ')과 학습 계획이 들어가요. <b>학습을 기다릴게요</b>를 누르면 학습 결과가 생길 때까지 ' +
       '평가 단계가 멈춰요.</p></section>'
     );
@@ -3428,7 +3521,6 @@
 
   // 출시 전 점검표(D-0114): 자동 점검과 사람이 볼 항목을 위에 두고, 세부 내용은 항목을 눌러 연다.
   var PKG_AFTER = '승인하면 다음 단계인 우리 앱 내보내기로 넘어가요. 자동 이어 실행이 켜져 있으면 바로 시작하고, 시험용 DB에서 먼저 확인해요.';
-  var PKG_GATES = ['G1', 'G3', 'G4a', 'G4b', 'G4', 'G5', 'G5b', 'G6', 'G7', 'G8'];
   var PKG_MANUAL = [
     ['copy', '프로필 문구와 챕터 소개를 읽어 봤어요'],
     ['media', '대표 이미지와 영상을 열어 봤어요'],
@@ -3480,8 +3572,10 @@
     out.push({ id: 'persona', title: '페르소나·학습', ok: Boolean(sft.adoptedBinding), warn: !learned, detail: learned ? '학습한 모델을 써요 · 데이터셋 ' + (sft.datasetRev || '-') : '학습 없이 긴 프롬프트로 진행해요' + (sft.evalReport ? ' · 평가 보고서 있음' : '') });
     var decided = {};
     list(pkg.gates).forEach(function (g) { if (g.decision !== 'REQUEST_CHANGES' && g.decision !== 'REJECT') decided[g.gate] = true; });
-    var missingGates = PKG_GATES.filter(function (g) { return !decided[g]; });
-    out.push({ id: 'gates', title: '관문 기록', ok: !missingGates.length, warn: missingGates.length > 0, detail: missingGates.length ? '기록이 없는 관문: ' + missingGates.join(', ') : '관문 ' + PKG_GATES.length + '개를 모두 결정했어요' });
+    // 이 캐릭터 그래프의 관문(G7a 포함, 모티브는 G0·G1s)을 기준으로 본다(QA v5 C-15).
+    var pkgGates = H.packageGates(state.character && state.character.gates);
+    var missingGates = pkgGates.filter(function (g) { return !decided[g]; });
+    out.push({ id: 'gates', title: '관문 기록', ok: !missingGates.length, warn: missingGates.length > 0, detail: missingGates.length ? '기록이 없는 관문: ' + missingGates.map(function (g) { return GATE_KO[g] || g; }).join(', ') : '관문 ' + pkgGates.length + '개를 모두 결정했어요' });
     var missing = list(counts.missing);
     out.push({ id: 'files', title: '파일', ok: !missing.length, block: missing.length > 0, detail: missing.length ? '빠진 파일 ' + missing.length + '개' : '파일 ' + (counts.files || 0) + '개, 빠진 파일 없음' });
     var ver = items.verification || {};
@@ -3650,7 +3744,8 @@
     });
     if (isRecord()) {
       out.push(recordCard(view.record));
-    } else if (view.record) {
+    } else if (view.record && view.status !== 'AWAITING_HUMAN') {
+      // 검토가 아직 열려 있으면(G7a처럼 묶음마다 보내는 관문) 결정을 끝낸 것처럼 보이지 않는다.
       out.push(
         banner(
           'ok',
@@ -3666,6 +3761,11 @@
       out.push(
         banner('warn', '아직 차례가 아니에요', '앞 단계가 끝나야 이 관문이 열려요. 먼저 작업을 돌려 주세요.')
       );
+    }
+    // 다시 만든 버전에는 지난 버전에 남긴 수정 요청을 보인다. G4·G5b는 챕터·칸마다 따로 보여 준다.
+    if (!isRecord() && view.status === 'AWAITING_HUMAN' && ['frames', 'actions', 'samples'].indexOf(state.kind) < 0) {
+      var ask = H.previousAsk(view);
+      if (ask) out.push(banner('muted', '다시 만든 버전', '지난 요청: ' + ask));
     }
     var rework = view.rework || {};
     if (rework.capReached) {
@@ -3745,10 +3845,8 @@
       if (item && item.candidateId) state.reviewIndex[item.candidateId] = item;
     });
     var summary = (state.character && state.character.summary) || {};
-    // 이름이 아직 없으면 '이름 미정 · slug (11/7)'로 보인다(진행 화면과 같은 규칙, D-0129).
-    var idm = /^cf-(\d{4})(\d{2})(\d{2})-(.+)$/.exec(state.characterId);
-    var name = summary.name && summary.name !== state.characterId ? summary.name
-      : idm ? '이름 미정 · ' + idm[4] + ' (' + Number(idm[2]) + '/' + Number(idm[3]) + ')' : state.characterId;
+    // 기획 전 모티브는 원문에서 정한 표시 이름을 쓴다. 이름이 아직 없을 때만 '이름 미정 · slug (11/7)'(D-0129).
+    var name = H.characterName(summary, state.characterId);
     var back = 'c-glass.html?character=' + encodeURIComponent(state.characterId) +
       '&gate=' + encodeURIComponent(state.gate);
     var record = isRecord();
@@ -3836,10 +3934,13 @@
     var view = state.view || {};
     var title = view.title || GATE_KO[state.gate] || state.gate;
     var paid = state.kind === 'intro' || state.kind === 'actions';
-    return title + ' ' + revLabel(view.rev) + '을 반려하면 이 단계를 처음부터 다시 만들어요.\n' +
-      '앞 단계에서 정한 결과(얼굴·기획 등)는 그대로 둬요.' +
-      (paid ? '\n유료 단계라 다시 만들기 전에 비용 확인을 다시 받아요.' : '') +
-      '\n고칠 부분만 바꾸려면 취소하고 수정 요청을 쓰세요. 반려할까요?';
+    // 남는 것은 이미 승인한 다른 관문만 적는다. 첫 관문(출처 확인·얼굴 고르기 등)에는 이 줄이 없다.
+    var kept = H.keptOnReject(state.character && state.character.gates, state.gate);
+    var lines = [title + ' ' + revLabel(view.rev) + '을 반려하면 이 단계를 처음부터 다시 만들어요.'];
+    if (kept.length) lines.push('이미 정한 결과는 그대로 둬요: ' + kept.slice(0, 3).join(', ') + (kept.length > 3 ? ' 등' : ''));
+    if (paid) lines.push('유료 단계라 다시 만들기 전에 비용 확인을 다시 받아요.');
+    lines.push('고칠 부분만 바꾸려면 취소하고 수정 요청을 쓰세요. 반려할까요?');
+    return lines.join('\n');
   }
   var NAV_KEYS = '<kbd>J</kbd><kbd>→</kbd> 다음 · <kbd>K</kbd><kbd>←</kbd> 이전';
   function navStep(key) {

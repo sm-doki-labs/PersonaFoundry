@@ -103,6 +103,7 @@ class Job:
     video_tier: str | None = None
     review_revision: str | None = None
     resumed_by: str | None = None
+    ran_stages: list[str] | None = None
     seq: int = 0  # 같은 초에 만든 작업의 순서(기록에는 남기지 않는다)
 
     def as_dict(self, *, include_log: bool = True) -> dict[str, Any]:
@@ -125,6 +126,7 @@ class Job:
             "videoTier": self.video_tier,
             "reviewRevision": self.review_revision,
             "resumedBy": self.resumed_by,
+            "ranStages": self.ran_stages,
             "logLines": len(self.log),
             "result": {
                 "stoppedAt": self.stopped_at,
@@ -169,6 +171,7 @@ class Job:
             video_tier=text("videoTier") or None,
             review_revision=text("reviewRevision") or None,
             resumed_by=text("resumedBy") or None,
+            ran_stages=texts("ranStages") if isinstance(data.get("ranStages"), list) else None,
         )
 
 
@@ -462,6 +465,7 @@ class JobManager:
             try:
                 log = self._dispatch(job, stream)
                 job.stopped_at = log.stopped_at
+                job.ran_stages = list(log.timings)
                 job.steps = list(log.steps)
                 job.waiting = list(log.waiting)
                 job.blocked = list(log.blocked)
@@ -632,6 +636,11 @@ class JobManager:
         ):
             raise ValueError("영상 만들기를 마치지 못했어요.")
         if job.until == "s8c" and ctx.state(job.character_id).stage("s8c").status != "APPROVED":
+            state = ctx.state(job.character_id)
+            if (log.waiting or log.held) and not any(
+                state.stage(sid).status == "CHECK_FAILED" for sid in log.blocked
+            ):
+                return log
             raise ValueError("대화 준비를 마치지 못했어요. 멈춘 단계의 작업 기록을 확인해 주세요.")
         return log
 
@@ -727,6 +736,8 @@ class JobManager:
                     "tier": job.video_tier or read_video_tier(char_dir),
                     "status": job.status,
                 }
+                if job.error:
+                    marker["error"] = job.error
                 atomic_write(inside(char_dir, "video-job.json"), json.dumps(marker).encode())
             folder.mkdir(parents=True, exist_ok=True)
             path = folder / f"{job.job_id}.json"

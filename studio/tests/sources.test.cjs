@@ -15,18 +15,20 @@ function fakeServer(opts) {
   const calls = [];
   const db = { draft: null, files: [], seq: 0, canFinalize: false, problems: ['원문 파일을 하나 이상 올려 주세요.'], fail: {}, speakers: [{ name: '손흥민', lines: 12 }, { name: '기자', lines: 4 }], suggest: {}, drafts: null };
   const json = (status, body) => ({ ok: status >= 200 && status < 300, status, headers: { get: () => 'application/json' }, json: async () => body });
-  // 약속 4: 비운 대상 화자는 원문에서 가장 많이 말한 화자로 채우고, 원문에 없는 이름이면 해요체 한 문장으로 알린다.
+  // 약속 4: 비운 대상 화자는 서버가 표시 이름과 맞춘 화자로 채우고, 원문에 없는 이름이면 해요체 한 문장으로 알린다.
+  // 맞는 화자가 없으면(suggest.subjectSpeaker null) 비워 두고 고르라고 알린다(QA v5 A-03).
   function check(f) {
     if (!f.kind) f.kind = db.suggest.kind || S.guessKind(f.filename);
     if (!f.register) f.register = db.suggest.register || S.defaultRegister(f.kind);
     if (o.legacy) { f.status = 'ready'; f.problems = []; return; }
     const names = db.speakers.map((s) => s.name);
-    if (!f.subjectSpeaker) f.subjectSpeaker = names[0];
+    const sug = Object.assign({ subjectSpeaker: names[0], userSpeaker: names[1] || null }, db.suggest);
+    if (!f.subjectSpeaker) f.subjectSpeaker = sug.subjectSpeaker;
     f.detectedSpeakers = db.speakers;
-    f.suggested = Object.assign({ subjectSpeaker: names[0], userSpeaker: names[1] || null }, db.suggest);
+    f.suggested = sug;
     const ok = names.indexOf(f.subjectSpeaker) >= 0;
     f.status = ok ? 'ready' : 'problem';
-    f.problems = ok ? [] : ["원문에서 '" + f.subjectSpeaker + "'이라는 화자를 찾지 못했어요. 원문에 있는 이름: " + names.join(', ')];
+    f.problems = ok ? [] : !f.subjectSpeaker ? ['누가 이 사람인지 골라 주세요. 원문에 있는 이름: ' + names.join(', ')] : ["원문에서 '" + f.subjectSpeaker + "'이라는 화자를 찾지 못했어요. 원문에 있는 이름: " + names.join(', ')];
   }
   // 4차 약속 5: 사진은 fileType "photo"로 같은 줄에 선다. photoRule을 켜면 서버도 영상 등급이 있는데 사진이 없으면 시작을 막는다.
   const isPhoto = (name) => /\.(jpe?g|png|webp)$/i.test(name);
@@ -82,20 +84,28 @@ function fakeServer(opts) {
       if (f.fileType === 'photo' && Object.keys(body || {}).length) return json(422, { detail: '사진에는 화자 정보를 넣지 않아도 돼요.' });
       Object.assign(f, body, { sha256: 'h' + m[1] });
       if (f.fileType === 'photo') { f.status = 'ready'; f.problems = []; } else check(f);
-      db.canFinalize = true;
+      db.canFinalize = f.status === 'ready';
       db.problems = [];
       photoGate();
       return json(200, Object.assign({}, f));
     }
     if ((m = /^\/api\/sources\/cf-son\/files\/(f\d+)$/.exec(u.pathname))) {
       const f = db.files.find((x) => x.fileId === m[1]);
-      if (method === 'PATCH') { Object.assign(f, body); check(f); return json(200, Object.assign({}, f)); }
+      if (method === 'PATCH') { Object.assign(f, body); check(f); db.canFinalize = f.status === 'ready'; return json(200, Object.assign({}, f)); }
       if (method === 'DELETE') { db.files = db.files.filter((x) => x !== f); if (!db.files.length) { db.canFinalize = false; db.problems = ['원문 파일을 하나 이상 올려 주세요.']; } return { ok: true, status: 204, json: async () => null }; }
     }
     if (method === 'POST' && u.pathname === '/api/sources/cf-son/finalize') { db.finalized = true; return json(200, { jobId: 'job-1' }); }
+    if (method === 'POST' && u.pathname === '/api/sources/cf-son/import-path') {
+      const f = { fileId: 'f' + (++db.seq), filename: body.path.replace(/^.*\//, ''), size: 100, sha256: 'h', fileType: 'text', textId: 'imported', kind: 'TRANSCRIPT', register: 'CASUAL', subjectSpeaker: null, userSpeaker: null, date: null, sourceUrl: null, problems: [] };
+      check(f);
+      db.files.push(f);
+      db.canFinalize = f.status === 'ready';
+      return json(200, Object.assign({}, f));
+    }
+    if (method === 'GET' && u.pathname === '/api/projects') return json(200, { characters: (db.projects || []).slice() });
     if (method === 'GET' && u.pathname === '/api/characters/cf-son') return json(200, Object.assign({ id: 'cf-son', origin: 'SOURCE', modelMode: db.draft && db.draft.modelMode, autoReview: db.draft && db.draft.autoReview, progress: { done: db.done || 0, total: 12 }, pendingGates: [], stages: [], job: (db.done || 0) < 12 ? { id: 'job-1' } : null }, db.detail || {}));
     if (method === 'GET' && u.pathname === '/api/characters/cf-son/chat/meta') return db.noChat ? json(404, { detail: 'Not Found' }) : json(200, { characterId: 'cf-son', ready: !!db.chatReady, reason: db.chatReady ? '' : '프롬프트를 아직 만들고 있어요.' });
-    if (method === 'DELETE' && u.pathname === '/api/sources/cf-son') { db.draft = null; db.files = []; return { ok: true, status: 204, json: async () => null }; }
+    if (method === 'DELETE' && u.pathname === '/api/sources/cf-son') { db.draft = null; db.files = []; if (db.drafts) db.drafts = db.drafts.filter((d) => d.characterId !== 'cf-son'); if (db.projects) db.projects = db.projects.filter((c) => c.id !== 'cf-son'); return { ok: true, status: 204, json: async () => null }; }
     return json(404, { detail: 'Not Found' });
   }
   return { fetch, calls, db };
@@ -153,7 +163,7 @@ test('local store: draft, then files → PUT with cookies to our server → comp
   server.calls.length = 0;
   intake.addFiles([file('KakaoTalk_son.txt', 3000)]);
   await settle();
-  assert.deepEqual(seq(server.calls).filter((s) => !s.includes('/api/characters/')), ['POST /api/sources/cf-son/files', 'PUT /api/sources/cf-son/files/f1/content', 'POST /api/sources/cf-son/files/f1/complete', 'GET /api/sources/cf-son']);
+  assert.deepEqual(seq(server.calls).filter((s) => !s.includes('/api/characters/')), ['POST /api/sources/cf-son/files', 'PUT /api/sources/cf-son/files/f1/content', 'POST /api/sources/cf-son/files/f1/complete', 'GET /api/sources/cf-son', 'PATCH /api/sources/cf-son/files/f1', 'GET /api/sources/cf-son']);
   assert.deepEqual(server.calls[0].body, { filename: 'KakaoTalk_son.txt', size: 3000, contentType: 'text/plain' });
   const put = server.calls[1];
   assert.equal(put.url, '/api/sources/cf-son/files/f1/content');
@@ -161,6 +171,7 @@ test('local store: draft, then files → PUT with cookies to our server → comp
   assert.deepEqual(put.headers, { 'Content-Type': 'application/octet-stream' });
   assert.deepEqual(server.calls[2].body, { textId: 'kakaotalk_son', kind: null, register: null, subjectSpeaker: null, userSpeaker: null, date: null, sourceUrl: null }, 'the subject speaker is left blank so the server picks it from the source');
   assert.equal(intake.state.draft.files[0].subjectSpeaker, '손흥민');
+  assert.equal(server.calls.find((c) => c.method === 'PATCH').body.userSpeaker, '기자', 'the partner the server found fills the empty partner field (A-23)');
   const items = intake.items();
   assert.equal(items.length, 1);
   assert.equal(items[0].status, '준비됐어요');
@@ -338,7 +349,7 @@ test('a draft with only a memo sends the team-internal scope, and carries the mo
   assert.deepEqual(body.usageBasis, { scope: S.DEFAULT_SCOPE, notes: '발표용' });
   assert.equal(body.modelMode, 'TRAIN');
   assert.equal(body.autoReview, false);
-  assert.deepEqual(intake.settings(), { modelMode: 'TRAIN', autoReview: false, videoTier: 'none' }, 'the summary shows what the server holds');
+  assert.deepEqual(intake.settings(), { modelMode: 'TRAIN', autoReview: false, videoTier: 'none', signaturePose: null }, 'the summary shows what the server holds');
 
   const other = fakeServer();
   const b = S.createIntake({ fetch: other.fetch, origin: ORIGIN, XHR: null });
@@ -453,9 +464,14 @@ test('server content inference wins over automatic filename hints', async () => 
   server.calls.length = 0;
   intake.addFiles([file('notes.txt')]);
   await settle();
-  assert.equal(intake.items()[0].meta.kind, 'TRANSCRIPT');
-  assert.equal(intake.items()[0].meta.register, 'CASUAL');
-  assert.equal(intake.items()[0].meta.subjectSpeaker, '손흥민');
+  const complete = server.calls.find((c) => c.path.endsWith('/complete'));
+  assert.equal(complete.body.kind, null, 'with no hint in the name the server reads the content first');
+  assert.equal(complete.body.register, null);
+  const patch = server.calls.find((c) => c.method === 'PATCH');
+  assert.ok(patch, 'the content guess is saved');
+  assert.equal(patch.body.kind, 'TRANSCRIPT');
+  assert.equal(patch.body.register, 'CASUAL');
+  assert.equal(patch.body.subjectSpeaker, '손흥민', 'the speaker the server filled is kept');
 
   const named = fakeServer();
   named.db.suggest = { kind: 'TRANSCRIPT', register: 'CASUAL' };
@@ -463,8 +479,8 @@ test('server content inference wins over automatic filename hints', async () => 
   named.calls.length = 0;
   b.addFiles([file('interview_press.txt')]);
   await settle();
-  assert.ok(!named.calls.some((c) => c.method === 'PATCH'), 'server already persisted its content inference');
-  assert.equal(b.items()[0].meta.kind, 'TRANSCRIPT');
+  assert.ok(!named.calls.some((c) => c.method === 'PATCH' && c.body.kind !== 'INTERVIEW'), 'a hint in the file name wins');
+  assert.equal(b.items()[0].meta.kind, 'INTERVIEW');
 });
 
 test('an older server without suggestions still gets the display name as the speaker', async () => {
@@ -536,7 +552,8 @@ test('file cards hide the internal text id, the path import is folded under 고�
 // ---- 4차 약속 5: 영상 등급과 사진 ----
 async function tierDraft(server, videoTier) {
   const intake = S.createIntake({ fetch: server.fetch, origin: ORIGIN, XHR: null });
-  await intake.createDraft({ displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', age: '34세', gender: '남성', job: '축구선수', videoTier });
+  const sig = videoTier === 'none' ? {} : { sigTitle: '찰칵 세리머니', sigMotion: '두 손으로 카메라 모양을 만든다.' };
+  await intake.createDraft(Object.assign({ displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', age: '34세', gender: '남성', job: '축구선수', videoTier }, sig));
   return intake;
 }
 const photo = (name, size) => file(name || 'face.jpg', size == null ? 5000 : size, 'image/jpeg');
@@ -550,7 +567,7 @@ test('five video tiers with plain names, no clip counts, and the same cards on b
   assert.ok(!/\d+\s*개|클립/.test(html), 'no clip counts anywhere, not even in labels');
   assert.equal((html.match(/type="radio"/g) || []).length, 5);
   assert.match(html, /value="none" checked/, 'no video is the default');
-  assert.match(visible, /첫 장면만, 기본 감정으로 가장 빨리 확인해요/);
+  assert.match(visible, /자주 쓰는 기본 감정만, 가장 빨리 확인해요/);
   assert.match(visible, /가장 오래 걸리고 비용도 가장 커요/);
   assert.ok(!S.tierCardsHTML('x', 'light', { paidOnly: true }).includes('value="none"'));
   assert.equal(S.tierOf('ultra'), 'none');
@@ -634,6 +651,25 @@ test('the photo box refuses other files, big photos stay out, and photos can sti
   assert.deepEqual(server.calls.filter((c) => c.method === 'POST' && c.path.endsWith('/files')).map((c) => c.body.filename), ['second.jpg'], 'texts are locked after the start, photos are not');
   assert.equal(intake.photoItems().length, 2);
   assert.ok(intake.photoItems().every((p) => !p.removable), 'photos already in use cannot be removed after the start');
+});
+
+test('a video tier needs a signature pose: name and motion are required, the pose goes with the draft and can be saved later (D-0165)', async () => {
+  const server = fakeServer();
+  const intake = S.createIntake({ fetch: server.fetch, origin: ORIGIN, XHR: null });
+  const base = { displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', age: '34세', gender: '남성', job: '축구선수', videoTier: 'light' };
+  const missing = await intake.createDraft(base);
+  assert.deepEqual(Object.keys(missing.errors).sort(), ['sigMotion', 'sigTitle']);
+  assert.equal(server.calls.length, 0, 'nothing is sent without the pose');
+  assert.deepEqual(intake.validateDraft(Object.assign({}, base, { videoTier: 'none' })), {}, 'no pose is asked without video');
+  await intake.createDraft(Object.assign({}, base, { sigTitle: ' 찰칵 세리머니 ', sigMotion: '두 손으로 카메라 모양을 만든다.', sigWhen: '' }));
+  assert.deepEqual(server.calls[0].body.signaturePose, { title: '찰칵 세리머니', motion: '두 손으로 카메라 모양을 만든다.', useWhen: '' });
+  assert.equal(intake.settings().signaturePose.title, '찰칵 세리머니');
+  server.calls.length = 0;
+  assert.equal(await intake.setSignature({ title: '하트', motion: '손가락 하트를 내민다.', useWhen: '고마울 때' }), true);
+  const call = server.calls.find((c) => c.method === 'PATCH');
+  assert.deepEqual(call.body, { videoTier: 'light', signaturePose: { title: '하트', motion: '손가락 하트를 내민다.', useWhen: '고마울 때' } });
+  assert.equal(await intake.setSignature({ title: '하트', motion: ' ' }), false, 'a pose without motion is not sent');
+  assert.equal(S.sigOf({ title: 'a' }), null);
 });
 
 test('the tier can be changed before the start, and an older server says so plainly', async () => {
@@ -866,4 +902,98 @@ test('manual selections during upload override inference and failed metadata ret
   assert.equal(server.db.files[0].userSpeaker,'유지할 상대');
   assert.equal(intake.items()[0].saving,'saved');
   assert.equal(intake.startState().ready,true);
+});
+
+test('when no speaker matches the display name, nobody is picked: the card lists names to choose and the start waits (A-03)', async () => {
+  const server = fakeServer();
+  server.db.speakers = [{ name: '엄마', lines: 4 }, { name: '나', lines: 4 }];
+  server.db.suggest = { subjectSpeaker: null, userSpeaker: '나', subjectChoices: ['엄마'] };
+  const intake = await ready(server);
+  server.calls.length = 0;
+  const [key] = intake.addFiles([file('kakao-mom.txt')]);
+  await settle();
+  const patch = server.calls.find((c) => c.method === 'PATCH');
+  assert.equal(patch.body.subjectSpeaker, null, 'no speaker is chosen by line count or as the exporter');
+  assert.equal(patch.body.userSpeaker, '나', 'the exporter is offered as the partner');
+  let item = intake.items()[0];
+  assert.equal(item.status, '확인이 필요해요');
+  assert.equal(item.speaker, '', 'no one-tap chip suggests a guess');
+  assert.deepEqual(item.choices, ['엄마']);
+  assert.match(item.problems[0], /누가 이 사람인지 골라 주세요/);
+  assert.equal(intake.startState().ready, false);
+  await intake.pickSpeaker(key, '엄마');
+  await settle();
+  item = intake.items()[0];
+  assert.equal(item.status, '준비됐어요');
+  assert.deepEqual(item.choices, []);
+  assert.equal(item.meta.subjectSpeaker, '엄마');
+  assert.equal(item.meta.userSpeaker, '나');
+  assert.equal(intake.startState().ready, true);
+  assert.equal(S.suggestedSpeaker({ detectedSpeakers: [{ name: '나', lines: 9 }], suggested: { subjectSpeaker: null } }), '', 'the busiest speaker is never a fallback');
+});
+test('deleting a draft re-reads the resume list and the sidebar so it disappears from both (A-04)', async () => {
+  const server = fakeServer();
+  const intake = await ready(server);
+  server.db.drafts = [{ characterId: 'cf-son', displayName: '손흥민', createdAt: '2026-11-10T05:10:00+09:00', files: 0 }];
+  server.db.projects = [{ id: 'cf-son', displayName: '손흥민', status: 'draft', origin: 'SOURCE' }];
+  await intake.drafts();
+  await intake.projects();
+  assert.equal(await intake.deleteDraft(), true);
+  assert.deepEqual(intake.state.drafts, []);
+  assert.deepEqual(intake.state.projects, []);
+  assert.equal(intake.state.cid, null);
+});
+
+test('a path import comes back checked like an upload, and the partner speaker is filled (A-05)', async () => {
+  const server = fakeServer({ allowPathImport: true });
+  const intake = await ready(server);
+  await intake.importPath('/tmp/qa/son-vlog.vtt');
+  await settle();
+  const item = intake.items()[0];
+  assert.equal(item.status, '준비됐어요', 'no longer stuck on "다 올라가지 않았어요"');
+  assert.equal(item.editable, true);
+  assert.equal(item.meta.subjectSpeaker, '손흥민');
+  assert.equal(item.meta.userSpeaker, '기자');
+  assert.equal(intake.startState().ready, true);
+});
+
+test('long basic facts are caught per field, and an old server error does not linger (A-06)', async () => {
+  const server = fakeServer();
+  const intake = S.createIntake({ fetch: server.fetch, origin: ORIGIN, XHR: null });
+  const base = { displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', age: '34세', gender: '남성', job: '축구선수' };
+  intake.state.error = '입력한 내용을 확인해 주세요.';
+  const res = await intake.createDraft(Object.assign({}, base, { age: '서른넷 그리고 몇 달 지났고 생일은 칠월이에요', job: '가'.repeat(61), background: '가'.repeat(401) }));
+  assert.deepEqual(res.errors, { age: '나이는 20자까지 적을 수 있어요.', job: '하는 일은 60자까지 적을 수 있어요.', background: '한 줄 배경은 400자까지 적을 수 있어요.' });
+  assert.equal(intake.state.error, null);
+  assert.equal(server.calls.length, 0);
+  const html = fs.readFileSync(path.join(__dirname, '..', 'sources.html'), 'utf8');
+  assert.match(html, /name="age" maxlength="20"/);
+  assert.match(html, /name="job" maxlength="60"/);
+  assert.match(html, /name="background" rows="2" maxlength="400"/);
+  assert.match(html, /data-err="background"/);
+});
+
+test('when progress changes state the sidebar is read again, and not on every unchanged poll (A-07)', async () => {
+  const server = fakeServer();
+  const intake = await ready(server);
+  await intake.projects();
+  server.db.detail = { status: 'running', chatReady: false };
+  await intake.progress();
+  const reads = () => server.calls.filter((c) => c.path === '/api/projects').length;
+  const before = reads();
+  await intake.progress();
+  assert.equal(reads(), before, 'same state, no extra read');
+  server.db.detail = { status: 'chat_ready', chatReady: true };
+  await intake.progress();
+  assert.equal(reads(), before + 1);
+});
+
+test('a photo the server cannot open shows an icon instead of a broken image (A-14)', async () => {
+  const server = fakeServer();
+  const intake = await ready(server);
+  intake.state.draft.files = [{ fileId: 'p1', filename: 'broken.jpg', fileType: 'photo', status: 'problem', problems: ['열 수 없는 사진이에요. 이 사진을 지우고 다른 사진을 올려 주세요.'], url: '/x/broken.jpg' }];
+  const [ph] = intake.photoItems();
+  assert.equal(ph.thumb, '');
+  assert.match(ph.problems[0], /지우고/);
+  assert.equal(ph.removable, true);
 });
