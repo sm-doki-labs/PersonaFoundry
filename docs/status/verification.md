@@ -724,3 +724,15 @@
 최종 전체 Python: **1,897 passed, 5 skipped, 46 subtests passed**, 기존 경고3개. 프론트 Node: **154 passed**. Ruff/diff 검사 통과. 중간에 chapterTemplate을 그래프 공용 메타데이터에 넣어 기존 계약 검사4개가 실패했으며, 캐릭터 요약/상세에만 전달하도록 고친 뒤 전체 재검사를 통과했다.
 
 실제 Foundry UI로 합성 친구·인터뷰 각 288메시지 입력→생성용224/보류64→evidence-v4 무예시8섹션→표본12턴→원문 검토 기록→5/5→Gemini채팅을 완료했다. 새대화 후 이전 기록 선택, 서버 재시작 후 새탭 복원을 확인했다. 기존1269파일 SHA 변경0/누락0. 영상 렌더링은 실제 호출하지 않았으며 G6 대기/재개는 합성 검사로 검증했다. 자세한 범위는 D-0181 인계 참고.
+
+
+### 2026-11-12 옛 워크숍 진입 제거
+
+`pytest -q tests/test_current_factory_entry.py tests/test_web_history.py tests/test_web_gates.py tests/test_web_text_pipeline.py`: 64 passed. `pytest -q tests/test_trait_authoring.py`: 15 passed. `node --test studio/tests/gate.test.cjs`: 5 passed. 새 진입 테스트는 수정 전 3 failed를 확인했다. 기존 경고3개. 8776 기본 주소에서 현재 Foundry와 캐릭터6명 표시 확인. 공장 기존파일2,101개 변경0, 보호백업298개 변경0. 서버 재시작·생성 호출·배포 없음. 이전 중단 작업 검증은 재개하지 않았다.
+
+
+### 2026-11-12 현재 공장 진입 PR 검증
+
+중단된 공정 변경을 제외한 staged tree를 별도 폴더로 내보내 검증했다. 최종 `python -m pytest -q`: 1,963 passed, 6 skipped, 3 warnings, 46 subtests passed (165.62초). `node --test studio/tests/*.test.cjs`: 177 passed. 변경 Python 파일 ruff와 staged diff 검사 통과. 최초 전체 검사에서 옛 워크숍 경로를 기대한 test_studio_integration 2건이 실패했고, 현재 화면을 기대하도록 수정 후 전체 재검사를 통과했다.
+
+리뷰에서 wheel 설치에 studio 자산이 빠지는 회귀를 확인하여 setuptools data-files와 설치 prefix 탐색을 추가했다. `uv build --wheel` 후 별도 가상환경에 설치하고 소스 체크아웃 밖에서 공장·채팅·검토 HTML과 공장 JS/CSS를 HTTP 200으로 확인했다. 패키지에는 실행용 studio 자산57개를 포함하며 tests/plans/recordings는 넣지 않는다. 기존 작업 폴더와 서버·채팅·pv6는 그대로 보존한다.

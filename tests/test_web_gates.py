@@ -402,7 +402,7 @@ def test_gate_screen_static_files_are_served(tmp_path):
         style = client.get("/shared/gate.css")
         assert style.status_code == 200
         workroom = client.get("/c-glass.html")
-        assert "shared/live.js" in workroom.text
+        assert "/shared/current-factory.js" in workroom.text
 
 
 def test_projects_expose_lanes_and_job_queue(tmp_path):

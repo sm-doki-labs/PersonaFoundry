@@ -38,6 +38,11 @@ where = ["src"]
 [tool.setuptools.package-data]
 character_factory_poc = ["prompts/*.md", "prompts/review/*.md", "resources/*.json", "resources/*.md", "web/static/**/*"]
 
+[tool.setuptools.data-files]
+"share/character-factory-poc/studio" = ["studio/*.html"]
+"share/character-factory-poc/studio/shared" = ["studio/shared/*.js", "studio/shared/*.css"]
+"share/character-factory-poc/studio/assets" = ["studio/assets/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "."]

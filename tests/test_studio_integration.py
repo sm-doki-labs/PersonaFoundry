@@ -46,10 +46,10 @@ def test_studio_does_not_serve_worker_logs_or_arbitrary_project_files(tmp_path):
         assert client.get("/studio/shared/text-pipeline.js").status_code == 200
 
 
-def test_unconfigured_factory_preserves_its_existing_workshop(tmp_path):
+def test_unconfigured_factory_opens_current_factory(tmp_path):
     with TestClient(create_app(tmp_path)) as client:
         assert client.get("/").status_code == 200
-        assert client.get("/studio/d-ops.html").status_code == 404
+        assert client.get("/studio/factory.html").status_code == 200
 
 
 def test_runtime_queue_override_still_reads_updated_factory_settings(tmp_path):
@@ -84,4 +84,4 @@ def test_text_panel_opens_the_real_studio_character_when_configured(tmp_path):
     with TestClient(create_app(tmp_path)) as client:
         response = client.get(f"/api/text-pipeline/characters/{cid}")
         assert response.status_code == 200
-        assert response.json()["workshopUrl"] == f"/studio/d-ops.html#char/{cid}"
+        assert response.json()["workshopUrl"] == f"/studio/factory.html#c/{cid}"

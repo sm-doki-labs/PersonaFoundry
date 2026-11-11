@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,7 +47,14 @@ class WebSettings:
 
     @property
     def studio_path(self) -> Path | None:
-        return _absolute(self.root, self.studio_dir) if self.studio_dir else None
+        if self.studio_dir:
+            return _absolute(self.root, self.studio_dir)
+        # A source checkout opens the current factory even without a local override.
+        bundled = Path(__file__).resolve().parents[3] / "studio"
+        if (bundled / "factory.html").is_file():
+            return bundled
+        installed = Path(sys.prefix) / "share" / "character-factory-poc" / "studio"
+        return installed if (installed / "factory.html").is_file() else None
 
     @property
     def jobs_path(self) -> Path:
