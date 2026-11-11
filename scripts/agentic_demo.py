@@ -38,7 +38,8 @@ def main() -> int:
     root = Path(args.root).resolve()
     ctx, cid = flow.setup(root, "female")
     with open(root / "factory.toml", "a", encoding="utf-8") as f:
-        f.write(ORCH + PAID_VIDEO)
+        f.write(ORCH + PAID_VIDEO + '\n[providers.demo_chat]\nadapter = "fake"\n')
+        f.write(f'\n[web]\nstudio_dir = "{ROOT_REPO / "studio"}"\n')
     ctx.config = load_config(root)
     ctx._judge.add("REVIEW", review_answer)  # noqa: SLF001
     extra = {

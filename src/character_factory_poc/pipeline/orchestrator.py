@@ -202,6 +202,10 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
         # 씨앗은 다른 단계가 돌기 전에 먼저 고정한다. 외모 축은 그 뒤 s2 승인을 기다린다.
         if appearance and ctx.state(cid).stage("s2").status != "APPROVED":
             raise GateNotApprovedError(f"{cid}: 외모 축 캐릭터는 s2 승인 뒤 기획한다(D-0042)")
+        if opt.brief_text and load_latest_seed(ctx, cid) is None:
+            # 얼굴부터 고른 캐릭터도 등록한 브리프를 씨앗으로 쓴다. s2 승인 뒤라 비운 성별은
+            # 승인한 외모에서 채운다(QA v5 C-13). 씨앗 없이 기획을 멈추지 않는다.
+            return run_s3_from_brief(ctx, cid, opt.brief_text)
         return run_s3_variants(ctx, cid)
 
     def s10t():
@@ -290,15 +294,16 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
             raise FactoryError("모티브 캐릭터는 --ranking을 받지 않는다(얼굴은 받은 사진에서 온다)")
         for sid in ("s1", "s2", "s3"):
             runners.pop(sid, None)
-        from character_factory_poc.pipeline.origin import read_video_tier
         from character_factory_poc.stages.s0_source.run import run_s0
         from character_factory_poc.stages.s2_hero.twin import run_s2_twin
         from character_factory_poc.stages.s3_plan.twin import run_s3_twin
-        from character_factory_poc.stages.s6_actions.catalog import ALL_CHAPTERS, VIDEO_TIERS
+        from character_factory_poc.stages.s6_actions.catalog import (
+            MOTIF_VIDEO_TIERS,
+        )
         from character_factory_poc.stages.s8_prompts.chapter_start import run_s8c
 
-        tier = VIDEO_TIERS.get(read_video_tier(ctx.character_dir(cid)))
-        chapters = tier.chapters if tier else ALL_CHAPTERS
+        # D-0164: 모티브는 등급과 상관없이(영상 없음·예전 설정 포함) 배경 하나·장면 이미지 하나다.
+        chapters = MOTIF_VIDEO_TIERS["light"].chapters
         runners.update(
             {
                 "s8c": lambda: run_s8c(ctx, cid),
@@ -393,8 +398,8 @@ def _mark_failed(ctx: Context, cid: str, sid: str, message: str) -> None:
 def _matches_video_scope(ctx, cid, sid, rev):
     """등급이 바뀌면 범위가 같은 승인 결과만 재사용한다."""
     from character_factory_poc.common.store import read_json
-    from character_factory_poc.pipeline.origin import read_video_tier
-    from character_factory_poc.stages.s6_actions.catalog import VIDEO_TIERS
+    from character_factory_poc.pipeline.origin import is_twin, read_signature, read_video_tier
+    from character_factory_poc.stages.s6_actions.catalog import signature_matches, video_tiers
 
     folder = ctx.character_dir(cid)
     tier = read_video_tier(folder)
@@ -403,7 +408,11 @@ def _matches_video_scope(ctx, cid, sid, rev):
     state = ctx.state(cid)
     if sid == "s6":
         data = read_json(folder / "s6-actions" / rev / "inputs.json")
-        return data["preset"] == f"tier:{tier}" and data["frameRev"] == state.gate("G4").rev
+        return (
+            data["preset"] == f"tier:{tier}"
+            and data["frameRev"] == state.gate("G4").rev
+            and (not is_twin(folder) or signature_matches(data, read_signature(folder)))
+        )
     locations = {
         "s4a": ("s4a-backgrounds", "background-candidates.json"),
         "s4b": ("s4b-poses", "scene-plan.json"),
@@ -420,7 +429,7 @@ def _matches_video_scope(ctx, cid, sid, rev):
     if data[field] != state.gate(gate).rev:
         return False
     chapters = data["chapters"]
-    return [ch["chapterId"] for ch in chapters] == list(VIDEO_TIERS[tier].chapters)
+    return [ch["chapterId"] for ch in chapters] == list(video_tiers(is_twin(folder))[tier].chapters)
 
 
 def _step(
@@ -445,13 +454,32 @@ def _step(
     gate_ok = stage.gate is None or state.gate(stage.gate).status == "APPROVED"
     ran = False
     reusable = st.status in {"APPROVED", "SKIPPED"} or (st.status == "AWAITING_HUMAN" and gate_ok)
+    stale = (
+        opt.video_only
+        and st.status == "AWAITING_HUMAN"
+        and stage.gate
+        and not _matches_video_scope(ctx, cid, sid, st.currentRev)
+    )
+    if stale:
+        # D-0166: 다른 등급으로 만들다 기다리던 후보는 정리하고 이 등급으로 다시 만든다.
+        # 같은 첫 화면·같은 지시의 영상은 다시 만들 때 옮겨 온다(_carry).
+        approve_gate(
+            ctx,
+            cid,
+            stage.gate,
+            {
+                "decision": "APPROVE",
+                "reviewer": "자동 진행",
+                "reasons": "영상 등급을 바꿔 기다리던 후보를 정리했어요.",
+            },
+        )
+        log.add(f"{stage.gate}: 등급이 달라 기다리던 후보를 정리")
+        state = ctx.state(cid)
+        st = state.stage(sid)
+        reusable = True
     if reusable and (not opt.video_only or _matches_video_scope(ctx, cid, sid, st.currentRev)):
         log.add(f"{sid}: 이미 {st.status}({st.currentRev}) — 건너뜀")
     elif st.status == "AWAITING_HUMAN" and stage.gate:
-        if opt.video_only and not _matches_video_scope(ctx, cid, sid, st.currentRev):
-            raise NeedsInputError(
-                "다른 등급으로 만들던 장면이 있어요. 먼저 기다리는 검토를 마쳐 주세요."
-            )
         log.add(f"{sid}: {stage.gate} 대기 중({st.currentRev})")
     else:
         try:
@@ -567,7 +595,7 @@ def _step(
 
 
 def _finish(log: RunLog) -> RunLog:
-    log.stopped_at = (log.waiting or log.blocked or ["end"])[0]
+    log.stopped_at = (log.held or log.waiting or log.blocked or ["end"])[0]
     if log.waiting or log.blocked:
         log.add(
             "더 진행할 단계가 없다. 기다리는 관문: "
@@ -596,11 +624,29 @@ def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
         return run_waves(ctx, cid, opt)
     log = RunLog()
     runners = _stage_runners(ctx, cid, opt)
-    # 자동 진행은 직렬 텍스트 경로만 탄다. 사진·영상·학습·평가는 별도 실행 확인이 필요하다.
     from character_factory_poc.pipeline.origin import VIDEO_STAGES
 
-    for sid in VIDEO_STAGES if opt.video_only else graph:
-        if auto_review and sid not in {"s0", "s3", "s7", "s8", "s8c"} and sid not in opt.confirmed:
+    scope = graph
+    if opt.video_only:
+        scope = VIDEO_STAGES
+    elif auto_review:
+        scope = {"s0", "s3", "s7", "s8", "s8c"} | opt.confirmed
+        if opt.web:
+            # 버튼의 목표에 필요한 단계만 연다. 유료 확인은 _step에서 그대로 받는다.
+            owners = {s.gate: sid for sid, s in graph.items() if s.gate}
+            todo = [owners.get(opt.until, opt.until)]
+            scope = set()
+            while todo:
+                sid = todo.pop()
+                if sid in scope:
+                    continue
+                scope.add(sid)
+                stage = graph[sid]
+                todo.extend(stage.needs | stage.after | {owners[g] for g in stage.deps})
+                if "G6" in stage.deps:
+                    todo.append("s8c")  # 자동 승인은 첫 장면이 준비된 뒤에 한다.
+    for sid in graph:
+        if sid not in scope:
             continue
         note = _skip_note(ctx, cid, sid, runners)
         if note is not None:
@@ -608,7 +654,9 @@ def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
                 log.add(note)
             continue
         action = _step(ctx, cid, sid, opt, runners, log, auto_review=auto_review)
-        if (auto_review or opt.video_only) and (log.blocked or log.held):
+        if (auto_review and log.held) or (
+            (opt.video_only or (auto_review and not opt.web)) and (log.blocked or log.held)
+        ):
             break
         if action == "break":
             break

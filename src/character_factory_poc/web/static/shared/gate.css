@@ -421,6 +421,15 @@ img.intro-hero{max-width:200px;border-radius:8px}
 .action-inner .frame-zoom-foot{align-items:flex-start;flex-wrap:wrap}
 .action-inner .frame-zoom-foot textarea{flex:1;min-width:220px;min-height:40px}
 .action-cell-note.is-new{color:var(--accent,var(--solid));font-weight:600}
+/* 휴대폰 폭(QA v5 C-06): 버튼 줄은 접고, 첫 프레임과 영상은 창 폭 안에서 나눠 쓴다. */
+.action-board .intro-ctrl,.action-col-acts{flex-wrap:wrap}
+@media (max-width:640px){
+  .action-inner .frame-zoom-pair{gap:8px}
+  .action-inner .frame-zoom-pair figure{flex:1 1 0}
+  .action-inner .frame-zoom-pair figure:first-child:not(:last-child){flex:0 0 32%}
+  .action-inner .frame-zoom-pair img,.action-inner .frame-zoom-pair figure:first-child:not(:last-child) img,.action-inner .clip,.action-inner .clip video,.action-inner .clip-broken{width:100%;height:auto;max-height:62dvh}
+  .action-inner .frame-zoom-foot textarea{min-width:0;flex-basis:100%}
+}
 
 /* 데이터 샘플·학습 데이터 받은 편지함(D-0112, D-0113) */
 .sample-guide{margin:10px 0 0}

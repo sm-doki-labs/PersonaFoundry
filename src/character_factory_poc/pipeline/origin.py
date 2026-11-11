@@ -54,10 +54,32 @@ def read_video_tier(char_dir: Path) -> str | None:
     return json.loads(path.read_text("utf-8"))["videoTier"] if path.exists() else None
 
 
-def write_video_tier(char_dir: Path, tier: VideoTier) -> None:
+def _video_settings(char_dir: Path) -> dict:
+    path = char_dir / "video-settings.json"
+    return json.loads(path.read_text("utf-8")) if path.exists() else {}
+
+
+def _write_video_settings(char_dir: Path, data: dict) -> None:
     from character_factory_poc.common.source_store import atomic_write, inside
 
-    atomic_write(inside(char_dir, "video-settings.json"), json.dumps({"videoTier": tier}).encode())
+    atomic_write(
+        inside(char_dir, "video-settings.json"), json.dumps(data, ensure_ascii=False).encode()
+    )
+
+
+def write_video_tier(char_dir: Path, tier: VideoTier) -> None:
+    _write_video_settings(char_dir, _video_settings(char_dir) | {"videoTier": tier})
+
+
+def read_signature(char_dir: Path) -> dict | None:
+    """모티브 시그니처 포즈 {title, motion, useWhen}(D-0165). 유저가 정하고, 없으면 None."""
+    return _video_settings(char_dir).get("signature") or None
+
+
+def write_signature(char_dir: Path, signature: dict) -> None:
+    data = _video_settings(char_dir)
+    data.setdefault("videoTier", "none")
+    _write_video_settings(char_dir, data | {"signature": signature})
 
 
 def origin_label(origin: str) -> str:

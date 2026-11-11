@@ -331,3 +331,26 @@ test('page wiring: two muted inline players, a hidden sound toggle, screen reade
   assert.match(css, /prefers-reduced-motion:reduce\)\{\s*\.ch-screen video/);
 });
 
+
+test('the signature pose is never a stand-in reaction (D-0167)', () => {
+  const sig = { clipKey: 'signature_good', url: '/v/sig.mp4', mood: 'good' };
+  assert.equal(C.pickFallbackClip([sig]), null, 'only a signature pose means no stand-in');
+  const glad = { clipKey: 'glad_good', url: '/v/glad.mp4', mood: 'good' };
+  for (let i = 0; i < 5; i += 1) assert.equal(C.pickFallbackClip([sig, glad], { random: () => i / 5 }).clipKey, 'glad_good');
+});
+
+test('no video: a character made without photos gets a plain note instead of a dead-end 영상 만들기 link (QA v5 D-04)', () => {
+  const none = { ready: false };
+  const href = 'factory.html#c/cf-son';
+  const linked = C.videoNote({ canMakeVideo: true }, none, href);
+  assert.match(linked, /영상 만들기<\/a>/);
+  assert.ok(linked.includes('href="' + href + '"'));
+  const noPhoto = C.videoNote({ canMakeVideo: false }, none, href);
+  assert.ok(noPhoto.includes('영상은 만들 때 사진을 올린 캐릭터만 만들 수 있어요'));
+  assert.ok(!noPhoto.includes('<a '), 'no link to a screen that cannot make it');
+  // 예전 서버처럼 값이 없으면 지금처럼 링크를 둔다. 영상이 있으면 안내가 없다.
+  assert.match(C.videoNote({}, none, href), /영상 만들기<\/a>/);
+  const clips = { ready: true, idle: { good: { clipKey: 'idle_good', url: '/v.mp4' } } };
+  assert.equal(C.videoNote({ canMakeVideo: false }, clips, href), '');
+});
+

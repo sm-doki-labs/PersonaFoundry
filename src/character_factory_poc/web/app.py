@@ -102,6 +102,9 @@ def create_app(
     from character_factory_poc.web.runtime import install_runtime_routes
 
     install_runtime_routes(app, root, conf, jobs)
+    from character_factory_poc.web.model_binding import install_binding_routes
+
+    install_binding_routes(app, root, conf, jobs)
 
     @app.exception_handler(WebError)
     async def _web_error(_request: Request, exc: WebError) -> JSONResponse:  # pragma: no cover

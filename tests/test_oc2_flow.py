@@ -96,6 +96,11 @@ def test_finalize(tmp_path, monkeypatch, manual, sample_failure):
     assert any(s["id"] == "s8c" for lane in detail["lanes"] for s in lane["stages"])
     if manual:
         assert state.gate("G0").status == "AWAITING_HUMAN" and not sampled
+        from tests.test_v_make import wait
+
+        attempt = client.post("/api/jobs", json={"characterId": cid, "until": "s8c"}).json()
+        stopped = wait(client, attempt["jobId"])
+        assert "G0" in stopped["waiting"] and stopped["error"] is None
         return
     assert sampled == [cid], info
     assert state.stage("s8c").status == "APPROVED"
@@ -107,3 +112,23 @@ def test_finalize(tmp_path, monkeypatch, manual, sample_failure):
             assert rec["selections"] == [first["variantId"]]
     assert state.gate("G1s").status == state.gate("G8").status == "PENDING"
     assert all(state.stage(s).status == "PENDING" for s in ("s2", "s4", "s5", "s10t", "s10"))
+
+
+def test_extra_target_holds_paid_work_without_running_unrelated_stages(tmp_path, monkeypatch):
+    from character_factory_poc.pipeline.orchestrator import RunOptions, run_until
+    from character_factory_poc.pipeline.origin import write_origin
+
+    ctx = Context.load(tmp_path, execute=True)
+    cid = "cf-extra"
+    folder = ctx.character_dir(cid)
+    write_origin(folder, "SOURCE", auto_review=True)
+    ctx.use_models(FakeTextModel(responses={"AGENT": _good_digest}))
+    first = run_until(ctx, cid, RunOptions(until="G0", web=True, source_pack=_pack(tmp_path)))
+    assert first.stopped_at == "G0"
+    monkeypatch.setattr(
+        "character_factory_poc.pipeline.scheduler.paid_stage", lambda ctx, sid: sid == "s2"
+    )
+    held = run_until(ctx, cid, RunOptions(until="s2", web=True))
+    assert held.held == ["s2"] and not held.timings
+    more = run_until(ctx, cid, RunOptions(until="s9h", web=True))
+    assert list(more.timings) == ["s9h"] and ctx.state(cid).stage("s9h").status == "APPROVED"

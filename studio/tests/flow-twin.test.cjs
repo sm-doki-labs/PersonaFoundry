@@ -125,7 +125,7 @@ test('track badge text: original, or twin with how the model is prepared', () =>
 test('chat link opens only when the character can chat: the server chatReady wins, else prompt (s8) and opening scene (s8c) both exist', () => {
   const rows = (s8, s8c) => [{ id: 's8', status: s8 }].concat(s8c ? [{ id: 's8c', status: s8c }] : []);
   const base = { id: 'cf-son', origin: 'SOURCE' };
-  assert.equal(Flow.chatHref(Object.assign({}, base, { stages: rows('AWAITING_HUMAN', 'APPROVED') })), 'chat.html#c/cf-son', 'G6 waiting means the prompt is already written');
+  assert.equal(Flow.chatHref(Object.assign({}, base, { stages: rows('AWAITING_HUMAN', 'APPROVED') })), '', 'waiting for approval is not ready to chat');
   assert.equal(Flow.chatHref(Object.assign({}, base, { stages: rows('APPROVED', 'APPROVED') })), 'chat.html#c/cf-son');
   // QA C1: 프롬프트만 있고 첫 장면이 없으면 대화 화면이 막히므로 버튼을 보이지 않는다.
   assert.equal(Flow.chatHref(Object.assign({}, base, { stages: rows('APPROVED') })), '', 'no opening scene yet');
@@ -140,7 +140,7 @@ test('chat link opens only when the character can chat: the server chatReady win
 });
 
 test('the S8c step is named after the opening scene, and mode names match the upload page', () => {
-  assert.equal(Flow.s8cName('SOURCE', ''), '팬 통화 장면');
+  assert.equal(Flow.s8cName('SOURCE', ''), '첫 통화 장면', 'without a template the name fits family calls too (QA v5 F20)');
   assert.equal(Flow.s8cName('SOURCE', 'FAN_CALL'), '팬 통화 장면');
   assert.equal(Flow.s8cName('SOURCE', 'FAMILY_CALL'), '통화 장면');
   assert.equal(Flow.s8cName('CREATED', ''), '통화 장면');

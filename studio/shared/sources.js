@@ -15,9 +15,9 @@
   // [값, 이름, 한 줄 설명, 시간·비용 칸 수(0~4)]. 진행 화면(flow.js)도 같은 표를 쓴다(시험이 같은지 본다).
   const VIDEO_TIERS = [
     ['none', '영상 없이', '대화만 만들어요. 영상 비용이 들지 않아요.', 0],
-    ['light', '라이트', '첫 장면만, 기본 감정으로 가장 빨리 확인해요.', 1],
-    ['standard', '스탠다드', '세 장면 모두, 기본 감정으로 만들어요.', 2],
-    ['pro', '프로', '세 장면 모두, 더 다양한 감정으로 만들어요.', 3],
+    ['light', '라이트', '자주 쓰는 기본 감정만, 가장 빨리 확인해요.', 1],
+    ['standard', '스탠다드', '대화에서 자주 쓰는 감정까지 만들어요.', 2],
+    ['pro', '프로', '더 섬세한 감정까지 만들어요.', 3],
     ['max', '맥스', '앱에서 쓰는 반응 전부예요. 가장 오래 걸리고 비용도 가장 커요.', 4]
   ];
   const COST_WORD = ['없음', '적음', '보통', '많음', '가장 많음'];
@@ -44,6 +44,12 @@
   function labelOf(pairs, id) { const p = pairs.find((x) => x[0] === id); return p ? p[1] : ''; }
   function tierOf(value) { return VIDEO_TIERS.some((t) => t[0] === value) ? value : 'none'; }
   function tierName(value) { return labelOf(VIDEO_TIERS, tierOf(value)); }
+  // 시그니처 포즈(D-0165): 이름과 동작이 있어야 쓴다. 앞뒤 공백은 뗀다.
+  function sigOf(value) {
+    const v = value || {};
+    const sig = { title: text(v.title).trim(), motion: text(v.motion).trim(), useWhen: text(v.useWhen).trim() };
+    return sig.title && sig.motion ? sig : null;
+  }
   // 등급 고르기 카드. 원문 화면과 진행 화면의 영상 만들기가 같은 카드를 쓴다. paidOnly면 '영상 없이'를 뺀다.
   function tierCardsHTML(name, value, opts) {
     const o = opts || {};
@@ -90,13 +96,15 @@
     const vReady = on && vs === 'ready';
     const vFailed = on && vs === 'failed';
     // 영상 상태를 주는 서버면 다 되거나 실패할 때까지 '만드는 중'으로 본다. 그 필드가 없는 서버면 기다리는 중으로만 적는다.
-    const making = on && typeof vs === 'string' && !vReady && !vFailed;
+    // 사람 확인 모드는 영상을 자동으로 시작하지 않는다(QA v5 E6). 실제 작업이 돌 때만 '만드는 중'이다.
+    const making = on && typeof vs === 'string' && !vReady && !vFailed && (vs === 'making' || auto);
     if (on && st === 'chat_ready') {
       if (vReady) body = '영상까지 다 만들었어요. 대화해 보기에서 영상과 함께 대화해요.';
       else if (vFailed) body = '대화는 지금 해 볼 수 있어요. 영상은 만들지 못했어요. 진행 화면에서 까닭을 봐 주세요.';
+      else if (!making) body = '대화는 지금 해 볼 수 있어요. 영상은 진행 화면에서 영상 만들기를 눌러 시작해요.';
       else body = '대화는 지금 해 볼 수 있어요. 영상은 이어서 만들고 있어요. 다 되면 대화할 때 영상이 나와요.';
     } else if (on && st === 'running' && body) body += ' 영상은 대화가 된 뒤에 이어서 만들어요.';
-    const vText = making ? '영상 만드는 중 · ' + tierName(tier) : videoText({ videoTier: tier, videoStatus: vs, videoLabel: c.videoLabel });
+    const vText = making ? '영상 만드는 중 · ' + tierName(tier) : (!auto && vs === 'none') ? '영상은 진행 화면에서 시작해요 · ' + tierName(tier) : videoText({ videoTier: tier, videoStatus: vs, videoLabel: c.videoLabel });
     return {
       ready, status: st, title, body,
       tone: { chat_ready: 'ok', failed: 'fail', needs_review: 'wait', stopped: 'wait' }[st] || 'run',
@@ -113,7 +121,9 @@
     const ready = !!(S.chat && S.chat.ready) || c.chatReady === true;
     if (!ready) return true;
     const tier = tierOf(c.videoTier || (S.settings && S.settings.videoTier));
-    return typeof c.videoStatus === 'string' && (c.videoStatus === 'making' || (c.videoStatus === 'none' && tier !== 'none'));
+    // 사람 확인 모드는 영상이 저절로 시작되지 않으니 '없음'에서 기다리지 않는다(QA v5 E6).
+    const auto = c.autoReview !== false && !(S.settings && S.settings.autoReview === false);
+    return typeof c.videoStatus === 'string' && (c.videoStatus === 'making' || (c.videoStatus === 'none' && tier !== 'none' && auto));
   }
   // 서버 기록이 사진인지. fileType을 주지 않는 서버면 확장자로 본다.
   function isPhotoRecord(rec) {
@@ -159,10 +169,14 @@
   function speakersOf(rec) {
     return (Array.isArray(rec && rec.detectedSpeakers) ? rec.detectedSpeakers : []).map((s) => text(s && typeof s === 'object' ? s.name : s).trim()).filter(Boolean);
   }
-  // 원문에서 찾은 대상 화자 제안: 서버 제안 → 가장 많이 말한 화자.
+  // 원문에서 찾은 대상 화자 제안: 서버가 표시 이름과 맞춘 화자만 쓴다. 줄 수만으로 고르지 않는다(QA v5 A-03).
   function suggestedSpeaker(rec) {
-    const s = rec && rec.suggested && text(rec.suggested.subjectSpeaker).trim();
-    return s || speakersOf(rec)[0] || '';
+    return text(rec && rec.suggested && rec.suggested.subjectSpeaker).trim();
+  }
+  // 표시 이름과 맞는 화자가 없을 때 고를 후보. 서버가 카톡을 내보낸 본인('나')은 뺀다.
+  function speakerChoices(rec) {
+    const list = rec && rec.suggested && Array.isArray(rec.suggested.subjectChoices) ? rec.suggested.subjectChoices : [];
+    return list.map((s) => text(s).trim()).filter(Boolean);
   }
   // 조사 '으로/로': 받침이 있으면(ㄹ 받침 빼고) '으로'. 한글이 아니면 '(으)로'.
   function ro(word) {
@@ -326,6 +340,7 @@
     };
     let seq = 0;
     let active = 0;
+    let lastStatus = null; // 왼쪽 목록을 다시 읽을지 견줄 직전 진행 상태
     const aborts = {};
     const chains = {};
     let pendingSaves = 0;
@@ -456,6 +471,11 @@
         }
       }
       emit();
+      // 상태가 바뀌면 왼쪽 캐릭터 목록도 다시 읽는다(본문은 대화 가능인데 목록만 만드는 중으로 남지 않게, QA v5 A-07).
+      const c = state.character || {};
+      const now = [c.status, c.chatReady, c.videoStatus, state.chat && state.chat.ready].join('|');
+      if (lastStatus !== null && now !== lastStatus && state.projects) await projects();
+      lastStatus = now;
       return { character: state.character, chat: state.chat };
     }
     async function projects() {
@@ -482,7 +502,7 @@
       const c = state.character || {};
       const s = state.settings || {};
       const pick = (k) => (d[k] != null ? d[k] : c[k] != null ? c[k] : s[k] != null ? s[k] : null);
-      return { modelMode: pick('modelMode'), autoReview: pick('autoReview'), videoTier: tierOf(pick('videoTier')) };
+      return { modelMode: pick('modelMode'), autoReview: pick('autoReview'), videoTier: tierOf(pick('videoTier')), signaturePose: sigOf(pick('signaturePose')) };
     }
     // 시작 전에 영상 등급을 바꾼다(약속 5 PATCH settings). 실패하면 화면 값은 그대로 두고 알린다.
     async function setTier(value) {
@@ -509,19 +529,56 @@
       return ok;
     }
 
+    // 시그니처 포즈(D-0165)를 저장한다. 영상 등급은 그대로 두고 함께 보낸다.
+    async function setSignature(pose) {
+      const sig = sigOf(pose);
+      if (!state.cid || state.finalized || state.busy || !sig) return false;
+      state.busy = 'tier';
+      state.error = null;
+      emit();
+      let ok = false;
+      try {
+        const data = await request('PATCH', '/api/sources/' + encodeURIComponent(state.cid) + '/settings', { videoTier: settings().videoTier, signaturePose: sig });
+        const saved = sigOf(data && data.signaturePose) || sig;
+        state.settings = Object.assign({}, state.settings || {}, { signaturePose: saved });
+        if (state.draft) state.draft.signaturePose = saved;
+        state.announce = '시그니처 포즈를 저장했어요.';
+        ok = true;
+      } catch (error) {
+        state.error = '시그니처 포즈를 저장하지 못했어요. ' + errorText(error);
+      }
+      state.busy = null;
+      emit();
+      if (ok) await refresh();
+      return ok;
+    }
+
     function validateDraft(input) {
       const v = input || {};
       const errors = {};
+      const tooLong = (name, label, n) => { if (!errors[name] && text(v[name]).trim().length > n) errors[name] = label + ' ' + n + '자까지 적을 수 있어요.'; };
       if (!text(v.displayName).trim()) errors.displayName = '표시 이름을 적어 주세요.';
       if (!SUBJECT_KINDS.some((k) => k[0] === v.subjectKind)) errors.subjectKind = '공인인지 개인인지 골라 주세요.';
       if (!text(v.age).trim()) errors.age = '나이를 적어 주세요.';
       if (!text(v.gender).trim()) errors.gender = '성별을 골라 주세요.';
       if (!text(v.job).trim()) errors.job = '하는 일을 적어 주세요.';
+      // 서버 한도와 같다(KnownFacts). 넘으면 그 칸 옆에 알린다(QA v5 A-06).
+      tooLong('age', '나이는', 20);
+      tooLong('job', '하는 일은', 60);
+      tooLong('background', '한 줄 배경은', 400);
+      if (tierOf(v.videoTier) !== 'none') {
+        if (!text(v.sigTitle).trim()) errors.sigTitle = '시그니처 포즈 이름을 적어 주세요.';
+        if (!text(v.sigMotion).trim()) errors.sigMotion = '어떤 동작인지 적어 주세요.';
+      }
       return errors;
     }
     async function createDraft(input) {
       const errors = validateDraft(input);
-      if (Object.keys(errors).length) return { errors };
+      if (Object.keys(errors).length) {
+        // 칸 오류를 보일 때는 지난번 서버 오류 문장을 지운다(고친 뒤 다른 칸 오류가 나도 옛 문장이 남지 않게).
+        if (state.error) { state.error = null; emit(); }
+        return { errors };
+      }
       state.busy = 'create';
       state.error = null;
       emit();
@@ -539,11 +596,13 @@
           videoTier
         };
         if (input.chapterTemplate) body.chapterTemplate = input.chapterTemplate;
+        const signaturePose = videoTier === 'none' ? null : sigOf({ title: input.sigTitle, motion: input.sigMotion, useWhen: input.sigWhen });
+        if (signaturePose) body.signaturePose = signaturePose;
         const data = await request('POST', '/api/sources/drafts', body);
         state.busy = null;
         if (o.onCid) o.onCid(data.characterId);
         await load(data.characterId);
-        state.settings = { modelMode, autoReview, videoTier };
+        state.settings = { modelMode, autoReview, videoTier, signaturePose };
         emit();
         return { characterId: data.characterId };
       } catch (error) {
@@ -585,8 +644,10 @@
           // 사진에는 원문 정보가 없어 모두 빈칸으로 보낸다.
           meta: photo ? { textId: '', kind: '', register: '', subjectSpeaker: '', userSpeaker: '', date: '', sourceUrl: '' } : {
             textId: problem ? '' : suggestTextId(file.name, kind, takenIds()),
-            kind,
-            register: defaultRegister(kind),
+            // 이름에 실마리가 없으면 종류와 자리를 비워 보내 서버가 내용으로 정하게 한다. 인터뷰로 먼저 읽으면
+            // 이름 없는 카톡 파일에서 '[엄마] [오전 9' 같은 화자가 잡힌다.
+            kind: hint || '',
+            register: hint ? defaultRegister(kind) : '',
             subjectSpeaker: '',
             userSpeaker: '',
             date: '',
@@ -685,6 +746,9 @@
         const old = rec && rec.suggested === undefined && rec.detectedSpeakers === undefined;
         next.subjectSpeaker = suggestedSpeaker(rec) || (old ? text(state.draft && state.draft.subject && state.draft.subject.displayName) : '');
       }
+      // 상대 화자도 서버가 찾은 값으로 채운다(QA v5 A-23). 대상 화자와 같은 이름은 넣지 않는다.
+      const partner = text(sug.userSpeaker).trim();
+      if (!entry.touched.userSpeaker && !next.userSpeaker.trim() && partner && partner !== next.subjectSpeaker.trim()) next.userSpeaker = partner;
       return next;
     }
 
@@ -752,6 +816,17 @@
       }
       return queuePatch(rec.fileId, meta);
     }
+    // 원문에서 찾은 이름 단추로 대상 화자를 정한다. 상대 화자가 비었거나 같은 이름이면 서버가 권한 상대로 바꾼다.
+    function pickSpeaker(key, name) {
+      const rec = files().find((f) => keyOf(f.fileId) === key);
+      const who = text(name).trim();
+      if (!rec || !who || state.finalized) return null;
+      const meta = Object.assign({}, metaOfRecord(rec), { subjectSpeaker: who });
+      const partner = text(rec.suggested && rec.suggested.userSpeaker).trim();
+      const others = speakersOf(rec).filter((n) => n !== who);
+      if (!text(meta.userSpeaker).trim() || text(meta.userSpeaker).trim() === who) meta.userSpeaker = partner && partner !== who ? partner : others.length === 1 ? others[0] : '';
+      return queuePatch(rec.fileId, meta);
+    }
 
     async function removeFile(key) {
       const entry = state.uploads.find((u) => u.key === key);
@@ -798,8 +873,16 @@
       state.error = null;
       emit();
       try {
-        await request('POST', '/api/sources/' + encodeURIComponent(state.cid) + '/import-path', { path: p });
+        const rec = await request('POST', '/api/sources/' + encodeURIComponent(state.cid) + '/import-path', { path: p });
         state.announce = '경로에서 원문을 가져왔어요.';
+        // 서버가 올린 파일과 같은 확인을 마친 기록을 준다. 찾은 화자·상대를 올린 파일처럼 채운다(QA v5 A-05).
+        if (rec && rec.fileId) {
+          upsert(rec);
+          if (!isPhotoRecord(rec)) {
+            const next = afterCheck(rec, { touched: {}, kindFromName: false, meta: {} });
+            if (!sameMeta(metaOfRecord(rec), next)) queuePatch(rec.fileId, next);
+          }
+        }
       } catch (error) {
         state.error = '가져오지 못했어요. ' + errorText(error);
       }
@@ -867,6 +950,8 @@
       Object.assign(state, { cid: null, draft: null, uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, busy: null, finalized: null, loadError: null, settings: null, character: null, chat: null, announce: '초안과 올린 원문을 지웠어요.' });
       if (o.onCid) o.onCid(null);
       emit();
+      // 지운 초안이 만들던 초안 목록과 왼쪽 캐릭터 목록에서도 빠지게 둘 다 다시 읽는다(QA v5 A-04).
+      await Promise.all([drafts(), projects()]);
       return true;
     }
     function reset() {
@@ -891,16 +976,21 @@
         const problems = (f.problems || []).map(text);
         if (f.status === 'pending' && !problems.length) problems.push('이 파일은 끝까지 올라가지 않았어요. 지우고 다시 올려 주세요.');
         // 원문에서 찾은 화자가 지금 대상 화자와 다르면 한 번에 바꾸는 단추를 건넨다(약속 4 suggested·detectedSpeakers).
+        // 표시 이름과 맞는 화자를 찾지 못했으면 후보 이름을 단추로 늘어놓고 고르게 한다(QA v5 A-03).
         const meta = metaOfRecord(f);
         const found = suggestedSpeaker(f);
         const names = speakersOf(f);
-        const speaker = !state.finalized && f.status !== 'pending' && found && found !== text(meta.subjectSpeaker).trim() && (f.status === 'problem' || (names.length && names.indexOf(text(meta.subjectSpeaker).trim()) < 0)) ? found : '';
-        out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, speaker, meta, display: Object.assign(metaOfRecord(f), state.rawInput[key] || {}), editable: f.status !== 'pending' && !state.finalized, removable: !state.finalized && state.busy !== 'remove:' + key, retry: false, saving: state.saving[key] || '', saveError: state.saveError[key] || '', fieldErrors: state.fieldErrors[key] || {} });
+        const cur = text(meta.subjectSpeaker).trim();
+        const off = !cur || (names.length > 0 && names.indexOf(cur) < 0);
+        const look = !state.finalized && f.status !== 'pending' && (f.status === 'problem' || off);
+        const speaker = look && found && found !== cur ? found : '';
+        const choices = look && !speaker && off ? speakerChoices(f).filter((n) => n !== cur) : [];
+        out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, speaker, choices, meta, display: Object.assign(metaOfRecord(f), state.rawInput[key] || {}), editable: f.status !== 'pending' && !state.finalized, removable: !state.finalized && state.busy !== 'remove:' + key, retry: false, saving: state.saving[key] || '', saveError: state.saveError[key] || '', fieldErrors: state.fieldErrors[key] || {} });
       });
       state.uploads.filter((u) => u.fileType !== 'photo').forEach((u) => {
         const map = { queued: ['muted', '기다리는 중'], starting: ['run', '준비하는 중'], sending: ['run', '올리는 중 ' + Math.round(u.progress * 100) + '%'], checking: ['run', '확인하는 중'], failed: ['fail', '올리지 못했어요'], rejected: ['fail', '받을 수 없는 파일'] };
         const st = map[u.phase] || ['muted', ''];
-        out.push({ key: u.key, source: 'upload', fileId: u.fileId, filename: u.filename, size: u.size, tone: st[0], status: st[1], phase: u.phase, progress: u.phase === 'sending' ? u.progress : null, problems: u.error ? [u.error] : [], speaker: '', meta: u.meta, display: Object.assign({}, u.meta, state.rawInput[u.key] || {}), editable: u.phase !== 'rejected' && !state.finalized, removable: !u.cancelled, retry: u.phase === 'failed', saving: '', saveError: '', fieldErrors: state.fieldErrors[u.key] || {} });
+        out.push({ key: u.key, source: 'upload', fileId: u.fileId, filename: u.filename, size: u.size, tone: st[0], status: st[1], phase: u.phase, progress: u.phase === 'sending' ? u.progress : null, problems: u.error ? [u.error] : [], speaker: '', choices: [], meta: u.meta, display: Object.assign({}, u.meta, state.rawInput[u.key] || {}), editable: u.phase !== 'rejected' && !state.finalized, removable: !u.cancelled, retry: u.phase === 'failed', saving: '', saveError: '', fieldErrors: state.fieldErrors[u.key] || {} });
       });
       return out;
     }
@@ -915,7 +1005,9 @@
         const st = f.status === 'ready' ? ['ok', '준비됐어요'] : f.status === 'problem' ? ['wait', '확인이 필요해요'] : ['muted', '다 올라가지 않았어요'];
         const problems = (f.problems || []).map(text);
         if (f.status === 'pending' && !problems.length) problems.push('끝까지 올라가지 않았어요. 지우고 다시 올려 주세요.');
-        out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, thumb: text(f.previewUrl || f.thumbUrl || f.url) || state.thumbs[key] || '', removable: !state.finalized && state.busy !== 'remove:' + key, retry: false });
+        // 열 수 없는 사진은 브라우저 깨진 그림 대신 사진 아이콘을 둔다(QA v5 A-14).
+        const thumb = f.status === 'problem' ? '' : text(f.previewUrl || f.thumbUrl || f.url) || state.thumbs[key] || '';
+        out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, thumb, removable: !state.finalized && state.busy !== 'remove:' + key, retry: false });
       });
       state.uploads.filter((u) => u.fileType === 'photo').forEach((u) => {
         const map = { queued: ['muted', '기다리는 중'], starting: ['run', '준비하는 중'], sending: ['run', '올리는 중 ' + Math.round(u.progress * 100) + '%'], checking: ['run', '확인하는 중'], failed: ['fail', '올리지 못했어요'], rejected: ['fail', '받을 수 없는 사진'] };
@@ -927,7 +1019,7 @@
     function uploading() { return state.uploads.some((u) => ACTIVE.indexOf(u.phase) >= 0); }
 
     return {
-      state, load, refresh, progress, projects, drafts, settings, setTier, createDraft, validateDraft, addFiles, retry, dismiss, editFile, removeFile, importPath, finalize, deleteDraft, reset, startState, items, photoItems, uploading,
+      state, load, refresh, progress, projects, drafts, settings, setTier, setSignature, createDraft, validateDraft, addFiles, retry, dismiss, editFile, pickSpeaker, removeFile, importPath, finalize, deleteDraft, reset, startState, items, photoItems, uploading,
       subscribe(fn) { listeners.push(fn); return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); }; }
     };
   }
@@ -1015,7 +1107,7 @@
       '</div>' +
       '<div class="src-bar" data-bar role="progressbar" aria-valuemin="0" aria-valuemax="100" hidden><span></span></div>' +
       '<ul class="src-problems" data-problems hidden></ul>' +
-      '<div class="src-file-acts" data-speaker-row hidden><button type="button" class="btn src-chip" data-act="use-speaker"></button></div>' +
+      '<div class="src-file-acts" data-speaker-row hidden></div>' +
       '<div class="src-file-acts" data-retry-row hidden><button type="button" class="btn" data-act="retry">' + icon('retry') + '다시 올리기</button></div>' +
       '<div class="src-fields" id="' + id('body') + '" data-body>' +
         fld('kind', '종류', '<select id="' + id('kind') + '" data-field="kind" aria-describedby="' + id('kind') + '-h">' + options(KINDS, item.meta.kind) + '</select>', '') +
@@ -1054,12 +1146,13 @@
       side: $('[data-side]'), headTheme: $('[data-head-theme]'), fileSum: $('[data-file-sum]'), startLead: $('[data-start-lead]'),
       doneTitle: $('[data-done-title]'), doneText: $('[data-done-text]'), prog: $('[data-prog]'), progText: $('[data-prog-text]'), chatLink: $('[data-chat-link]'),
       title: $('[data-title]'), intro: $('[data-intro]'), crumb: $('[data-crumb]'), resume: $('[data-resume]'), adv: $('[data-adv]'), startNote: $('[data-start-note]'),
-      tierCards: $('[data-tier-cards]'), tierHint: $('[data-tier-hint]'), sumVideo: $('[data-sum-video]'), tierEdit: $('[data-tier-edit]'),
+      tierCards: $('[data-tier-cards]'), tierHint: $('[data-tier-hint]'), sumVideo: $('[data-sum-video]'), tierEdit: $('[data-tier-edit]'), sig: $('[data-sig]'), sumSig: $('[data-sum-sig]'),
       photos: $('[data-photos]'), photoList: $('[data-photo-list]'), photoPicker: $('[data-photo-picker]'), photoCount: $('[data-photo-count]'), photoHint: $('[data-photo-hint]'),
       videoLine: $('[data-video-line]'), videoText: $('[data-video-text]')
     };
     if (r.tierCards) r.tierCards.innerHTML = tierCardsHTML('videoTier', 'none');
     let tierEditOpen = false;
+    let sigDraft = null; // 바꾸기 칸에 적고 아직 저장하지 않은 시그니처(다시 그려도 지우지 않는다, QA v5 E9)
     const tiles = new Map();
     let chapterTouched = false;
     let confirmDelete = false;
@@ -1138,6 +1231,11 @@
             const edit = r.summary.querySelector('[data-act="tier-edit"]');
             if (edit) { edit.hidden = !!S.finalized; edit.disabled = S.busy === 'tier'; edit.setAttribute('aria-expanded', String(tierEditOpen && !S.finalized)); edit.textContent = tierEditOpen ? '닫기' : '바꾸기'; }
           }
+          if (r.sumSig) {
+            const sig = set.signaturePose;
+            r.sumSig.textContent = sig ? sig.title + ' — ' + sig.motion : '아직 정하지 않았어요';
+            r.sumSig.parentElement.hidden = set.videoTier === 'none';
+          }
           const notes = r.summary.querySelector('[data-sum-notes]');
           const memo = [text(basis.scope) && text(basis.scope) !== DEFAULT_SCOPE ? text(basis.scope) : '', text(basis.notes)].filter(Boolean).join(' · ');
           notes.textContent = memo;
@@ -1148,7 +1246,7 @@
       if (r.tierEdit) {
         const show = hasDraft && tierEditOpen && !S.finalized;
         r.tierEdit.hidden = !show;
-        const html = show ? '<div class="vt-grid" role="radiogroup" aria-label="영상 등급 바꾸기">' + tierCardsHTML('videoTierEdit', intake.settings().videoTier, { disabled: S.busy === 'tier' }) + '</div><p class="src-fhint">영상 단계는 비용이 들어요. 고르면 바로 저장해요.</p>' : '';
+        const html = show ? '<div class="vt-grid" role="radiogroup" aria-label="영상 등급 바꾸기">' + tierCardsHTML('videoTierEdit', intake.settings().videoTier, { disabled: S.busy === 'tier' }) + '</div><p class="src-fhint">영상 단계는 비용이 들어요. 등급은 고르면 바로 저장해요.</p>' + (intake.settings().videoTier === 'none' ? '' : sigEditHTML(sigDraft || intake.settings().signaturePose, S.busy === 'tier')) : '';
         if (r.tierEdit.dataset.html !== html) { r.tierEdit.innerHTML = html; r.tierEdit.dataset.html = html; }
       }
       renderTitle();
@@ -1205,14 +1303,14 @@
       if (probs.dataset.html !== ph) { probs.innerHTML = ph; probs.dataset.html = ph; }
       probs.hidden = !item.problems.length;
       probs.classList.toggle('bad', item.tone === 'fail');
+      // 서버가 이름을 맞춘 화자가 있으면 그 한 사람, 없으면 고를 후보 이름마다 단추를 둔다.
       const sp = q('[data-speaker-row]');
-      sp.hidden = !item.speaker;
-      if (item.speaker) {
-        const chip = sp.firstChild;
-        chip.dataset.name = item.speaker;
-        chip.textContent = "원문에서 찾은 '" + item.speaker + "'" + ro(item.speaker);
-        chip.setAttribute('aria-label', '대상 화자를 원문에서 찾은 ' + item.speaker + ro(item.speaker) + ' 바꾸기: ' + item.filename);
-      }
+      const chips = item.speaker
+        ? [[item.speaker, "원문에서 찾은 '" + item.speaker + "'" + ro(item.speaker), '대상 화자를 원문에서 찾은 ' + item.speaker + ro(item.speaker) + ' 바꾸기: ' + item.filename]]
+        : (item.choices || []).map((n) => [n, n, '대상 화자를 ' + n + ro(n) + ' 정하기: ' + item.filename]);
+      const sh = chips.map((c) => '<button type="button" class="btn src-chip" data-act="use-speaker" data-name="' + E(c[0]) + '" aria-label="' + E(c[2]) + '">' + E(c[1]) + '</button>').join('');
+      if (sp.dataset.html !== sh) { sp.innerHTML = sh; sp.dataset.html = sh; }
+      sp.hidden = !sh;
       q('[data-retry-row]').hidden = !item.retry;
       const x = q('[data-act="remove"]');
       x.disabled = !item.removable;
@@ -1315,8 +1413,9 @@
       const tier = intake.settings().videoTier;
       const has = intake.photoItems().length > 0;
       const ready = c.chatReady === true || !!(S.chat && S.chat.ready);
-      const show = tier !== 'none' || has || (!!S.finalized && ready);
-      return { show, add: show && c.videoStatus !== 'making', tier };
+      // 사진은 처음 만들 때만 올린다(D-0160). 시작한 뒤에는 올린 사진만 보여 주고 더 받지 않는다(QA v5 E3).
+      const show = tier !== 'none' || has;
+      return { show, add: show && !S.finalized && c.videoStatus !== 'making', tier, ready };
     }
     function syncTile(el, it) {
       const q = (s) => el.querySelector(s);
@@ -1342,7 +1441,7 @@
       const list = po.show ? intake.photoItems() : [];
       const ready = list.filter((i) => i.tone === 'ok').length;
       if (r.photoCount) r.photoCount.textContent = list.length ? ready + '장 준비' : '';
-      if (r.photoHint) r.photoHint.textContent = S.finalized && po.tier === 'none' ? '얼굴이 잘 보이는 사진 1장 이상 · 진행 화면에서 영상을 만들 때 이 사진을 써요.' : '얼굴이 잘 보이는 사진 1장 이상 · jpg, png, webp · 한 장에 15MB까지';
+      if (r.photoHint) r.photoHint.textContent = S.finalized ? '만들 때 올린 사진이에요. 진행 화면에서 영상을 만들 때 이 사진을 써요.' : '얼굴이 잘 보이는 사진 1장 이상 · jpg, png, webp · 한 장에 15MB까지';
       const add = r.photos.querySelector('[data-act="pick-photo"]');
       if (add) { add.hidden = !po.add; add.disabled = !po.add; }
       if (!r.photoList) return;
@@ -1469,11 +1568,11 @@
       const mode = (f.querySelector('[name="modelMode"]:checked') || {}).value;
       const tier = (f.querySelector('[name="videoTier"]:checked') || {}).value;
       const auto = f.querySelector('[name="autoReview"]');
-      const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined, modelMode: mode, autoReview: auto ? auto.checked : true, videoTier: tier };
+      const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined, modelMode: mode, autoReview: auto ? auto.checked : true, videoTier: tier, sigTitle: f.querySelector('[name="sigTitle"]').value, sigMotion: f.querySelector('[name="sigMotion"]').value, sigWhen: f.querySelector('[name="sigWhen"]').value };
       const errors = intake.validateDraft(input);
-      ['displayName', 'subjectKind', 'age', 'gender', 'job'].forEach((n) => fieldError(n, errors[n]));
+      ['displayName', 'subjectKind', 'age', 'gender', 'job', 'background', 'sigTitle', 'sigMotion'].forEach((n) => fieldError(n, errors[n]));
       const first = Object.keys(errors)[0];
-      if (first) { const ctl = f.querySelector('[name="' + first + '"]'); if (ctl) ctl.focus(); return; }
+      if (first) { if (S.error) { S.error = null; render(); } const ctl = f.querySelector('[name="' + first + '"]'); if (ctl) ctl.focus(); return; }
       intake.createDraft(input).then((res) => {
         if (res && res.characterId) {
           const h = r.steps.files && r.steps.files.querySelector('h2');
@@ -1490,6 +1589,12 @@
       if (act === 'pick' && r.picker) r.picker.click();
       else if (act === 'pick-photo' && r.photoPicker) r.photoPicker.click();
       else if (act === 'tier-edit') { tierEditOpen = !tierEditOpen; render(); if (tierEditOpen && r.tierEdit) { const cur = r.tierEdit.querySelector('input:checked'); if (cur) cur.focus(); } }
+      else if (act === 'sig-save' && r.tierEdit) {
+        const q = (n) => (r.tierEdit.querySelector('[name="' + n + '"]') || {}).value;
+        const pose = { title: q('sigeTitle'), motion: q('sigeMotion'), useWhen: q('sigeWhen') };
+        if (!sigOf(pose)) { S.error = '시그니처 포즈의 이름과 동작을 적어 주세요.'; render(); return; }
+        intake.setSignature(pose).then((ok) => { if (ok) { sigDraft = null; tierEditOpen = false; render(); const b = r.summary && r.summary.querySelector('[data-act="tier-edit"]'); if (b) b.focus(); } });
+      }
       else if (act === 'theme' || act === 'theme-next') setTheme(el.dataset.theme || 'system');
       else if (act === 'fold') { listOpen = el.getAttribute('aria-expanded') !== 'true'; render(); }
       else if (act === 'toggle' && key) { open[key] = el.getAttribute('aria-expanded') !== 'true'; render(); }
@@ -1501,27 +1606,39 @@
         setTimeout(() => { const t = next && next.querySelector('[data-act="remove"]'); if (t && doc.contains(t)) t.focus(); else { const p = photo ? r.photos.querySelector('[data-act="pick-photo"]') : r.drop && r.drop.querySelector('[data-act="pick"]'); if (p) p.focus(); } }, 0);
       }
       else if (act === 'retry' && key) intake.retry(key);
-      else if (act === 'use-speaker' && key) intake.editFile(key, 'subjectSpeaker', el.dataset.name);
+      else if (act === 'use-speaker' && key) intake.pickSpeaker(key, el.dataset.name);
       else if (act === 'start') intake.finalize().then((done) => { if (done) intake.projects(); if (done && r.done) { const h = r.done.querySelector('h3'); if (h) h.focus(); } });
       else if (act === 'ask-delete') { confirmDelete = true; render(); const no = r.delRow.querySelector('[data-act="cancel-delete"]'); if (no) no.focus(); }
       else if (act === 'cancel-delete') { confirmDelete = false; render(); const ask = r.delRow.querySelector('[data-act="ask-delete"]'); if (ask) ask.focus(); }
-      else if (act === 'delete') intake.deleteDraft().then((ok) => { if (ok) { confirmDelete = false; chapterTemplateReset(); render(); intake.drafts(); const n = r.form && r.form.querySelector('[name="displayName"]'); if (n) n.focus(); } });
+      else if (act === 'delete') intake.deleteDraft().then((ok) => { if (ok) { confirmDelete = false; chapterTemplateReset(); render(); const n = r.form && r.form.querySelector('[name="displayName"]'); if (n) n.focus(); } });
       else if (act === 'reload') { const cid = route(); if (cid) intake.load(cid); }
       else if (act === 'restart') { intake.reset(); clearHash(); render(); intake.drafts(); }
+    }
+    // 바꾸기 칸의 시그니처 포즈. 등급과 달리 적고 나서 저장 버튼으로 보낸다.
+    function sigEditHTML(sig, busy) {
+      const s = sig || { title: '', motion: '', useWhen: '' };
+      return '<div class="src-sig" data-sig-edit><p class="src-sig-h"><b>시그니처 포즈</b><span class="src-fhint">모든 영상 등급에 한 편씩 들어가요.</span></p>' +
+        '<div class="src-fld"><label for="src-sige-title">이름</label><input id="src-sige-title" name="sigeTitle" maxlength="30" autocomplete="off" placeholder="예: 찰칵 세리머니" value="' + E(s.title) + '"></div>' +
+        '<div class="src-fld"><label for="src-sige-motion">어떤 동작인가요</label><textarea id="src-sige-motion" name="sigeMotion" rows="2" maxlength="400" placeholder="예: 두 손으로 카메라 모양을 만들어 눈앞에 대고 찰칵 누르는 시늉을 해요.">' + E(s.motion) + '</textarea></div>' +
+        '<div class="src-fld"><label for="src-sige-when">언제 나오면 좋을까요 <span class="opt">선택</span></label><input id="src-sige-when" name="sigeWhen" maxlength="200" autocomplete="off" placeholder="예: 골이나 축하 얘기를 할 때" value="' + E(s.useWhen) + '"></div>' +
+        '<div class="acts"><button type="button" class="btn" data-act="sig-save"' + (busy ? ' disabled' : '') + '>시그니처 포즈 저장</button></div></div>';
     }
     function chapterTemplateReset() {
       chapterTouched = false;
       tierEditOpen = false;
+      sigDraft = null;
       if (r.form) r.form.reset();
       if (r.tierHint) r.tierHint.hidden = true;
+      if (r.sig) r.sig.hidden = true;
     }
     function onChange(e) {
       const t = e.target;
       if (t === r.picker) { intake.addFiles(t.files); t.value = ''; return; }
       if (t === r.photoPicker) { intake.addFiles(t.files, { photoOnly: true }); t.value = ''; return; }
-      if (t.name === 'videoTierEdit') { intake.setTier(t.value).then((ok) => { if (ok) { tierEditOpen = false; render(); const b = r.summary && r.summary.querySelector('[data-act="tier-edit"]'); if (b) b.focus(); } }); return; }
+      // 등급을 고르면 저장하되 칸은 열어 둔다. 시그니처를 같은 칸에서 이어서 적는다(QA v5 E9·A-11).
+      if (t.name === 'videoTierEdit') { const v = t.value; intake.setTier(v).then((ok) => { if (ok) { render(); const c0 = r.tierEdit && r.tierEdit.querySelector('[name="videoTierEdit"][value="' + v + '"]'); if (c0) c0.focus(); } }); return; }
       if (r.form && r.form.contains(t)) {
-        if (t.name === 'videoTier' && r.tierHint) { r.tierHint.hidden = t.value === 'none'; return; }
+        if (t.name === 'videoTier') { if (r.tierHint) r.tierHint.hidden = t.value === 'none'; if (r.sig) r.sig.hidden = t.value === 'none'; return; }
         if (t.name === 'chapterTemplate') chapterTouched = true;
         if (t.name === 'subjectKind') {
           fieldError('subjectKind', '');
@@ -1535,6 +1652,11 @@
     }
     function onInput(e) {
       const t = e.target;
+      if (r.tierEdit && r.tierEdit.contains(t) && /^sige/.test(t.name || '')) {
+        const q = (n) => (r.tierEdit.querySelector('[name="' + n + '"]') || {}).value || '';
+        sigDraft = { title: q('sigeTitle'), motion: q('sigeMotion'), useWhen: q('sigeWhen') };
+        return;
+      }
       if (r.form && r.form.contains(t) && t.name && t.getAttribute('aria-invalid')) fieldError(t.name, '');
     }
     function hasFiles(e) { const dt = e.dataTransfer; return !!(dt && Array.from(dt.types || []).indexOf('Files') >= 0); }
@@ -1589,7 +1711,7 @@
     };
   }
 
-  const api = { MAX_BYTES, EXTENSIONS, PHOTO_EXTENSIONS, PHOTO_MAX_BYTES, VIDEO_TIERS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, ro, shortDate, suggestTextId, checkFile, isPhotoName, isPhotoRecord, tierOf, tierName, tierCardsHTML, videoText, doneView, wantsPoll, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
+  const api = { sigOf, MAX_BYTES, EXTENSIONS, PHOTO_EXTENSIONS, PHOTO_MAX_BYTES, VIDEO_TIERS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, speakerChoices, ro, shortDate, suggestTextId, checkFile, isPhotoName, isPhotoRecord, tierOf, tierName, tierCardsHTML, videoText, doneView, wantsPoll, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global) global.SourceIntake = api;
 })(typeof window !== 'undefined' ? window : null);

@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
-from character_factory_poc.common.errors import FactoryError
+from character_factory_poc.common.errors import FactoryError, ValidationFailed
 from character_factory_poc.common.schema import dump, validate
 from character_factory_poc.common.store import next_rev, read_json, write_manifest, write_once_json
 from character_factory_poc.contracts.model_binding import ModelBindingImport
@@ -17,6 +17,22 @@ from character_factory_poc.pipeline.graph import BIND_EXISTING, SOURCE
 from character_factory_poc.pipeline.origin import read_model_mode, read_origin
 
 TOKEN_ENV = "HF_TOKEN"
+
+# 연결 파일 칸 이름을 화면 말로(QA v5 B-F07). 검사 오류는 칸 이름만 알린다.
+FIELD_KO = {
+    "schemaVersion": "파일 형식",
+    "provider": "모델 종류",
+    "ref": "모델 이름",
+    "revision": "버전(커밋)",
+    "baseModel": "기반 모델",
+    "baseModelRevision": "기반 모델 버전",
+    "servingRoute": "서빙 경로",
+    "provenance": "학습 기록",
+    "provenance.trainedBy": "학습한 사람",
+    "provenance.trainedAt": "학습한 날",
+    "provenance.dataNote": "학습 데이터 설명",
+    "provenance.usageBasis": "사용 근거",
+}
 
 
 class BindingClient(Protocol):
@@ -51,7 +67,10 @@ def _default_client() -> BindingClient | None:
         raise
     token = os.environ.get(TOKEN_ENV)
     if not token:
-        raise FactoryError(f"{TOKEN_ENV}가 없어 HF 토큰 신원을 확인할 수 없다")
+        raise FactoryError(
+            f"서버에 HF 토큰({TOKEN_ENV})이 없어 모델 주인을 확인하지 못했어요. "
+            "운영 담당에게 알려 주세요."
+        )
     return _HubClient(HfApi(token=token), hf_hub_download)
 
 
@@ -71,28 +90,36 @@ def _preflight(binding: ModelBindingImport, client: BindingClient | None) -> dic
         name = identity["name"]
         owners = {name, *(org["name"] for org in identity.get("orgs", []))}
     except Exception:
-        raise FactoryError(f"{TOKEN_ENV} 토큰 신원·소속 확인 실패: 인증 권한을 확인한다") from None
+        raise FactoryError(
+            f"HF 토큰({TOKEN_ENV})으로 계정을 확인하지 못했어요. 토큰 권한을 확인해 주세요."
+        ) from None
     if not name or owner.casefold() not in {o.casefold() for o in owners}:
-        raise FactoryError("HF 저장소 소유 확인 실패: 토큰 계정 또는 소속 조직의 저장소가 아니다")
+        raise FactoryError(
+            "HF 저장소 소유를 확인하지 못했어요. 토큰 계정이나 그 조직의 저장소가 아니에요."
+        )
     try:
         repo, sha, files = client.revision_info(binding.ref, binding.revision)
     except Exception:
         raise FactoryError(
-            "HF 저장소·커밋에 접근할 수 없다. 비공개 저장소의 404는 "
-            "저장소·커밋이 없음 또는 읽기 권한 없음일 수 있다"
+            "HF 저장소·커밋을 열지 못했어요. 비공개 저장소의 404는 "
+            "저장소·커밋이 없음 또는 읽기 권한 없음일 수 있어요."
         ) from None
     if repo.casefold() != binding.ref.casefold() or sha.lower() != binding.revision.lower():
-        raise FactoryError("HF가 돌려준 저장소 소유자·이름 또는 커밋이 연결 기록과 다르다")
+        raise FactoryError("HF가 알려 준 저장소 이름이나 커밋이 연결 파일과 달라요.")
     weights = files & {"adapter_model.safetensors", "adapter_model.bin"}
     if "adapter_config.json" not in files or not weights:
-        raise FactoryError("HF 커밋에 adapter_config.json 또는 어댑터 가중치 파일이 없다")
+        raise FactoryError(
+            "그 HF 커밋에 어댑터 설정(adapter_config.json)이나 가중치 파일이 없어요."
+        )
     try:
         config = client.adapter_config(binding.ref, binding.revision)
         base = config.get("base_model_name_or_path")
     except Exception:
-        raise FactoryError("고정한 HF 커밋의 adapter_config.json을 읽을 수 없다") from None
+        raise FactoryError(
+            "그 HF 커밋의 어댑터 설정(adapter_config.json)을 읽지 못했어요."
+        ) from None
     if base != binding.baseModel:
-        raise FactoryError("adapter_config.json의 기반 모델이 baseModel과 다르다")
+        raise FactoryError("어댑터가 쓰는 기반 모델이 연결 파일의 기반 모델과 달라요.")
     return {
         "status": "PASSED",
         "tokenEnv": TOKEN_ENV,
@@ -107,7 +134,32 @@ def _preflight(binding: ModelBindingImport, client: BindingClient | None) -> dic
 def _no_token(obj: dict) -> None:
     token = os.environ.get(TOKEN_ENV)
     if token and token in json.dumps(obj, ensure_ascii=False):
-        raise FactoryError("연결 기록에는 토큰 값을 넣을 수 없다")
+        raise FactoryError("연결 파일에 토큰 값이 들어 있어요. 토큰은 빼고 다시 올려 주세요.")
+
+
+def _parse(raw: Any) -> ModelBindingImport:
+    if not isinstance(raw, dict):
+        raise FactoryError("연결 파일은 칸 이름과 값이 있는 JSON이어야 해요.")
+    try:
+        return validate("model-binding-import-v1", raw)  # type: ignore[return-value]
+    except ValidationFailed as exc:
+        fields: list[str] = []
+        rules: list[str] = []
+        for problem in exc.problems:
+            loc, _, msg = problem.partition(": ")
+            if loc in FIELD_KO:
+                fields.append(FIELD_KO[loc])
+            elif loc == "<root>" and msg.startswith("Value error, "):
+                rules.append(msg.removeprefix("Value error, "))
+            else:
+                fields.append(FIELD_KO.get(loc.split(".")[0], "알 수 없는 칸"))
+        parts = []
+        if fields:
+            parts.append(
+                "빠졌거나 맞지 않는 칸이 있어요: " + ", ".join(dict.fromkeys(fields)) + "."
+            )
+        parts.extend(rules)
+        raise FactoryError(" ".join(parts) or "연결 파일을 읽지 못했어요.") from None
 
 
 def import_binding(
@@ -120,8 +172,19 @@ def import_binding(
         raw = read_json(binding_path)
     except (OSError, ValueError):
         raise FactoryError("모델 연결 JSON 파일을 읽을 수 없다") from None
-    _no_token(raw)
-    binding: ModelBindingImport = validate("model-binding-import-v1", raw)  # type: ignore[assignment]
+    return import_binding_data(ctx, cid, raw, client=client)
+
+
+def import_binding_data(
+    ctx: Context, cid: str, raw: Any, *, client: BindingClient | None = None
+) -> Path:
+    """연결 파일 내용(dict)을 확인하고 기록한다. 웹 화면과 CLI가 같은 길을 쓴다."""
+    char_dir = ctx.character_dir(cid)
+    if read_origin(char_dir) != SOURCE or read_model_mode(char_dir) != BIND_EXISTING:
+        raise FactoryError("이미 학습된 모델은 모티브의 BIND_EXISTING 모드에서만 연결할 수 있다")
+    if isinstance(raw, dict):
+        _no_token(raw)
+    binding = _parse(raw)
     check = _preflight(binding, client)
     _no_token(check)
     root = char_dir / "model-prep"

@@ -388,6 +388,7 @@
     (Array.isArray(list) ? list : []).forEach((c) => {
       if (!c || !c.url || !c.clipKey || seen.has(c.clipKey)) return;
       if (STRUCTURAL.test(clipBareKey(c.clipKey))) return; // 대기·말하기는 감정이 아니다
+      if (clipBaseKey(c.clipKey) === 'signature') return; // 시그니처 포즈는 아무 말에나 대신 틀지 않는다(D-0167)
       seen.add(c.clipKey);
       pool.push(c);
     });
@@ -417,6 +418,14 @@
       .map((c) => ({ clipKey: text(c.clipKey), url: text(c.url), mood: c.mood ? text(c.mood) : null, title: text(c.title) }));
     const audio = typeof data.hasAudio === 'boolean' ? data.hasAudio : (typeof data.audio === 'boolean' ? data.audio : null);
     return { chapter: text(data.chapter) || 'ch1', idle: { good, bad }, emotion, audio };
+  }
+
+  // 영상이 없는 캐릭터의 조용한 안내. 지금 글 대화는 그대로 둔다. 만들 때 사진을 올리지 않은 캐릭터는
+  // 영상을 만들 수 없으니(서버 meta.canMakeVideo=false) 막다른 '영상 만들기' 링크를 걸지 않는다(QA v5 D-04).
+  function videoNote(meta, clips, href) {
+    if (videoClips(clips)) return '';
+    if (meta && meta.canMakeVideo === false) return '<p class="ch-vnote">영상은 만들 때 사진을 올린 캐릭터만 만들 수 있어요</p>';
+    return '<p class="ch-vnote">영상이 아직 없어요 · <a href="' + escapeHTML(href) + '">영상 만들기</a></p>';
   }
 
   // 영상 무대. 서비스 앱 CallVideoStage처럼 <video> 두 겹을 겹쳐 두고, 뒤 겹에 다음 영상을 물려 첫 프레임이 나온 뒤에만 앞으로 올린다.
@@ -730,7 +739,8 @@
         '<button type="button" class="fd-head-theme" data-act="theme" data-theme="' + next[0] + '" aria-label="화면 테마: 지금 ' + cur[2] + '. 누르면 ' + next[2] + '" title="화면 테마: ' + cur[2] + '">' + icon(cur[1]) + '</button>';
     }
 
-    // 통화 머리: 캐릭터 이름, 모티브 안내, 지금 상태, 새 대화·고칠 점 적기, 접힌 '설정 보기'(모델·온도·판).
+    // 통화 머리: 캐릭터 이름, 모티브 안내, 지금 상태, 새 대화, 접힌 '설정 보기'(모델·온도·판).
+    // '고칠 점 적기'는 대화 가능한 캐릭터에 적을 곳이 없어 뺐다(QA v5 D-03).
     // 캐릭터를 고르지 않았거나 없는 캐릭터면 머리를 숨기고 상태 카드만 보인다.
     function renderCall() {
       if (!R.call) return;
@@ -755,14 +765,12 @@
       }
       const name = nameOf();
       const hasTalk = !!(s && (s.messages.length || s.pending || s.play));
-      // 영상이 없는 캐릭터는 지금 글 대화 그대로 두고, 영상 만들기로 가는 조용한 안내만 붙인다.
-      const noVideo = ready && s.clips && !videoClips(s.clips);
       R.call.innerHTML = '<div class="ch-av' + (speaking ? ' is-speaking' : '') + '" aria-hidden="true">' + E(initial(name)) + '</div>' +
         '<div class="ch-who"><div class="ch-name"><h1 id="ch-title">' + E(name) + '</h1>' + pill + '</div>' +
         (isMotif(m.origin) ? '<p class="ch-note">' + E(MOTIF_NOTE) + '</p>' : '') +
-        (noVideo ? '<p class="ch-vnote">영상이 아직 없어요 · <a href="' + E(factoryHref(chat.characterId)) + '">영상 만들기</a></p>' : '') +
+        (ready && s.clips ? videoNote(m, s.clips, factoryHref(chat.characterId)) : '') +
         (info.length ? '<details class="ch-set" data-open-key="set"' + (ui.open.has('set') ? ' open' : '') + '><summary data-key="sum:set">설정 보기</summary><p class="ch-info" aria-label="대화 설정">' + info.join('<span class="dot" aria-hidden="true">·</span>') + '</p></details>' : '') + '</div>' +
-        (ready ? '<div class="ch-acts"><a class="btn" href="' + E(factoryHref(chat.characterId)) + '" title="진행 화면에서 프롬프트에 고칠 점을 적어요">고칠 점 적기</a><button type="button" class="btn" data-act="reset" data-key="reset"' + (hasTalk ? '' : ' disabled') + '>' + icon('refresh') + '새 대화</button></div>' : '');
+        (ready ? '<div class="ch-acts"><button type="button" class="btn" data-act="reset" data-key="reset"' + (hasTalk ? '' : ' disabled') + '>' + icon('refresh') + '새 대화</button></div>' : '');
     }
 
     function playbarHTML(s) {
@@ -1096,7 +1104,7 @@
     return { get chat() { return chat; }, open };
   }
 
-  const api = { createChat, createVideoCall, pickFallbackClip, clipBaseKey, videoClips, mount, routeId, seconds, revLabel, viaLabel, rejectedCount, isMotif, displayName, createdLabel, chatList, isGeneric, groupScenarios, MOTIF_NOTE };
+  const api = { createChat, createVideoCall, pickFallbackClip, clipBaseKey, videoClips, videoNote, mount, routeId, seconds, revLabel, viaLabel, rejectedCount, isMotif, displayName, createdLabel, chatList, isGeneric, groupScenarios, MOTIF_NOTE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global) global.CharacterChat = api;
 })(typeof window !== 'undefined' ? window : globalThis);
