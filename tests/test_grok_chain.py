@@ -16,8 +16,9 @@ from character_factory_poc.providers.factory import make_video_model
 from character_factory_poc.providers.fake_video import FAKE_MP4
 from character_factory_poc.providers.grok_chain import GrokVideoChain
 from character_factory_poc.providers.grok_oauth import GrokOAuthVideoModel
+from character_factory_poc.providers.xai_login import Credentials, XaiLogin
 from character_factory_poc.providers.xai_video import XaiVideoModel
-from tests.test_grok_oauth import TOKEN, _account, _auth, _req
+from tests.test_grok_oauth import TOKEN, _req
 
 KEY = "api-key-for-tests-abcdef"
 
@@ -57,17 +58,27 @@ class Fake:
         return httpx.Response(200, content=FAKE_MP4)
 
 
+def _store(tmp_path: Path, login=True) -> Path:
+    """공장 로그인 파일(D-0184). login=False면 없는 파일이다."""
+    import time
+
+    store = tmp_path / "xai-oauth.json"
+    if login:
+        XaiLogin(store=store).save(
+            Credentials(access=TOKEN, refresh="r", expires_at=time.time() + 3600, email="t@x")
+        )
+    return store
+
+
 def _chain(tmp_path: Path, fake: Fake, *, login=True, key=True, monkeypatch=None):
-    auth = (
-        _auth(tmp_path / "auth.json", [_account("a1")], "a1") if login else tmp_path / "none.json"
-    )
+    auth = _store(tmp_path, login)
     if monkeypatch is not None:
         if key:
             monkeypatch.setenv("XAI_API_KEY", KEY)
         else:
             monkeypatch.delenv("XAI_API_KEY", raising=False)
     client = httpx.Client(transport=httpx.MockTransport(fake))
-    oauth = GrokOAuthVideoModel(token_file=auth, client=client, sleep=lambda s: None)
+    oauth = GrokOAuthVideoModel(login_file=auth, client=client, sleep=lambda s: None)
     api = XaiVideoModel(client=client, sleep=lambda s: None)
     return GrokVideoChain([oauth, api])
 
@@ -116,7 +127,7 @@ def test_nothing_available_stops_before_network(tmp_path, monkeypatch):
     fake = Fake()
     chain = _chain(tmp_path, fake, login=False, key=False, monkeypatch=monkeypatch)
     with pytest.raises(
-        VideoGenerationError, match="opencodex에서 xAI 계정에 로그인하거나 XAI_API_KEY"
+        VideoGenerationError, match="cfp grok login으로 공장에서 로그인하거나 XAI_API_KEY"
     ):
         chain.submit(_req(tmp_path))
     assert fake.calls == []
@@ -133,11 +144,11 @@ def test_resumed_job_is_looked_up_on_each_path(tmp_path, monkeypatch):
 
 
 def test_factory_builds_login_first_chain(tmp_path, monkeypatch):
-    auth = _auth(tmp_path / "auth.json", [_account("a1")], "a1")
+    auth = _store(tmp_path)
     monkeypatch.setenv("XAI_API_KEY", KEY)
     model = make_video_model(
         ProviderConfig(
-            adapter="grok", model="grok-imagine-video-1.5", extra={"token_file": str(auth)}
+            adapter="grok", model="grok-imagine-video-1.5", extra={"login_file": str(auth)}
         )
     )
     assert isinstance(model, GrokVideoChain)
@@ -160,13 +171,14 @@ def test_example_config_defaults_to_login_first():
 def test_testpath_client_prefers_login(tmp_path, monkeypatch):
     from character_factory_poc.testpath.videos import VideoApiError, XaiFramesClient
 
-    auth = _auth(tmp_path / "auth.json", [_account("a1")], "a1")
+    monkeypatch.setenv("CFP_XAI_OAUTH_FILE", str(_store(tmp_path)))
     monkeypatch.setenv("XAI_API_KEY", KEY)
-    client = XaiFramesClient(token_file=str(auth))
+    client = XaiFramesClient()
     assert [name for name, _ in client._auth_options()] == ["grok_oauth", "xai_video"]
     assert client._headers()["Authorization"] == f"Bearer {TOKEN}"
     monkeypatch.delenv("XAI_API_KEY")
-    missing = XaiFramesClient(token_file=str(tmp_path / "none.json"))
+    monkeypatch.setenv("CFP_XAI_OAUTH_FILE", str(tmp_path / "none.json"))
+    missing = XaiFramesClient()
     with pytest.raises(VideoApiError, match="인증이 없다"):
         missing._auth_options()
 
@@ -174,13 +186,13 @@ def test_testpath_client_prefers_login(tmp_path, monkeypatch):
 def test_route_summary_names_the_path(tmp_path, monkeypatch):
     from character_factory_poc.providers.grok_chain import route_summary
 
-    auth = _auth(tmp_path / "auth.json", [_account("a1")], "a1")
+    auth = _store(tmp_path)
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     login = ProviderConfig(
-        adapter="grok", model="grok-imagine-video-1.5-lite", extra={"token_file": str(auth)}
+        adapter="grok", model="grok-imagine-video-1.5-lite", extra={"login_file": str(auth)}
     )
-    assert route_summary(login) == "영상: Grok 로그인(opencodex) · grok-imagine-video-1.5-lite"
+    assert route_summary(login) == "영상: Grok 로그인(공장) · grok-imagine-video-1.5-lite"
     monkeypatch.setenv("XAI_API_KEY", KEY)
-    none = ProviderConfig(adapter="grok", extra={"token_file": str(tmp_path / "none.json")})
+    none = ProviderConfig(adapter="grok", extra={"login_file": str(tmp_path / "none.json")})
     assert "xAI API 키" in route_summary(none) and "넘어감" in route_summary(none)
     assert route_summary(ProviderConfig()) == "영상: 시험용 가짜 영상(비용 없음)"

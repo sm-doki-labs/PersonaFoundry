@@ -38,7 +38,7 @@ class XaiFramesClient:
     poll_s: float = 5.0
     timeout_s: float = 900.0
 
-    #: 사용자 2026-11-12: 시험 경로도 Grok 로그인(opencodex) 먼저, 안 되면 API 키.
+    #: 사용자 2026-11-12: 시험 경로도 공장 Grok 로그인 먼저, 안 되면 API 키.
     auth: str = "auto"  # auto | oauth | key
     token_file: str = ""
 
@@ -46,11 +46,17 @@ class XaiFramesClient:
         """쓸 수 있는 인증을 우선순위대로. 토큰·키 값은 기록하지 않는다."""
         from character_factory_poc.common.errors import VideoGenerationError
         from character_factory_poc.providers.grok_oauth import TokenSource
+        from character_factory_poc.providers.xai_login import XaiLogin
 
         options, reasons = [], []
         if self.auth in {"auto", "oauth"}:
             try:
-                token = TokenSource(token_file=self.token_file or None).token()
+                # 기본은 공장 소유 로그인(D-0184). token_file을 직접 주면 그 파일(옛 경로)을 읽는다.
+                token = (
+                    TokenSource(token_file=self.token_file).token()
+                    if self.token_file
+                    else XaiLogin().access_token()
+                )
                 options.append(("grok_oauth", token))
             except VideoGenerationError as exc:
                 reasons.append(f"grok_oauth: {exc}")

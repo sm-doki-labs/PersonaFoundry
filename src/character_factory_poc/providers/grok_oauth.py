@@ -16,7 +16,9 @@ Bearer로 보내 grok-imagine-video-1.5-lite 480p 2초와 grok-imagine-video-1.5
 번호로 auth.json을 고친다) 이 어댑터는 auth.json을 쓰지 않는다. 기본 경로는 이 어댑터를 먼저 쓰고
 API 키로 넘어가는 grok(grok_chain)이다.
 
-토큰은 opencodex auth.json의 xai.accounts 가운데 xai.activeAccountId와 id가 같은 계정의
+기본 토큰은 공장 소유 로그인(providers/xai_login.py, `cfp grok login`)에서 받는다(D-0184). 아래
+TokenSource는 설정에 token_file·token_env를 직접 적었을 때만 쓰는 옛 경로다. 그 경우 토큰은
+opencodex auth.json의 xai.accounts 가운데 xai.activeAccountId와 id가 같은 계정의
 credential.access에서 읽고, credential.expires는 epoch 밀리초로 가정해 검증한다(2026-10-27 로컬
 파일에서 13자리 값 확인). 토큰 값은 repr·예외 메시지·원장에 넣지 않는다. 만료됐으면 새로 고침 없이
 opencodex에서 다시 로그인하라는 오류를 낸다. 요청 본문·상태 처리·비용 추정은 xai_video와 같은 코드를
@@ -146,6 +148,21 @@ class TokenSource:
         return token
 
 
+class FactoryTokenSource:
+    """공장 소유 로그인(xai_login)에서 토큰을 받는다. 기본 경로다(D-0184)."""
+
+    def __init__(self, login=None):
+        from character_factory_poc.providers.xai_login import XaiLogin
+
+        self.login = login or XaiLogin()
+
+    def __repr__(self) -> str:
+        return f"FactoryTokenSource({self.login!r})"
+
+    def token(self) -> str:
+        return self.login.access_token()
+
+
 class GrokOAuthVideoModel(XaiVideoModel):
     """xAI 영상 API를 OAuth 로그인 토큰으로 부르는 VideoModel(2026-11-12 실제 호출 확인).
 
@@ -171,10 +188,22 @@ class GrokOAuthVideoModel(XaiVideoModel):
         clock: Callable[[], float] = time.monotonic,
         token_source: TokenSource | None = None,
         now_ms: Callable[[], int] | None = None,
+        login_file: str | Path | None = None,
+        client_id: str = "",
     ):
-        self.token_source = token_source or TokenSource(
-            token_file=token_file, token_env=token_env, now_ms=now_ms
-        )
+        if token_source is None:
+            if token_file or token_env:
+                # 설정에 외부 토큰 파일·환경변수를 직접 적었을 때만 쓴다(옛 opencodex 경로).
+                token_source = TokenSource(
+                    token_file=token_file, token_env=token_env, now_ms=now_ms
+                )
+            else:
+                from character_factory_poc.providers.xai_login import XaiLogin
+
+                token_source = FactoryTokenSource(
+                    XaiLogin(store=Path(login_file) if login_file else None, client_id=client_id)
+                )
+        self.token_source = token_source
         super().__init__(
             model=model,
             api_key_env="",

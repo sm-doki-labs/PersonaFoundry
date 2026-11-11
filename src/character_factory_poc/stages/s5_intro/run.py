@@ -48,8 +48,8 @@ DEFAULTS: dict[str, Any] = {
 }
 NOTES = {
     "xai_video": "xAI 공식 API, 출력 1초당 과금",
-    "grok": "Grok 로그인(opencodex) 먼저, 안 되면 xAI API 키. 출력 1초당 과금",
-    "grok_oauth": "Grok 로그인(opencodex) 토큰, 출력 1초당 과금(2026-11-12 실제 호출 확인, 비공식 경로)",
+    "grok": "공장 Grok 로그인 먼저, 안 되면 xAI API 키. 출력 1초당 과금",
+    "grok_oauth": "공장 Grok 로그인 토큰, 출력 1초당 과금(비공식 경로)",
     "grok_web": "Grok 웹(구독 사용량), 약관 위험 감수(D-0029)",
     "fake": "가짜 영상, 비용 없음",
 }

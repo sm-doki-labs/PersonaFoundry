@@ -2,8 +2,8 @@
 
 같은 xAI 영상 API(POST /videos/generations, GET /videos/{id})를 두 가지 인증으로 부른다.
 
-1. grok_oauth: opencodex에 로그인한 xAI 계정(~/.opencodex/auth.json의 활성 계정) 토큰.
-   2026-11-12 실제 호출로 확인했다(grok-imagine-video-1.5-lite 480p 2초, 1.5 1080p 2초).
+1. grok_oauth: 공장이 직접 로그인해 보관·갱신하는 xAI 계정 토큰(providers/xai_login.py, D-0184).
+   2026-11-12 실제 호출로 로그인 토큰이 영상 API에 받아들여짐을 확인했다.
    공식 문서가 보장하는 방식은 아니라 막힐 수 있다.
 2. xai_video: XAI_API_KEY(공식 API 키).
 
@@ -12,7 +12,7 @@
 (안전 차단, 잘못된 요청, 서버 오류)는 다른 경로로 다시 보내지 않고 그대로 올린다. 같은 요청을
 두 번 과금하지 않기 위해서다.
 
-토큰 갱신은 opencodex가 맡는다(잠금·세대 번호로 auth.json을 고친다). 공장은 auth.json을 쓰지 않는다.
+토큰 갱신도 공장이 한다(만료 5분 전, 파일 잠금 안에서). opencodex에는 기대지 않는다.
 토큰 값은 출력·기록하지 않는다.
 """
 
@@ -92,7 +92,7 @@ class GrokVideoChain:
             self.skipped = reasons
             return job
         raise VideoGenerationError(
-            "Grok 영상을 만들 경로가 없다. opencodex에서 xAI 계정에 로그인하거나 "
+            "Grok 영상을 만들 경로가 없다. cfp grok login으로 공장에서 로그인하거나 "
             "XAI_API_KEY를 설정한다. " + " / ".join(reasons)
         )
 
@@ -115,7 +115,7 @@ class GrokVideoChain:
             self._used = candidate
             return result
         raise last or VideoGenerationError(
-            "이전 영상 작업을 조회할 경로가 없다. opencodex 로그인이나 XAI_API_KEY를 확인한다"
+            "이전 영상 작업을 조회할 경로가 없다. cfp grok login이나 XAI_API_KEY를 확인한다"
         )
 
 
@@ -129,13 +129,13 @@ def route_summary(cfg) -> str:
 
     model = make_video_model(cfg)
     members = model.members if isinstance(model, GrokVideoChain) else [model]
-    labels = {"grok_oauth": "Grok 로그인(opencodex)", "xai_video": "xAI API 키"}
+    labels = {"grok_oauth": "Grok 로그인(공장)", "xai_video": "xAI API 키"}
     for i, member in enumerate(members):
         why = unavailable_reason(member)
         if why is None:
             note = "" if i == 0 else " · 앞 경로를 쓸 수 없어 넘어감"
             return f"영상: {labels.get(member.name, member.name)} · {model.model}{note}"
-    return "영상: 쓸 수 있는 경로 없음(opencodex 로그인 또는 XAI_API_KEY 필요)"
+    return "영상: 쓸 수 있는 경로 없음(cfp grok login 또는 XAI_API_KEY 필요)"
 
 
 __all__ = ["GrokVideoChain", "route_summary", "unavailable_reason"]

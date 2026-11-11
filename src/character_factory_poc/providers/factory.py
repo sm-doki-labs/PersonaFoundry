@@ -115,6 +115,8 @@ def make_video_model(cfg: ProviderConfig) -> VideoModel:
             model=cfg.model or "grok-imagine-video-1.5-lite",
             token_file=x.get("token_file") or None,
             token_env=str(x.get("token_env") or ""),
+            login_file=x.get("login_file") or None,
+            client_id=str(x.get("oauth_client_id") or ""),
             base_url=cfg.base_url or "https://api.x.ai/v1",
             poll_interval_s=float(x.get("poll_interval_s", 5)),
             timeout_s=float(x.get("timeout_s", 600)),
