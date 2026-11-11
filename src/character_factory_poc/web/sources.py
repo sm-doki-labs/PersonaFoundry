@@ -755,12 +755,17 @@ def install_source_routes(app, conf, jobs):
     def demo_job(cid, name):
         """시연 모드 실행: 패키지 승인(G9)까지 자동 승인으로 돌고 끝나면 발행·알림한다."""
         from character_factory_poc.common.notify import notify
+        from character_factory_poc.providers.grok_chain import route_summary
 
         job = jobs.submit(cid, until="G9", trigger="demo")
+        try:
+            route = route_summary(load_config(conf.root, conf.config_path).provider("video"))
+        except (ValueError, OSError) as exc:
+            route = f"영상 경로 확인 실패: {exc}"
         notify(
             "started",
             name,
-            ["모든 검토를 자동 승인하고, 끝나면 테스터 전용으로 발행해요."],
+            ["모든 검토를 자동 승인하고, 끝나면 테스터 전용으로 발행해요.", route],
             character_id=cid,
         )
         return job

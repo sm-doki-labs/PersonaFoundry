@@ -48,7 +48,8 @@ DEFAULTS: dict[str, Any] = {
 }
 NOTES = {
     "xai_video": "xAI 공식 API, 출력 1초당 과금",
-    "grok_oauth": "xAI OAuth 로그인 토큰, 출력 1초당 과금(미확인 경로)",
+    "grok": "공장 Grok 로그인 먼저, 안 되면 xAI API 키. 출력 1초당 과금",
+    "grok_oauth": "공장 Grok 로그인 토큰, 출력 1초당 과금(비공식 경로)",
     "grok_web": "Grok 웹(구독 사용량), 약관 위험 감수(D-0029)",
     "fake": "가짜 영상, 비용 없음",
 }
@@ -72,7 +73,7 @@ def s5_config(ctx: Context) -> dict[str, Any]:
 
 def estimate(ctx: Context, cfg: dict[str, Any]) -> float:
     pcfg = ctx.config.provider("video")
-    if pcfg.adapter not in {"xai_video", "grok_oauth"}:
+    if pcfg.adapter not in {"xai_video", "grok_oauth", "grok"}:
         return 0.0
     each = estimate_cost(
         pcfg.model or "grok-imagine-video-1.5-lite",

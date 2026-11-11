@@ -914,6 +914,56 @@ def cmd_export_doki_app(args) -> int:
     return 0 if result.verification.status != "FAILED" else 1
 
 
+def _grok_login(args):
+    from character_factory_poc.providers.xai_login import XaiLogin
+
+    extra = _ctx(args).config.provider("video").extra
+    return XaiLogin(
+        store=extra.get("login_file") or None, client_id=str(extra.get("oauth_client_id") or "")
+    )
+
+
+def cmd_grok(args) -> int:
+    """공장 소유 Grok 로그인(D-0184). 영상 1순위 경로의 토큰을 받고 보관·갱신한다."""
+    from character_factory_poc.common.errors import VideoGenerationError
+
+    login = _grok_login(args)
+    try:
+        if args.sub == "login":
+            if args.device:
+                cred = login.login_device(
+                    on_prompt=lambda url, code: print(
+                        f"다른 기기 브라우저에서 {url} 을 열고 코드 {code} 를 입력하세요."
+                    )
+                )
+            else:
+                cred = login.login_browser(
+                    open_browser=not args.no_browser,
+                    on_url=lambda url: print(
+                        "브라우저에서 xAI 로그인을 마쳐 주세요. 창이 안 열리면 이 주소를 여세요:\n"
+                        + url
+                    ),
+                )
+            print(f"로그인됐어요: {cred.email or '이메일 없음'} · {login.store}")
+        elif args.sub == "status":
+            st = login.status()
+            if not st["loggedIn"]:
+                print(f"로그인 안 됨 · {st['store']} · cfp grok login")
+                return 1
+            who = st["email"] or "이메일 없음"
+            print(f"로그인됨: {who} · 토큰 {st['expiresInMin']}분 남음(쓸 때 자동 갱신)")
+            print(f"  저장 위치: {st['store']}")
+            if args.refresh:
+                login.access_token(min_valid_s=10**9)
+                print(f"갱신했어요: 토큰 {login.status()['expiresInMin']}분 남음")
+        elif args.sub == "logout":
+            print("로그아웃했어요." if login.logout() else "로그인 기록이 없어요.")
+    except VideoGenerationError as exc:
+        print(f"실패: {exc}")
+        return 1
+    return 0
+
+
 def cmd_preview_publish(args) -> int:
     """G9 승인 패키지를 테스터 전용으로 앱에 올린다([publish.preview] 설정)."""
     from character_factory_poc.common.notify import notify
@@ -1534,6 +1584,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="일회용 PostgreSQL에 실제 적재해 확인(CFP_PG_ADMIN_URL)",
     )
     s.set_defaults(fn=cmd_export_doki_app)
+
+    grok = sub.add_parser("grok", help="공장 Grok 로그인(영상 1순위 경로)").add_subparsers(
+        dest="sub", required=True
+    )
+    s = grok.add_parser("login", help="xAI 공식 로그인 화면에서 로그인한다")
+    s.add_argument("--device", action="store_true", help="화면 없는 서버: 기기 코드로 로그인")
+    s.add_argument("--no-browser", action="store_true", help="브라우저를 열지 않고 주소만 보인다")
+    s.set_defaults(fn=cmd_grok)
+    s = grok.add_parser("status", help="로그인 상태(토큰 값은 보이지 않는다)")
+    s.add_argument("--refresh", action="store_true", help="지금 토큰을 갱신해 본다")
+    s.set_defaults(fn=cmd_grok)
+    s = grok.add_parser("logout", help="공장의 Grok 로그인을 지운다")
+    s.set_defaults(fn=cmd_grok)
 
     preview = sub.add_parser("preview", help="테스터 전용 미리보기 발행").add_subparsers(
         dest="sub", required=True
