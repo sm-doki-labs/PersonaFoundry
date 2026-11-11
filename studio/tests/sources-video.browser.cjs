@@ -40,6 +40,12 @@ const tap = (p, sel) => p.$eval(sel, (el) => el.click());
 // 진행 화면은 자주 다시 그려서 요소 손잡이가 떨어진다. 그 순간의 자리로 화면을 잘라 찍는다.
 // has를 주면 그 글이 들어간 요소를 고른다(다시 그려도 같은 요소를 찾는다).
 async function snap(p, sel, name, has) {
+  // 진행 화면은 다시 그리는 사이 요소가 잠깐 없어질 수 있다. 몇 번 다시 잡는다.
+  for (let i = 0; ; i += 1) {
+    try { return await snap1(p, sel, name, has); } catch (e) { if (i >= 5) throw e; await sleep(400); }
+  }
+}
+async function snap1(p, sel, name, has) {
   const find = (els, h) => els.find((e) => e.offsetParent !== null && e.getBoundingClientRect().height > 4 && (!h || e.innerText.includes(h)));
   await p.$$eval(sel, (els, h, f) => { const el = new Function('return ' + f)()(els, h); el.scrollIntoView({ block: 'center', behavior: 'instant' }); }, has || '', find.toString());
   await sleep(300);

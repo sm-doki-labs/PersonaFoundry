@@ -206,6 +206,29 @@ def faces(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict[s
     }
 
 
+_EXAMPLES = "상대가 하는 말 예:"
+
+
+def plain_use_when(text: Any) -> str:
+    """동작의 '이럴 때' 규칙(모델용 원문)을 검토자가 읽는 한 줄로 줄인다(QA v5 C-07).
+
+    원문은 '<이름> — 상황. … 상대가 하는 말 예: 「…」 · 「…」. 틀지 않는다: … → key' 꼴이다.
+    상대가 하는 말 예가 있으면 그 예만, 없으면 영어가 섞이지 않은 첫 문장만 쓴다. 원문은
+    대화 중 영상 고르기에 그대로 쓰이고 화면에만 이 글을 보인다.
+    """
+    s = " ".join(str(text or "").split()).split("틀지 않는다", 1)[0]
+    head, sep, rest = s.partition(" — ")
+    situation, _, examples = (rest if sep else head).partition(_EXAMPLES)
+    quotes = re.findall(r"「[^」]+」", examples)
+    if quotes:
+        return "이런 말에 나와요: " + " · ".join(quotes)
+    for sentence in re.split(r"(?<=[.!?])\s+", situation):
+        line = sentence.strip().rstrip(".")
+        if line and not re.search(r"[A-Za-z]", line):
+            return "이럴 때: " + line
+    return ""
+
+
 def _plain_rationale(candidate: dict[str, Any], fallback: str) -> str:
     """외모군 근거를 검토자가 읽는 말로 바꾼다. 원래 근거(백분위·IQR)는 보고서에 그대로 남는다."""
     lists = candidate.get("listCount")
@@ -624,6 +647,7 @@ def actions(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict
                     "title": spec.get("title", ""),
                     "description": spec.get("description", ""),
                     "useWhen": spec.get("useWhen", ""),
+                    "whenText": plain_use_when(spec.get("useWhen", "")),
                     "duration": spec.get("duration"),
                     "prompt": spec.get("prompt", ""),
                     "reviewNote": spec.get("reviewNote", ""),
@@ -857,7 +881,10 @@ def data_dataset(char_dir: Path, character_id: str, stage_dir: str, rev: str) ->
     notes = [
         f"차단 실패 {dataset.get('blockingFailures', 0)}건, 경고 {dataset.get('warnings', 0)}건"
     ]
-    notes += [str(n) for n in report.get("warnings", [])][:5] if isinstance(report, dict) else []
+    if isinstance(report, dict):
+        from character_factory_poc.web.model_path import plain_note
+
+        notes += [plain_note(str(n)) for n in report.get("warnings", [])][:5]
     plan = read_json(rev_dir / "plan.json") or {}
     labels = {
         str(c.get("clusterId")): str(c.get("label") or c.get("clusterId"))

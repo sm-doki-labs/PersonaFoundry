@@ -60,10 +60,11 @@ def test_old_standard_is_a_preset_only(tmp_path):
 
 @pytest.mark.parametrize(
     ("tier", "total", "seconds"),
-    [("light", 10, 110), ("standard", 20, 210), ("pro", 28, 290), ("max", 37, 380)],
+    [("light", 5, 55), ("standard", 20, 210), ("pro", 28, 290), ("max", 37, 380)],
 )
 def test_motif_tiers_are_one_scene(tmp_path, tier, total, seconds):
-    """D-0164: 모티브는 배경 하나·같은 옷. 등급은 몸짓 수로만 갈리고 단계당 최소 10편을 지킨다."""
+    """D-0164·D-0167: 모티브는 배경 하나·같은 옷. 등급은 몸짓 수로만 갈린다. 라이트는 5+1편이고
+    무표정 대기가 없어 무표정 첫 화면을 만들지 않는다."""
     from character_factory_poc.stages.s6_actions.catalog import MOTIF_VIDEO_TIERS
     from character_factory_poc.stages.s6_actions.run import _resolve_config
 
@@ -78,8 +79,9 @@ def test_motif_tiers_are_one_scene(tmp_path, tier, total, seconds):
     tier_keys = cfg["actions"][:-1]
     assert set(MOTIF_VIDEO_TIERS["light"].actions) <= set(tier_keys) <= set(APP_KEYS)
     assert len(set(tier_keys)) == total
-    image, video = plan_calls(ctx, cfg)
-    assert image.calls == 1 and video.calls == total + 1
+    *image, video = plan_calls(ctx, cfg)
+    assert [p.calls for p in image] == ([] if tier == "light" else [1])
+    assert video.calls == total + 1
     assert (
         sum(cfg["durations"]["idle" if k.startswith("idle") else "emotion"] for k in cfg["actions"])
         == seconds + 10
@@ -133,3 +135,17 @@ def test_export_reports_short_stages_without_blocking(tmp_path):
     warnings = clip_count_warnings(read_json(out / "doki-app/api-svc/seed.json"))
     assert len(warnings) == 3 and set(warnings) <= set(result.unmapped)
     assert ctx.state(cid).stage("sx").status == "APPROVED"
+
+
+def test_original_without_tier_shows_no_video_chip(flow):  # noqa: F811
+    """QA v5 E7: 등급 없이(l2) 만든 오리지널 영상에 "영상 있음 · 영상 없이"를 띄우지 않는다."""
+    from character_factory_poc.web import reads
+
+    ctx, cid, _ = flow
+    run_s6(ctx, cid)
+    approve_gate(ctx, cid, "G5b", {"decision": "APPROVE"})
+    folder = ctx.character_dir(cid)
+    state, _ = reads.read_state(folder)
+    fields = reads.video_fields(folder, state)
+    assert fields["videoTier"] == "none" and fields["videoStatus"] == "none"
+    assert fields["videoError"] == ""

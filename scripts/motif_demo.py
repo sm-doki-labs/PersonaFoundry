@@ -76,7 +76,13 @@ def main() -> int:
     root = Path(args.root).resolve()
     root.mkdir(parents=True, exist_ok=True)
     # 대화해 보기·반응 고르기도 가짜 모델로 둔다(유료 호출 없음).
-    ctx, agents = make_ctx(root, '[providers.demo_chat]\nadapter = "fake"\n')
+    # 화면 폴더(/studio)를 연결하고, 팀 서버처럼 검토 뒤 대화 준비까지 자동으로 이어 돈다.
+    extra = (
+        '[providers.demo_chat]\nadapter = "fake"\n'
+        f'[web]\nstudio_dir = "{ROOT_REPO / "studio"}"\n'
+        '[orchestrator]\nauto_resume = true\nresume_until = "G6"\n'
+    )
+    ctx, agents = make_ctx(root, extra)
     _fake_tendency_tags()
     if args.sample_mp4:
         ctx.use_video(PlayableVideo(Path(args.sample_mp4).read_bytes()))

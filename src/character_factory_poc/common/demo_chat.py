@@ -65,6 +65,8 @@ class Scene:
     prompt: Path | None
     chapter: Path | None
     name: str
+    prompt_status: str
+    waiting_review: bool
 
     @classmethod
     def read(cls, folder: Path, *, name: str | None = None) -> Scene:
@@ -75,14 +77,44 @@ class Scene:
                 name = (
                     load_json(folder / "source-pack.json", {}).get("subject", {}).get("displayName")
                 )
+        try:
+            state = load_json(folder / "state.json", {})
+            gates = state.get("gates", {})
+            waiting = any(
+                isinstance(g, dict) and g.get("status") == "AWAITING_HUMAN" for g in gates.values()
+            )
+            gate = gates.get("G6", {})
+            stage = state.get("stages", {}).get("s8", {})
+            status, rev = gate.get("status", ""), gate.get("rev")
+            if stage.get("status") in {"RUNNING", "REJECTED", "CHECK_FAILED"}:
+                status = stage["status"]
+        except (ValueError, OSError, AttributeError):
+            status, rev, waiting = "", None, False
+        prompt = None
+        if (
+            status in {"APPROVED", "AWAITING_HUMAN"}
+            and isinstance(rev, str)
+            and re.fullmatch(r"pv[0-9]+", rev)
+        ):
+            candidate = folder / "s8-prompts" / rev
+            if (candidate / "long.md").is_file():
+                prompt = candidate
         return cls(
             folder,
-            latest(folder / "s8-prompts", "pv", "long.md"),
+            prompt,
             latest(folder / "s8-chapters", "cs", "chapter-start.json"),
             name or "캐릭터",
+            status,
+            waiting,
         )
 
-    def _voice(self):
+    def _voice(self, *, for_review=False):
+        if self.prompt_status in {"REJECTED", "RUNNING"}:
+            raise NotReady(
+                "말투와 성격을 다시 준비하고 있어요. 새 버전을 승인하면 대화할 수 있어요."
+            )
+        if self.prompt_status == "AWAITING_HUMAN" and not for_review:
+            raise NotReady("말투와 성격을 승인하면 대화할 수 있어요.")
         try:
             voice = (self.prompt / "long.md").read_text("utf-8").rstrip("\n") if self.prompt else ""
         except (UnicodeError, OSError):
@@ -93,7 +125,7 @@ class Scene:
 
     def _scene(self):
         if not self.chapter:
-            raise NotReady("팬 통화 장면이 아직 없어요.")
+            raise NotReady("첫 통화 장면이 아직 없어요.")
         try:
             ch = next(
                 c
@@ -119,8 +151,8 @@ class Scene:
         except (StopIteration, KeyError, TypeError, OSError, ValueError) as exc:
             raise NotReady("첫 대화 장면을 읽을 수 없어요. 장면 설정을 확인해 주세요.") from exc
 
-    def compose(self):
-        return self._voice() + "\n\n" + self._scene()
+    def compose(self, *, for_review=False):
+        return self._voice(for_review=for_review) + "\n\n" + self._scene()
 
     def readiness(self, *, running=False, draft=False):
         missing, reasons = [], []
@@ -131,9 +163,23 @@ class Scene:
                 missing.append(key)
                 reasons.append(str(exc))
         page = "sources" if draft else "factory"
+        from character_factory_poc.pipeline.origin import SOURCE, read_origin
+
+        if missing and read_origin(self.folder) != SOURCE:
+            # 오리지널에는 첫 통화 장면(S8c) 단계가 없다(QA v5 C-05).
+            # 막다른 안내 대신 쓸 수 없다고 말한다.
+            reasons = [
+                "지어낸 캐릭터는 아직 대화해 보기를 쓸 수 없어요. "
+                "실존 인물로 만든 캐릭터에서 써 보세요."
+            ]
+            return dict(ready=False, missing=missing, reason=reasons[0], nextHref=None)
         if missing:
             reasons.append(
-                "원문 화면에서 만들기를 시작해 주세요." if draft else "진행 화면에서 확인해 주세요."
+                "원문 화면에서 만들기를 시작해 주세요."
+                if draft
+                else "진행 화면에서 기다리는 확인을 마치면 이어서 만들어요."
+                if self.waiting_review
+                else "진행 화면에서 확인해 주세요."
             )
         return dict(
             ready=not missing,
@@ -143,6 +189,8 @@ class Scene:
         )
 
     def samples(self):
+        if not self.prompt:
+            return []
         data = load_json(self.chapter / "samples.json") if self.chapter else None
         if isinstance(data, list):
             return data
@@ -230,7 +278,8 @@ def respond(model, messages, temperature, deadline=None):
 
 def run_samples(ctx: Context, cid: str) -> Path:
     scene = Scene.read(ctx.character_dir(cid))
-    system = Message("system", scene.compose())
+    # 승인 전 검토 시트에 실을 표본만 현재 검토 판으로 만든다.
+    system = Message("system", scene.compose(for_review=True))
     path = scene.chapter / "samples.json"
     if scene.samples():
         return path

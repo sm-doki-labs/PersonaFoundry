@@ -646,7 +646,10 @@ def video_fields(folder, state):
     same_signature = not tier or not is_twin(folder) or signature_matches(inputs, signature)
     job = read_json_file(folder / "video-job.json") or {}
     status = "none"
-    if tier != "none" and approved and (not tier or preset == f"tier:{tier}") and same_signature:
+    if not tier and not preset.startswith("tier:"):
+        # 영상 등급이 없는 캐릭터(오리지널 등)는 영상 칩을 띄우지 않는다(QA v5 E7).
+        status = "none"
+    elif tier != "none" and approved and (not tier or preset == f"tier:{tier}") and same_signature:
         status = "ready"
     elif tier and tier == job.get("tier"):
         if job.get("status") in ("queued", "running"):
@@ -659,10 +662,15 @@ def video_fields(folder, state):
         "ready": "영상을 볼 수 있어요",
         "failed": "영상을 만들지 못했어요",
     }
+    # 영상 작업이 실패했으면 까닭을 사람 말 한 줄로 싣는다(QA v5 E13). 예외 이름은 뗀다.
+    error = ""
+    if status == "failed":
+        error = re.sub(r"^[A-Za-z_]*(Error|Exception): ", "", str(job.get("error") or "")).strip()
     return dict(
         videoTier=tier or (preset.removeprefix("tier:") if preset.startswith("tier:") else "none"),
         videoStatus=status,
         videoLabel=labels[status],
+        videoError=error[:200],
         signaturePose=signature,
     )
 
@@ -692,12 +700,12 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
     # 남은 사람 확인은 지금 할 일에서 따로 보인다(3차 QA).
     if chat:
         status = "chat_ready"
-        if meta["origin"] != CREATED:
-            goal = dict(goal, done=goal["total"])
     elif pending:
         status = "needs_review"
-    elif any(s["status"] in {"CHECK_FAILED", "REJECTED"} for s in stages):
+    elif any(s["status"] == "CHECK_FAILED" for s in stages):
         status = "failed"
+    elif any(s["status"] == "REJECTED" for s in stages):
+        status = "needs_review"
     elif is_draft(intake, stages):
         status = "draft"
     else:
@@ -715,7 +723,11 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
         "createdAt": created_at(char_dir, intake),
         "archived": read_archived(char_dir),
         "goal": dict(
-            label="전체 단계" if meta["origin"] == CREATED else "대화 가능까지",
+            label="전체 단계"
+            if meta["origin"] == CREATED
+            else "대화와 학습 준비"
+            if meta["modelMode"] == "TRAIN"
+            else "대화 가능까지",
             done=goal["done"],
             total=goal["total"],
         ),
@@ -810,6 +822,7 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
                 "videoStatus",
                 "videoLabel",
                 "signaturePose",
+                "videoError",
                 *QA_FIELDS,
             )
         },

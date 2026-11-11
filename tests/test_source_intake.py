@@ -91,7 +91,9 @@ def test_round_trip(tmp_path):
     )
     assert not Path(spec["path"]).is_absolute()
     assert client.post(url + "/finalize").status_code == 409
-    assert client.delete(url).is_success and not (folder / spec["path"]).exists()
+    removed = client.delete(url)
+    assert removed.is_success and not (folder / spec["path"]).exists()
+    assert not removed.json()["removed"] and folder.is_dir(), "a started character stays"
 
 
 @pytest.mark.parametrize(
@@ -131,6 +133,9 @@ def test_validation_and_import(tmp_path):
     original = tmp_path / "외부.txt"
     original.write_bytes(RAW)
     item = client.post(url + "/import-path", json={"path": str(original)}).json()
+    assert item["status"] == "ready" and item["subjectSpeaker"] == "선수", (
+        "imports are checked (A-05)"
+    )
     target = url + "/files/" + item["fileId"]
     assert client.post(target + "/complete", json=META).json()["status"] == "ready"
     folder = tmp_path / "runs/characters" / url.split("/")[-1]
@@ -255,3 +260,113 @@ def test_pending_files_duplicate_ids_and_short_upload(tmp_path):
     assert not client.get(url).json()["canFinalize"]
     assert client.patch(second, json={"textId": "a2"}).is_success
     assert client.get(url).json()["canFinalize"]
+
+
+KAKAO = (
+    "--------------- 2026년 11월 1일 토요일 ---------------\n"
+    + "[나] [오전 9:12] 밥은?\n[엄마] [오전 9:13] 먹었지\n" * 3
+    + "[나] [오전 9:14] 응\n[나] [오전 9:15] 알겠어\n"
+).encode()
+
+
+def upload_as(client, display, data, filename="kakao-mom.txt"):
+    response = client.post(
+        "/api/sources/drafts",
+        json={"displayName": display, "subjectKind": "PRIVATE_PERSON", "autoReview": False},
+    )
+    url = "/api/sources/" + response.json()["characterId"]
+    record = client.post(
+        url + "/files", json={"filename": filename, "size": len(data), "contentType": "text/plain"}
+    ).json()
+    assert client.put(record["upload"]["url"], content=data).is_success
+    return url, url + "/files/" + record["fileId"]
+
+
+def test_kakao_never_picks_the_exporter_or_the_busiest_speaker(tmp_path):
+    """QA v5 A-03·A-23: 표시 이름과 맞는 화자가 없으면 고르게 하고, 카톡의 '나'는 상대로 권한다."""
+    client = TestClient(create_app(tmp_path))
+    url, target = upload_as(client, "손흥민", KAKAO)
+    item = client.post(target + "/complete", json={}).json()
+    assert item["subjectSpeaker"] is None and item["status"] == "problem"
+    assert "누가 이 사람인지 골라 주세요" in item["problems"][0] and "엄마" in item["problems"][0]
+    assert [s["name"] for s in item["detectedSpeakers"]] == ["엄마", "나"], "the exporter goes last"
+    assert item["suggested"]["subjectSpeaker"] is None
+    assert item["suggested"]["subjectChoices"] == ["엄마"], "'나' is never offered as the subject"
+    assert item["suggested"]["userSpeaker"] == "나"
+    assert not client.get(url).json()["canFinalize"]
+    same = client.patch(target, json={"subjectSpeaker": "엄마", "userSpeaker": "엄마"}).json()
+    assert same["status"] == "problem" and "다른 사람" in same["problems"][-1]
+    fixed = client.patch(target, json={"subjectSpeaker": "엄마", "userSpeaker": "나"}).json()
+    assert fixed["status"] == "ready" and client.get(url).json()["canFinalize"]
+
+    _, target = upload_as(client, "엄마", KAKAO)
+    item = client.post(target + "/complete", json={}).json()
+    assert item["status"] == "ready" and item["subjectSpeaker"] == "엄마"
+    assert item["suggested"]["userSpeaker"] == "나"
+
+    raw = "기자: 하나\n기자: 둘\n선수: 셋".encode()
+    _, target = upload_as(client, "손흥민", raw, "interview.txt")
+    item = client.post(target + "/complete", json={}).json()
+    assert item["subjectSpeaker"] is None and item["status"] == "problem", "no pick by line count"
+    assert item["suggested"]["subjectChoices"] == ["기자", "선수"]
+    picked = client.patch(target, json={"subjectSpeaker": "선수"}).json()
+    assert picked["status"] == "ready" and picked["suggested"]["userSpeaker"] == "기자"
+
+
+def test_deleting_an_unstarted_draft_removes_it_everywhere(tmp_path):
+    """QA v5 A-04: 시작 전 초안은 목록·초안 API·캐릭터 목록에서 사라진다."""
+    client = TestClient(create_app(tmp_path))
+    url = start(client)
+    put(client, url)
+    cid = url.split("/")[-1]
+    assert [d["characterId"] for d in client.get("/api/sources/drafts").json()] == [cid]
+    response = client.delete(url)
+    assert response.is_success and response.json()["removed"]
+    assert client.get("/api/sources/drafts").json() == []
+    assert cid not in [c["id"] for c in client.get("/api/projects").json()["characters"]]
+    assert client.get(url).status_code == 404 and client.delete(url).status_code == 404
+    assert not (tmp_path / "runs/characters" / cid).exists()
+
+
+@pytest.mark.parametrize(
+    "facts,message",
+    [
+        ({"age": "서른넷 그리고 몇 달 지났고 생일은 칠월이에요"}, "나이는 20자까지"),
+        ({"job": "가" * 61}, "하는 일은 60자까지"),
+        ({"background": "가" * 401}, "한 줄 배경은 400자까지"),
+    ],
+)
+def test_long_draft_values_name_the_field(tmp_path, facts, message):
+    """QA v5 A-06: 긴 값은 어느 칸인지와 한도를 말하고 파일 크기를 말하지 않는다."""
+    client = TestClient(create_app(tmp_path))
+    response = client.post(
+        "/api/sources/drafts",
+        json={"displayName": "선수", "subjectKind": "PUBLIC_FIGURE", "knownFacts": facts},
+    )
+    assert response.status_code == 422 and message in response.json()["detail"]
+    assert "파일" not in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "filename,data,meta,expected",
+    [
+        ("notes.json", b'{"a": 1}', {"kind": "INTERVIEW"}, "목록이어야"),
+        ("notes.txt", "화자 표시가 없는 글이에요.".encode(), {"kind": "INTERVIEW"}, "이름: 한 말"),
+        ("live.srt", b"1\n00:00:01,000 --> 00:00:02,000\nhi\n", {"kind": "INTERVIEW"}, "받아쓰기"),
+        ("kakao.txt", "그냥 글".encode(), {"kind": "KAKAO_EXPORT"}, "대화 내보내기"),
+    ],
+)
+def test_unreadable_sources_say_why(tmp_path, filename, data, meta, expected):
+    """QA v5 A-09: 원문을 읽지 못한 구체 까닭을 쉬운 말로 알린다."""
+    client = TestClient(create_app(tmp_path))
+    _, target = upload_as(client, "선수", data, filename)
+    item = client.post(target + "/complete", json=meta).json()
+    assert item["status"] == "problem" and expected in item["problems"][0], item["problems"]
+
+
+def test_broken_photo_asks_to_remove_it(tmp_path):
+    """QA v5 A-14: 열 수 없는 사진은 지우라고 분명히 말한다."""
+    client = TestClient(create_app(tmp_path))
+    _, target = upload_as(client, "선수", b"\xff\xd8\xff", "broken.jpg")
+    item = client.post(target + "/complete", json={}).json()
+    assert item["status"] == "problem" and "지우고" in item["problems"][0]
