@@ -83,6 +83,15 @@ class Draft(Strict):
     autoReview: bool = True
     chapterTemplate: Literal["FAN_CALL", "FAMILY_CALL", "FRIEND_CHAT", "INTERVIEW"] | None = None
     knownFacts: KnownFacts = Field(default_factory=KnownFacts)
+    # 시연 모드: 모든 관문 자동 승인 → 테스터 미리보기 발행 → 디스코드 알림(사용자 2026-11-12).
+    demoMode: bool = False
+    demoBudgetUsd: float = Field(default=15.0, gt=0, le=200)
+
+
+class DemoSwitch(Strict):
+    enabled: bool
+    budgetUsd: float = Field(default=15.0, gt=0, le=200)
+    start: bool = False
 
 
 class Upload(Strict):
@@ -323,6 +332,14 @@ def install_source_routes(app, conf, jobs):
         write_origin(folder, SOURCE, auto_review=body.autoReview)
         write_video_tier(folder, body.videoTier)
         write_model_mode(folder, body.modelMode)
+        if body.demoMode:
+            from character_factory_poc.common.errors import FactoryError
+            from character_factory_poc.pipeline.demo import write_demo_mode
+
+            try:
+                write_demo_mode(folder, enabled=True, budget_usd=body.demoBudgetUsd)
+            except FactoryError as exc:
+                raise WebError(422, str(exc)) from exc
         subject = SourceSubject(displayName=body.displayName, kind=body.subjectKind)
         save(
             inside(folder, "s0-source", "intake.json"),
@@ -581,12 +598,29 @@ def install_source_routes(app, conf, jobs):
                 **opts,
             )
             save(inside(folder, "source-pack.json"), pack.model_dump(mode="json"))
-            if read_auto_review(folder) and draft["videoTier"] != "none":
+            from character_factory_poc.pipeline.demo import read_demo_mode
+
+            if read_demo_mode(folder):
+                job = demo_job(cid, draft.get("subject", {}).get("displayName") or cid)
+            elif read_auto_review(folder) and draft["videoTier"] != "none":
                 job = video_job(cid, prepare_chat=True)
             else:
                 job = jobs.submit(cid, until="s8c" if read_auto_review(folder) else "G0")
             draft["jobId"] = job["jobId"]
             return {"jobId": draft["jobId"]}
+
+    def demo_job(cid, name):
+        """시연 모드 실행: 패키지 승인(G9)까지 자동 승인으로 돌고 끝나면 발행·알림한다."""
+        from character_factory_poc.common.notify import notify
+
+        job = jobs.submit(cid, until="G9", trigger="demo")
+        notify(
+            "started",
+            name,
+            ["모든 검토를 자동 승인하고, 끝나면 테스터 전용으로 발행해요."],
+            character_id=cid,
+        )
+        return job
 
     def video_job(cid, *, prepare_chat=False):
         return jobs.submit(
@@ -610,6 +644,27 @@ def install_source_routes(app, conf, jobs):
         with opened(cid, settings=True) as (folder, draft):
             change_settings(folder, draft, cid, body.videoTier)
         return {"videoTier": body.videoTier}
+
+    @router.put("/{cid}/demo-mode")
+    def demo_mode(cid: str, body: DemoSwitch):
+        """만든 캐릭터에도 시연 모드를 켜고 끈다. start면 바로 자동 진행을 시작한다."""
+        from character_factory_poc.common.errors import FactoryError
+        from character_factory_poc.pipeline.demo import write_demo_mode
+
+        folder = reads.character_dir(conf.root, cid)
+        if not folder.is_dir() or not folder.is_relative_to(conf.root):
+            raise WebError(404, "캐릭터를 찾을 수 없어요.")
+        if jobs.active_for(cid):
+            raise WebError(409, "진행 중인 작업이 끝난 뒤에 바꿀 수 있어요.")
+        try:
+            mode = write_demo_mode(folder, enabled=body.enabled, budget_usd=body.budgetUsd)
+        except FactoryError as exc:
+            raise WebError(422, str(exc)) from exc
+        job_id = None
+        if body.enabled and body.start:
+            name = reads.display_name(reads._persona(folder), {}) or cid
+            job_id = demo_job(cid, name)["jobId"]
+        return {"enabled": mode.enabled, "budgetUsd": mode.budgetUsd, "jobId": job_id}
 
     videos = APIRouter(route_class=IntakeRoute)
 

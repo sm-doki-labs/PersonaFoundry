@@ -567,6 +567,27 @@ def display_name(persona, intake):
     )
 
 
+def _demo_summary(char_dir: Path) -> dict | None:
+    """시연 모드(자동 승인·테스터 발행) 상태. 꺼져 있으면 None."""
+    from character_factory_poc.pipeline.demo import read_demo_mode
+
+    try:
+        mode = read_demo_mode(char_dir)
+    except (OSError, ValueError):
+        return None
+    if mode is None:
+        return None
+    status = read_json_file(char_dir / "demo-status.json") or {}
+    return {
+        "enabled": True,
+        "budgetUsd": mode.budgetUsd,
+        "phase": status.get("phase", "ready"),
+        "detail": status.get("detail", ""),
+        "apiCharacterId": status.get("apiCharacterId"),
+        "at": status.get("at"),
+    }
+
+
 def created_at(folder, intake):
     intake = intake or {}
     origin = read_json_file(folder / "origin.json") or {}
@@ -809,6 +830,7 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
             )
         },
         "autoReview": read_auto_review(char_dir),
+        "demo": _demo_summary(char_dir),
         "persona": summary["persona"],
         "stages": summary["stages"],
         "gates": summary["gates"],

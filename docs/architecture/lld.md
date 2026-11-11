@@ -1,6 +1,6 @@
 # 에이전틱 캐릭터 공장 상세 설계 (LLD)
 
-- 문서 버전: v1.42
+- 문서 버전: v1.43
 - 작성일: 2026-10-14
 - 수정일: 2026-11-11
 - 상태: 초안, 사용자 검토 전
@@ -1043,3 +1043,8 @@ version_for/selected·CLI 계획·motif_plan_calls·factory.example.toml의 기�
 
 
 D-0181 상세: `GET /api/characters/{cid}/chat/sessions`, `GET/PUT .../{sid}`는 UUID 세션을 `chat-history/{sid}.json`에 원자 저장한다. POSIX 디렉터리 잠금·O_NOFOLLOW·revision 충돌(409)을 사용한다. 저장 한도는 2MiB/2,000메시지/메시지1Mi자이며, 새 모델 입력은 16,000자로 제한한다. 과거의 긴 메시지는 보관과 복원 대상으로 유지한다. UI는 임시 기록을 이관하고 새 대화/이전 대화 선택/저장 실패 재시도를 제공하며 충돌본을 새 세션으로 보존한다. 저장 API는 모델 호출과 분리한다. 모델 설정은 explicit demo_chat→configured text→legacy DEFAULT 순서이며 서버 모드의 Vertex 제한은 그대로다. FRIEND_CHAT/INTERVIEW 자동 표본은 장면별 3개×4턴을 사용하며 평가 질문은 최종 페르소나에 주입하지 않는다. 기존 FAN_CALL/FAMILY_CALL 표본 규칙은 유지한다.
+
+
+## 2026-11-12 시연 모드와 테스터 전용 앱 발행(D-0182)
+
+명세 v1.38 구현: stages/export/preview.py·preview_scripts.py(대상 저장소 가상환경에서 실행하는 DB 조각), pipeline/demo.py·demo_flow.py, common/notify.py(CFP_DISCORD_WEBHOOK_URL), orchestrator RunOptions.demo(유료 확인 생략·관문 시연 승인·예산 확인·G9 뒤 발행), web/sources.py demoMode·PUT /api/sources/{cid}/demo-mode, reads.demo 요약, studio 시연 스위치·상태 낱말. 고정 200만 번대 id 묶음(sx)은 로컬 시연 DB 전용으로 남긴다.

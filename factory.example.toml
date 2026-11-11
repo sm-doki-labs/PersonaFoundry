@@ -311,3 +311,18 @@ location = "global"
 
 # 원문 조건부 경향 공정은 [stages.s8]의 motif_compiler = "evidence-v4"로 선택한다.
 # 기능·언어 형식 분리와 혼합 근거 보존을 적용하며 G6 검토를 유지한다.
+
+# 테스터 전용 미리보기 발행(cfp preview publish, 시연 모드). 순서: 읽기 점검 → id 예약 →
+# content.segments preview 지정·대기 → 사진·영상 업로드 → api-svc 등록 → chat-svc 발행 → 대화 켜기 →
+# 로그인 없는 목록·검색에 없는지 확인. 접속 정보는 .env(CFP_PREVIEW_*)에만 둔다.
+[publish.preview]
+target = "test"                                 # test | live
+api_svc_repo = "~/projects/_wt/api-svc-live"    # 실서비스 배포 판 체크아웃(.venv 포함)
+chat_svc_repo = "~/projects/_wt/chat-svc-live"  # 실서비스 배포 판 체크아웃(data/ = 실서비스 발행본)
+api_base_url = "http://127.0.0.1:8899"          # api-svc 주소(/api/v1 앞)
+storage = "none"                                # none(시험) | s3(실서비스)
+s3_bucket = ""
+aws_profile = ""
+wait_seconds = 35                               # api-svc 설정 캐시(30초)보다 길게
+allow_live = false
+

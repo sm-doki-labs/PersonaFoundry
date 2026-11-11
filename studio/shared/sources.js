@@ -438,6 +438,8 @@
         state.character = {
           modelMode: d && d.modelMode ? d.modelMode : null,
           autoReview: d && typeof d.autoReview === 'boolean' ? d.autoReview : null,
+          demoMode: d && d.demo && d.demo.enabled === true ? true : d ? false : null,
+          demo: d && d.demo ? d.demo : null,
           progress: (d && d.progress) || null,
           // 계획 3차 약속 3: 서버가 한 곳에서 정한 상태·대화 가능·목표 진행. 없는 서버면 아래 옛 표시로 돌아간다.
           status: d && d.status ? text(d.status) : null,
@@ -489,7 +491,9 @@
       const c = state.character || {};
       const s = state.settings || {};
       const pick = (k) => (d[k] != null ? d[k] : c[k] != null ? c[k] : s[k] != null ? s[k] : null);
-      return { modelMode: pick('modelMode'), autoReview: pick('autoReview'), videoTier: tierOf(pick('videoTier')) };
+      const out = { modelMode: pick('modelMode'), autoReview: pick('autoReview'), videoTier: tierOf(pick('videoTier')) };
+      if (pick('demoMode') === true) out.demoMode = true;
+      return out;
     }
     // 시작 전에 영상 등급을 바꾼다(약속 5 PATCH settings). 실패하면 화면 값은 그대로 두고 알린다.
     async function setTier(value) {
@@ -535,6 +539,7 @@
       try {
         const modelMode = modeOf(input.modelMode);
         const autoReview = input.autoReview !== false;
+        const demoMode = input.demoMode === true;
         const videoTier = tierOf(input.videoTier);
         const body = {
           displayName: text(input.displayName).trim(),
@@ -545,12 +550,13 @@
           autoReview,
           videoTier
         };
+        if (demoMode) body.demoMode = true;
         if (input.chapterTemplate) body.chapterTemplate = input.chapterTemplate;
         const data = await request('POST', '/api/sources/drafts', body);
         state.busy = null;
         if (o.onCid) o.onCid(data.characterId);
         await load(data.characterId);
-        state.settings = { modelMode, autoReview, videoTier };
+        state.settings = demoMode ? { modelMode, autoReview, videoTier, demoMode } : { modelMode, autoReview, videoTier };
         emit();
         return { characterId: data.characterId };
       } catch (error) {
@@ -1171,7 +1177,7 @@
           const modeEl = r.summary.querySelector('[data-sum-mode]');
           if (modeEl) { modeEl.textContent = labelOf(MODES, set.modelMode); modeEl.parentElement.hidden = !set.modelMode; }
           const autoEl = r.summary.querySelector('[data-sum-auto]');
-          if (autoEl) { autoEl.textContent = set.autoReview === false ? '출처·기획 확인과 G6 근거 검토를 사람이 해요' : 'G0·G3 자동 처리 · G6 근거 검토는 사람이 해요'; autoEl.parentElement.hidden = set.autoReview == null; }
+          if (autoEl) { autoEl.textContent = set.demoMode ? '시연 모드 · 모든 검토 자동 승인 · 테스터 전용 발행' : set.autoReview === false ? '출처·기획 확인과 G6 근거 검토를 사람이 해요' : 'G0·G3 자동 처리 · G6 근거 검토는 사람이 해요'; autoEl.parentElement.hidden = set.autoReview == null; }
           if (r.sumVideo) {
             r.sumVideo.textContent = tierName(set.videoTier);
             const edit = r.summary.querySelector('[data-act="tier-edit"]');
@@ -1416,12 +1422,16 @@
       setStep(r.steps.info, d ? 'done' : 'active');
       setStep(r.steps.start, !d ? 'todo' : S.finalized ? 'done' : st.ready ? 'active' : 'wait');
       if (r.startLead) r.startLead.hidden = !!S.finalized;
-      if (r.startLead) r.startLead.textContent = (auto
+      if (r.startLead) r.startLead.textContent = set.demoMode
+        ? '시연 모드예요. 모든 검토를 자동으로 승인하며 사진·영상·패키지까지 만들고, 테스터 계정에만 보이게 앱에 올려요. 끝나거나 멈추면 디스코드로 알려요.'
+        : (auto
         ? '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. G0 출처 확인과 G3 기획 확인은 자동으로 처리하고, G6 원문 근거 검토는 사람이 해요.'
         : '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. 진행 화면에서 출처·기획 확인과 G6 원문 근거 검토를 기다려요.') +
         (tier !== 'none' ? ' 대화가 되면 이어서 ' + vName + ' 영상을 만들어요.' : '');
       if (r.startNote) {
-        r.startNote.textContent = '원문 분석·프롬프트 생성·대화에는 모델 사용 비용이 들어요' + (tier !== 'none' ? ' · 영상 제작에는 별도 비용이 들어요' : '') + (set.modelMode === 'TRAIN' ? ' · 학습은 비용 확인 후 시작해요' : '');
+        r.startNote.textContent = set.demoMode
+          ? '원문 분석·사진·영상·대화 준비에 모델 사용 비용이 들어요 · 시연 예산 상한 15달러를 넘으면 멈추고 알려요'
+          : '원문 분석·프롬프트 생성·대화에는 모델 사용 비용이 들어요' + (tier !== 'none' ? ' · 영상 제작에는 별도 비용이 들어요' : '') + (set.modelMode === 'TRAIN' ? ' · 학습은 비용 확인 후 시작해요' : '');
         r.startNote.hidden = !!S.finalized;
       }
       if (r.startBtn) {
@@ -1507,7 +1517,8 @@
       const mode = (f.querySelector('[name="modelMode"]:checked') || {}).value;
       const tier = (f.querySelector('[name="videoTier"]:checked') || {}).value;
       const auto = f.querySelector('[name="autoReview"]');
-      const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined, modelMode: mode, autoReview: auto ? auto.checked : true, videoTier: tier };
+      const demo = f.querySelector('[name="demoMode"]');
+      const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined, modelMode: mode, autoReview: auto ? auto.checked : true, videoTier: tier, demoMode: demo ? demo.checked : false };
       const errors = intake.validateDraft(input);
       ['displayName', 'subjectKind', 'age', 'gender', 'job'].forEach((n) => fieldError(n, errors[n]));
       const first = Object.keys(errors)[0];

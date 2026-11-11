@@ -10,7 +10,8 @@ from __future__ import annotations
 import json
 import struct
 from collections import Counter
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -52,6 +53,8 @@ class ApiSeed:
     bundle: dict[str, Any]
     mapping: list[tuple[str, str, str]]
     unmapped: list[str]
+    #: file_store.key → 패키지 안 원본 파일. 미리보기 발행이 업로드할 때 쓴다.
+    files: dict[str, Path] = field(default_factory=dict)
 
 
 def _png_size(data: bytes) -> tuple[int, int] | None:
@@ -112,14 +115,17 @@ def build_seed(
     exported_at: str,
     alembic_revision: str,
     default_voice_id: str | None = None,
+    row_id: Callable[[str, int], int] | None = None,
 ) -> ApiSeed:
     # 정식 패키지는 characters/<cid>/s11-release/pkN 아래 있다. 동시에 내보내도
     # 이미 생성된 캐릭터 폴더 이름만 대조하면 된다(다른 캐릭터의 출처는 읽지 않는다).
-    release = package_dir.parent
-    peers = ()
-    if release.name == "s11-release" and release.parent.name == package.characterId:
-        peers = (p.name for p in release.parent.parent.iterdir() if p.is_dir())
-    row_id = api_seed_ids(package.characterId, peers)
+    # 실서비스 미리보기 발행은 대상 DB 시퀀스에서 예약한 번호를 row_id로 넘긴다.
+    if row_id is None:
+        release = package_dir.parent
+        peers = ()
+        if release.name == "s11-release" and release.parent.name == package.characterId:
+            peers = (p.name for p in release.parent.parent.iterdir() if p.is_dir())
+        row_id = api_seed_ids(package.characterId, peers)
     character_id = row_id("character", 0)
     slug = slug_for(package.characterId)
     uid = str(character_uid(package.characterId))
@@ -338,6 +344,7 @@ def build_seed(
     )
 
     media_no = 0
+    files: dict[str, Path] = {}
 
     def add_media(path: Path, media_type: str, rel: str) -> int:
         nonlocal media_no
@@ -347,6 +354,7 @@ def build_seed(
         data = path.read_bytes()
         size = _png_size(data) if media_type == "image" else None
         key = f"api-svc/protected/characters/{character_id}/{slug}/{rel}"
+        files[key] = path
         builder.add("media", ["id", "media_type", "status"], [media_id, media_type, "ready"])
         builder.add(
             "file_store",
@@ -597,7 +605,7 @@ def build_seed(
         ]
     )
     unmapped.extend(clip_count_warnings(builder.bundle))
-    return ApiSeed(bundle=builder.bundle, mapping=mapping, unmapped=unmapped)
+    return ApiSeed(bundle=builder.bundle, mapping=mapping, unmapped=unmapped, files=files)
 
 
 def _mood(video: Video) -> str:

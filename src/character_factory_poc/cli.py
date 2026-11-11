@@ -914,6 +914,54 @@ def cmd_export_doki_app(args) -> int:
     return 0 if result.verification.status != "FAILED" else 1
 
 
+def cmd_preview_publish(args) -> int:
+    """G9 승인 패키지를 테스터 전용으로 앱에 올린다([publish.preview] 설정)."""
+    from character_factory_poc.common.notify import notify
+    from character_factory_poc.stages.export.preview import publish_preview
+
+    result = publish_preview(_ctx(args), args.character_id)
+    for step in result.steps:
+        print(f"  {'ok ' if step.ok else 'NG '} {step.name} {step.detail}")
+    for warning in result.warnings:
+        print(f"  참고: {warning}")
+    if args.notify:
+        if result.status == "PUBLISHED":
+            lines = [
+                "테스터 계정의 앱 목록에서 볼 수 있어요. 일반 사용자에게는 보이지 않아요.",
+                f"앱 캐릭터 번호 {result.apiCharacterId} · 대상 {result.target}",
+            ]
+            notify(
+                "published", result.name or args.character_id, lines, character_id=args.character_id
+            )
+        else:
+            notify(
+                "failed",
+                result.name or args.character_id,
+                [f"발행에서 멈췄어요: {result.failure[:400]}"],
+                character_id=args.character_id,
+            )
+    print(
+        f"테스터 전용 발행: {result.status}"
+        + (f" · 앱 캐릭터 {result.apiCharacterId}" if result.apiCharacterId else "")
+    )
+    return 0 if result.status == "PUBLISHED" else 1
+
+
+def cmd_demo_mode(args) -> int:
+    from character_factory_poc.pipeline.demo import write_demo_mode
+
+    folder = _ctx(args).character_dir(args.character_id)
+    if not folder.is_dir():
+        print(f"캐릭터가 없다: {args.character_id}")
+        return 1
+    mode = write_demo_mode(folder, enabled=args.state == "on", budget_usd=args.budget)
+    print(
+        f"시연 모드: {'켬' if mode.enabled else '끔'}"
+        + (f" · 예산 상한 ${mode.budgetUsd:.2f}" if mode.enabled else "")
+    )
+    return 0
+
+
 def cmd_web(args) -> int:
     from character_factory_poc.web.__main__ import main as web_main
 
@@ -1486,6 +1534,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="일회용 PostgreSQL에 실제 적재해 확인(CFP_PG_ADMIN_URL)",
     )
     s.set_defaults(fn=cmd_export_doki_app)
+
+    preview = sub.add_parser("preview", help="테스터 전용 미리보기 발행").add_subparsers(
+        dest="sub", required=True
+    )
+    s = preview.add_parser("publish", help="G9 승인 패키지를 테스터에게만 보이게 앱에 올린다")
+    s.add_argument("character_id")
+    s.add_argument("--notify", action="store_true", help="결과를 디스코드로 알린다")
+    s.set_defaults(fn=cmd_preview_publish)
+
+    s = sub.add_parser("demo", help="시연 모드: 모든 관문 자동 승인 → 테스터 발행 → 알림")
+    s.add_argument("character_id")
+    s.add_argument("state", choices=["on", "off"])
+    s.add_argument("--budget", type=float, default=15.0, help="시연 예산 상한(달러)")
+    s.set_defaults(fn=cmd_demo_mode)
 
     s = sub.add_parser("web", help="워크숍 웹앱(LLD §6.5)")
     s.add_argument("--port", type=int, default=None)

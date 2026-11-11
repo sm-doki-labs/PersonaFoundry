@@ -105,12 +105,16 @@
   const STATUS_LABEL = { draft: '시작 전', running: '만드는 중', needs_review: '확인 필요', chat_ready: '대화 가능', failed: '실패', stopped: '멈춤', done: '완료' };
   const STATUS_TONE = { draft: 'muted', running: 'run', needs_review: 'wait', chat_ready: 'ok', failed: 'fail', stopped: 'muted', done: 'ok' };
   const STATUS_RANK = { needs_review: 0, failed: 1, running: 2, chat_ready: 3, draft: 4, stopped: 5, done: 6 };
+  // 시연 모드(모든 검토 자동 승인 → 테스터 전용 발행)는 상태 낱말 뒤에 붙인다. 품질 검토가 아니다.
+  const DEMO_LABEL = { ready: '시연 모드', publishing: '시연 · 테스터 발행 중', published: '시연 · 테스터 발행됨', publish_failed: '시연 · 발행 실패', budget: '시연 · 예산 상한', stopped: '시연 · 멈춤', failed: '시연 · 멈춤', packaged: '시연 · 패키지 완료' };
   function statusOf(c, sum) {
     const x = c || {};
     const s = sum || {};
     let st = STATUS_LABEL[x.status] ? x.status : '';
     if (!st) st = s.running ? 'running' : s.fail ? 'failed' : (s.review || s.paid) ? 'needs_review' : isChatReady(x) ? 'chat_ready' : s.complete ? 'done' : s.fresh ? 'draft' : 'stopped';
-    return { status: st, label: text(x.statusLabel).trim() || STATUS_LABEL[st], tone: STATUS_TONE[st] || 'muted', rank: STATUS_RANK[st] == null ? 9 : STATUS_RANK[st] };
+    const demo = x.demo && x.demo.enabled ? (DEMO_LABEL[x.demo.phase] || DEMO_LABEL.ready) : '';
+    const label = (text(x.statusLabel).trim() || STATUS_LABEL[st]) + (demo ? ' · ' + demo : '');
+    return { status: st, label, tone: STATUS_TONE[st] || 'muted', rank: STATUS_RANK[st] == null ? 9 : STATUS_RANK[st] };
   }
   // 목표 경로: 모티브는 대화 가능까지 필요한 단계만(첫 장면 S8c, 없으면 프롬프트 S8의 앞 단계들). 학습 방식이면 학습 단계까지 더한다.
   // 오리지널은 목표 경로를 따로 두지 않는다(null).
