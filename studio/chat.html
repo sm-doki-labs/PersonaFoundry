@@ -32,6 +32,7 @@
         </figure>
         <div class="ch-talk">
           <div class="ch-call" data-call></div>
+          <section class="ch-history" data-history aria-label="대화 기록" hidden></section>
           <div class="ch-state" data-state hidden></div>
           <div class="ch-bar" data-playbar hidden></div>
           <ol class="ch-list" data-list aria-label="대화" hidden></ol>
@@ -41,6 +42,7 @@
               <textarea id="ch-input" data-input rows="1" autocomplete="off" spellcheck="false" aria-describedby="ch-hint"></textarea>
               <button type="submit" class="btn pri ch-send" data-send data-mode="send" aria-label="보내기" disabled><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/><polyline points="13 6 19 12 13 18"/></svg><span>보내기</span></button>
             </div>
+            <p class="ch-history-error" data-input-error role="alert" hidden></p>
             <p class="ch-hint" id="ch-hint" data-composer-hint>Enter로 보내고 Shift+Enter로 줄을 바꿔요</p>
           </form>
           <p class="sr" data-live aria-live="polite" aria-atomic="true"></p>

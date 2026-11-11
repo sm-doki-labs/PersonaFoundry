@@ -148,7 +148,30 @@ def cmd_persona_prompts(args) -> int:
     retries = int(ctx.config.stage("s8").get("max_check_retries", 3))
     probes = _read_lines(args.probes)
     if not args.execute:
-        if ctx.text_deck_enabled or ctx.config.stage("s7").get("formation_profile"):
+        from character_factory_poc.pipeline.origin import is_twin
+
+        if is_twin(ctx.character_dir(args.character_id)):
+            if ctx.config.stage("s8").get("motif_compiler", "evidence-v4") in {
+                "evidence-v2",
+                "evidence-v3",
+                "evidence-v4",
+                "evidence-v5",
+            }:
+                from character_factory_poc.stages.s8_prompts.evidence_pipeline import full_plan
+
+                print(format_plan(full_plan(ctx, args.character_id, len(probes))))
+                return 0
+            print(
+                format_plan(
+                    s8.motif_plan_calls(
+                        len(probes),
+                        ctx.config.stage("s8").get("scene_traits", False),
+                        ctx.config.stage("s8").get("trait_method", "focus"),
+                        ctx.config.stage("s8").get("motif_compiler", "evidence-v4"),
+                    )
+                )
+            )
+        elif ctx.text_deck_enabled or ctx.config.stage("s7").get("formation_profile"):
             print("고정 컴파일: 모델 호출0회. 품질 검증은 persona qualify에서 별도로 실행한다.")
         else:
             print(format_plan(s8.plan_calls(retries, len(probes))))

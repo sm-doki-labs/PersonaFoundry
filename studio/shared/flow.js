@@ -31,9 +31,11 @@
     return (x.originLabel || '모티브') + ' · ' + (MODE_LABEL[x.modelMode] || MODE_LABEL.TRAIN);
   }
   // 모티브 단계 줄에 붙이는 쉬운 설명. 단계 이름은 서버 그래프를 그대로 쓴다.
-  const TWIN_HINT = { s2: '받은 사진에서 기준 사진 고르기', s8c: '첫 통화 장면을 정하고 장면마다 대화 표본을 만들어요' };
+  const TWIN_HINT = { s2: '받은 사진에서 기준 사진 고르기', s8c: '선택한 장면을 정하고 장면마다 대화 표본을 만들어요' };
   // S8c(챕터 시작 설정)는 사람 검토 없이 도는 단계다. 화면 이름은 시작 장면을 따른다(계획 2차 약속 2).
   function s8cName(origin, template) {
+    if (template === 'FRIEND_CHAT') return '친구 대화 장면';
+    if (template === 'INTERVIEW') return '인터뷰 장면';
     if (template) return template === 'FAN_CALL' ? '팬 통화 장면' : '통화 장면';
     return origin === 'SOURCE' ? '팬 통화 장면' : '통화 장면';
   }
@@ -125,10 +127,10 @@
   function goalOf(graph, detail, views) {
     const ids = goalStages(graph, detail);
     const g = detail && detail.goal;
-    if (g && Number(g.total) > 0) return { label: text(g.label).trim() || (ids ? '대화 가능까지' : '전체'), done: Number(g.done) || 0, total: Number(g.total), ids };
+    if (g && Number(g.total) > 0) return { label: text(g.label).trim() || (ids ? '대화 제작 단계' : '전체'), done: Number(g.done) || 0, total: Number(g.total), ids };
     const list = ids ? Array.from(ids) : (graph ? graph.stages.map((s) => s.id) : []);
     const done = list.filter((id) => ['done', 'skip'].includes(((views || {})[id] || {}).kind)).length;
-    return { label: ids ? '대화 가능까지' : '전체', done, total: list.length, ids };
+    return { label: ids ? '대화 제작 단계' : '전체', done, total: list.length, ids };
   }
   // 모티브 그래프 접기: 목표 경로 단계와 지금 일이 걸린(실행·대기·실패·비용 확인) 단계만 남기고 나머지는 숨긴다.
   // keep이 null이면 전부 보인다(오리지널이거나 사람이 펼쳤을 때). hidden은 접었을 때 숨는 단계 수다.
@@ -1144,7 +1146,7 @@
       all.forEach((s) => s.tasks.filter((x) => x.kind === 'wait').forEach((x) => gates.set(x.gate, (gates.get(x.gate) || 0) + 1)));
       if (state.ov.gate && !gates.has(state.ov.gate)) state.ov.gate = '';
       const is = (s, st) => s.status.status === st;
-      const match = { all: () => true, mine: (s) => s.todo > 0, run: (s) => is(s, 'running'), chat: (s) => is(s, 'chat_ready'), fail: (s) => is(s, 'failed') };
+      const match = { all: () => true, mine: (s) => s.todo > 0, run: (s) => is(s, 'running'), chat: (s) => isChatReady(s.c), fail: (s) => is(s, 'failed') };
       const counts = {};
       Object.keys(match).forEach((k) => { counts[k] = all.filter(match[k]).length; });
       const q = state.ov.q.trim().toLowerCase();
@@ -1167,7 +1169,7 @@
     }
     function nowText(s) {
       const st = s.status.status;
-      if (st === 'chat_ready') return '다 만들었어요 · 대화할 수 있어요';
+      if (st === 'chat_ready') return '대화할 수 있어요 · 제작 진행은 별도예요';
       if (st === 'running') return '만드는 중이에요';
       if (st === 'draft') return s.c.origin === 'SOURCE' ? '원문을 올리는 중이에요' : '아직 실행하지 않았어요';
       if (st === 'done') return '모든 단계를 마쳤어요';
@@ -1312,11 +1314,11 @@
           '<div class="acts"><button type="button" class="btn pri" data-act="run-stage" data-stage="' + E(goalLeft.end) + '"' + (state.busy ? ' disabled' : '') + '>대화 준비 이어서 하기</button></div></div>';
       }
       if (chat) {
-        const t1 = st === 'chat_ready' ? '다 만들었어요 · 대화할 수 있어요' : '대화할 수 있어요';
-        let t2 = st === 'chat_ready' ? '만든 캐릭터와 바로 대화해 볼 수 있어요.' : st === 'running' ? '그동안 다른 단계를 더 만들고 있어요.' : '아래 할 일을 마치지 않아도 대화해 볼 수 있어요.';
+        const t1 = st === 'chat_ready' ? '대화할 수 있어요 · 제작 진행은 별도예요' : '대화할 수 있어요';
+        let t2 = st === 'chat_ready' ? '대화할 수 있어요. 전체 제작 완료 여부는 단계별 진행을 확인해 주세요.' : st === 'running' ? '그동안 다른 단계를 더 만들고 있어요.' : '아래 할 일을 마치지 않아도 대화해 볼 수 있어요.';
         // 영상(약속 5): 만드는 중이면 그렇다고 적고, 영상이 없거나 실패했으면 보조 버튼으로 영상 만들기를 건넨다.
         if (d.videoStatus === 'making') t2 += ' 영상은 만드는 중이에요. 다 되면 대화할 때 영상이 나와요.';
-        else if (d.videoStatus === 'ready') t2 = st === 'chat_ready' ? '영상까지 다 만들었어요. 대화해 보기에서 영상과 함께 대화해요.' : t2;
+        else if (d.videoStatus === 'ready') t2 = st === 'chat_ready' ? '영상도 준비됐어요. 대화해 보기에서 영상과 함께 대화해요. 남은 제작 단계는 진행 화면에서 확인해 주세요.' : t2;
         const vOpen = Boolean(state.video && state.video.open);
         const vBtn = canMakeVideo(d) ? '<button type="button" class="btn" data-act="video-open" aria-expanded="' + vOpen + '">' + icon('video') + (d.videoStatus === 'failed' ? '영상 다시 만들기' : '영상 만들기') + '</button>' : '';
         html += '<div class="fl-item ok"><span class="mk"></span><div class="tx"><div class="t1">' + E(t1) + '</div><div class="t2">' + E(t2) + '</div></div><div class="acts"><a class="btn pri" href="' + E(chat) + '">' + icon('chat') + (d.videoStatus === 'ready' ? '영상과 함께 대화해 보기' : '대화해 보기') + '</a>' + vBtn + '</div>' +

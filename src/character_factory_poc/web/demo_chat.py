@@ -47,6 +47,10 @@ class ClipTurn(BaseModel):
 
 
 def install_demo_routes(app, root, conf):
+    from character_factory_poc.web.chat_history import install_chat_history_routes
+
+    install_chat_history_routes(app, root)
+
     def folder_for(cid):
         try:
             return character_dir(root, cid)
@@ -73,7 +77,7 @@ def install_demo_routes(app, root, conf):
         stages = reads.read_state(scene.folder)[0].get("stages", {}).values()
         draft = reads.is_draft(intake, stages)
         readiness = scene.readiness(running=active.get("status") == "running", draft=draft)
-        cfg = ctx.config.providers.get("demo_chat", demo.DEFAULT)
+        cfg = demo.configured_provider(ctx)
         return dict(
             characterId=cid,
             name=scene.name,
@@ -90,13 +94,10 @@ def install_demo_routes(app, root, conf):
     def reply(cid, chat, deadline):
         scene, ctx = setup(cid)
         try:
-            system = scene.compose()
+            opening = scene.opening()
             cfg = demo.provider(ctx, chat.via, conf.server_mode)
             model = demo.talk_model(ctx, cid, cfg)
-            messages = [
-                Message("system", system),
-                *(Message(m.role, m.content) for m in chat.messages),
-            ]
+            messages = [*opening, *(Message(m.role, m.content) for m in chat.messages)]
             return demo.respond(model, messages, ctx.config.demo_chat_temperature(True), deadline)
         except demo.NotReady as exc:
             raise WebError(409, str(exc)) from exc

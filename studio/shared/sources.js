@@ -24,7 +24,7 @@
   const KINDS = [['INTERVIEW', '인터뷰'], ['ARTICLE', '기사'], ['TRANSCRIPT', '받아쓰기'], ['KAKAO_EXPORT', '카톡']];
   const REGISTERS = [['FORMAL', '공식 자리'], ['CASUAL', '캐주얼 자리']];
   const SUBJECT_KINDS = [['PUBLIC_FIGURE', '공인'], ['PRIVATE_PERSON', '개인']];
-  const CHAPTERS = [['FAN_CALL', '팬과 첫 통화'], ['FAMILY_CALL', '가족과 통화']];
+  const CHAPTERS = [['FAN_CALL', '팬과 첫 통화'], ['FAMILY_CALL', '가족과 통화'], ['FRIEND_CHAT', '친구 메신저 대화'], ['INTERVIEW', '인터뷰']];
   // 모델 준비 방식(계획 2차 약속 2). 기본은 프롬프트만이다.
   const MODES = [['PROMPT_ONLY', '프롬프트만'], ['BIND_EXISTING', '학습된 모델 연결'], ['TRAIN', '학습해서 쓰기']];
   // 사용 근거는 선택이다. 메모만 받고 쓰는 곳은 팀 내부 사용으로 보낸다(약속 2 기본값과 같다).
@@ -77,13 +77,15 @@
     const auto = o.auto !== false;
     // 상태 이름은 모든 화면이 같은 말을 쓴다(약속 3 statusLabel). 서버가 상태를 주지 않으면 예전처럼 진행 기록에서 짐작한다.
     const ready = c.chatReady === true || chat.ready === true;
-    const st = ready ? 'chat_ready' : c.status || (c.failed ? 'failed' : c.awaiting ? 'needs_review' : 'running');
+    const st = c.status || (c.failed ? 'failed' : c.awaiting ? 'needs_review' : c.running ? 'running' : ready ? 'chat_ready' : 'running');
     const title = (st !== 'chat_ready' && c.statusLabel) || DONE_LABEL[st] || '만드는 중';
     let body = '';
     if (st === 'failed') body = '어느 단계에서 멈췄는지 진행 화면에서 봐 주세요.';
     else if (st === 'needs_review') body = '진행 화면에서 확인할 차례가 있어요. 확인하면 이어서 만들어요.';
     else if (st === 'stopped') body = '진행 화면에서 멈춘 까닭을 봐 주세요.';
-    else if (st !== 'chat_ready') body = auto ? (chat.reason && !c.status ? chat.reason : '보통 15~20분 걸려요. 이 화면을 열어 두면 다 됐을 때 대화해 보기 버튼이 생겨요.') : '출처 정리가 끝나면 진행 화면에 확인할 차례가 떠요.';
+    else if (st !== 'chat_ready') body = auto ? (chat.reason && !c.status ? chat.reason : '원문을 분석하고 있어요. G6에서 사람이 근거를 검토해야 해요. 처리 시간은 원문 분량과 모델 응답에 따라 달라져요.') : '진행 화면에서 출처·기획 확인과 G6 원문 근거 검토를 진행해 주세요.';
+    if (ready && st !== 'chat_ready') body += ' 대화는 이용할 수 있지만 제작 단계가 모두 끝난 것은 아니에요.';
+    if (ready && st === 'chat_ready') body = '대화할 수 있어요. 전체 제작 진행과 남은 단계는 진행 화면에서 확인해 주세요.';
     const tier = tierOf(c.videoTier || o.tier);
     const vs = c.videoStatus;
     const on = tier !== 'none' || vs === 'making' || vs === 'ready';
@@ -92,26 +94,27 @@
     // 영상 상태를 주는 서버면 다 되거나 실패할 때까지 '만드는 중'으로 본다. 그 필드가 없는 서버면 기다리는 중으로만 적는다.
     const making = on && typeof vs === 'string' && !vReady && !vFailed;
     if (on && st === 'chat_ready') {
-      if (vReady) body = '영상까지 다 만들었어요. 대화해 보기에서 영상과 함께 대화해요.';
+      if (vReady) body = '영상도 준비됐어요. 대화해 보기에서 영상과 함께 대화해요. 남은 제작 단계는 진행 화면에서 확인해 주세요.';
       else if (vFailed) body = '대화는 지금 해 볼 수 있어요. 영상은 만들지 못했어요. 진행 화면에서 까닭을 봐 주세요.';
       else body = '대화는 지금 해 볼 수 있어요. 영상은 이어서 만들고 있어요. 다 되면 대화할 때 영상이 나와요.';
     } else if (on && st === 'running' && body) body += ' 영상은 대화가 된 뒤에 이어서 만들어요.';
     const vText = making ? '영상 만드는 중 · ' + tierName(tier) : videoText({ videoTier: tier, videoStatus: vs, videoLabel: c.videoLabel });
     return {
       ready, status: st, title, body,
+      progress: c.goal || (c.progress && c.progress.total ? c.progress : null),
       tone: { chat_ready: 'ok', failed: 'fail', needs_review: 'wait', stopped: 'wait' }[st] || 'run',
       video: { show: ready && on, text: vText, tone: vReady ? 'ok' : vFailed ? 'fail' : 'run', making },
       chatLabel: vReady ? '영상과 함께 대화해 보기' : '대화해 보기'
     };
   }
-  // 시작한 뒤 진행을 다시 읽을지: 대화 준비가 될 때까지, 그리고 영상 등급을 골랐으면 영상이 다 되거나 실패할 때까지.
+  // 대화 준비와 별개로 제작·검토가 진행 중이면 갱신한다. 영상도 준비되거나 실패할 때까지 읽는다.
   // 대화 API가 없는 서버면 멈추고, 영상 상태를 주지 않는 서버면 대화가 된 뒤에 멈춘다.
   function wantsPoll(S) {
     const c = S.character || {};
     if (!(S.finalized && S.cid)) return false;
     if (S.chat && S.chat.unavailable) return false;
     const ready = !!(S.chat && S.chat.ready) || c.chatReady === true;
-    if (!ready) return true;
+    if (!ready || c.status === 'running' || c.status === 'needs_review') return true;
     const tier = tierOf(c.videoTier || (S.settings && S.settings.videoTier));
     return typeof c.videoStatus === 'string' && (c.videoStatus === 'making' || (c.videoStatus === 'none' && tier !== 'none'));
   }
@@ -310,7 +313,7 @@
       saving: {}, // key → 'saving' | 'saved' | 'error'
       saveError: {},
       fieldErrors: {}, // key → { field: 문구 }
-      rawInput: {}, // key → { field: 아직 맞지 않아 보내지 않은 입력값 }. 보내는 값(meta)은 늘 검사를 통과한 값이다.
+      rawInput: {}, // key → 입력 즉시 보관한 값. 서버가 같은 편집을 확인할 때까지 유지한다.
       cardKey: {}, // fileId → 올릴 때 쓴 카드 key(올린 뒤에도 같은 카드를 쓴다)
       thumbs: {}, // key → 이 브라우저에서 고른 사진의 미리보기 주소(서버가 주소를 주지 않아도 바로 보인다)
       busy: null, // 'create' | 'import' | 'finalize' | 'delete' | 'remove:<key>'
@@ -329,6 +332,9 @@
     const aborts = {};
     const chains = {};
     let pendingSaves = 0;
+    let editEpoch = 0;
+    let refreshSeq = 0;
+    const inputVersions = {};
 
     function emit() { listeners.forEach((fn) => { try { fn(state); } catch (error) { /* 화면 오류가 상태를 막지 않게 */ } }); }
     const URLS = (global && global.URL) || (typeof URL !== 'undefined' ? URL : null);
@@ -392,11 +398,12 @@
 
     async function refresh() {
       if (!state.cid) return;
+      const cid = state.cid, epoch = editEpoch, token = ++refreshSeq;
       try {
-        const data = await request('GET', '/api/sources/' + encodeURIComponent(state.cid));
-        state.draft = data;
+        const data = await request('GET', '/api/sources/' + encodeURIComponent(cid));
+        if (cid === state.cid && epoch === editEpoch && token === refreshSeq && !pendingSaves) state.draft = data;
       } catch (error) {
-        state.notice = '최신 상태를 불러오지 못했어요. ' + errorText(error);
+        if (cid === state.cid && token === refreshSeq) state.notice = '최신 상태를 불러오지 못했어요. ' + errorText(error);
       }
       emit();
     }
@@ -444,7 +451,7 @@
           videoLabel: d && d.videoLabel ? text(d.videoLabel) : '',
           awaiting: Boolean(d && ((d.pendingGates && d.pendingGates.length) || d.awaitingHuman)),
           running: Boolean(d && d.job),
-          failed: stages.some((s) => text(s && s.status).toUpperCase() === 'CHECK_FAILED')
+          failed: stages.some((s) => ['CHECK_FAILED', 'REJECTED'].includes(text(s && s.status).toUpperCase()))
         };
       } catch (error) { /* 시작 전에는 캐릭터 진행이 없을 수 있다 */ }
       if (state.finalized) {
@@ -644,7 +651,13 @@
         entry.progress = 1;
         emit();
         // 사진에는 원문 정보가 없어 빈 본문으로 확인만 한다(서버가 사진에 화자 정보를 받지 않는다).
-        const rec = await request('POST', filesPath(entry.fileId) + '/complete', entry.fileType === 'photo' ? {} : metaBody(entry.meta));
+        const body = entry.fileType === 'photo' ? {} : metaBody(entry.meta);
+        // 파일명 추정은 확정값이 아니다. 사람이 고르지 않았으면 서버가 본문을 판별한다.
+        if (entry.fileType !== 'photo') {
+          if (!entry.touched.kind) body.kind = null;
+          if (!entry.touched.register) body.register = null;
+        }
+        const rec = await request('POST', filesPath(entry.fileId) + '/complete', body);
         if (entry.cancelled) throw Object.assign(new Error('abort'), { aborted: true });
         state.uploads = state.uploads.filter((u) => u !== entry);
         upsert(rec);
@@ -677,11 +690,13 @@
       const next = {};
       META_FIELDS.forEach((f) => { next[f] = entry.touched[f] ? text(entry.meta[f]) : text(rec[f] == null ? '' : rec[f]); });
       const sug = (rec && rec.suggested) || {};
-      if (!entry.touched.kind && !entry.kindFromName && KINDS.some((k) => k[0] === sug.kind) && sug.kind !== next.kind) {
+      if (!entry.touched.kind && KINDS.some((k) => k[0] === sug.kind) && sug.kind !== next.kind) {
         next.kind = sug.kind;
         if (!entry.touched.register) next.register = REGISTERS.some((x) => x[0] === sug.register) ? sug.register : (defaultRegister(sug.kind) || next.register);
       }
-      if (!next.subjectSpeaker.trim()) {
+      if (!next.kind) next.kind = entry.meta.kind;
+      if (!next.register) next.register = entry.meta.register || defaultRegister(next.kind);
+      if (!next.subjectSpeaker.trim() && !entry.touched.subjectSpeaker) {
         const old = rec && rec.suggested === undefined && rec.detectedSpeakers === undefined;
         next.subjectSpeaker = suggestedSpeaker(rec) || (old ? text(state.draft && state.draft.subject && state.draft.subject.displayName) : '');
       }
@@ -698,58 +713,81 @@
     }
 
     function queuePatch(fileId, meta) {
-      const key = keyOf(fileId);
-      state.overlay[fileId] = Object.assign({}, meta);
+      const key = keyOf(fileId), cid = state.cid, path = filesPath(fileId);
+      const sent = Object.assign({}, meta);
+      const versions = Object.assign({}, inputVersions[key]);
+      state.overlay[fileId] = sent;
       state.saving[key] = 'saving';
       delete state.saveError[key];
+      editEpoch++;
       pendingSaves++;
       emit();
       const chain = (chains[fileId] || Promise.resolve()).then(async () => {
         try {
-          const rec = await request('PATCH', filesPath(fileId), metaBody(meta));
-          if (sameMeta(state.overlay[fileId], meta)) delete state.overlay[fileId];
+          const rec = await request('PATCH', path, metaBody(sent));
+          if (cid !== state.cid) return;
+          // Acknowledgements clear only the exact snapshot/edits they saved.
+          if (state.overlay[fileId] === sent) delete state.overlay[fileId];
+          const raw = Object.assign({}, state.rawInput[key]);
+          Object.keys(raw).forEach((field) => {
+            if (inputVersions[key] && inputVersions[key][field] === versions[field] &&
+                !(state.fieldErrors[key] || {})[field] && text(raw[field]).trim() === text(sent[field]).trim()) delete raw[field];
+          });
+          if (Object.keys(raw).length) state.rawInput[key] = raw; else delete state.rawInput[key];
           upsert(rec);
-          state.saving[key] = 'saved';
+          state.saving[key] = state.overlay[fileId] ? 'saving' : 'saved';
+          if (!state.overlay[fileId]) delete state.saveError[key];
         } catch (error) {
-          state.saving[key] = 'error';
-          state.saveError[key] = errorText(error);
-        }
-        pendingSaves--;
+          if (cid === state.cid) {
+            state.saving[key] = 'error';
+            state.saveError[key] = errorText(error);
+          }
+        } finally { pendingSaves--; }
         emit();
-        if (!pendingSaves) await refresh();
+        if (!pendingSaves && cid === state.cid) await refresh();
       });
       chains[fileId] = chain;
       return chain;
     }
-    // 카드 칸 하나를 고친다. 올리는 중이면 확인 요청에 실어 보내고, 다 올린 파일이면 바로 저장(PATCH)한다.
-    function editFile(key, field, value) {
+    // 입력 즉시 임시값을 보관하고 change에서 저장한다. 늦은 응답이 다른 칸의 입력을 되돌리지 않는다.
+    function stageFile(key, field, value) { return editFile(key, field, value, { defer: true }); }
+    function editFile(key, field, value, options) {
       if (META_FIELDS.indexOf(field) < 0 || state.finalized) return null;
       const entry = state.uploads.find((u) => u.key === key);
       const rec = entry ? null : files().find((f) => keyOf(f.fileId) === key);
       if (!entry && !rec) return null;
+      editEpoch++;
+      const errs = Object.assign({}, state.fieldErrors[key] || {});
+      const raw = Object.assign({}, state.rawInput[key] || {});
       const meta = Object.assign({}, entry ? entry.meta : metaOfRecord(rec));
+      Object.keys(raw).forEach((f) => { if (!errs[f]) meta[f] = raw[f]; });
       const prevKind = meta.kind;
       meta[field] = text(value);
       if (field === 'kind') meta.register = nextRegister(prevKind, meta.kind, meta.register) || '';
       if (field === 'textId') meta.textId = text(value).trim();
-      const errs = Object.assign({}, state.fieldErrors[key] || {});
       delete errs[field];
       if (field === 'textId') {
         const problem = textIdProblem(meta.textId) || (takenIds(key).some((x) => x.toLowerCase() === meta.textId.toLowerCase()) ? '다른 파일과 원문 이름이 같아요. 다른 이름을 적어 주세요.' : null);
         if (problem) errs.textId = problem;
       }
       if (field === 'sourceUrl' && meta.sourceUrl && !/^https?:\/\/\S+$/i.test(meta.sourceUrl.trim())) errs.sourceUrl = 'http:// 또는 https://로 시작하는 주소를 적어 주세요.';
-      const raw = Object.assign({}, state.rawInput[key] || {});
-      if (errs[field]) raw[field] = text(value); else delete raw[field];
-      if (Object.keys(raw).length) state.rawInput[key] = raw; else delete state.rawInput[key];
+      raw[field] = text(value);
+      if (!inputVersions[key]) inputVersions[key] = {};
+      inputVersions[key][field] = editEpoch;
+      if (field === 'kind') { raw.register = meta.register; inputVersions[key].register = editEpoch; }
+      state.rawInput[key] = raw;
       if (Object.keys(errs).length) state.fieldErrors[key] = errs; else delete state.fieldErrors[key];
       if (errs[field]) { emit(); return null; }
       if (entry) {
         entry.meta = meta;
         entry.touched[field] = true;
+        // Upload metadata is already queued for complete/afterCheck.
+        const invalid = Object.fromEntries(Object.entries(raw).filter(([f]) => errs[f]));
+        if (Object.keys(invalid).length) state.rawInput[key] = invalid; else delete state.rawInput[key];
         emit();
         return Promise.resolve();
       }
+      if (options && options.defer) { emit(); return null; }
       return queuePatch(rec.fileId, meta);
     }
 
@@ -817,6 +855,7 @@
       if (state.uploads.some((u) => ACTIVE.indexOf(u.phase) >= 0)) reasons.push('올리는 중인 파일이 끝나면 시작할 수 있어요.');
       if (state.uploads.some((u) => u.phase === 'failed')) reasons.push('올리지 못한 파일을 다시 올리거나 지워 주세요.');
       if (pendingSaves) reasons.push('고친 내용을 저장하고 있어요.');
+      else if (Object.keys(state.rawInput).length) reasons.push('입력한 파일 정보를 확정해 주세요.');
       if (Object.keys(state.saveError).length) reasons.push('저장하지 못한 파일 정보가 있어요.');
       if (Object.keys(state.fieldErrors).length) reasons.push('파일 정보에 고칠 곳이 있어요.');
       const serverProblems = d.canFinalize !== true ? (d.problems || []).map(text) : [];
@@ -927,7 +966,7 @@
     function uploading() { return state.uploads.some((u) => ACTIVE.indexOf(u.phase) >= 0); }
 
     return {
-      state, load, refresh, progress, projects, drafts, settings, setTier, createDraft, validateDraft, addFiles, retry, dismiss, editFile, removeFile, importPath, finalize, deleteDraft, reset, startState, items, photoItems, uploading,
+      state, load, refresh, progress, projects, drafts, settings, setTier, createDraft, validateDraft, addFiles, retry, dismiss, stageFile, editFile, removeFile, importPath, finalize, deleteDraft, reset, startState, items, photoItems, uploading,
       subscribe(fn) { listeners.push(fn); return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); }; }
     };
   }
@@ -972,7 +1011,7 @@
   // 진행 화면 사이드바와 같은 두 줄 모양: 이름(모티브 표시) 아래에 상태, 이름이 겹치면 만든 시각을 붙인다.
   function sideItemHTML(c, dup) {
     const name = text(c.displayName).trim() || displayName(c.name, c.id);
-    const failed = (c.stages || []).some((s) => text(s && s.status).toUpperCase() === 'CHECK_FAILED');
+    const failed = (c.stages || []).some((s) => ['CHECK_FAILED', 'REJECTED'].includes(text(s && s.status).toUpperCase()));
     const p = c.progress || {};
     const st = c.status ? (STATUS_DOT[c.status] || '') : failed ? 'fail' : c.awaitingHuman ? 'wait' : c.job ? 'run' : p.total && p.done >= p.total ? 'ok' : '';
     const when = createdText(c);
@@ -1132,7 +1171,7 @@
           const modeEl = r.summary.querySelector('[data-sum-mode]');
           if (modeEl) { modeEl.textContent = labelOf(MODES, set.modelMode); modeEl.parentElement.hidden = !set.modelMode; }
           const autoEl = r.summary.querySelector('[data-sum-auto]');
-          if (autoEl) { autoEl.textContent = set.autoReview === false ? '단계마다 사람이 확인해요' : '사람 확인 없이 대화해 보기까지 가요'; autoEl.parentElement.hidden = set.autoReview == null; }
+          if (autoEl) { autoEl.textContent = set.autoReview === false ? '출처·기획 확인과 G6 근거 검토를 사람이 해요' : 'G0·G3 자동 처리 · G6 근거 검토는 사람이 해요'; autoEl.parentElement.hidden = set.autoReview == null; }
           if (r.sumVideo) {
             r.sumVideo.textContent = tierName(set.videoTier);
             const edit = r.summary.querySelector('[data-act="tier-edit"]');
@@ -1378,11 +1417,11 @@
       setStep(r.steps.start, !d ? 'todo' : S.finalized ? 'done' : st.ready ? 'active' : 'wait');
       if (r.startLead) r.startLead.hidden = !!S.finalized;
       if (r.startLead) r.startLead.textContent = (auto
-        ? '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. 사람 확인 없이 대화해 보기까지 이어서 만들어요.'
-        : '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. 다 되면 진행 화면에서 출처 확인을 기다려요.') +
+        ? '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. G0 출처 확인과 G3 기획 확인은 자동으로 처리하고, G6 원문 근거 검토는 사람이 해요.'
+        : '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. 진행 화면에서 출처·기획 확인과 G6 원문 근거 검토를 기다려요.') +
         (tier !== 'none' ? ' 대화가 되면 이어서 ' + vName + ' 영상을 만들어요.' : '');
       if (r.startNote) {
-        r.startNote.textContent = (auto ? '보통 15~20분 걸려요' : '단계마다 진행 화면에서 확인해요') + (tier !== 'none' ? ' · 영상은 대화가 된 뒤에 만들고 비용이 들어요' : ' · 이미지·영상·학습은 하지 않아요');
+        r.startNote.textContent = '원문 분석·프롬프트 생성·대화에는 모델 사용 비용이 들어요' + (tier !== 'none' ? ' · 영상 제작에는 별도 비용이 들어요' : '') + (set.modelMode === 'TRAIN' ? ' · 학습은 비용 확인 후 시작해요' : '');
         r.startNote.hidden = !!S.finalized;
       }
       if (r.startBtn) {
@@ -1399,7 +1438,6 @@
         r.done.hidden = !S.finalized;
         if (r.doneLink && S.cid) r.doneLink.href = 'factory.html#c/' + encodeURIComponent(S.cid);
         const c = S.character || {};
-        const p = c.progress || {};
         const view = doneView(c, S.chat, { auto, tier });
         const ready = view.ready;
         if (r.doneTitle) r.doneTitle.textContent = view.title;
@@ -1414,10 +1452,10 @@
           if (spin) spin.hidden = !view.video.making;
         }
         if (r.prog) {
-          // 진행 막대는 만드는 동안만 보인다. 대화 가능이면 다 된 것이라 숨긴다. 단계 수는 목표까지 필요한 단계로 센다(약속 3 goal).
-          const g = c.goal || (p.total ? { done: p.done, total: p.total } : null);
-          r.prog.hidden = !(S.finalized && g && !ready);
-          if (g && !ready) {
+          // 대화가 가능해도 실제 제작 진행 수를 계속 보여 준다.
+          const g = view.progress;
+          r.prog.hidden = !(S.finalized && g);
+          if (g) {
             const pct = Math.round(g.done / g.total * 100);
             const bar = r.prog.querySelector('[data-prog-bar]');
             if (bar) { bar.firstChild.style.width = pct + '%'; bar.setAttribute('aria-label', g.total + '단계 중 ' + g.done + '단계 완료'); }
@@ -1447,7 +1485,7 @@
       if (r.live && S.announce) { r.live.textContent = S.announce; S.announce = ''; }
       if (doc.title !== undefined) doc.title = (S.cid && nameNow() ? nameNow() : '원문으로 새 캐릭터') + ' · Foundry';
     }
-    // 시작한 뒤에는 대화 준비가 될 때까지 진행을 가끔 다시 읽는다. 화면이 숨으면 쉬고, 대화 API가 없으면 멈춘다.
+    // 제작·검토 또는 대화 준비가 남으면 진행을 다시 읽는다. 화면이 숨으면 쉬고, 대화 API가 없으면 멈춘다.
     // 영상 등급을 골랐으면 대화가 된 뒤에도 영상이 다 되거나 실패할 때까지 읽는다(영상 상태를 주지 않는 서버면 거기서 멈춘다).
     function schedule() {
       const want = wantsPoll(S);
@@ -1536,6 +1574,8 @@
     function onInput(e) {
       const t = e.target;
       if (r.form && r.form.contains(t) && t.name && t.getAttribute('aria-invalid')) fieldError(t.name, '');
+      const card = t.closest && t.closest('[data-key]');
+      if (card && t.dataset.field) intake.stageFile(card.dataset.key, t.dataset.field, t.value);
     }
     function hasFiles(e) { const dt = e.dataTransfer; return !!(dt && Array.from(dt.types || []).indexOf('Files') >= 0); }
     function onDragOver(e) {
@@ -1560,7 +1600,7 @@
       else if (r.drop && r.drop.contains(e.target)) intake.addFiles(e.dataTransfer.files);
     }
     function onHash() { const cid = route(); if (cid && cid !== S.cid) intake.load(cid); else if (!cid && S.cid) { intake.reset(); intake.drafts(); } }
-    function onLeave(e) { if (intake.uploading()) { e.preventDefault(); e.returnValue = ''; } }
+    function onLeave(e) { if (intake.uploading() || Object.keys(S.rawInput).length || Object.keys(S.overlay).length) { e.preventDefault(); e.returnValue = ''; } }
 
     doc.addEventListener('submit', onSubmit);
     doc.addEventListener('click', onClick);

@@ -142,6 +142,8 @@ test('chat link opens only when the character can chat: the server chatReady win
 test('the S8c step is named after the opening scene, and mode names match the upload page', () => {
   assert.equal(Flow.s8cName('SOURCE', ''), '팬 통화 장면');
   assert.equal(Flow.s8cName('SOURCE', 'FAN_CALL'), '팬 통화 장면');
+  assert.equal(Flow.s8cName('SOURCE', 'FRIEND_CHAT'), '친구 대화 장면');
+  assert.equal(Flow.s8cName('SOURCE', 'INTERVIEW'), '인터뷰 장면');
   assert.equal(Flow.s8cName('SOURCE', 'FAMILY_CALL'), '통화 장면');
   assert.equal(Flow.s8cName('CREATED', ''), '통화 장면');
   const S = require('../shared/sources.js');
@@ -180,7 +182,7 @@ test('QA F02/F16: progress counts only the stages needed to chat (motif), uses t
   assert.deepEqual([...Flow.goalStages(p, { origin: 'SOURCE', modelMode: 'PROMPT_ONLY' })].sort(), ['s0', 's3', 's7', 's8', 's8c']);
   const d = detailFor(PROMPT, DONE5, []);
   const g = Flow.goalOf(p, d, Flow.viewsFor(p, d, { now: NOW }));
-  assert.deepEqual([g.label, g.done, g.total], ['대화 가능까지', 5, 5]);
+  assert.deepEqual([g.label, g.done, g.total], ['대화 제작 단계', 5, 5]);
   const half = detailFor(PROMPT, { s0: 'APPROVED', s3: 'APPROVED' }, []);
   assert.equal(Flow.goalOf(p, half, Flow.viewsFor(p, half, { now: NOW })).done, 2);
   assert.deepEqual(Flow.goalOf(p, Object.assign({}, half, { goal: { label: '대화 가능까지', done: 4, total: 5 } }), {}).done, 4, 'server goal wins');

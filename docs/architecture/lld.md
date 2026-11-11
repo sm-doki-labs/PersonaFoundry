@@ -1,10 +1,11 @@
 # 에이전틱 캐릭터 공장 상세 설계 (LLD)
 
-- 문서 버전: v1.30
+- 문서 버전: v1.42
 - 작성일: 2026-10-14
-- 수정일: 2026-11-07
+- 수정일: 2026-11-11
 - 상태: 초안, 사용자 검토 전
-- 근거: [PRD v1.17](../product/prd.md), [시스템 명세 v1.25](spec.md). 이 문서는 명세를 코드로 옮기는 세부만 정하고 다른 결정을 담지 않는다. 절마다 근거가 되는 명세 절을 `(명세 §n)`으로 적는다.
+- 근거: [PRD v1.25](../product/prd.md), [시스템 명세 v1.37](spec.md). 이 문서는 명세를 코드로 옮기는 세부만 정하고 다른 결정을 담지 않는다. 절마다 근거가 되는 명세 절을 `(명세 §n)`으로 적는다.
+- 이번 변경: v1.40 말투 사용 조건 추출 표준(D-0179). 이전: v1.39 기능·말투 분리, 혼합 근거 보존과 조건부 조립(D-0178). 이전:  v1.37 전체 생성용 원문 분할 분석·반례 대조·조건 보존(D-0176). 이전: v1.36 원문 근거 기반 무예시 8섹션 공장의 기본 S8·G6·시연·내보내기 연결(D-0174). 이전: v1.35 실제 문답을 이전 턴으로 넣는 선택 기능(D-0173). 이전: v1.34 모티브 대조 특질 검증(D-0171). 이전: v1.33 두 말차례의 관심과 대응(D-0170). 이전: v1.32 모티브 반응 특질의 독립 대조 실험(D-0169). 이전: v1.31 모티브 V3 조립(D-0163).
 - 변경 이력: v0.1 최초 작성 / v0.2(2026-10-20) S1을 화제성 순위 → 외모 특징 프록시로 바꾸고 §2~§5·§8.1·§9~§13을 고쳤다(D-0017, D-0018) / v0.3(2026-10-20) 인물 인상 칸과 계약 v2(§5.2·§5.5·§8.1·§10, D-0020, D-0021) / v0.4(2026-10-21) G1 참조 사진·S2 구현(§2~§5·§5.7·§5.8·§8.1·§8.2·§9·§10·§12·§13, D-0022, D-0023) / v0.5(2026-10-21) S3 외모 연결, S4·G4 구현(§2~§5·§5.10·§8.3·§8.4·§12, D-0024~D-0026) / v0.6(2026-10-21) S5·G5와 xai_video·grok_web 어댑터(§2~§5·§5.11·§8.5·§9·§10·§12·§13, D-0028~D-0030) / v0.7(2026-10-21) 9:16 세로 첫 프레임과 `intro-inputs-v2`(§3·§4·§5.11·§8.5, D-0031), 실제 grok.com 화면에 맞춘 `grok_web`(§9, D-0032) / v0.8(2026-10-22) 씨앗 → 변형 기획, S3r 참고 자료, S4a·S4b·S4 배경 → 자세 → 완성 이미지, 갈래별 진행 오케스트레이터(§2~§6·§8.3·§8.3a·§8.4·§11·§12, D-0033~D-0035) / v0.9(2026-10-22) 이미지 자동 검사·수정 루프(§2·§3·§5.10b·§8.4a·§9·§11·§12, D-0036, D-0037) / v1.0(2026-10-22) S6 동작 영상 골격과 G5b(§2~§5·§5.11a·§6.1·§8.5a·§11·§12, D-0038, D-0039) / v1.1(2026-10-22) 앱 통화 영상 카탈로그, 무표정 첫 프레임, 계약 v2(§2~§4·§5.11a·§8.5·§11·§12, D-0040, D-0041) / v1.2(2026-10-27) 얼굴은 G1에서 한 장만 고르고 S2를 자동 기준 사진·동일인 검사로 바꿔 G2를 없앴다. 아직 코드에는 반영하지 않았다(§2~§4·§5.7·§5.8·§5.9·§5.17·§6.1·§8.1~§8.5·§11~§13, D-0042, D-0043) / v1.3(2026-10-27) 3일 PoC 계약: §4 명령(S1 수집·S9~S11·내보내기·웹앱), §5.14·§5.15·§5.17을 새 계약(`data-plan-v1` 등, `training-run-v2` 등, `character-package-v1`·`export-result-v1`)으로 바꾸고, §6.5 워크숍 API, §8.8~§8.11(S9 샘플·대량 두 단계와 G7a, S10 학습·평가 분리, 패키지, 우리 앱 내보내기), §9 어댑터(`grok_oauth`, 순위 수집기, `gemma_qlora`, `vertex_gemini`), §12 M8을 더했다(D-0044, D-0045) / v1.4(2026-10-28) 학습 없이 긴 프롬프트로 패키지까지 가는 G8 결정(§8.9), 학습 제출 분리(`--submit-training`), G8 답 형식(§6.5)(D-0048) / v1.5(2026-10-28) 에이전틱 실행: §3 설정, §4 명령, §5.16 관문 기록 선택 칸, §5.19~§5.21 새 계약, §6.6~§6.10 물결 실행·자동 재개·사전 검토·재작업·대기열, §11 시험, §12 M9(D-0049) / v1.6(2026-10-29) 한소민 근거로 정본 직접 보존·조건부 적용·사실 소유자 구분을 보완했다(D-0053·D-0054)
 
 ## 1. 범위와 기준
@@ -527,6 +528,16 @@ Profiler는 기획서, 기준 문서 발췌(5항목 설명, 카드 7요소 설�
 
 ### 8.7 S8 프롬프트
 
+모티브는 모델 덱 사용 여부와 관계없이 providers.text를 한 번 호출한다(로컬 비교의 편집 모델을 사용할 수 있다)(명세 §10.2, D-0163). assembler-input.json에 입력을, assembly.json에 frame·검증한 ids(1~3개)·응답 모델을 기록한다. G0 비교 세트·표시된 개인정보 메시지를 예시로 쓰지 않는다. 긴 본문과 호환용 짧은 사본은 같다. 스튜디오는 V3 본문을 그대로 사용하고 공개 내보내기에서는 원문 예시 칸을 제거한다.
+
+선택 설정 `[stages.s8] scene_traits=true`(D-0170, 명세 §10.2)는 G0 생성용 원문에서 연속한 상대 발화와 본인 답을 한 쌍으로 복원한다. 같은 사람이 연달아 보낸 메시지는 묶고, 개인정보 표시·제3자·시간 공백을 건너뛰지 않는다. 원문 파일이 여러 개면 파일 단위, 하나면 대화 단위로 발견·대조 묶음을 나눈다. 각 묶음 최대 160쌍이며 대화별로 고르게 뽑는다.
+발견 모델은 단서·관심 대상·대응·적용 범위를 쓰고 원문 쌍과 양쪽 문장 번호를 고른다. 서로 다른 두 대화에서 관찰된 후보는 다른 계열 모델에 넘겨 별도 자료에서 지지와 반례를 찾는다. 양쪽에 서로 다른 주제(기타 제외)가 있고 독립 대조에서 지지 대화 수가 반례 대화 수보다 많을 때만 V3에 넘긴다. 무엇이 반복됐고 어떤 근거로 제외됐는지는 내부 response-traits.json에 남긴다. 결과는 개인 고유성 판정이나 관측 빈도 추정이 아니다. 기본 설정은 꺼짐이다. 이전 네 말차례 실험은 D-0169 검증 기록을 참고한다.
+
+`trait_method="contrast"`(D-0171)는 같은 상황의 두 반응과 상대 말에서 관찰 가능한 구분 단서를 발견한다. 다른 파일 또는 대화 묶음 전체의 상대 발화에서 갈래별 발견 예와 비슷한 장면 및 고정 표본을 섞어 최대 128쌍을 고른다. 첫 예측에는 실제 답이 없고, 별도 판정 모델에는 예측 라벨과 단서가 없다. 각 갈래 절반 초과 일치, 양쪽 지지, 둘 이상의 검토 대화 및 최소 한 갈래의 주제 이동이 있어야 한다. 고른 장면에만 해당하며 사람 식별 점수가 아니다. 최대 모델 호출은 조립 별도 3회이고, 기각 기록은 revision 안에만 남는다. 기존 scene_traits=true의 trait_method 기본값은 focus다.
+
+선택 설정 `[stages.s8] example_turns = N`(D-0173, 명세 §10.2, 기본 0)은 조립 뒤 같은 revision에 example-turns.json을 남긴다. 모델을 부르지 않는다. 승인된 생성용 원문에서 같은 사람의 연속 메시지를 한 말차례로 묶고, 개인정보 표시·제3자 발화·링크·사진 표기·30분 넘는 공백을 건너뛰지 않고 이어진 "상대 말차례 → 본인 말차례"만 후보로 삼는다(상대 250자, 본인 450자 이하, 같은 답 중복 제거). 원문이 전부 카톡이 아니면 본인 답 길이의 하위 75% 안에서만 뽑는다. 출처(textId)가 하나면 무작위로, 여럿이면 출처마다 돌아가며 N개를 뽑는다. 시드는 캐릭터 ID와 원문 revision의 해시다. 파일에는 뽑은 문답(msgId·user·reply), 길이 제한, 그리고 system(조립 지시문의 첫 문단 + 연결 문장 + 사실표)을 적는다. 대화 테스트와 G6 표본 대화(common/demo_chat.py의 Scene.opening)는 최신 프롬프트 revision에 이 파일이 있고 turns가 비어 있지 않으면 system을 시스템 프롬프트로 쓰고 문답을 이전 턴으로 넣는다. 없으면 기존처럼 long.md를 쓴다. long.md, G6 본문, S11 내보내기는 바꾸지 않는다.
+
+
 2026-10-29 보완(명세 §10.2): `stages/s8_prompts/source.py`가 승인 v1/v2 기획을 개인 식별용 레퍼런스·외모 축 없이 투영한다. `source-plan.json`에 입력 파일 SHA-256과 허용 필드를 고정한다. S8 모델 입력에 이 투영을 추가하고, 조립 시 ACTOR_IDENTITY·PERSONA / FACTS·PERSONA / VOICE·CHAPTERS는 정본으로 대체한다. v1에 없는 필드는 만들지 않고 말투는 기존 특질 시트로 보완한다. 모델 생성 전 정본+시스템+출력 규칙만으로도 short 상한을 넘으면 거절한다. 동결 쌍의 재개를 새 정본 사전 검사보다 먼저 판단한다. 생성할 네 섹션마다 최소24자 예산을 확보하지 못하면 호출 전에 거절한다. v1 말투는 dialogueHabits 다섯 항목을 모두 보존한다. 생성 뒤 전체 상한과 long/short 정렬 검사도 유지한다. 다른 선택·전환 섹션은 모델이 간결하게 작성하며 각 규칙을 적용하지 않을 조건과 자유 대화의 여지를 명시한다. 신규 tr/pv로만 실행한다.
 
 `resources/prompt-sections-v1.json`의 섹션 목록으로 긴·짧은 프롬프트를 조립한다. 긴 프롬프트의 시스템 규칙 섹션은 `systemRulesRef` 파일을 그대로 넣는다. `align`은 두 프롬프트의 섹션 헤더 집합이 같은지, 짧은 프롬프트가 `short_prompt_max_chars` 이내인지, 금지 표현이 없는지 확인한다. `probe`는 `voiceProbes`마다 두 프롬프트로 응답을 받고 판정 모델이 캐릭터 일치를 비교한다. 결과는 G6 페이지에 나란히 표시되며 자동 승인에 쓰지 않는다.
@@ -987,3 +998,48 @@ v1.28 변경(2026-11-08): S9 SNS 재작성을 흐름 뼈대 + 양쪽 다시 쓰�
 v1.29 변경(2026-11-08): 한소민 구성(학습용 짧은 프롬프트·관계·채널 배정·흐름 시드·작가 지침·검사기)을 S9에 추가했다(D-0138).
 
 v1.30 변경(2026-11-08): 학습용 짧은 프롬프트를 S10 평가 학습 모델 조건과 S11 서빙 기록에 연결했다(D-0139).
+
+## 원문 근거 표준 구현 (2026-11-11, 명세 원문 근거 표준 절, D-0174)
+
+- `evidence_source.py`: 순수 분리·표본 선정·근거 검사. 작성용 후보는 제한된 corpus 표본, 비교 원문은 제외한다.
+- `evidence_pipeline.py`: 승인 원천과 G0/G3/S7 해시 결속, 사실표·장면 고정, 추출 1회, 후보별 구조 검사, `evidence-packet.json` 및 `evidence-review.json` 저장, 기존 `evidence_compiler.compile_prompt` 호출. 실패 시 `CHECK_FAILED`, 성공 시 기존 G6 `AWAITING_HUMAN`. 후보의 의미적 타당성은 모델 점수로 대체하지 않는다.
+- `run_deck_s8`가 모티브 기본 경로에서 호출한다. V3 비교 실행은 명시적 설정만 허용한다. 예시 주입 설정은 표준 경로에서 허용하지 않는다.
+- G6 `evidenceReviewed: true` 요구, 원천·후보 해시와 컴파일 결과 재검증, 승인기록에 근거 자료 해시 포함. 자동 진행은 G6를 건너뛰지 않는다. 수정 요청은 기존 rework 경로로 새 불변 revision 생성.
+- 검증: 합성 원문으로 S0→G3→S7→S8→G6→시연 본문 연결, 비교 원문 유출·예시·낡은 승인·자동 승인 우회·누락근거·수정 재시도 회귀 검사. 실제 인물 품질 평가는 별도이며 이 구현 검증으로 대신하지 않는다.
+
+## 전체 원문 공정 구현 (명세 전체 원문 공정, D-0176)
+
+evidence_full_source.prepare_full_source는 안전 검사와 시간 경계로 나눈 모든 말차례를 chunk로 만들고 input/included/excluded coverage를 검증한다. 기본 24,000 JSON자 상한은 호출별 크기일 뿐 총량 표본 제한이 아니다. 최대 다섯 앞 말차례를 가능한 만큼 중첩하며 원문을 자르지 않는다. evidence_full_pipeline은 N개 discover, consolidate 1개, N개 audit 호출을 수행하고 단계별 JSON과 request hash를 저장한다. audit에는 모든 후보 결과가 있어야 하고 현재 chunk의 SUBJECT ID만 허용한다. 겹친 문맥의 상충 분류는 지지에서 제외한다. 후보 필드 다섯 개를 고정 문구로 조립하며 rule 요약은 v2 본문에 쓰지 않는다. evidence-review-v2가 coverage/auditCoverage/analysisArtifacts를 묶고 G6/시연에서 해시를 검증한다. 전체 읽기 누락, 미지원 근거, 반례, 예산 초과는 통과시키지 않는다. evidence_workers 기본2, 범위1~4; evidence_chunk_chars 기본24000, 범위6000~60000. 실험의 상한은 작업별 예산 원장으로 별도 지정한다.
+
+
+## 2026-11-11 evidence-v3 구현(명세 v1.33)
+
+evidence_atomic.py에서 unit의 SHA-256 순서로 약 1/4를 confirmation에 배정한다(최소 1, 총 최소 3 unit). 원자 형식은 section/function/dimension/trigger/behavior/exclusion/evidence다. audit 항목은 recordId/applicable/behavior/triggerReason/behaviorReason다. support는 조건 yes와 전체 행동 support에 한하며 context가 없거나 continuation의 next/followup이 없으면 unclear다. 중복 구간의 counter/unclear는 support를 제거한다. 구현 기본값은 발견 지지 2개 독립 unit+확인 지지 1개, 양쪽 counter 0이다. 이는 보수적 기계 필터이며 통계적 검증 기준은 아니다. 전수 대조란 모든 구간을 입력으로 읽힌다는 뜻이고 저장 인용은 후보당 구간별 지지 최대3/반례3/불명·범위밖2다. 관측 빈도 추정에는 쓰지 않는다. 한 번만 개발용 근거로 refine하고 모든 개발 구간을 reaudit한다. 확인 자료로 재수정하지 않는다. v1/v2는 명시 설정으로 재현 가능하며 evidence-v3는 선택 경로다. 전체 보류 결과로 기본은 evidence-v2를 유지한다.
+
+형식 재시도는 revision 전체 공유 상한 10회이며 파일 잠금으로 병렬 예약한다. 남은 기본 호출+남은 형식 재시도를 실행 전 예산에 확인한다. 성공 캐시는 별도 receipt 해시로 변경을 탐지한다. v3의 receipt 누락은 자동 재사용을 차단하며 v1/v2의 이전 캐시는 과거 호환 경로로 유지한다. 구체 자음 표기를 예시로 포함한 원자는 최종 조립에서 보류한다.
+
+
+## 2026-11-11 evidence-v4 구현(명세 v1.34)
+
+evidence_tendencies.py는 section/function/dimension/trigger/realization/linguisticLevel/exclusion/observability/evidence를 추출한다. linguisticLevel은 morphology/syntax/discourse/lexical_register/turn_management다. 적용 조건이 prior_context가 아닌 후보는 보류한다. targets는 원문의 실제 응답 ID·이전 USER 목록·이전 SUBJECT를 고정한다. 판독은 responseTurnId/conditionTurnId와 각 원문 인용, applicability, functionMatch, formMatch를 반환한다. 서로 다른 기능·형식의 부분 지지는 공동 지지로 세지 않는다. 개발 공동 지지 2 unit·확인 1 unit은 구현상 반복 필터이며 품질 합격선이 아니다. variation 또는 unclear가 있으면 mixed로 남기며 조건부 선택지와 변이 한계를 조립한다. 지지 인용 수는 확률로 계산하지 않는다.
+
+발견27/확인25처럼 원래 청크 안에서 unit이 분할될 수 있으므로 단계별 청크 수는 전체32와 다를 수 있다. 계산은 2×developmentChunks+confirmationChunks+1과 공유 형식 재시도10회다. v4도 캐시 receipt와 전체 분석 해시를 검증한다. compiler가 바뀌면 이전 CHECK_FAILED revision을 재사용하지 않고 새 revision을 만든다. G6는 AWAITING_HUMAN이며 자동 승인하지 않는다. 시연 비교는 검사된 실제 생성 본문을 사용하고 불변 facts·8섹션·무예시·조건 보존을 확인한다.
+
+실행 보완: v4의 validate_transport는 후보별 정상 items와 오류 invalidItems를 분리한다. 오류의 원본과 이유를 그대로 보존하고 invalidCount를 근거 상태에 반영한다. 오류 인용을 고쳐 지지로 승격하지 않으며, 캐시를 읽을 때도 동일한 정규화가 멱등적으로 적용된다.
+
+## 2026-11-11 evidence-v5 구현(명세 v1.35)
+
+evidence_usage.py는 v4 실행기의 profile 훅으로 호출·카드 조립·집계·검토 메타데이터만 교체한다. 후보는 usageAxis 필드를 추가하고 audit item은 conditionBasis(explicit_user_act/visible_turn_sequence/response_derived/unknown)를 추가한다. 인용/말차례 오류는 invalidItems에 격리하며 조건 근거 미판정/응답 역산은 집계에서 unclear가 된다. evidence-usage-coverage.json과 review.usageCoverage는 각 축의 candidates/retained/status를 담는다. analysisArtifacts에 포함하여 변조를 검출한다. schemaVersion=evidence-review-v5, compiler=evidence-pipeline-v5이며 facts/role/scene와 무예시 계약은 pv6와 동일하다. CLI·시연·패키지·서비스 내보내기는 v5를 인식하고 이전 명시 버전을 유지한다.
+
+
+## 2026-11-11 pv6 현행 표준 확정(D-0180)
+
+version_for/selected·CLI 계획·motif_plan_calls·factory.example.toml의 기본값을 evidence-v4로 통일한다. 명시적 evidence-v5와 해당 산출물 읽기는 유지한다. 로컬 익준 미리보기는 순수 pv6 compose를 사용하고 임시 슬랭 지시를 제거한다. 기준 프롬프트 SHA-256과 실제 미리보기 본문 일치를 검증한다.
+
+
+## 2026-11-11 프론트 생성 경로와 대화 보존(D-0181)
+
+명세 v1.37에 따라 SourcePack/초안의 chapterTemplate 확장, S3/S8/챕터 매핑과 UI 선택을 연결한다. common.demo_chat의 provider는 명시적 demo_chat 설정을 우선하고 미설정 시 설정된 text 공급자를 사용한다. 로컬 Vertex와 서비스 인증 제한은 유지한다. chat_history API는 안전한 세션 ID·메시지 검증·동시 수정 충돌 검사를 적용한다. 브라우저 임시 기록을 우선 보존하여 이관하고 저장 오류를 표시한다. 실제 상태에서 진행률을 계산한다.
+
+
+D-0181 상세: `GET /api/characters/{cid}/chat/sessions`, `GET/PUT .../{sid}`는 UUID 세션을 `chat-history/{sid}.json`에 원자 저장한다. POSIX 디렉터리 잠금·O_NOFOLLOW·revision 충돌(409)을 사용한다. 저장 한도는 2MiB/2,000메시지/메시지1Mi자이며, 새 모델 입력은 16,000자로 제한한다. 과거의 긴 메시지는 보관과 복원 대상으로 유지한다. UI는 임시 기록을 이관하고 새 대화/이전 대화 선택/저장 실패 재시도를 제공하며 충돌본을 새 세션으로 보존한다. 저장 API는 모델 호출과 분리한다. 모델 설정은 explicit demo_chat→configured text→legacy DEFAULT 순서이며 서버 모드의 Vertex 제한은 그대로다. FRIEND_CHAT/INTERVIEW 자동 표본은 장면별 3개×4턴을 사용하며 평가 질문은 최종 페르소나에 주입하지 않는다. 기존 FAN_CALL/FAMILY_CALL 표본 규칙은 유지한다.

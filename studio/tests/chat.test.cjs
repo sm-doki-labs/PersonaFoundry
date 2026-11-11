@@ -21,6 +21,7 @@ const META = {
 function fakeServer(opts) {
   const o = Object.assign({ meta: META }, opts || {});
   const calls = [];
+  const sessions = new Map();
   const fail = [];
   const held = [];
   let hold = false;
@@ -32,6 +33,17 @@ function fakeServer(opts) {
     if (method === 'GET' && url === '/api/characters/' + CID + '/chat/meta') {
       if (o.metaFail && o.metaFail.length) { const f = o.metaFail.shift(); if (f === 'network') throw new TypeError('Failed to fetch'); return json(f, { detail: '잠깐 문제가 있었어요.' }); }
       return json(200, o.meta);
+    }
+    const root = '/api/characters/' + CID + '/chat/sessions';
+    if (url === root) return json(200, { sessions: [...sessions.values()] });
+    if (url.startsWith(root + '/')) {
+      const id = url.split('/').pop(), old = sessions.get(id);
+      if (method === 'GET') return old ? json(200, old) : json(404, {});
+      if (old && JSON.stringify(old.messages) === JSON.stringify(body.messages)) return json(200, old);
+      if ((old ? old.revision : 0) !== body.revision) return json(409, {});
+      const data = { id, revision: body.revision + 1, messages: body.messages };
+      sessions.set(id, data);
+      return json(200, data);
     }
     if (method === 'GET') return json(404, { detail: 'Not Found' });
     if (method === 'POST' && url === '/api/characters/' + CID + '/chat') {
@@ -118,17 +130,20 @@ test('send: POSTs the whole conversation, keeps the reply with its time, and ign
   assert.equal(server.posts().length, 2);
 });
 
-test('conversation stays in this tab only: sessionStorage restores it and 새 대화 clears it', async () => {
+test('sessionStorage remembers the selected conversation and 새 대화 preserves the server history', async () => {
   const server = fakeServer();
   const storage = memoryStorage();
   const chat = await open(server, { storage });
   await chat.send('안녕하세요');
   const again = await open(server, { storage });
   assert.deepEqual(talk(again), ['user:안녕하세요', 'assistant:답: 안녕하세요']);
-  again.reset();
+  const first = again.state.sessionId;
+  await again.reset();
   assert.equal(again.state.messages.length, 0);
-  assert.equal(storage.map.size, 0);
-  assert.equal(server.posts().length, 1, 'nothing is saved on the server');
+  assert.equal(storage.map.size, 1);
+  assert.equal(await again.selectSession(first), true);
+  assert.deepEqual(talk(again), ['user:안녕하세요', 'assistant:답: 안녕하세요']);
+  assert.equal(server.posts().length, 1, 'history operations never invoke the model');
 });
 
 test('scenario autoplay sends turns one by one in order, each after the previous reply', async () => {

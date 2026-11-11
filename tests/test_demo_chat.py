@@ -194,3 +194,34 @@ def test_guard_exhaustion_and_atomic_samples(setup):
         demo.run_samples(ctx, CID)
     assert len(fake.requests) == 6
     assert not (folder / "s8-chapters/cs2/samples.json").exists()
+
+
+def test_compiled_motif_scene_is_used_verbatim(setup):
+    _, folder, _, _ = setup
+    ready(folder)
+    put(folder / "s8-prompts/pv10/text-deck-binding.json", {"compiler": "motif-assembler-v3"})
+    scene = demo.Scene.read(folder)
+    assert scene.compose() == "유리의 말투"
+    assert scene.readiness()["ready"]
+
+
+def test_example_turns_are_sent_as_earlier_turns(setup):
+    _, folder, fake, client = setup
+    ready(folder)
+    examples = folder / "s8-prompts/pv10/example-turns.json"
+    put(
+        examples,
+        dict(system="정체성과 사실", turns=[dict(msgId="m1", user="밥 먹었어?", reply="ㅇㅇ")]),
+    )
+    body = dict(messages=[dict(role="user", content="뭐 해?")])
+    assert client.post(URL, json=body).status_code == 200
+    assert [(m.role, m.content) for m in fake.requests[-1].messages] == [
+        ("system", "정체성과 사실"),
+        ("user", "밥 먹었어?"),
+        ("assistant", "ㅇㅇ"),
+        ("user", "뭐 해?"),
+    ]
+    put(examples, dict(system="정체성과 사실", turns=[]))
+    assert client.post(URL, json=body).status_code == 200
+    sent = fake.requests[-1].messages
+    assert len(sent) == 2 and sent[0].content == demo.Scene.read(folder).compose()

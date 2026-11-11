@@ -55,6 +55,7 @@ from character_factory_poc.stages.s0_source import parse
 from character_factory_poc.stages.s3_plan.common import new_character
 from character_factory_poc.web import reads
 from character_factory_poc.web.errors import WebError
+from character_factory_poc.web.launch_validation import validate_source_launch
 
 EXTENSIONS = {".txt", ".srt", ".vtt", ".csv", ".json"}
 FIELDS = ("textId", "kind", "register", "subjectSpeaker", "userSpeaker", "date", "sourceUrl")
@@ -80,7 +81,7 @@ class Draft(Strict):
     usageBasis: UsageBasis = Field(default_factory=UsageBasis)
     modelMode: Literal["PROMPT_ONLY", "BIND_EXISTING", "TRAIN"] = "PROMPT_ONLY"
     autoReview: bool = True
-    chapterTemplate: Literal["FAN_CALL", "FAMILY_CALL"] | None = None
+    chapterTemplate: Literal["FAN_CALL", "FAMILY_CALL", "FRIEND_CHAT", "INTERVIEW"] | None = None
     knownFacts: KnownFacts = Field(default_factory=KnownFacts)
 
 
@@ -195,17 +196,39 @@ def source_text(folder, item):
     )
 
 
+def kakao_layout(raw):
+    """Recognize export structure, not mentions of Kakao inside an interview."""
+    raw = raw.lstrip("\ufeff")
+    if raw.startswith(('"', "[")):
+        try:
+            data = json.loads(raw)
+            if isinstance(data, str):
+                raw = data
+            elif isinstance(data, list) and all(isinstance(x, str) for x in data):
+                raw = "\n".join(data)
+        except ValueError:
+            pass
+    for line in raw.splitlines():
+        if (
+            parse._PC_MSG.match(line)
+            or parse._MOBILE_MSG.match(line)
+            or re.match(r"^date,\s*user,\s*message(?:,|$)", line, re.I)
+        ):
+            return True
+    return False
+
+
 def suggested_kind(filename, raw):
-    hint = filename.lower() + " " + raw[:180].lower()
-    if re.search(
-        r"카카오톡|카톡|kakao|date,\s*user,\s*message|\[(?:오전|오후) \d|오[전후] \d+:\d+,", hint
-    ):
-        return "KAKAO_EXPORT"
-    if Path(filename).suffix.lower() in {".vtt", ".srt"} or re.search(
-        r"브이로그|vlog|녹취|자막|일상", hint
-    ):
+    if Path(filename).suffix.lower() in {".vtt", ".srt"}:
         return "TRANSCRIPT"
-    if re.search(r"기사|article|보도자료", hint):
+    if kakao_layout(raw):
+        return "KAKAO_EXPORT"
+    name = filename.lower()
+    if re.search(r"카카오톡|카톡|kakao", name) or Path(filename).suffix.lower() == ".csv":
+        return "KAKAO_EXPORT"
+    if re.search(r"브이로그|vlog|녹취|자막|일상|transcript|subtitle|casual", name):
+        return "TRANSCRIPT"
+    if re.search(r"기사|article|보도자료|news", name):
         return "ARTICLE"
     return "INTERVIEW"
 
@@ -322,7 +345,16 @@ def install_source_routes(app, conf, jobs):
         result = []
         for folder in reads.visible_folders(conf.root):
             draft = reads.read_json_file(folder / "s0-source/intake.json")
-            if not draft or draft.get("jobId") or jobs.active_for(folder.name):
+            # Only resumable upload drafts belong here; old intake formats are
+            # left untouched and remain visible through the character list.
+            if (
+                not isinstance(draft, dict)
+                or not isinstance(draft.get("files"), list)
+                or not isinstance(draft.get("subject"), dict)
+                or not {"characterId", "usageBasis"}.issubset(draft)
+                or draft.get("jobId")
+                or jobs.active_for(folder.name)
+            ):
                 continue
             state, _ = reads.read_state(folder)
             if reads.is_draft(draft, state.get("stages", {}).values()):
@@ -431,6 +463,12 @@ def install_source_routes(app, conf, jobs):
         if spec.register is None:
             candidate["register"] = default_register(spec.kind)
         detected, subject, user = [], None, None
+        if (
+            spec.kind != "KAKAO_EXPORT"
+            and kakao_layout(raw)
+            and Path(item["filename"]).suffix.lower() not in {".srt", ".vtt"}
+        ):
+            problems.append("카톡 내보내기 형식이에요. 파일 종류를 카톡으로 바꿔 주세요.")
         if not problems:
             try:
                 messages = parse.source_messages(spec, raw, display)
@@ -507,6 +545,7 @@ def install_source_routes(app, conf, jobs):
             problems, ready = summary(draft)
             if not ready:
                 raise WebError(409, "; ".join(problems) or "올린 원문을 모두 확인해 주세요.")
+            validate_source_launch(load_config(conf.root, conf.config_path))
             texts, photos = [], []
             for item in draft["files"]:
                 try:

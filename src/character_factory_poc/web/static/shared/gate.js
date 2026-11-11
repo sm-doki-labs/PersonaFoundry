@@ -434,6 +434,9 @@
       hint: '표본 응답을 먼저 보고, 필요하면 프롬프트 원문을 열어 확인해요. 괜찮으면 승인하고, 아니면 고칠 점을 적어 주세요.',
       // 표본이 없을 때 '표본 응답을 먼저 보고'라고 하지 않는다. 대신 무엇을 보면 되는지 말한다.
       hintFor: function (items) {
+        if (items.evidenceReview) {
+          return '원문 근거를 펼쳐 읽고 규칙과 적용 조건을 확인해 주세요. 구조 검사만 통과했으며, 의미상 근거가 충분한지는 사람이 검토해요. 확인란을 선택해야 승인할 수 있어요.';
+        }
         if (list(items.samples).length || list(items.probes).length) {
           return '대화 표본을 먼저 읽고, 필요하면 프롬프트 원문을 열어 확인해요. 괜찮으면 승인하고, 아니면 고칠 점을 적어 주세요.';
         }
@@ -2238,6 +2241,63 @@
           }).join('') + '</div>' : '') + '</li>';
       }).join('') + '</ul></section>';
   }
+  var EVIDENCE_SECTION_KO = {
+    FACTS: '기본 사실', LIFE_AND_TASTES: '생활과 취향', DISPOSITION: '성향',
+    WANTS_AND_FEARS: '바라는 것과 두려움', READING_AND_TENSION: '상황 해석과 긴장',
+    CHOICES: '선택 기준', VOICE: '말투', KNOWS_AND_LIMITS: '아는 것과 한계'
+  };
+  function evidenceText(value) {
+    return typeof value === 'string' ? value : joinList(value, '\n');
+  }
+  function evidenceHistory(record) {
+    if (!Array.isArray(record.history)) return evidenceText(record.history).trim();
+    var turns = record.history.slice();
+    var last = turns[turns.length - 1];
+    // The source history includes the USER context, which has its own field below.
+    if (last && last.speaker === 'USER' && last.text === record.context) turns.pop();
+    return turns.map(function (turn) {
+      if (typeof turn === 'string') return turn;
+      if (!turn || typeof turn.text !== 'string') return '';
+      var speaker = { USER: '상대', SUBJECT: '본인' }[turn.speaker] || '화자 미상';
+      return speaker + ': ' + turn.text;
+    }).filter(Boolean).join('\n');
+  }
+  function evidenceCards(items) {
+    var review = items.evidenceReview;
+    if (!review) return '';
+    var records = list(review.records);
+    var cards = list(review.cards);
+    return '<section class="gate-section"><h2>원문 근거와 적용 조건</h2>' +
+      '<p class="section-sub">자동 구조 검사만 통과했어요. 원문이 규칙과 적용 조건을 의미상 뒷받침하는지는 사람이 확인해야 해요. 원문 대화는 내부 검토용이에요.</p>' +
+      (cards.length ? cards.map(function (card) {
+        return '<article class="doc"><h3>' + esc(EVIDENCE_SECTION_KO[card.section] || card.section || '그 밖의 특질') + '</h3>' +
+          facts([['규칙', card.rule], ['적용 조건', card.trigger], ['첫 반응', card.first],
+            ['반응 전환', card.shift], ['멈추는 조건', card.stop], ['적용 한계', card.limit]]) +
+          '<details class="gate-more"><summary>원문 근거 ' + list(card.evidence).length + '개 펼쳐 읽기</summary>' +
+          list(card.evidence).map(function (id) {
+            var record = records.find(function (r) { return r && r.id === id; });
+            if (!record) return '<p class="qa-note is-bad">연결된 원문 근거를 찾지 못했어요: ' + esc(id) + '</p>';
+            var fields = [['앞선 맥락', record.context], ['본인 반응', record.target],
+              ['상대의 다음 반응', record.next], ['본인의 후속 반응', record.followup]];
+            var history = evidenceHistory(record);
+            var visible = fields.map(function (f) { return evidenceText(f[1]).trim(); });
+            if (history && visible.indexOf(history) < 0 && history !== visible.filter(Boolean).join('\n')) {
+              fields.unshift(['이전 대화', history]);
+            }
+            return '<div class="doc"><h4>원문 ' + esc(id) + '</h4>' +
+              facts([['대화 묶음', record.unit]]) + fields.map(function (f) {
+                return '<span class="fact-label">' + esc(f[0]) + '</span><pre>' +
+                  esc(evidenceText(f[1]) || '기록 없음') + '</pre>';
+              }).join('') + '</div>';
+          }).join('') + '</details></article>';
+      }).join('') : '<p class="empty">검토할 규칙이 없어요. 보류 이유와 프롬프트 원문을 확인해 주세요.</p>') +
+      (list(review.held).length ? '<details class="gate-more"><summary>보류한 규칙 ' + list(review.held).length + '개</summary>' +
+        list(review.held).map(function (held) {
+          return facts([['후보 위치', typeof held.index === 'number' ? held.index + 1 : held.index], ['보류 이유', held.reason]]);
+        }).join('') + '</details>' : '') +
+      (isRecord() ? '' : '<p><label class="plan-toggle"><input type="checkbox" data-evidence-reviewed>' +
+        '원문 근거와 적용 조건을 읽고 확인했어요</label></p>') + '</section>';
+  }
   function renderPrompts(items) {
     var long = items.long || {};
     var short = items.short || {};
@@ -2270,7 +2330,7 @@
         '</h3><pre>' + esc(p.text || '') + '</pre></div>';
     };
     return (
-      samples + inferredCards(items) +
+      evidenceCards(items) + samples + (items.evidenceReview ? '' : inferredCards(items)) +
       (probes
         ? '<section class="gate-section"><h2>' + (samples ? '긴·짧은 프롬프트 비교' : '표본 응답') + '</h2>' +
           '<p class="section-sub">검토 모델의 판정은 참고용이에요. 승인은 사람이 해요.</p>' +
@@ -2308,6 +2368,14 @@
 
   function buildPrompts(decision) {
     var answer = { decision: decision };
+    if (decision === 'APPROVE' && state.items.evidenceReview) {
+      var ack = q('[data-evidence-reviewed]');
+      if (!ack || ack.checked !== true) {
+        focusField(ack);
+        throw Error('원문 근거와 적용 조건을 읽고 확인란을 선택해 주세요.');
+      }
+      answer.evidenceReviewed = true;
+    }
     if (decision === 'REQUEST_CHANGES') {
       var note = q('[data-prompt-note]').value.trim();
       if (!note) { focusField(q('[data-prompt-note]')); throw Error('아래 수정 요청 칸에 고칠 점을 적어 주세요.'); }

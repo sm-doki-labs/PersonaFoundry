@@ -57,6 +57,8 @@ class SourceQuotes:
     pattern: re.Pattern[str]
 
     def public_prompt(self, text: str) -> str:
+        # V3의 마지막 칸은 검토용 실제 대화다. 짧은 발화도 공개 패키지로 복사하지 않는다.
+        text = text.partition("\n\n[자료에서 고른 발화 참고]\n")[0]
         body = "\n".join(
             line
             for line in text.splitlines()

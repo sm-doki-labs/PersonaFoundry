@@ -14,7 +14,7 @@ from pydantic import Field
 
 from character_factory_poc.common.schema import register
 from character_factory_poc.contracts.common import ArtifactRef, Strict
-from character_factory_poc.contracts.source import SubjectKind
+from character_factory_poc.contracts.source import ChapterTemplate, SubjectKind
 
 
 class PackageFile(Strict):
@@ -174,7 +174,7 @@ class TwinRelease(Strict):
     usageScope: str
     consentRecorded: bool
     modelMode: Literal["TRAIN", "BIND_EXISTING", "PROMPT_ONLY"]
-    chapterTemplate: Literal["FAN_CALL", "FAMILY_CALL"]
+    chapterTemplate: ChapterTemplate
     startButtonLabel: str
     voiceId: UUID | None = None
     # OpenAI 호환 서빙에서 요청 model로 쓰는 공개 별칭. 주소나 키를 받지 않는다.

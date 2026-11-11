@@ -305,3 +305,11 @@ def test_required_facts_without_known_facts(tmp_path, stated):
             run_s3_twin(ctx, cid)
         assert all(f"knownFacts.{key}" in str(exc.value) for key in ("age", "gender", "job"))
         assert ctx.state(cid).gate("G3").status == "PENDING"
+
+
+def test_anonymous_counterpart_label_is_not_a_person_name(tmp_path):
+    from character_factory_poc.stages.s3_plan.check_v2 import name_guard
+    from character_factory_poc.stages.s3_plan.twin import _guard
+
+    rows = [{"name": name, "speaker": "USER"} for name in ["상대", "상대방", "가상화자명"]]
+    assert _guard(tmp_path, rows, "주인공") == name_guard(["가상화자명"])

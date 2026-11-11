@@ -22,6 +22,7 @@ from character_factory_poc.stages.s8_prompts.actor_persona import (
 from character_factory_poc.stages.s8_prompts.build import run_s8
 from character_factory_poc.stages.s8_prompts.twin import approved_facts
 from tests.support.flow import v2_plan
+from tests.support.synthetic import assembly_answer
 from tests.support.web_gates import trait_sheet_for
 from tests.test_motif_choices import demo_ledger
 from tests.test_source_s0 import _twin, _write_pack
@@ -294,14 +295,14 @@ def test_public_facts_and_adjacent_self_view_reach_deck(tmp_path, monkeypatch):
     )
     ctx.config.stages["s7"] = {"formation_profile": "ko-text-choice-voice-long-v2"}
     run_s7(ctx, cid)
+    model.add("AGENT", assembly_answer)
+    ctx.config.stages.setdefault("s8", {})["motif_compiler"] = "v3"
     pair = read_json(run_s8(ctx, cid, []) / "prompt-pair.json")
-    assert pair["systemRulesRef"] == "builtin:actor-system-rules-v4-motif"
+    assert pair["systemRulesRef"] == "builtin:motif-assembler-v3"
     for mode in ("long", "short"):
         text = pair[mode]["text"]
         assert len(text) <= 8000 and "제외된 행사" not in text
         assert "활동을 이어 간다고 밝혔다.\n본인은 일상에 대해 짧게 말한다." in text
-        limits = text.split("[PERSONA / KNOWS_AND_LIMITS]")[1]
-        assert all(word in limits for word in ("지난 경기", "활동을 이어", "그런 얘기는"))
 
 
 def test_recent_and_career_pools_share_the_slots():

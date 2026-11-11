@@ -10,7 +10,7 @@ from character_factory_poc.providers.fake_vision import FakeVisionModel, all_pas
 from character_factory_poc.stages.s6_actions.catalog import VIDEO_TIERS
 from character_factory_poc.web.app import create_app
 from tests.support.flow import make_ctx
-from tests.support.synthetic import prompter_output
+from tests.support.synthetic import assembly_answer
 from tests.support.web_gates import trait_sheet_for
 from tests.test_chapter_start import _start
 from tests.test_scene_flow import agent_input, backgrounds, poses, scenes
@@ -31,7 +31,10 @@ def wait(client, job, expected="succeeded"):
 
 
 def test_light(tmp_path, monkeypatch):
-    ctx, agents = make_ctx(tmp_path, '[stages.s6]\nvideo_tier="max"')
+    # Historical V3 auto-approval flow; the default evidence gate is covered in test_oc2_flow.
+    ctx, agents = make_ctx(
+        tmp_path, '[stages.s6]\nvideo_tier="max"\n[stages.s8]\nmotif_compiler="v3"'
+    )
     client = TestClient(create_app(tmp_path))
     files = _pack(tmp_path).parent
     cid = client.post(
@@ -103,7 +106,7 @@ def test_light(tmp_path, monkeypatch):
         "s0": _good_digest,
         "s3-twin": _answer,
         "s7": lambda req: trait_sheet_for(ctx, cid),
-        "s8": lambda req: prompter_output(),
+        "s8": assembly_answer,
         "s8c": lambda req: _start().model_dump() | {"characterId": cid},
         "s4a": scoped(backgrounds),
         "s4b-scene": scenes,

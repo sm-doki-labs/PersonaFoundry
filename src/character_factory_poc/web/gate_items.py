@@ -742,6 +742,8 @@ def prompts(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict
     folder = Path(char_dir) / stage_dir / rev
     pair = read_json(folder / "prompt-pair.json")
     probe = read_json(folder / "prompt-probe.json")
+    # Private dialogue stays in this gate view, pinned to the displayed S8 revision.
+    evidence_review = read_json(folder / "evidence-review.json")
     if pair is None:
         return _empty("prompts", ["prompt-pair.json이 없다. S8을 먼저 돌린다"])
     bundle = read_json(folder / "persona-bundle.json")
@@ -778,8 +780,12 @@ def prompts(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict
         "judgeModel": (probe or {}).get("judgeModel", ""),
         "probeNote": (probe or {}).get("note", ""),
         "traitSheet": trait,
+        "evidenceReview": evidence_review,
         "helper": (
-            "긴 프롬프트·짧은 프롬프트·표본 응답을 비교하고 승인하거나 고칠 점을 적는다. "
+            "자동 구조 검사만 통과했어요. 원문 근거가 규칙과 적용 조건을 의미상 뒷받침하는지는 "
+            "사람이 읽고 확인해야 해요. 원문은 내부 검토용이에요."
+            if evidence_review is not None
+            else "긴 프롬프트·짧은 프롬프트·표본 응답을 비교하고 승인하거나 고칠 점을 적는다. "
             "판정은 참고용이고 승인은 사람이 한다."
         ),
     }

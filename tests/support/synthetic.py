@@ -286,3 +286,11 @@ def scout_features(ranking: dict) -> dict:
         "features": feats,
         "notes": "머리색은 시기마다 달라 확신도를 낮췄다.",
     }
+
+
+def assembly_answer(req):
+    packet = json.loads(req.messages[-1].content)
+    return {
+        "frame": "화면의 역할에서 상대에게 직접 답한다.",
+        "ids": [next(iter(packet["examples"]))],
+    }

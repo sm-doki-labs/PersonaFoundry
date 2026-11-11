@@ -445,6 +445,38 @@ def _step(
     gate_ok = stage.gate is None or state.gate(stage.gate).status == "APPROVED"
     ran = False
     reusable = st.status in {"APPROVED", "SKIPPED"} or (st.status == "AWAITING_HUMAN" and gate_ok)
+    if sid == "s8" and (reusable or st.status == "AWAITING_HUMAN"):
+        from character_factory_poc.stages.s8_prompts.evidence_pipeline import (
+            is_evidence,
+            verify_review,
+        )
+
+        prompt_dir = ctx.character_dir(cid) / "s8-prompts" / str(st.currentRev)
+        if is_evidence(prompt_dir):
+            try:
+                verify_review(ctx, cid, prompt_dir, approved=st.status == "APPROVED")
+            except (OSError, ValueError, KeyError, TypeError):
+                log.add(
+                    "s8: 검토한 원천 또는 설정이 변경됐다. 해당 원천을 바로잡고 S8을 다시 생성한다"
+                )
+                log.blocked.append("s8")
+                return "break"
+    if reusable and sid == "s8c":
+        from character_factory_poc.common.canonical import sha256_file
+        from character_factory_poc.common.store import read_json
+        from character_factory_poc.stages.s8_prompts.evidence_pipeline import is_evidence
+
+        prompt_rev = state.stage("s8").currentRev
+        prompt_dir = ctx.character_dir(cid) / "s8-prompts" / str(prompt_rev)
+        if is_evidence(prompt_dir):
+            pinned = ctx.character_dir(cid) / "s8-chapters" / str(st.currentRev) / "inputs.json"
+            inputs = read_json(pinned) if pinned.is_file() else {}
+            pair_path = prompt_dir / "prompt-pair.json"
+            reusable = (
+                pair_path.is_file()
+                and inputs.get("promptRevision") == prompt_rev
+                and inputs.get("promptPairSha256") == sha256_file(pair_path)
+            )
     if reusable and (not opt.video_only or _matches_video_scope(ctx, cid, sid, st.currentRev)):
         log.add(f"{sid}: 이미 {st.status}({st.currentRev}) — 건너뜀")
     elif st.status == "AWAITING_HUMAN" and stage.gate:
@@ -528,12 +560,21 @@ def _step(
     # 관문 처리: 자동 승인 플래그가 없으면 기다리는 관문으로 모으고 다른 갈래를 계속 진행한다
     state = ctx.state(cid)
     gate = stage.gate
-    if auto_review and sid == "s8":
+    evidence_review = False
+    if sid in {"s8", "s8c"} and state.gate("G6").rev:
+        from character_factory_poc.stages.s8_prompts.evidence_pipeline import is_evidence
+
+        evidence_review = is_evidence(ctx.character_dir(cid) / "s8-prompts" / state.gate("G6").rev)
+    if auto_review and sid == "s8" and not evidence_review:
         gate = None  # 챕터 설정과 대화 표본까지 준비된 뒤 프롬프트를 승인한다.
     if auto_review and sid == "s8c" and state.stage(sid).status == "APPROVED":
         gate = "G6"
     if gate and state.gate(gate).status == "AWAITING_HUMAN":
-        if opt.video_only:
+        if gate == "G6" and evidence_review:
+            log.add("G6: 원문 근거와 적용 조건 검토 대기")
+            if gate not in log.waiting:
+                log.waiting.append(gate)
+        elif opt.video_only:
             approve_gate(
                 ctx,
                 cid,

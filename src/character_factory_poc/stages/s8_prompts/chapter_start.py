@@ -28,6 +28,53 @@ from character_factory_poc.stages.s7_traits.check import _plan_speech_level
 
 QUOTES = re.compile(r"[\"'“”‘’「」]")
 
+# 선택한 관계·채널·진행 주체는 생성 모델이 다른 장면으로 바꾸지 않는다.
+_SCENE_FRAMES = {
+    "FRIEND_CHAT": {
+        "sceneFacts": [
+            "상대는 오래된 친구다.",
+            "인물과 상대는 메신저에서 문자 메시지를 주고받는다.",
+        ],
+        "sceneBoundaries": [
+            "메신저에 보낼 인물의 말만 쓰고 해설·행동 지문·메모를 쓰지 않는다.",
+            "확인되지 않은 공동 기억이나 개인사를 만들지 않는다.",
+        ],
+        "relationship": {
+            "addresseeStance": (
+                "오래된 친구로 대하되 기획의 말높임을 따른다. "
+                "친구라는 이유만으로 반말이나 특정 호칭을 강제하지 않는다."
+            ),
+            "entryPosture": ["오래된 친구와 메신저 메시지를 주고받고 있다."],
+            "presenceReason": "오래된 친구와 메신저로 대화하고 있다.",
+            "initiativePolicy": (
+                "서로 일상 주제를 꺼내거나 상대의 이야기에 답할 수 있다. "
+                "답이 늦거나 상대가 마무리하려 하면 재촉하지 않는다."
+            ),
+            "sceneWant": "친구와 지금 나누고 싶은 이야기를 편하게 주고받는다.",
+        },
+    },
+    "INTERVIEW": {
+        "sceneFacts": [
+            "상대는 인터뷰를 진행하는 질문자다.",
+            "인물은 인터뷰 대상이며 질문자가 정한 주제와 질문에 답한다.",
+        ],
+        "sceneBoundaries": [
+            "인물의 답변만 쓰고 질문자의 대사·해설·행동 지문을 대신 쓰지 않는다.",
+            "확인되지 않은 경력이나 개인사를 만들지 않는다.",
+        ],
+        "relationship": {
+            "addresseeStance": "상대를 인터뷰 질문자로 대하며 기획의 말높임을 따른다.",
+            "entryPosture": ["질문자가 진행하는 인터뷰에 응답자로 참여하고 있다."],
+            "presenceReason": "질문자가 진행하는 인터뷰에서 질문에 답하기 위해 참여한다.",
+            "initiativePolicy": (
+                "질문자가 주제와 진행 순서를 정하고 인물은 질문에 답한다. "
+                "질문이 불명확할 때만 확인하며 다음 질문을 대신 만들거나 진행을 맡지 않는다."
+            ),
+            "sceneWant": "질문자가 묻는 내용을 이해하고 확인된 범위에서 답한다.",
+        },
+    },
+}
+
 
 def plan_calls() -> list[CallPlan]:
     return [
@@ -149,6 +196,19 @@ def _fan_call_frame(out: ChapterStartSet, template: str | None, name: str) -> Ch
     return out
 
 
+def _scene_frame(out: ChapterStartSet, template: str | None, name: str) -> ChapterStartSet:
+    frame = _SCENE_FRAMES.get(template)
+    if frame is None:
+        return _fan_call_frame(out, template, name)
+    for ch in out.chapters:
+        ch.sceneFacts = list(frame["sceneFacts"])
+        # 기존 경계도 보존하되 계약의 최대 세 칸을 지킨다.
+        ch.sceneBoundaries = [" ".join(ch.sceneBoundaries), *frame["sceneBoundaries"]]
+        for key, value in frame["relationship"].items():
+            setattr(ch.relationship, key, list(value) if isinstance(value, list) else value)
+    return out
+
+
 def run_chapter_start(ctx: Context, cid: str) -> Path:
     from character_factory_poc.stages.s8_prompts.build import load_latest_trait_sheet
 
@@ -179,6 +239,11 @@ def run_chapter_start(ctx: Context, cid: str) -> Path:
             .joinpath("chapter_start_fan.md")
             .read_text("utf-8")
         )
+    elif template in _SCENE_FRAMES:
+        inputs["scene-template"] = {
+            "chapterTemplate": template,
+            **_SCENE_FRAMES[template],
+        }
     result = run_agent(
         AgentSpec("chapter_start", "chapter-start-v1", "s8c", max_check_retries=1),
         rev_dir / "workspace",
@@ -191,15 +256,24 @@ def run_chapter_start(ctx: Context, cid: str) -> Path:
     )
     if not result.ok:
         raise SystemExit("챕터 시작 설정 검사 실패:\n- " + "\n- ".join(result.problems))
-    out = _fan_call_frame(result.output, template, plan.name)
+    out = _scene_frame(result.output, template, plan.name)
     write_once_json(rev_dir / "chapter-start.json", dump(out))
+    pinned_inputs = {
+        "planRev": plan.planRev,
+        "traitSheet": sheet_path.relative_to(char_dir).as_posix(),
+    }
+    from character_factory_poc.stages.s8_prompts.evidence_pipeline import is_evidence
+
+    prompt_rev = ctx.state(cid).stage("s8").currentRev
+    prompt_dir = char_dir / "s8-prompts" / str(prompt_rev)
+    if is_evidence(prompt_dir):
+        from character_factory_poc.common.canonical import sha256_file
+
+        pinned_inputs.update(
+            promptRevision=prompt_rev, promptPairSha256=sha256_file(prompt_dir / "prompt-pair.json")
+        )
     (rev_dir / "inputs.json").write_text(
-        json.dumps(
-            {"planRev": plan.planRev, "traitSheet": sheet_path.relative_to(char_dir).as_posix()},
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
+        json.dumps(pinned_inputs, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     write_manifest(rev_dir)
     return rev_dir / "chapter-start.json"

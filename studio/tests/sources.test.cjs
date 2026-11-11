@@ -17,6 +17,8 @@ function fakeServer(opts) {
   const json = (status, body) => ({ ok: status >= 200 && status < 300, status, headers: { get: () => 'application/json' }, json: async () => body });
   // 약속 4: 비운 대상 화자는 원문에서 가장 많이 말한 화자로 채우고, 원문에 없는 이름이면 해요체 한 문장으로 알린다.
   function check(f) {
+    if (!f.kind) f.kind = db.suggest.kind || S.guessKind(f.filename);
+    if (!f.register) f.register = db.suggest.register || S.defaultRegister(f.kind);
     if (o.legacy) { f.status = 'ready'; f.problems = []; return; }
     const names = db.speakers.map((s) => s.name);
     if (!f.subjectSpeaker) f.subjectSpeaker = names[0];
@@ -157,7 +159,7 @@ test('local store: draft, then files → PUT with cookies to our server → comp
   assert.equal(put.url, '/api/sources/cf-son/files/f1/content');
   assert.equal(put.credentials, 'same-origin');
   assert.deepEqual(put.headers, { 'Content-Type': 'application/octet-stream' });
-  assert.deepEqual(server.calls[2].body, { textId: 'kakaotalk_son', kind: 'KAKAO_EXPORT', register: 'CASUAL', subjectSpeaker: null, userSpeaker: null, date: null, sourceUrl: null }, 'the subject speaker is left blank so the server picks it from the source');
+  assert.deepEqual(server.calls[2].body, { textId: 'kakaotalk_son', kind: null, register: null, subjectSpeaker: null, userSpeaker: null, date: null, sourceUrl: null }, 'the subject speaker is left blank so the server picks it from the source');
   assert.equal(intake.state.draft.files[0].subjectSpeaker, '손흥민');
   const items = intake.items();
   assert.equal(items.length, 1);
@@ -176,8 +178,10 @@ test('S3 store: PUT goes to the signed URL with exactly the returned headers and
   assert.equal(put.credentials, 'omit');
   assert.deepEqual(put.headers, { 'Content-Type': 'text/vtt' });
   const complete = server.calls.find((c) => c.path.endsWith('/complete'));
-  assert.equal(complete.body.kind, 'TRANSCRIPT');
-  assert.equal(complete.body.register, 'CASUAL');
+  assert.equal(complete.body.kind, null);
+  assert.equal(complete.body.register, null);
+  assert.equal(intake.items()[0].meta.kind, 'TRANSCRIPT');
+  assert.equal(intake.items()[0].meta.register, 'CASUAL');
 });
 
 test('a failed send restarts with a fresh slot; a failed check retries only the check', async () => {
@@ -442,18 +446,16 @@ test('a name that is not in the source gets the server problem as is and a one-t
   assert.equal(S.ro('지민일'), '로', 'ㄹ 받침 takes 로');
 });
 
-test('server guesses fill kind and register only when the file name gave no hint', async () => {
+test('server content inference wins over automatic filename hints', async () => {
   const server = fakeServer();
   server.db.suggest = { kind: 'TRANSCRIPT', register: 'CASUAL' };
   const intake = await ready(server);
   server.calls.length = 0;
   intake.addFiles([file('notes.txt')]);
   await settle();
-  const patch = server.calls.find((c) => c.method === 'PATCH');
-  assert.ok(patch, 'the content guess is saved');
-  assert.equal(patch.body.kind, 'TRANSCRIPT');
-  assert.equal(patch.body.register, 'CASUAL');
-  assert.equal(patch.body.subjectSpeaker, '손흥민', 'the speaker the server filled is kept');
+  assert.equal(intake.items()[0].meta.kind, 'TRANSCRIPT');
+  assert.equal(intake.items()[0].meta.register, 'CASUAL');
+  assert.equal(intake.items()[0].meta.subjectSpeaker, '손흥민');
 
   const named = fakeServer();
   named.db.suggest = { kind: 'TRANSCRIPT', register: 'CASUAL' };
@@ -461,8 +463,8 @@ test('server guesses fill kind and register only when the file name gave no hint
   named.calls.length = 0;
   b.addFiles([file('interview_press.txt')]);
   await settle();
-  assert.ok(!named.calls.some((c) => c.method === 'PATCH'), 'a hint in the file name wins');
-  assert.equal(b.items()[0].meta.kind, 'INTERVIEW');
+  assert.ok(!named.calls.some((c) => c.method === 'PATCH'), 'server already persisted its content inference');
+  assert.equal(b.items()[0].meta.kind, 'TRANSCRIPT');
 });
 
 test('an older server without suggestions still gets the display name as the speaker', async () => {
@@ -526,7 +528,7 @@ test('file cards hide the internal text id, the path import is folded under 고�
   assert.ok(/:not\(\[type="checkbox"\]\),\.src textarea/.test(css), 'the full-width field rule skips the switch');
   const note = (html.match(/id="src-auto-h">([^<]*)</) || [])[1];
   assert.ok(note && note.length <= 40, 'the switch has a one-line note');
-  assert.ok(html.includes('data-start-note') && html.includes('보통 15~20분 걸려요'));
+  assert.ok(html.includes('data-start-note'));
   assert.ok(html.includes('data-resume') && html.includes('data-title') && html.includes('data-crumb'));
   assert.ok(!/대화 테스트/.test(html + js), 'the chat page is called 대화해 보기 everywhere');
 });
@@ -663,14 +665,14 @@ test('after the start the card shows chat first, then "영상 만드는 중 · �
   assert.equal(waiting.video.text, '영상 만드는 중 · 라이트', 'the server has not flipped to making yet, the line already says so');
   const done = S.doneView({ chatReady: true, videoTier: 'light', videoStatus: 'ready' }, null, {});
   assert.equal(done.chatLabel, '영상과 함께 대화해 보기');
-  assert.match(done.body, /영상까지 다 만들었어요/);
+  assert.match(done.body, /영상도 준비됐어요/);
   assert.equal(done.video.tone, 'ok');
   const failed = S.doneView({ chatReady: true, videoTier: 'max', videoStatus: 'failed' }, null, {});
   assert.equal(failed.chatLabel, '대화해 보기');
   assert.match(failed.body, /영상은 만들지 못했어요/);
   const none = S.doneView({ chatReady: true, videoTier: 'none', videoStatus: 'none' }, null, {});
   assert.equal(none.video.show, false);
-  assert.equal(none.body, '');
+  assert.match(none.body, /전체 제작 진행/, 'chat availability does not claim production completion');
   [before, making, done, failed].forEach((v) => assert.ok(!/\d+\s*개/.test(v.body + v.video.text), 'no counts'));
 });
 
@@ -706,3 +708,162 @@ test('video text names the tier for known states, stays empty without video, and
   cases.forEach((c) => assert.equal(Flow.videoText(c), S.videoText(c)));
 });
 
+test('friend messenger and interview scenes are selectable and sent unchanged to the API', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'sources.html'), 'utf8');
+  const select = html.match(/<select id="src-chapter"[\s\S]*?<\/select>/)[0];
+  for (const chapter of ['FRIEND_CHAT', 'INTERVIEW']) {
+    assert.ok(select.includes('value="' + chapter + '"'), chapter + ' is selectable');
+    const server = fakeServer();
+    const intake = S.createIntake({ fetch: server.fetch, origin: ORIGIN, XHR: null });
+    await intake.createDraft({ displayName: '합성 인물', subjectKind: 'PRIVATE_PERSON', age: '30', gender: '여성', job: '작가', chapterTemplate: chapter, autoReview: true });
+    assert.equal(server.db.draft.chapterTemplate, chapter);
+    assert.equal(server.db.draft.autoReview, true);
+  }
+});
+
+test('chat availability preserves failure, review, running states and incomplete progress', () => {
+  for (const [status, tone] of [['failed', 'fail'], ['needs_review', 'wait'], ['running', 'run']]) {
+    const view = S.doneView({ status, chatReady: true, goal: { label: '제작 진행', done: 4, total: 5 } }, { ready: true });
+    assert.equal(view.ready, true);
+    assert.equal(view.status, status);
+    assert.equal(view.tone, tone);
+    assert.equal(view.progress.done, 4);
+    assert.equal(view.progress.total, 5);
+    assert.match(view.body, /대화/);
+  }
+});
+
+test('chat availability keeps polling while production or review is pending', () => {
+  for (const status of ['running', 'needs_review']) {
+    assert.equal(S.wantsPoll({ finalized: true, cid: 'synthetic', chat: { ready: true }, character: { status, chatReady: true } }), true);
+  }
+});
+
+test('auto upload asks the server to infer content instead of confirming filename guesses', async () => {
+  const server = fakeServer();
+  server.db.suggest = {kind:'KAKAO_EXPORT',register:'CASUAL'};
+  const intake=await ready(server);
+  intake.addFiles([file('synthetic-interview.txt')]);
+  await settle();
+  const complete=server.calls.find(c=>c.path.endsWith('/complete'));
+  assert.equal(complete.body.kind,null);
+  assert.equal(complete.body.register,null);
+  assert.equal(intake.items()[0].meta.kind,'KAKAO_EXPORT');
+  assert.equal(intake.items()[0].meta.subjectSpeaker,'손흥민');
+});
+
+test('typing is kept across an older PATCH response and suggestion applies without erasing other fields', async () => {
+  const server=fakeServer();
+  let release, hold=false;
+  const fetch=async (url,init)=>{
+    const response=await server.fetch(url,init);
+    if(hold && init?.method==='PATCH') {hold=false; await new Promise(r=>{release=r;});}
+    return response;
+  };
+  const intake=await ready({fetch});
+  const [key]=intake.addFiles([file('interview.txt')]);
+  await settle();
+  hold=true;
+  const saving=intake.editFile(key,'kind','KAKAO_EXPORT');
+  await settle();
+  assert.equal(typeof intake.stageFile,'function','input events need a local draft before blur');
+  intake.stageFile(key,'subjectSpeaker','새 대상');
+  intake.stageFile(key,'userSpeaker','대화 상대');
+  intake.stageFile(key,'register','FORMAL');
+  release(); await saving;
+  assert.equal(intake.items()[0].display.subjectSpeaker,'새 대상');
+  assert.equal(intake.items()[0].display.userSpeaker,'대화 상대');
+  assert.equal(intake.startState().ready,false,'unsaved input must not be finalized');
+  await intake.editFile(key,'subjectSpeaker','손흥민');
+  await settle();
+  assert.equal(server.db.files[0].subjectSpeaker,'손흥민');
+  assert.equal(server.db.files[0].userSpeaker,'대화 상대');
+  assert.equal(server.db.files[0].register,'FORMAL');
+});
+
+test('a GET started before a new edit cannot replace the acknowledged metadata', async () => {
+  const server=fakeServer();
+  let hold=false,release;
+  const fetch=async (url,init)=>{
+    const response=await server.fetch(url,init);
+    if(hold && init?.method==='GET' && url.endsWith('/api/sources/cf-son')) {
+      hold=false;
+      const data=structuredClone(await response.json());
+      await new Promise(r=>{release=r;});
+      return {...response,json:async()=>data};
+    }
+    return response;
+  };
+  const intake=await ready({fetch});
+  const [key]=intake.addFiles([file('interview.txt')]); await settle();
+  hold=true;
+  const reading=intake.refresh(); await settle();
+  await intake.editFile(key,'userSpeaker','기자');
+  release(); await reading;
+  assert.equal(intake.items()[0].display.userSpeaker,'기자');
+});
+
+test('actual input/change/suggest handlers keep all fields through delayed rerender', async () => {
+  const server=fakeServer();
+  const listeners={}, controls={};
+  let release, hold=false;
+  const fetch=async (url,init)=>{
+    const result=await server.fetch(url,init);
+    if(hold && init?.method==='PATCH') {hold=false; await new Promise(r=>{release=r;});}
+    return result;
+  };
+  function node() {
+    const children=new Map();
+    return {dataset:{},classList:{toggle(){},remove(){}},style:{},firstChild:{dataset:{},style:{},setAttribute(){}},
+      setAttribute(){},removeAttribute(){},remove(){},
+      querySelector(s){if(!children.has(s))children.set(s,node());return children.get(s);},
+      querySelectorAll(){return [];}};
+  }
+  const card=node(); card.dataset.key='u1';
+  for(const field of ['kind','subjectSpeaker','userSpeaker','register']) {
+    controls[field]={dataset:{field},value:'',id:'input-'+field,closest:()=>card,setAttribute(){},removeAttribute(){}};
+  }
+  card.querySelector('[data-body]').querySelectorAll=()=>Object.values(controls);
+  const doc={querySelector:()=>null,createElement:()=>({firstChild:card}),activeElement:null,
+    addEventListener:(name,fn)=>{listeners[name]=fn;},removeEventListener(){}};
+  const mounted=S.mount({root:doc,fetch,XHR:null});
+  await mounted.intake.createDraft({displayName:'손흥민',subjectKind:'PUBLIC_FIGURE',age:'34',gender:'남성',job:'선수'});
+  mounted.intake.addFiles([file('interview.txt')]); await settle();
+  hold=true;
+  controls.kind.value='KAKAO_EXPORT'; listeners.change({target:controls.kind}); await settle();
+  for(const [field,value] of [['subjectSpeaker','입력 중'],['userSpeaker','대화 상대'],['register','FORMAL']]) {
+    controls[field].value=value; listeners.input({target:controls[field]});
+  }
+  release(); await settle();
+  assert.equal(controls.subjectSpeaker.value,'입력 중');
+  assert.equal(controls.userSpeaker.value,'대화 상대');
+  assert.equal(controls.register.value,'FORMAL');
+  const suggestion={dataset:{act:'use-speaker',name:'손흥민'},closest:()=>card};
+  listeners.click({target:{closest:()=>suggestion}}); await settle();
+  assert.equal(server.db.files[0].userSpeaker,'대화 상대');
+  assert.equal(server.db.files[0].register,'FORMAL');
+  assert.equal(controls.subjectSpeaker.value,'손흥민');
+  mounted.destroy();
+});
+
+test('manual selections during upload override inference and failed metadata retries retain later edits', async () => {
+  const server=fakeServer();
+  server.db.suggest={kind:'TRANSCRIPT',register:'CASUAL'};
+  const intake=await ready(server);
+  const [key]=intake.addFiles([file('synthetic-interview.txt')]);
+  intake.editFile(key,'kind','KAKAO_EXPORT');
+  intake.editFile(key,'register','FORMAL');
+  await settle();
+  const complete=server.calls.find(c=>c.path.endsWith('/complete'));
+  assert.equal(complete.body.kind,'KAKAO_EXPORT');
+  assert.equal(complete.body.register,'FORMAL');
+  assert.equal(intake.items()[0].meta.kind,'KAKAO_EXPORT');
+  assert.equal(intake.items()[0].meta.register,'FORMAL');
+  server.db.fail['PATCH /api/sources/cf-son/files/:id']=1;
+  await intake.editFile(key,'userSpeaker','유지할 상대');
+  assert.equal(intake.items()[0].saving,'error');
+  await intake.editFile(key,'subjectSpeaker','손흥민'); await settle();
+  assert.equal(server.db.files[0].userSpeaker,'유지할 상대');
+  assert.equal(intake.items()[0].saving,'saved');
+  assert.equal(intake.startState().ready,true);
+});

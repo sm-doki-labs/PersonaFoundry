@@ -624,7 +624,7 @@ def job_status(row, job, last):
         and not (row.get("chatReady") and job.get("trigger") in {"videos", "videos-with-chat"})
     ):
         status = "running"
-    elif status not in ("needs_review", "chat_ready") and last and last["status"] == "failed":
+    elif status != "needs_review" and last and last["status"] == "failed":
         status = "failed"
     row.update(status=status, statusLabel=STATUS_LABELS[status])
 
@@ -675,7 +675,7 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
     pending = [g for g in gates if g["status"] == "AWAITING_HUMAN"]
     intake = read_json_file(char_dir / "s0-source/intake.json")
     display = display_name(persona, intake)
-    chat = Scene.read(char_dir, name=display).readiness()["ready"]
+    chat = False if error else Scene.read(char_dir, name=display).readiness()["ready"]
     goal_stages = stages
     if meta["origin"] != CREATED:
         ids = {"s0", "s3", "s7", "s8", "s8c"}
@@ -683,16 +683,13 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
             ids.update(("s9s", "s9", "s10t"))
         goal_stages = [s for s in stages if s["id"] in ids]
     goal = _progress(goal_stages)
-    # 대화가 되면 상태는 "대화 가능" 하나로 보인다.
-    # 남은 사람 확인은 지금 할 일에서 따로 보인다(3차 QA).
-    if chat:
-        status = "chat_ready"
-        if meta["origin"] != CREATED:
-            goal = dict(goal, done=goal["total"])
+    # 대화 가능 여부는 별도 기능이다. 실패·검토와 실제 완료 수를 덮지 않는다.
+    if any(s["status"] in {"CHECK_FAILED", "REJECTED"} for s in stages):
+        status = "failed"
     elif pending:
         status = "needs_review"
-    elif any(s["status"] in {"CHECK_FAILED", "REJECTED"} for s in stages):
-        status = "failed"
+    elif chat:
+        status = "chat_ready"
     elif is_draft(intake, stages):
         status = "draft"
     else:
@@ -706,11 +703,14 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
         "status": status,
         "statusLabel": STATUS_LABELS[status],
         "chatReady": chat,
+        "chapterTemplate": (read_json_file(char_dir / "source-pack.json") or {}).get(
+            "chapterTemplate", ""
+        ),
         **video_fields(char_dir, state),
         "createdAt": created_at(char_dir, intake),
         "archived": read_archived(char_dir),
         "goal": dict(
-            label="전체 단계" if meta["origin"] == CREATED else "대화 가능까지",
+            label="전체 단계" if meta["origin"] == CREATED else "대화 제작 단계",
             done=goal["done"],
             total=goal["total"],
         ),
@@ -801,6 +801,7 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
                 "origin",
                 "originLabel",
                 "modelMode",
+                "chapterTemplate",
                 "videoTier",
                 "videoStatus",
                 "videoLabel",
