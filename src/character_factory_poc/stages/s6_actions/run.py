@@ -217,9 +217,6 @@ def _carry(ctx: Context, cid: str, cfg: dict) -> tuple[str | None, dict[str, str
     changes = {}
     for chapter in previous.chapters:
         old = {a.actionKey: a for a in chapter.actions}
-        needs_bad = any(clip_of(k, cfg)["mood"] == "bad" for k in cfg["actions"])
-        if needs_bad and chapter.badFrame is None:
-            return None, {}
         for key in cfg["actions"]:
             clip = clip_of(key, cfg)
             prompt = build_prompt(key, chapter.chapterId, motif=True, clip=clip)
@@ -234,6 +231,11 @@ def _carry(ctx: Context, cid: str, cfg: dict) -> tuple[str | None, dict[str, str
                 changes[f"{chapter.chapterId}-{key}"] = ""
     # 바뀐 것이 없어도 새 판으로 묶는다(등급 표시만 바뀐 경우). 영상은 하나도 새로 만들지 않는다.
     return gate.rev, changes
+
+
+def _has_bad_frames(ctx: Context, cid: str, rev: str) -> bool:
+    inputs = read_inputs(ctx.character_dir(cid) / "s6-actions" / rev / "inputs.json")
+    return all(ch.badFrame is not None for ch in inputs.chapters)
 
 
 def _reuse(ctx: Context, cid: str, cfg: dict) -> tuple[str | None, dict[str, str]]:
@@ -272,7 +274,9 @@ def plan_calls(ctx: Context, cfg: dict[str, Any], cid: str | None = None) -> lis
             for key in cfg["actions"]:
                 if not previous or f"{ch}-{key}" in changes:
                     durations.extend([_duration(cfg, key)] * cfg["candidates"])
-        if not previous and any(clip_of(key, cfg)["mood"] == "bad" for key in cfg["actions"]):
+        if any(clip_of(key, cfg)["mood"] == "bad" for key in cfg["actions"]) and not (
+            previous and _has_bad_frames(ctx, cid, previous)
+        ):
             bad_frames = chapter_count
         resolution = cfg["resolution"]
     pcfg = ctx.config.provider("video")
@@ -388,10 +392,19 @@ def _first_frames(ctx, cid, rev, rev_dir, frame, frame_dir, needs_bad, cfg, budg
             raw_path = f"first-frames/{frame.chapterId}-bad-raw.png"
             write_once_bytes(rev_dir / raw_path, (previous_dir / raw_path).read_bytes())
             source = dump(chapter.badFrameSource.model_copy(update={"reusedFrom": previous}))
-        return dump(chapter.goodFrame), dump(chapter.badFrame) if chapter.badFrame else None, source
-    write_once_bytes(rev_dir / good["path"], (frame_dir / frame.path).read_bytes())
-    if not needs_bad:
-        return good, None, None
+        if chapter.badFrame or not needs_bad:
+            return (
+                dump(chapter.goodFrame),
+                dump(chapter.badFrame) if chapter.badFrame else None,
+                source,
+            )
+        # 이전 판(라이트)에는 무표정 첫 화면이 없었다.
+        # 영상은 옮겨 오고 그 한 장만 새로 만든다(D-0167).
+        good = dump(chapter.goodFrame)
+    else:
+        write_once_bytes(rev_dir / good["path"], (frame_dir / frame.path).read_bytes())
+        if not needs_bad:
+            return good, None, None
     ratio = parse_ratio(cfg["aspect_ratio"])
     neutral = neutral_prompt(twin=is_twin(ctx.character_dir(cid)))
     result = ctx.image_model(cid, budget).generate(

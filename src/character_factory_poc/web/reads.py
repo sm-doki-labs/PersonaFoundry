@@ -700,12 +700,12 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
     # 남은 사람 확인은 지금 할 일에서 따로 보인다(3차 QA).
     if chat:
         status = "chat_ready"
-        if meta["origin"] != CREATED:
-            goal = dict(goal, done=goal["total"])
     elif pending:
         status = "needs_review"
-    elif any(s["status"] in {"CHECK_FAILED", "REJECTED"} for s in stages):
+    elif any(s["status"] == "CHECK_FAILED" for s in stages):
         status = "failed"
+    elif any(s["status"] == "REJECTED" for s in stages):
+        status = "needs_review"
     elif is_draft(intake, stages):
         status = "draft"
     else:
@@ -723,7 +723,11 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
         "createdAt": created_at(char_dir, intake),
         "archived": read_archived(char_dir),
         "goal": dict(
-            label="전체 단계" if meta["origin"] == CREATED else "대화 가능까지",
+            label="전체 단계"
+            if meta["origin"] == CREATED
+            else "대화와 학습 준비"
+            if meta["modelMode"] == "TRAIN"
+            else "대화 가능까지",
             done=goal["done"],
             total=goal["total"],
         ),

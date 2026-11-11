@@ -99,6 +99,7 @@ class Job:
     trigger: str = "manual"
     confirm: list[str] = field(default_factory=list)
     held: list[str] = field(default_factory=list)
+    ran_stages: list[str] | None = None
     seq: int = 0  # 같은 초에 만든 작업의 순서(기록에는 남기지 않는다)
 
     def as_dict(self, *, include_log: bool = True) -> dict[str, Any]:
@@ -118,6 +119,7 @@ class Job:
             "trigger": self.trigger,
             "confirm": list(self.confirm),
             "held": list(self.held),
+            "ranStages": self.ran_stages,
             "logLines": len(self.log),
             "result": {
                 "stoppedAt": self.stopped_at,
@@ -159,6 +161,7 @@ class Job:
             trigger=text("trigger", "manual"),
             confirm=texts("confirm"),
             held=texts("held"),
+            ran_stages=texts("ranStages") if isinstance(data.get("ranStages"), list) else None,
         )
 
 
@@ -351,6 +354,7 @@ class JobManager:
             try:
                 log = self._dispatch(job, stream)
                 job.stopped_at = log.stopped_at
+                job.ran_stages = list(log.timings)
                 job.steps = list(log.steps)
                 job.waiting = list(log.waiting)
                 job.blocked = list(log.blocked)
@@ -488,6 +492,11 @@ class JobManager:
         ):
             raise ValueError("영상 만들기를 마치지 못했어요.")
         if job.until == "s8c" and ctx.state(job.character_id).stage("s8c").status != "APPROVED":
+            state = ctx.state(job.character_id)
+            if (log.waiting or log.held) and not any(
+                state.stage(sid).status == "CHECK_FAILED" for sid in log.blocked
+            ):
+                return log
             raise ValueError("대화 준비를 마치지 못했어요. 멈춘 단계의 작업 기록을 확인해 주세요.")
         return log
 

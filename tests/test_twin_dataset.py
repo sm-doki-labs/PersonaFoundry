@@ -157,8 +157,9 @@ def test_source_to_review_to_training_plan(tmp_path):
     assert report["metrics"]["noExchangeConversations"] == 1
     assert dataset["warnings"] == len(report["warnings"]) > 0
     assert (
-        "PROMPT_ONLY" in report["warnings"][0]
-        and "PROMPT_ONLY" in (folder / "gate-G7.html").read_text()
+        "프롬프트만" in report["warnings"][0]
+        and "PROMPT_ONLY" not in report["warnings"][0]
+        and "프롬프트만" in (folder / "gate-G7.html").read_text()
     )
     approve_gate(ctx, cid, "G7", {"decision": "APPROVE", "reviewer": "u"})
     planned = plan_s10t(ctx, cid, ["fake"])
