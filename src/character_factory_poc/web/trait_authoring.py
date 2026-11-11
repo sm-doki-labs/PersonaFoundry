@@ -112,4 +112,4 @@ def install_authoring_routes(app: FastAPI, root, conf, jobs) -> None:
                 raise WebError(409, str(exc)) from exc
             except (FactoryError, ValueError) as exc:
                 raise WebError(400, str(exc)) from exc
-        return {"seed": dump(seed), "nextUrl": f"/d-ops.html?character={cid}"}
+        return {"seed": dump(seed), "nextUrl": f"/studio/factory.html#c/{cid}"}

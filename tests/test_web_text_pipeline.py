@@ -331,7 +331,7 @@ def test_character_detail_reads_known_artifacts_and_recent_calls(tmp_path):
     assert len(prompt["text"]) == 6001
     assert prompt["textTruncated"] is True
     assert artifacts["특질 시트"]["sourceModel"] == "actual-trait-model"
-    assert body["workshopUrl"] == f"/c-glass.html?character={CID}"
+    assert body["workshopUrl"] == f"/studio/factory.html#c/{CID}"
     dumped = json.dumps(body, ensure_ascii=False)
     assert "gemini-4-argon" not in dumped
     assert "/Users/" not in dumped

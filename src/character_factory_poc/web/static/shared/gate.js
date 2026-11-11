@@ -3847,13 +3847,12 @@
     var summary = (state.character && state.character.summary) || {};
     // 기획 전 모티브는 원문에서 정한 표시 이름을 쓴다. 이름이 아직 없을 때만 '이름 미정 · slug (11/7)'(D-0129).
     var name = H.characterName(summary, state.characterId);
-    var back = 'c-glass.html?character=' + encodeURIComponent(state.characterId) +
-      '&gate=' + encodeURIComponent(state.gate);
+    var back = '/studio/factory.html#c/' + encodeURIComponent(state.characterId);
     var record = isRecord();
     document.body.classList.toggle('gate-record', record);
     q('[data-workroom-link]').setAttribute('href', back);
     q('[data-crumbs]').innerHTML =
-      '<a href="c-glass.html">작업실</a> › <a href="' + esc(back) + '">' + esc(name) +
+      '<a href="/studio/factory.html#all">공장</a> › <a href="' + esc(back) + '">' + esc(name) +
       '</a> › <b>' + esc(view.title || '검토') + '</b>';
     var status = q('[data-gate-status]');
     status.textContent =

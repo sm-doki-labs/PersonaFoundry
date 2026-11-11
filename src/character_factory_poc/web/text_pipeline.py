@@ -227,11 +227,7 @@ def _character(conf: WebSettings, character_id: str) -> dict[str, Any]:
         "gates": _gate_rows(state),
         "calls": _recent_calls(char_dir),
         "artifacts": _artifact_rows(char_dir, state),
-        "workshopUrl": (
-            f"/studio/d-ops.html#char/{quote(char_dir.name, safe='')}"
-            if conf.studio_path is not None
-            else f"/c-glass.html?character={quote(char_dir.name, safe='')}"
-        ),
+        "workshopUrl": f"/studio/factory.html#c/{quote(char_dir.name, safe='')}",
     }
 
 

@@ -3,54 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>캐릭터 공장 · 워크숍</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
-<style>
-*{box-sizing:border-box}
-body{margin:0;min-height:100dvh;background:#16181d;color:#ededf0;font-family:"Pretendard Variable",Pretendard,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 32px}
-h1{margin:0;font-size:28px;letter-spacing:-.02em}
-p.lead{margin:8px 0 8px;color:#8b8b94;font-size:15px}
-p.state{margin:0 0 32px;color:#6f7684;font-size:12.5px;min-height:1.2em}
-.grid{display:grid;grid-template-columns:repeat(2,minmax(0,560px));gap:24px;width:100%;max-width:1150px}
-a{color:inherit;text-decoration:none;display:flex;flex-direction:column;gap:14px;padding:12px 12px 18px;border-radius:18px;background:#16161a;border:1px solid rgba(255,255,255,.07);transition:transform 260ms cubic-bezier(.2,.8,.2,1),border-color 200ms,box-shadow 260ms}
-a:hover{transform:translateY(-4px);border-color:rgba(255,255,255,.2);box-shadow:0 30px 60px -30px rgba(0,0,0,.9)}
-a:focus-visible{outline:2px solid #b9bec7;outline-offset:3px}
-img{width:100%;aspect-ratio:16/10;object-fit:cover;border-radius:10px;display:block}
-.meta{padding:0 6px}
-.k{font-size:12px;font-weight:700;color:#b9bec7}
-.t{font-size:19px;font-weight:700;letter-spacing:-.02em;margin-top:2px}
-.d{font-size:13.5px;color:#9a9aa3;line-height:1.55;margin-top:6px}
-.note{margin-top:32px;font-size:13px;color:#6b6b73;text-align:center;line-height:1.6}
-.authoring-link{display:inline-block;padding:10px 4px;margin-top:20px;min-height:44px;background:none;border:0;border-radius:4px;font-size:13px;color:#b9bec7;text-decoration:underline;text-underline-offset:4px}
-.authoring-link:hover{transform:none;box-shadow:none}
-code{font-size:12px;color:#b9bec7}
-@media (max-width:1100px){.grid{grid-template-columns:1fr;max-width:520px}}
-</style>
+<title>캐릭터 공장으로 이동</title>
+<script src="/shared/current-factory.js"></script>
 </head>
-<body>
-<h1>캐릭터 공장 워크숍</h1>
-<p class="lead">운영 화면에서 캐릭터와 대기 관문을 보고, 관문 상세 화면에서 고르고 승인합니다.</p>
-<p class="state" data-health>공장 상태를 읽는 중…</p>
-<div class="grid">
-  <a href="d-ops.html"><img src="previews/d.jpg" alt="캐릭터 진행 현황 미리보기"><div class="meta"><div class="k">운영</div><div class="t">캐릭터 · 진행 현황</div><div class="d">runs의 실제 캐릭터를 단계·관문 상태와 함께 봅니다. 대기 관문, 진행률, 작업 실행이 여기 모입니다.</div></div></a>
-  <a href="c-glass.html"><img src="previews/c.jpg" alt="작업실 미리보기"><div class="meta"><div class="k">작업실</div><div class="t">작업실</div><div class="d">실제 캐릭터의 갈래별 진행과 대기 관문을 봅니다. 관문 칩을 누르면 얼굴 고르기, 기획 선택, 장면·영상 검토, 프롬프트 승인 화면이 열립니다.</div></div></a>
-</div>
-<a class="authoring-link" href="trait-authoring.html">캐릭터 기본 설정 · 추가 특질 선택</a>
-<p class="note">로컬 서버입니다. 프로젝트 목록·단계 진행·대기 관문은 <code>/api/projects</code>에서 옵니다.</p>
-<script src="shared/api.js"></script>
-<script>
-(function () {
-  var out = document.querySelector('[data-health]');
-  if (!out || !window.CF_API) return;
-  window.CF_API.health().then(function (data) {
-    var counts = data.counts || {};
-    out.textContent = '공장 루트 ' + data.root + ' · 캐릭터 ' + (counts.characters || 0) +
-      ' · 대기 관문 ' + (counts.pendingGates || 0) + ' · 브리프 ' + (counts.briefs || 0) +
-      ' · 실행 중 작업 ' + ((data.jobs || {}).active || 0);
-  }).catch(function (err) {
-    out.textContent = '공장 서버에 붙지 못했습니다: ' + err.message;
-  });
-})();
-</script>
-</body>
+<body><p><a href="/studio/factory.html#all">현재 캐릭터 공장 열기</a></p></body>
 </html>
