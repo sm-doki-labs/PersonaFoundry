@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from character_factory_poc.common.config import load_config
+from character_factory_poc.common.config import FactoryConfig, load_config
 from character_factory_poc.contracts.common import State
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.orchestrator import RunLog, RunOptions, run_until
@@ -99,6 +99,10 @@ class Job:
     trigger: str = "manual"
     confirm: list[str] = field(default_factory=list)
     held: list[str] = field(default_factory=list)
+    # 영상 실행 허락은 검토 대기·재시작을 넘어 원래 등급과 G6 revision에 묶어 둔다.
+    video_tier: str | None = None
+    review_revision: str | None = None
+    resumed_by: str | None = None
     ran_stages: list[str] | None = None
     seq: int = 0  # 같은 초에 만든 작업의 순서(기록에는 남기지 않는다)
 
@@ -119,6 +123,9 @@ class Job:
             "trigger": self.trigger,
             "confirm": list(self.confirm),
             "held": list(self.held),
+            "videoTier": self.video_tier,
+            "reviewRevision": self.review_revision,
+            "resumedBy": self.resumed_by,
             "ranStages": self.ran_stages,
             "logLines": len(self.log),
             "result": {
@@ -161,6 +168,9 @@ class Job:
             trigger=text("trigger", "manual"),
             confirm=texts("confirm"),
             held=texts("held"),
+            video_tier=text("videoTier") or None,
+            review_revision=text("reviewRevision") or None,
+            resumed_by=text("resumedBy") or None,
             ran_stages=texts("ranStages") if isinstance(data.get("ranStages"), list) else None,
         )
 
@@ -230,6 +240,7 @@ class JobManager:
         *,
         confirm: list[str] | None = None,
         trigger: str = "manual",
+        _resume_from: Job | None = None,
     ) -> dict:
         char_dir = reads.character_dir(self.root, character_id)
         if self.settings.server_mode and not char_dir.is_relative_to(self.root):
@@ -265,10 +276,20 @@ class JobManager:
             raise WebError(400, f"confirm은 단계 ID 목록이다: {bad!r}")
         if action in {"train", "skip-training"}:
             self._check_training_action(char_dir, action, confirmed)
+        self._validate_source_job(character_id, action, gate_or_stage, trigger)
+        from character_factory_poc.pipeline.origin import read_video_tier
+
+        video_tier = read_video_tier(char_dir) if trigger in VIDEO_TRIGGERS else None
+        if _resume_from is not None and video_tier != _resume_from.video_tier:
+            raise WebError(409, "허락한 영상 등급이 바뀌었어요. 영상 만들기를 다시 시작해 주세요.")
         with self._lock:
             running = self._active.get(character_id)
             if running:
                 raise WebError(409, f"이 캐릭터는 이미 작업이 돈다: {running}")
+            if _resume_from is not None:
+                _resume_from = self._jobs.setdefault(_resume_from.job_id, _resume_from)
+                if _resume_from.resumed_by:
+                    raise WebError(409, "검토를 기다리던 영상 작업은 이미 이어서 시작했어요.")
             job = Job(
                 job_id=new_job_id(),
                 character_id=character_id,
@@ -276,11 +297,17 @@ class JobManager:
                 until=gate_or_stage,
                 trigger=trigger,
                 confirm=confirmed,
+                video_tier=video_tier,
+                review_revision=_resume_from.review_revision if _resume_from else None,
                 seq=next(self._seq),
             )
+            if _resume_from is not None:
+                _resume_from.resumed_by = job.job_id
             self._jobs[job.job_id] = job
             self._active[character_id] = job.job_id
         self._persist(job)
+        if _resume_from is not None:
+            self._persist(_resume_from)
         self._publish_job(job)
         thread = threading.Thread(
             target=self._run,
@@ -309,6 +336,25 @@ class JobManager:
 
     def request_resume(self, character_id: str) -> dict | None:
         """관문 결정 뒤 이어서 돌린다(D-0049, LLD §6.7). 이미 돌고 있으면 끝난 뒤 한 번 더."""
+        pending = self._reviewed_video_job(character_id)
+        if pending is not None:
+            # 이 작업은 이미 영상 등급·단계 실행을 허락받았다. 전역 자동 재개와 별개다.
+            try:
+                return self.submit(
+                    character_id,
+                    action=pending.action,
+                    until=pending.until,
+                    trigger=pending.trigger,
+                    confirm=pending.confirm,
+                    _resume_from=pending,
+                )
+            except WebError as exc:
+                if exc.status != 409:
+                    raise
+                with self._lock:
+                    if not pending.resumed_by and self._active.get(character_id):
+                        self._rerun[character_id] = True
+                return None
         settings = self._orchestrator()
         if not settings.get("auto_resume", False):
             return None
@@ -326,11 +372,76 @@ class JobManager:
                 self._rerun[character_id] = True
             return None
 
+    def _reviewed_video_job(self, character_id: str) -> Job | None:
+        from character_factory_poc.pipeline.origin import read_video_tier
+
+        folder = reads.character_dir(self.root, character_id)
+        marker = reads.read_json_file(folder / "video-job.json") or {}
+        job_id = marker.get("jobId")
+        if not isinstance(job_id, str) or not _JOB_ID_RE.fullmatch(job_id):
+            return None
+        job = self._lookup(job_id)
+        if (
+            job is None
+            or job.character_id != character_id
+            or job.trigger != "videos-with-chat"
+            or job.status != "succeeded"
+            or job.waiting != ["G6"]
+            or not job.review_revision
+            or job.resumed_by
+            or job.video_tier in {None, "none"}
+            or job.video_tier != read_video_tier(folder)
+        ):
+            return None
+        state, error = reads.read_state(folder)
+        gate = state.get("gates", {}).get("G6", {})
+        if (
+            error
+            or gate.get("status") != "APPROVED"
+            or gate.get("rev") != job.review_revision
+            or not gate.get("recordRef")
+            or state.get("stages", {}).get("s8", {}).get("status") != "APPROVED"
+        ):
+            return None
+        return job
+
     def _orchestrator(self) -> dict[str, Any]:
         try:
             return dict(load_config(self.root, self.settings.config_path).orchestrator)
         except (OSError, ValueError):
             return {}
+
+    def _validate_source_job(
+        self,
+        character_id: str,
+        action: str,
+        until: str,
+        trigger: str,
+        config: FactoryConfig | None = None,
+    ) -> None:
+        from character_factory_poc.pipeline.origin import SOURCE, read_model_mode, read_origin
+        from character_factory_poc.pipeline.scheduler import until_scope
+        from character_factory_poc.web.launch_validation import validate_source_launch
+
+        if action != "run" or trigger == "videos":
+            return
+        folder = reads.character_dir(self.root, character_id)
+        if read_origin(folder) != SOURCE:
+            return
+        target = "s8c" if trigger == "videos-with-chat" else until
+        if "s3" not in until_scope(target, SOURCE, read_model_mode(folder)):
+            return
+        state, error = reads.read_state(folder)
+        if error:
+            raise WebError(409, "진행 상태를 읽지 못해 제작 설정을 확인할 수 없어요.")
+        # S3가 이미 끝났거나 검토 중이면 이번 실행은 판정 모델을 쓰지 않는다.
+        if state.get("stages", {}).get("s3", {}).get("status") in {
+            "APPROVED",
+            "SKIPPED",
+            "AWAITING_HUMAN",
+        }:
+            return
+        validate_source_launch(config or load_config(self.root, self.settings.config_path))
 
     def _run(self, job: Job) -> None:
         self._run_locked(job)
@@ -471,15 +582,48 @@ class JobManager:
         """cli run과 같은 경로: 설정을 읽어 Context를 만들고 run_until을 돌린다."""
         brief = self._creator_brief(job.character_id)
         config = load_config(self.root, self.settings.config_path)
+        self._validate_source_job(job.character_id, job.action, job.until, job.trigger, config)
         ctx = Context(config=config, execute=True)
         options = self.run_options(job, stream)
         if brief is not None:
             options = replace(options, brief_text=brief)
         if job.trigger in VIDEO_TRIGGERS:
+            from character_factory_poc.pipeline.origin import read_video_tier
+
+            if job.video_tier and job.video_tier != read_video_tier(
+                ctx.character_dir(job.character_id)
+            ):
+                raise ValueError("허락한 영상 등급이 바뀌었어요. 영상 만들기를 다시 시작해 주세요.")
             if job.trigger == "videos-with-chat":
+                if job.review_revision:
+                    gate = ctx.state(job.character_id).gate("G6")
+                    if gate.status != "APPROVED" or gate.rev != job.review_revision:
+                        raise ValueError("영상을 기다리던 원문 근거의 G6 승인을 확인해 주세요.")
                 chat = run_until(
                     ctx, job.character_id, replace(options, until="s8c", confirmed=set())
                 )
+                state = ctx.state(job.character_id)
+                gate = state.gate("G6")
+                if (
+                    chat.stopped_at == "s8c"
+                    and state.stage("s8c").status == "APPROVED"
+                    and gate.status == "AWAITING_HUMAN"
+                    and gate.rev
+                    and chat.waiting == ["G6"]
+                    and not chat.blocked
+                    and not chat.held
+                ):
+                    from character_factory_poc.stages.s8_prompts.evidence_pipeline import (
+                        is_evidence,
+                    )
+
+                    if is_evidence(ctx.character_dir(job.character_id) / "s8-prompts" / gate.rev):
+                        job.review_revision = gate.rev
+                        chat.stopped_at = "G6"
+                        chat.add(
+                            "G6 근거 검토 대기: 승인하면 허락한 영상 만들기를 이어서 진행해요."
+                        )
+                        return chat
                 if (
                     chat.stopped_at != "s8c"
                     or ctx.state(job.character_id).gate("G6").status != "APPROVED"
@@ -582,12 +726,16 @@ class JobManager:
     def _persist(self, job: Job) -> None:
         folder = self.settings.jobs_path
         try:
-            if job.trigger in VIDEO_TRIGGERS:
+            if job.trigger in VIDEO_TRIGGERS and not job.resumed_by:
                 from character_factory_poc.common.source_store import atomic_write, inside
                 from character_factory_poc.pipeline.origin import read_video_tier
 
                 char_dir = reads.character_dir(self.root, job.character_id)
-                marker = {"tier": read_video_tier(char_dir), "status": job.status}
+                marker = {
+                    "jobId": job.job_id,
+                    "tier": job.video_tier or read_video_tier(char_dir),
+                    "status": job.status,
+                }
                 if job.error:
                     marker["error"] = job.error
                 atomic_write(inside(char_dir, "video-job.json"), json.dumps(marker).encode())

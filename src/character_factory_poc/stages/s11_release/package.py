@@ -134,6 +134,10 @@ def load_persona(
     if not pair_path.exists():
         pair_path = prompt_dir / "prompt-pair.json"
     pair = load_prompt_pair(pair_path)
+    from character_factory_poc.stages.s8_prompts.evidence_pipeline import is_evidence, verify_review
+
+    if is_evidence(prompt_dir):
+        verify_review(ctx, cid, prompt_dir, approved=True)
     if isinstance(pair, PromptPairV2) or (prompt_dir / "persona-bundle.json").exists():
         from character_factory_poc.stages.s8_prompts.formation import verify_approved_pair
 
@@ -598,7 +602,26 @@ def build_package(ctx: Context, cid: str) -> Path:
             sft.adoptedBinding,
             [item.src for item in sft_sources if item.label == "training-run"],
         )
+        original_long = long_text
         long_text = quotes.public_prompt(long_text)
+        if pair.systemRulesRef in {
+            "builtin:evidence-pipeline-v1",
+            "builtin:evidence-pipeline-v2",
+            "builtin:evidence-pipeline-v3",
+            "builtin:evidence-pipeline-v4",
+            "builtin:evidence-pipeline-v5",
+        }:
+            from character_factory_poc.stages.s11_release.presentation import CHAT_DISCLOSURE
+
+            expected = original_long.rstrip("\n") + "\n\n" + CHAT_DISCLOSURE + "\n"
+            if long_text != expected:
+                raise CheckFailed(
+                    "s11",
+                    [
+                        "원문 공개 검사에서 표준 본문이 달라진다. "
+                        "사실·규칙을 재검토하며 조용히 삭제하지 않는다"
+                    ],
+                )
         short_text = quotes.public_prompt(short_text) if short_text else None
         # prompt-pair와 형성 자료에는 승인 원문이 있다. 앱이 쓰는 특질과 대사 지침만 전달한다.
         persona_sources = [item for item in persona_sources if item.label == "trait-sheet"]
@@ -786,6 +809,21 @@ def build_package(ctx: Context, cid: str) -> Path:
                 quotes.check(facts, f"chapters/{chapter_id}/facts.json")
             write_once_json(rev_dir / f"chapters/{chapter_id}/facts.json", facts)
         write_once_text(rev_dir / persona.longPrompt, long_text)
+        if pair.systemRulesRef in {
+            "builtin:evidence-pipeline-v1",
+            "builtin:evidence-pipeline-v2",
+            "builtin:evidence-pipeline-v3",
+            "builtin:evidence-pipeline-v4",
+            "builtin:evidence-pipeline-v5",
+        }:
+            write_once_json(
+                rev_dir / "persona/prompt-compiler.json",
+                dict(
+                    systemRulesRef=pair.systemRulesRef,
+                    personaVersion=persona.personaVersion,
+                    longPromptSha256=sha256_file(rev_dir / persona.longPrompt),
+                ),
+            )
         if persona.shortPrompt is not None and short_text is not None:
             write_once_text(rev_dir / persona.shortPrompt, short_text)
         if public_run is not None:

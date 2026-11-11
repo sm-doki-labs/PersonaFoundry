@@ -1,20 +1,19 @@
 """합성 원문 업로드부터 첫 장면과 승인 기록까지 확인한다."""
 
-import sys
 import time
-from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
+from character_factory_poc.common.canonical import sha256_text
 from character_factory_poc.common.store import read_json
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.graph import MODES, stages_for
 from character_factory_poc.providers.fake import FakeTextModel
 from character_factory_poc.web.app import create_app
-from tests.support.synthetic import prompter_output
 from tests.support.web_gates import trait_sheet_for
 from tests.test_chapter_start import _start
+from tests.test_evidence_pipeline import candidate
 from tests.test_source_intake import put
 from tests.test_source_s0 import _good_digest
 from tests.test_twin_flow import _pack
@@ -59,7 +58,7 @@ def test_finalize(tmp_path, monkeypatch, manual, sample_failure):
             "s0": lambda: _good_digest(req),
             "s3-twin": lambda: _answer(req),
             "s7": lambda: trait_sheet_for(ctx, cid),
-            "s8": prompter_output,
+            "s8": lambda: candidate(req),
             "s8c": lambda: _start().model_dump() | {"characterId": cid},
         }[req.stage]()
 
@@ -74,9 +73,7 @@ def test_finalize(tmp_path, monkeypatch, manual, sample_failure):
             raise RuntimeError("표본 생성 실패")
         sampled.append(character)
 
-    monkeypatch.setitem(
-        sys.modules, "character_factory_poc.common.demo_chat", SimpleNamespace(run_samples=sample)
-    )
+    monkeypatch.setattr("character_factory_poc.common.demo_chat.run_samples", sample)
     job = client.post(url + "/finalize").json()["jobId"]
     for _ in range(500):
         info = client.get("/api/jobs/" + job).json()
@@ -104,12 +101,42 @@ def test_finalize(tmp_path, monkeypatch, manual, sample_failure):
         return
     assert sampled == [cid], info
     assert state.stage("s8c").status == "APPROVED"
-    for gate, decision in [("G0", "APPROVE"), ("G3", "SELECT"), ("G6", "APPROVE")]:
+    for gate, decision in [("G0", "APPROVE"), ("G3", "SELECT")]:
         rec = read_json(root / state.gate(gate).recordRef)
         assert (rec["reviewer"], rec["decision"]) == ("자동 진행", decision)
         if gate == "G3":
             first = read_json(root / "s3-plan/pr1/variants.json")["candidates"][0]
             assert rec["selections"] == [first["variantId"]]
+    assert "G6" in info["waiting"]
+    assert state.gate("G6").status == "AWAITING_HUMAN"
+    folder = root / "s8-prompts" / state.gate("G6").rev
+    pair = read_json(folder / "prompt-pair.json")
+    assert pair["systemRulesRef"] == "builtin:evidence-pipeline-v4"
+    assert not (folder / "persona-version.json").exists()
+    unreviewed = client.post(
+        f"/api/characters/{cid}/gates/G6/decision",
+        json={"decision": "APPROVE", "reviewer": "근거 검토자"},
+    )
+    assert unreviewed.status_code == 400, unreviewed.text
+    assert ctx.state(cid).gate("G6").status == "AWAITING_HUMAN"
+    assert not (folder / "persona-version.json").exists()
+    approval = client.post(
+        f"/api/characters/{cid}/gates/G6/decision",
+        json={
+            "decision": "APPROVE",
+            "reviewer": "근거 검토자",
+            "evidenceReviewed": True,
+            "expectedRev": state.gate("G6").rev,
+        },
+    )
+    assert approval.status_code == 200, approval.text
+    state = ctx.state(cid)
+    assert state.gate("G6").status == "APPROVED"
+    rec = read_json(root / state.gate("G6").recordRef)
+    assert (rec["reviewer"], rec["decision"]) == ("근거 검토자", "APPROVE")
+    version = read_json(folder / "persona-version.json")
+    assert version["long"] == pair["long"]
+    assert version["long"]["sha256"] == sha256_text((folder / "long.md").read_text("utf-8"))
     assert state.gate("G1s").status == state.gate("G8").status == "PENDING"
     assert all(state.stage(s).status == "PENDING" for s in ("s2", "s4", "s5", "s10t", "s10"))
 

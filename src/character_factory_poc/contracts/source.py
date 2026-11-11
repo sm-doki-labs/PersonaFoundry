@@ -16,6 +16,7 @@ from character_factory_poc.common.schema import register
 from character_factory_poc.contracts.common import Strict
 
 SubjectKind = Literal["PUBLIC_FIGURE", "PRIVATE_PERSON"]
+ChapterTemplate = Literal["FAN_CALL", "FAMILY_CALL", "FRIEND_CHAT", "INTERVIEW"]
 TextKind = Literal["KAKAO_EXPORT", "INTERVIEW", "ARTICLE", "TRANSCRIPT"]
 Register = Literal["FORMAL", "CASUAL"]
 
@@ -73,7 +74,7 @@ class SourcePack(Strict):
     subject: SourceSubject
     factsPath: str | None = Field(default=None, min_length=1, description="공개 사실 JSON 경로")
     knownFacts: dict[str, str] = Field(default_factory=dict)
-    chapterTemplate: Literal["FAN_CALL", "FAMILY_CALL"] = Field(
+    chapterTemplate: ChapterTemplate = Field(
         default_factory=lambda data: (
             "FAN_CALL" if data["subject"].kind == "PUBLIC_FIGURE" else "FAMILY_CALL"
         )

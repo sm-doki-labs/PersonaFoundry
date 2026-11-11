@@ -567,6 +567,27 @@ def display_name(persona, intake):
     )
 
 
+def _demo_summary(char_dir: Path) -> dict | None:
+    """시연 모드(자동 승인·테스터 발행) 상태. 꺼져 있으면 None."""
+    from character_factory_poc.pipeline.demo import read_demo_mode
+
+    try:
+        mode = read_demo_mode(char_dir)
+    except (OSError, ValueError):
+        return None
+    if mode is None:
+        return None
+    status = read_json_file(char_dir / "demo-status.json") or {}
+    return {
+        "enabled": True,
+        "budgetUsd": mode.budgetUsd,
+        "phase": status.get("phase", "ready"),
+        "detail": status.get("detail", ""),
+        "apiCharacterId": status.get("apiCharacterId"),
+        "at": status.get("at"),
+    }
+
+
 def created_at(folder, intake):
     intake = intake or {}
     origin = read_json_file(folder / "origin.json") or {}
@@ -624,7 +645,7 @@ def job_status(row, job, last):
         and not (row.get("chatReady") and job.get("trigger") in {"videos", "videos-with-chat"})
     ):
         status = "running"
-    elif status not in ("needs_review", "chat_ready") and last and last["status"] == "failed":
+    elif status != "needs_review" and last and last["status"] == "failed":
         status = "failed"
     row.update(status=status, statusLabel=STATUS_LABELS[status])
 
@@ -688,7 +709,7 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
     pending = [g for g in gates if g["status"] == "AWAITING_HUMAN"]
     intake = read_json_file(char_dir / "s0-source/intake.json")
     display = display_name(persona, intake)
-    chat = Scene.read(char_dir, name=display).readiness()["ready"]
+    chat = False if error else Scene.read(char_dir, name=display).readiness()["ready"]
     goal_stages = stages
     if meta["origin"] != CREATED:
         ids = {"s0", "s3", "s7", "s8", "s8c"}
@@ -696,16 +717,14 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
             ids.update(("s9s", "s9", "s10t"))
         goal_stages = [s for s in stages if s["id"] in ids]
     goal = _progress(goal_stages)
-    # 대화가 되면 상태는 "대화 가능" 하나로 보인다.
-    # 남은 사람 확인은 지금 할 일에서 따로 보인다(3차 QA).
-    if chat:
-        status = "chat_ready"
-    elif pending:
-        status = "needs_review"
-    elif any(s["status"] == "CHECK_FAILED" for s in stages):
+    # 대화 가능 여부는 별도 기능이다. 실패·검토와 실제 완료 수를 덮지 않는다(D-0181).
+    # 수정 요청(REJECTED)은 실패가 아니라 다시 확인할 일이다(QA 3차).
+    if any(s["status"] == "CHECK_FAILED" for s in stages):
         status = "failed"
-    elif any(s["status"] == "REJECTED" for s in stages):
+    elif pending or any(s["status"] == "REJECTED" for s in stages):
         status = "needs_review"
+    elif chat:
+        status = "chat_ready"
     elif is_draft(intake, stages):
         status = "draft"
     else:
@@ -719,6 +738,9 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
         "status": status,
         "statusLabel": STATUS_LABELS[status],
         "chatReady": chat,
+        "chapterTemplate": (read_json_file(char_dir / "source-pack.json") or {}).get(
+            "chapterTemplate", ""
+        ),
         **video_fields(char_dir, state),
         "createdAt": created_at(char_dir, intake),
         "archived": read_archived(char_dir),
@@ -727,7 +749,7 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
             if meta["origin"] == CREATED
             else "대화와 학습 준비"
             if meta["modelMode"] == "TRAIN"
-            else "대화 가능까지",
+            else "대화 제작 단계",
             done=goal["done"],
             total=goal["total"],
         ),
@@ -818,6 +840,7 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
                 "origin",
                 "originLabel",
                 "modelMode",
+                "chapterTemplate",
                 "videoTier",
                 "videoStatus",
                 "videoLabel",
@@ -827,6 +850,7 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
             )
         },
         "autoReview": read_auto_review(char_dir),
+        "demo": _demo_summary(char_dir),
         "persona": summary["persona"],
         "stages": summary["stages"],
         "gates": summary["gates"],

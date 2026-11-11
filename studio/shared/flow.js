@@ -31,9 +31,11 @@
     return (x.originLabel || '모티브') + ' · ' + (MODE_LABEL[x.modelMode] || MODE_LABEL.TRAIN);
   }
   // 모티브 단계 줄에 붙이는 쉬운 설명. 단계 이름은 서버 그래프를 그대로 쓴다.
-  const TWIN_HINT = { s2: '받은 사진에서 기준 사진 고르기', s8c: '첫 통화 장면을 정하고 장면마다 대화 표본을 만들어요' };
+  const TWIN_HINT = { s2: '받은 사진에서 기준 사진 고르기', s8c: '선택한 장면을 정하고 장면마다 대화 표본을 만들어요' };
   // S8c(챕터 시작 설정)는 사람 검토 없이 도는 단계다. 화면 이름은 시작 장면을 따른다(계획 2차 약속 2).
   function s8cName(origin, template) {
+    if (template === 'FRIEND_CHAT') return '친구 대화 장면';
+    if (template === 'INTERVIEW') return '인터뷰 장면';
     if (template) return template === 'FAN_CALL' ? '팬 통화 장면' : '통화 장면';
     return origin === 'SOURCE' ? '첫 통화 장면' : '통화 장면';
   }
@@ -110,12 +112,16 @@
   const STATUS_LABEL = { draft: '시작 전', running: '만드는 중', needs_review: '확인 필요', chat_ready: '대화 가능', failed: '실패', stopped: '멈춤', done: '완료' };
   const STATUS_TONE = { draft: 'muted', running: 'run', needs_review: 'wait', chat_ready: 'ok', failed: 'fail', stopped: 'muted', done: 'ok' };
   const STATUS_RANK = { needs_review: 0, failed: 1, running: 2, chat_ready: 3, draft: 4, stopped: 5, done: 6 };
+  // 시연 모드(모든 검토 자동 승인 → 테스터 전용 발행)는 상태 낱말 뒤에 붙인다. 품질 검토가 아니다.
+  const DEMO_LABEL = { ready: '시연 모드', publishing: '시연 · 테스터 발행 중', published: '시연 · 테스터 발행됨', publish_failed: '시연 · 발행 실패', budget: '시연 · 예산 상한', stopped: '시연 · 멈춤', failed: '시연 · 멈춤', packaged: '시연 · 패키지 완료' };
   function statusOf(c, sum) {
     const x = c || {};
     const s = sum || {};
     let st = STATUS_LABEL[x.status] ? x.status : '';
     if (!st) st = s.running ? 'running' : s.fail ? 'failed' : (s.review || s.paid) ? 'needs_review' : isChatReady(x) ? 'chat_ready' : s.complete ? 'done' : s.fresh ? 'draft' : 'stopped';
-    return { status: st, label: text(x.statusLabel).trim() || STATUS_LABEL[st], tone: STATUS_TONE[st] || 'muted', rank: STATUS_RANK[st] == null ? 9 : STATUS_RANK[st] };
+    const demo = x.demo && x.demo.enabled ? (DEMO_LABEL[x.demo.phase] || DEMO_LABEL.ready) : '';
+    const label = (text(x.statusLabel).trim() || STATUS_LABEL[st]) + (demo ? ' · ' + demo : '');
+    return { status: st, label, tone: STATUS_TONE[st] || 'muted', rank: STATUS_RANK[st] == null ? 9 : STATUS_RANK[st] };
   }
   // 목표 경로: 모티브는 대화 가능까지 필요한 단계만(첫 장면 S8c, 없으면 프롬프트 S8의 앞 단계들). 학습 방식이면 학습 단계까지 더한다.
   // 오리지널은 목표 경로를 따로 두지 않는다(null).
@@ -132,10 +138,10 @@
   function goalOf(graph, detail, views) {
     const ids = goalStages(graph, detail);
     const g = detail && detail.goal;
-    if (g && Number(g.total) > 0) return { label: text(g.label).trim() || (ids ? '대화 가능까지' : '전체'), done: Number(g.done) || 0, total: Number(g.total), ids };
+    if (g && Number(g.total) > 0) return { label: text(g.label).trim() || (ids ? '대화 제작 단계' : '전체'), done: Number(g.done) || 0, total: Number(g.total), ids };
     const list = ids ? Array.from(ids) : (graph ? graph.stages.map((s) => s.id) : []);
     const done = list.filter((id) => ['done', 'skip'].includes(((views || {})[id] || {}).kind)).length;
-    return { label: ids ? '대화 가능까지' : '전체', done, total: list.length, ids };
+    return { label: ids ? '대화 제작 단계' : '전체', done, total: list.length, ids };
   }
   // 모티브 그래프 접기: 목표 경로 단계와 지금 일이 걸린(실행·대기·실패·비용 확인) 단계만 남기고 나머지는 숨긴다.
   // keep이 null이면 전부 보인다(오리지널이거나 사람이 펼쳤을 때). hidden은 접었을 때 숨는 단계 수다.
@@ -1308,7 +1314,7 @@
       all.forEach((s) => s.tasks.filter((x) => x.kind === 'wait').forEach((x) => gates.set(x.gate, (gates.get(x.gate) || 0) + 1)));
       if (state.ov.gate && !gates.has(state.ov.gate)) state.ov.gate = '';
       const is = (s, st) => s.status.status === st;
-      const match = { all: () => true, mine: (s) => s.todo > 0, run: (s) => is(s, 'running'), chat: (s) => is(s, 'chat_ready'), fail: (s) => is(s, 'failed') };
+      const match = { all: () => true, mine: (s) => s.todo > 0, run: (s) => is(s, 'running'), chat: (s) => isChatReady(s.c), fail: (s) => is(s, 'failed') };
       const counts = {};
       Object.keys(match).forEach((k) => { counts[k] = all.filter(match[k]).length; });
       const q = state.ov.q.trim().toLowerCase();
@@ -1331,7 +1337,7 @@
     }
     function nowText(s) {
       const st = s.status.status;
-      if (st === 'chat_ready') return chatStatusText(s.review);
+      if (st === 'chat_ready') return chatStatusText(s.review) + ' · 제작 진행은 별도예요';
       if (st === 'running') return '만드는 중이에요';
       if (st === 'draft') return s.c.origin === 'SOURCE' ? '원문을 올리는 중이에요' : '아직 실행하지 않았어요';
       if (st === 'done') return '모든 단계를 마쳤어요';
@@ -1480,10 +1486,10 @@
       }
       if (chat) {
         const t1 = chatStatusText(tasks.filter((t) => t.kind === 'wait').length);
-        let t2 = st === 'chat_ready' ? '만든 캐릭터와 바로 대화해 볼 수 있어요.' : st === 'running' ? '그동안 다른 단계를 더 만들고 있어요.' : '아래 할 일을 마치지 않아도 대화해 볼 수 있어요.';
+        let t2 = st === 'chat_ready' ? '대화할 수 있어요. 전체 제작 완료 여부는 단계별 진행을 확인해 주세요.' : st === 'running' ? '그동안 다른 단계를 더 만들고 있어요.' : '아래 할 일을 마치지 않아도 대화해 볼 수 있어요.';
         // 영상(약속 5): 만드는 중이면 그렇다고 적고, 영상이 없거나 실패했으면 보조 버튼으로 영상 만들기를 건넨다.
         if (d.videoStatus === 'making') t2 += ' 영상은 만드는 중이에요. 다 되면 대화할 때 영상이 나와요.';
-        else if (d.videoStatus === 'ready') t2 = st === 'chat_ready' ? '영상과 함께 대화해 볼 수 있어요.' : t2;
+        else if (d.videoStatus === 'ready') t2 = st === 'chat_ready' ? '영상도 준비됐어요. 대화해 보기에서 영상과 함께 대화해요. 남은 제작 단계는 진행 화면에서 확인해 주세요.' : t2;
         else if (d.videoStatus === 'failed') t2 += ' 영상은 만들지 못했어요' + (d.videoError ? ': ' + plainError(d.videoError) : '.');
         const vOpen = Boolean(state.video && state.video.open);
         const vBtn = canMakeVideo(d) ? '<button type="button" class="btn" data-act="video-open" aria-expanded="' + vOpen + '">' + icon('video') + (d.videoStatus === 'failed' ? '영상 다시 만들기' : d.videoStatus === 'ready' ? '영상 바꾸기' : '영상 만들기') + '</button>' : '';

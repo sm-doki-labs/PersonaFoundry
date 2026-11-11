@@ -1,4 +1,4 @@
-"""첫 장면 대화와 공통 시연 표본. 개인이 나눈 대화는 저장하지 않는다."""
+"""첫 장면 대화와 시연 표본. 개인 대화의 저장은 web.chat_history가 담당한다."""
 
 from __future__ import annotations
 
@@ -65,11 +65,12 @@ class Scene:
     prompt: Path | None
     chapter: Path | None
     name: str
-    prompt_status: str
-    waiting_review: bool
+    prompt_status: str = ""
+    waiting_review: bool = False
+    review_preview: bool = False
 
     @classmethod
-    def read(cls, folder: Path, *, name: str | None = None) -> Scene:
+    def read(cls, folder: Path, *, name: str | None = None, review_preview: bool = False) -> Scene:
         if name is None:
             plan = latest(folder / "s3-plan", "pr", "plan.json")
             name = (load_json(plan / "plan.json", {}) if plan else {}).get("name")
@@ -79,6 +80,9 @@ class Scene:
                 )
         try:
             state = load_json(folder / "state.json", {})
+        except (ValueError, OSError) as exc:
+            raise NotReady("대화 상태를 읽을 수 없어요. 저장 상태를 확인해 주세요.") from exc
+        try:
             gates = state.get("gates", {})
             waiting = any(
                 isinstance(g, dict) and g.get("status") == "AWAITING_HUMAN" for g in gates.values()
@@ -88,8 +92,9 @@ class Scene:
             status, rev = gate.get("status", ""), gate.get("rev")
             if stage.get("status") in {"RUNNING", "REJECTED", "CHECK_FAILED"}:
                 status = stage["status"]
-        except (ValueError, OSError, AttributeError):
+        except AttributeError:
             status, rev, waiting = "", None, False
+        # 승인됐거나 검토 중인 G6 판만 쓴다. 새 시도가 옛 판으로 몰래 되돌아가지 않는다.
         prompt = None
         if (
             status in {"APPROVED", "AWAITING_HUMAN"}
@@ -106,6 +111,7 @@ class Scene:
             name or "캐릭터",
             status,
             waiting,
+            review_preview,
         )
 
     def _voice(self, *, for_review=False):
@@ -113,8 +119,22 @@ class Scene:
             raise NotReady(
                 "말투와 성격을 다시 준비하고 있어요. 새 버전을 승인하면 대화할 수 있어요."
             )
-        if self.prompt_status == "AWAITING_HUMAN" and not for_review:
+        review = for_review or self.review_preview
+        if self.prompt_status == "AWAITING_HUMAN" and not review:
             raise NotReady("말투와 성격을 승인하면 대화할 수 있어요.")
+        if self.prompt:
+            from character_factory_poc.stages.s8_prompts.evidence_pipeline import (
+                is_evidence,
+                verify_snapshot,
+            )
+
+            try:
+                if is_evidence(self.prompt):
+                    verify_snapshot(self.folder, self.prompt, review_preview=review)
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                raise NotReady(
+                    "원문 근거 검토와 승인을 확인해 주세요. 자료가 바뀌었다면 다시 생성해야 해요."
+                ) from exc
         try:
             voice = (self.prompt / "long.md").read_text("utf-8").rstrip("\n") if self.prompt else ""
         except (UnicodeError, OSError):
@@ -125,7 +145,7 @@ class Scene:
 
     def _scene(self):
         if not self.chapter:
-            raise NotReady("첫 통화 장면이 아직 없어요.")
+            raise NotReady("대화 시작 장면이 아직 없어요.")
         try:
             ch = next(
                 c
@@ -151,12 +171,61 @@ class Scene:
         except (StopIteration, KeyError, TypeError, OSError, ValueError) as exc:
             raise NotReady("첫 대화 장면을 읽을 수 없어요. 장면 설정을 확인해 주세요.") from exc
 
+    def _has_compiled_scene(self):
+        if not self.prompt:
+            return False
+        from character_factory_poc.stages.s8_prompts.evidence_pipeline import is_evidence
+
+        if is_evidence(self.prompt):
+            return True  # _voice has verified the authoritative evidence binding.
+        binding = load_json(self.prompt / "text-deck-binding.json", {})
+        return binding.get("compiler") in {
+            "motif-assembler-v3",
+            "evidence-pipeline-v1",
+            "evidence-pipeline-v2",
+            "evidence-pipeline-v3",
+            "evidence-pipeline-v4",
+            "evidence-pipeline-v5",
+        }
+
     def compose(self, *, for_review=False):
-        return self._voice(for_review=for_review) + "\n\n" + self._scene()
+        voice = self._voice(for_review=for_review)
+        return voice if self._has_compiled_scene() else voice + "\n\n" + self._scene()
+
+    def example_turns(self):
+        """S8이 남긴 실제 문답 묶음(D-0173). 없거나 비어 있으면 None."""
+        if self.prompt and load_json(self.prompt / "text-deck-binding.json", {}).get(
+            "compiler"
+        ) in {
+            "evidence-pipeline-v1",
+            "evidence-pipeline-v2",
+            "evidence-pipeline-v3",
+            "evidence-pipeline-v4",
+            "evidence-pipeline-v5",
+        }:
+            return None
+        data = load_json(self.prompt / "example-turns.json") if self.prompt else None
+        if not isinstance(data, dict) or not data.get("system") or not data.get("turns"):
+            return None
+        return data
+
+    def opening(self, *, for_review=False) -> list[Message]:
+        """대화 앞에 놓는 메시지. 실제 문답 묶음이 있으면 이전 턴으로 넣는다."""
+        data = self.example_turns()
+        if not data:
+            return [Message("system", self.compose(for_review=for_review))]
+        self._voice(for_review=for_review)
+        messages = [Message("system", data["system"])]
+        for turn in data["turns"]:
+            messages += [Message("user", turn["user"]), Message("assistant", turn["reply"])]
+        return messages
 
     def readiness(self, *, running=False, draft=False):
         missing, reasons = [], []
-        for key, read in (("prompt", self._voice), ("scene", self._scene)):
+        required = [("prompt", self._voice)]
+        if not self._has_compiled_scene():
+            required.append(("scene", self._scene))
+        for key, read in required:
             try:
                 read()
             except NotReady as exc:
@@ -199,16 +268,30 @@ class Scene:
         return []
 
 
+def base_scenarios(folder=None):
+    pack = load_json(folder / "source-pack.json", {}) if folder else {}
+    name = {
+        "FRIEND_CHAT": "demo-scenarios-friend-v1.json",
+        "INTERVIEW": "demo-scenarios-interview-v1.json",
+    }.get(pack.get("chapterTemplate"), "demo-scenarios-v1.json")
+    return resource(name)
+
+
 def scenarios(folder=None):
-    generic = resource("demo-scenarios-v1.json")
+    generic = base_scenarios(folder)
     custom = load_json(folder / "demo/scenarios.json", []) if folder else []
     if isinstance(custom, dict):
         custom = custom["scenarios"]
     return custom + generic
 
 
+def configured_provider(ctx):
+    """Use the same configured provider for samples and interactive dialogue."""
+    return ctx.config.providers.get("demo_chat", ctx.config.providers.get("text", DEFAULT))
+
+
 def provider(ctx, via, server_mode=False):
-    cfg = ctx.config.providers.get("demo_chat", DEFAULT)
+    cfg = configured_provider(ctx)
     extra = {**DEFAULT.extra, "timeout_s": 15, **cfg.extra}
     if via == "vertex":
         if server_mode or os.getenv("CFP_SERVER_MODE") == "1":
@@ -223,8 +306,8 @@ def provider(ctx, via, server_mode=False):
             model="google/" + cfg.model.removeprefix("google/"),
             extra=extra,
         )
-    if cfg.adapter == "vertex_openai":
-        raise ValueError("기본 대화 모델 설정을 확인해 주세요.")
+    if cfg.adapter == "vertex_openai" and (server_mode or os.getenv("CFP_SERVER_MODE") == "1"):
+        raise PermissionError("팀 서버에서는 기본 대화 모델을 이용해 주세요.")
     return replace(cfg, extra=extra)
 
 
@@ -279,15 +362,15 @@ def respond(model, messages, temperature, deadline=None):
 def run_samples(ctx: Context, cid: str) -> Path:
     scene = Scene.read(ctx.character_dir(cid))
     # 승인 전 검토 시트에 실을 표본만 현재 검토 판으로 만든다.
-    system = Message("system", scene.compose(for_review=True))
+    opening = scene.opening(for_review=True)
     path = scene.chapter / "samples.json"
     if scene.samples():
         return path
     model = talk_model(ctx, cid, provider(ctx, "studio"))
     temperature = ctx.config.demo_chat_temperature(True)
     samples = []
-    for scenario in scenarios():
-        messages, turns = [system], []
+    for scenario in base_scenarios(scene.folder):
+        messages, turns = [*opening], []
         for user in scenario["turns"]:
             messages.append(Message("user", user))
             reply = respond(model, messages, temperature)["reply"]

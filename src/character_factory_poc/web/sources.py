@@ -58,6 +58,7 @@ from character_factory_poc.stages.s0_source import parse
 from character_factory_poc.stages.s3_plan.common import new_character
 from character_factory_poc.web import reads
 from character_factory_poc.web.errors import WebError
+from character_factory_poc.web.launch_validation import validate_source_launch
 
 EXTENSIONS = {".txt", ".srt", ".vtt", ".csv", ".json"}
 FIELDS = ("textId", "kind", "register", "subjectSpeaker", "userSpeaker", "date", "sourceUrl")
@@ -98,8 +99,17 @@ class Draft(Strict):
     usageBasis: UsageBasis = Field(default_factory=UsageBasis)
     modelMode: Literal["PROMPT_ONLY", "BIND_EXISTING", "TRAIN"] = "PROMPT_ONLY"
     autoReview: bool = True
-    chapterTemplate: Literal["FAN_CALL", "FAMILY_CALL"] | None = None
+    chapterTemplate: Literal["FAN_CALL", "FAMILY_CALL", "FRIEND_CHAT", "INTERVIEW"] | None = None
     knownFacts: KnownFacts = Field(default_factory=KnownFacts)
+    # 시연 모드: 모든 관문 자동 승인 → 테스터 미리보기 발행 → 디스코드 알림(사용자 2026-11-12).
+    demoMode: bool = False
+    demoBudgetUsd: float = Field(default=15.0, gt=0, le=200)
+
+
+class DemoSwitch(Strict):
+    enabled: bool
+    budgetUsd: float = Field(default=15.0, gt=0, le=200)
+    start: bool = False
 
 
 class Upload(Strict):
@@ -255,17 +265,39 @@ def source_text(folder, item):
     )
 
 
+def kakao_layout(raw):
+    """Recognize export structure, not mentions of Kakao inside an interview."""
+    raw = raw.lstrip("\ufeff")
+    if raw.startswith(('"', "[")):
+        try:
+            data = json.loads(raw)
+            if isinstance(data, str):
+                raw = data
+            elif isinstance(data, list) and all(isinstance(x, str) for x in data):
+                raw = "\n".join(data)
+        except ValueError:
+            pass
+    for line in raw.splitlines():
+        if (
+            parse._PC_MSG.match(line)
+            or parse._MOBILE_MSG.match(line)
+            or re.match(r"^date,\s*user,\s*message(?:,|$)", line, re.I)
+        ):
+            return True
+    return False
+
+
 def suggested_kind(filename, raw):
-    hint = filename.lower() + " " + raw[:180].lower()
-    if re.search(
-        r"카카오톡|카톡|kakao|date,\s*user,\s*message|\[(?:오전|오후) \d|오[전후] \d+:\d+,", hint
-    ):
-        return "KAKAO_EXPORT"
-    if Path(filename).suffix.lower() in {".vtt", ".srt"} or re.search(
-        r"브이로그|vlog|녹취|자막|일상", hint
-    ):
+    if Path(filename).suffix.lower() in {".vtt", ".srt"}:
         return "TRANSCRIPT"
-    if re.search(r"기사|article|보도자료", hint):
+    if kakao_layout(raw):
+        return "KAKAO_EXPORT"
+    name = filename.lower()
+    if re.search(r"카카오톡|카톡|kakao", name) or Path(filename).suffix.lower() == ".csv":
+        return "KAKAO_EXPORT"
+    if re.search(r"브이로그|vlog|녹취|자막|일상|transcript|subtitle|casual", name):
+        return "TRANSCRIPT"
+    if re.search(r"기사|article|보도자료|news", name):
         return "ARTICLE"
     return "INTERVIEW"
 
@@ -418,6 +450,14 @@ def install_source_routes(app, conf, jobs):
         if body.signaturePose:
             write_signature(folder, _signature(body.signaturePose))
         write_model_mode(folder, body.modelMode)
+        if body.demoMode:
+            from character_factory_poc.common.errors import FactoryError
+            from character_factory_poc.pipeline.demo import write_demo_mode
+
+            try:
+                write_demo_mode(folder, enabled=True, budget_usd=body.demoBudgetUsd)
+            except FactoryError as exc:
+                raise WebError(422, str(exc)) from exc
         subject = SourceSubject(displayName=body.displayName, kind=body.subjectKind)
         save(
             inside(folder, "s0-source", "intake.json"),
@@ -440,7 +480,16 @@ def install_source_routes(app, conf, jobs):
         result = []
         for folder in reads.visible_folders(conf.root):
             draft = reads.read_json_file(folder / "s0-source/intake.json")
-            if not draft or draft.get("jobId") or jobs.active_for(folder.name):
+            # Only resumable upload drafts belong here; old intake formats are
+            # left untouched and remain visible through the character list.
+            if (
+                not isinstance(draft, dict)
+                or not isinstance(draft.get("files"), list)
+                or not isinstance(draft.get("subject"), dict)
+                or not {"characterId", "usageBasis"}.issubset(draft)
+                or draft.get("jobId")
+                or jobs.active_for(folder.name)
+            ):
                 continue
             state, _ = reads.read_state(folder)
             if reads.is_draft(draft, state.get("stages", {}).values()):
@@ -550,6 +599,12 @@ def install_source_routes(app, conf, jobs):
         if spec.register is None:
             candidate["register"] = default_register(spec.kind)
         detected, subject, user, choices = [], None, None, []
+        if (
+            spec.kind != "KAKAO_EXPORT"
+            and kakao_layout(raw)
+            and Path(item["filename"]).suffix.lower() not in {".srt", ".vtt"}
+        ):
+            problems.append("카톡 내보내기 형식이에요. 파일 종류를 카톡으로 바꿔 주세요.")
         if not problems:
             try:
                 messages = parse.source_messages(spec, raw, display)
@@ -650,6 +705,7 @@ def install_source_routes(app, conf, jobs):
             problems, ready = summary(draft)
             if not ready:
                 raise WebError(409, "; ".join(problems) or "올린 원문을 모두 확인해 주세요.")
+            validate_source_launch(load_config(conf.root, conf.config_path))
             texts, photos = [], []
             for item in draft["files"]:
                 try:
@@ -685,12 +741,29 @@ def install_source_routes(app, conf, jobs):
                 **opts,
             )
             save(inside(folder, "source-pack.json"), pack.model_dump(mode="json"))
-            if read_auto_review(folder) and draft["videoTier"] != "none":
+            from character_factory_poc.pipeline.demo import read_demo_mode
+
+            if read_demo_mode(folder):
+                job = demo_job(cid, draft.get("subject", {}).get("displayName") or cid)
+            elif read_auto_review(folder) and draft["videoTier"] != "none":
                 job = video_job(cid, prepare_chat=True)
             else:
                 job = jobs.submit(cid, until="s8c" if read_auto_review(folder) else "G0")
             draft["jobId"] = job["jobId"]
             return {"jobId": draft["jobId"]}
+
+    def demo_job(cid, name):
+        """시연 모드 실행: 패키지 승인(G9)까지 자동 승인으로 돌고 끝나면 발행·알림한다."""
+        from character_factory_poc.common.notify import notify
+
+        job = jobs.submit(cid, until="G9", trigger="demo")
+        notify(
+            "started",
+            name,
+            ["모든 검토를 자동 승인하고, 끝나면 테스터 전용으로 발행해요."],
+            character_id=cid,
+        )
+        return job
 
     def video_job(cid, *, prepare_chat=False):
         return jobs.submit(
@@ -717,6 +790,27 @@ def install_source_routes(app, conf, jobs):
         with opened(cid, settings=True) as (folder, draft):
             change_settings(folder, draft, cid, body.videoTier, body.signaturePose)
             return {"videoTier": body.videoTier, "signaturePose": read_signature(folder)}
+
+    @router.put("/{cid}/demo-mode")
+    def demo_mode(cid: str, body: DemoSwitch):
+        """만든 캐릭터에도 시연 모드를 켜고 끈다. start면 바로 자동 진행을 시작한다."""
+        from character_factory_poc.common.errors import FactoryError
+        from character_factory_poc.pipeline.demo import write_demo_mode
+
+        folder = reads.character_dir(conf.root, cid)
+        if not folder.is_dir() or not folder.is_relative_to(conf.root):
+            raise WebError(404, "캐릭터를 찾을 수 없어요.")
+        if jobs.active_for(cid):
+            raise WebError(409, "진행 중인 작업이 끝난 뒤에 바꿀 수 있어요.")
+        try:
+            mode = write_demo_mode(folder, enabled=body.enabled, budget_usd=body.budgetUsd)
+        except FactoryError as exc:
+            raise WebError(422, str(exc)) from exc
+        job_id = None
+        if body.enabled and body.start:
+            name = reads.display_name(reads._persona(folder), {}) or cid
+            job_id = demo_job(cid, name)["jobId"]
+        return {"enabled": mode.enabled, "budgetUsd": mode.budgetUsd, "jobId": job_id}
 
     videos = APIRouter(route_class=IntakeRoute)
 

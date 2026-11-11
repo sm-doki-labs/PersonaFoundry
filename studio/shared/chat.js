@@ -5,7 +5,7 @@
   // 서버는 약속 1 대화 API만 쓴다: GET /api/characters/{cid}/chat/meta, POST /api/characters/{cid}/chat.
   // 4차 묶음 P: 영상이 있으면(약속 6 GET chat/clips ready=true) 서비스 앱처럼 영상 통화 화면이 된다.
   // 답이 오면 POST chat/clip으로 반응 영상을 고르고, 없으면 앱의 옅은 반응 대체 규칙(fallbackClip.ts)을 쓴다.
-  // 대화 기록은 서버에 남기지 않고 이 탭의 메모리(sessionStorage)에만 둔다.
+  // 대화 기록은 별도 history API에 저장한다. sessionStorage는 미저장 내용과 현재 선택을 보관한다.
   // createChat은 DOM 없이 돌아서 시험이 가짜 fetch로 보내기·재생 순서·준비 안 됨·다시 시도를 확인한다. mount는 그 위에 화면을 그린다.
 
   const MOTIF_NOTE = 'AI 생성 · 본인과 무관한 기술 시연';
@@ -120,32 +120,180 @@
     let playSeq = 0;
     let destroyed = false;
     let reaction = null;
+    let saveQueue = Promise.resolve(true);
+    let pendingSnapshot = null;
+    let restored = false;
+    let historyLoaded = false;
+    let cacheUnreadable = false;
 
     // phase: loading · ready · not-ready(준비 안 됨) · missing(없는 캐릭터) · error(불러오기 실패)
     // clips: null(아직 모름) · 약속 6 GET chat/clips 응답. 못 받으면 {ready:false}로 두고 글 대화만 한다.
-    const state = { phase: 'loading', meta: null, reason: '', error: '', messages: [], pending: null, play: null, announce: null, clips: null };
+    const state = { phase: 'loading', meta: null, reason: '', error: '', messages: [], pending: null, play: null, announce: null, clips: null, sessionId: null, revision: 0, sessions: [], saving: false, dirty: false, saveError: '', inputError: '', historyError: '', historyNotice: '', storageError: '', historyBusy: false };
 
     function emit() { if (!destroyed) listeners.forEach((fn) => { try { fn(state); } catch (error) { /* 화면 오류가 대화를 멈추지 않게 한다 */ } }); }
     function storeKey() { return STORE_PREFIX + cid; }
-    function save() {
-      if (!storage) return;
+    function newId() {
+      if (global.crypto && global.crypto.randomUUID) return global.crypto.randomUUID();
+      const bytes = new Uint8Array(16);
+      global.crypto.getRandomValues(bytes);
+      bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+      const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+      return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+    }
+    function snapshot() {
+      return state.messages.map((m) => {
+        const keep = { role: m.role, content: m.content };
+        for (const key of ['ms', 'rejected', 'reasons', 'model', 'error', 'stopped']) {
+          if (m[key] != null) keep[key] = m[key];
+        }
+        return keep;
+      });
+    }
+    function cache() {
+      if (destroyed || cacheUnreadable) return;
+      if (!storage) {
+        state.storageError = state.dirty ? '이 탭에 임시저장할 수 없어요. 서버 저장을 마칠 때까지 화면을 닫지 마세요.' : '';
+        return;
+      }
       try {
-        const keep = state.messages.map((m) => ({ role: m.role, content: m.content, ms: m.ms, rejected: m.rejected, reasons: m.reasons, model: m.model }));
-        if (keep.length) storage.setItem(storeKey(), JSON.stringify({ v: 1, messages: keep }));
-        else storage.removeItem(storeKey());
-      } catch (error) { /* 저장 공간이 없어도 대화는 이어 간다 */ }
+        storage.setItem(storeKey(), JSON.stringify({ v: 2, sessionId: state.sessionId, revision: state.revision,
+          dirty: state.dirty, messages: snapshot(), pendingSnapshot }));
+        state.storageError = '';
+      } catch (error) { state.storageError = '이 탭에 임시저장하지 못했어요. 서버 저장을 마칠 때까지 화면을 닫지 마세요.'; }
+    }
+    function applyMessages(messages) {
+      state.messages = messages.map((m) => Object.assign({}, m, { id: 'm' + (++seq) }));
+      const tail = state.messages[state.messages.length - 1];
+      if (tail && tail.role === 'user' && !tail.error) { tail.error = '답을 받기 전에 화면을 닫았어요.'; tail.stopped = true; }
     }
     function restore() {
+      if (restored) return;
+      restored = true;
       if (!storage) return;
       try {
         const raw = storage.getItem(storeKey());
         const data = raw ? JSON.parse(raw) : null;
         if (!data || !Array.isArray(data.messages)) return;
-        state.messages = data.messages.filter((m) => m && (m.role === 'user' || m.role === 'assistant')).map((m) => Object.assign({}, m, { id: 'm' + (++seq) }));
-        // 답을 못 받은 채 끝난 마지막 말은 다시 받을 수 있게 실패로 표시한다.
-        const tail = state.messages[state.messages.length - 1];
-        if (tail && tail.role === 'user') { tail.error = '답을 받기 전에 화면을 닫았어요.'; tail.stopped = true; }
-      } catch (error) { state.messages = []; }
+        if (data.messages.some((m) => !m || !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string')) throw Error('invalid cache');
+        applyMessages(data.messages);
+        state.sessionId = data.v === 2 ? data.sessionId : null;
+        state.revision = data.v === 2 ? data.revision || 0 : 0;
+        state.dirty = data.v === 2 ? !!data.dirty : data.messages.length > 0;
+        pendingSnapshot = data.v === 2 ? data.pendingSnapshot || null : null;
+      } catch (error) {
+        cacheUnreadable = true;
+        state.storageError = '탭에 보관된 대화를 읽지 못했어요. 임시 기록은 그대로 남겨 두었어요.';
+        state.historyError = state.storageError;
+      }
+    }
+    function rememberSession(data) {
+      const item = { id: data.id, revision: data.revision, title: data.title, updatedAt: data.updatedAt, messageCount: data.messages.length };
+      state.sessions = [item, ...state.sessions.filter((s) => s.id !== item.id)];
+    }
+    async function persist(messages) {
+      if (!state.sessionId) state.sessionId = newId();
+      cache();
+      let data;
+      try {
+        data = await historyCall('PUT', chatPath(cid, '/sessions/' + state.sessionId), { revision: state.revision, messages });
+      } catch (error) {
+        if (error.status !== 409) throw error;
+        state.sessionId = newId(); state.revision = 0;
+        state.historyNotice = '다른 탭의 기록과 충돌했어요. 이 탭의 내용은 별도 대화로 저장해요.';
+        cache();
+        data = await historyCall('PUT', chatPath(cid, '/sessions/' + state.sessionId), { revision: 0, messages });
+      }
+      state.revision = data.revision;
+      rememberSession(data);
+    }
+    function save() {
+      if (cacheUnreadable) return Promise.resolve(false);
+      const messages = snapshot();
+      if (!messages.length && !state.revision && !pendingSnapshot) { cache(); return Promise.resolve(true); }
+      state.dirty = true;
+      cache();
+      saveQueue = saveQueue.then(async () => {
+        state.saving = true; emit();
+        try {
+          // Replay an unacknowledged request before a newer snapshot. This also
+          // survives refresh, so a lost response cannot produce duplicate forks.
+          if (pendingSnapshot) { await persist(pendingSnapshot); pendingSnapshot = null; }
+          pendingSnapshot = messages;
+          cache();
+          await persist(messages);
+          pendingSnapshot = null;
+          state.dirty = JSON.stringify(snapshot()) !== JSON.stringify(messages);
+          state.saveError = '';
+          cache();
+          return true;
+        } catch (error) {
+          state.saveError = '대화 기록을 저장하지 못했어요. ' + error.message;
+          state.dirty = true;
+          cache();
+          return false;
+        } finally { state.saving = false; emit(); }
+      });
+      return saveQueue;
+    }
+    async function refreshSessions() {
+      try {
+        const data = await historyCall('GET', chatPath(cid, '/sessions'));
+        state.sessions = data.sessions || [];
+        state.historyError = '';
+        emit();
+        return true;
+      } catch (error) { state.historyError = '이전 대화 목록을 불러오지 못했어요. ' + error.message; emit(); return false; }
+    }
+    async function loadHistory() {
+      if (historyLoaded) return;
+      state.historyBusy = true; emit();
+      try {
+        const listed = await refreshSessions();
+        if (state.dirty || pendingSnapshot) await save();
+        else {
+          const id = state.sessionId || (listed && state.sessions[0] && state.sessions[0].id);
+          if (id && (state.revision || !state.sessionId)) {
+            const data = await historyCall('GET', chatPath(cid, '/sessions/' + id));
+            state.sessionId = data.id; state.revision = data.revision;
+            applyMessages(data.messages); cache();
+          }
+        }
+        historyLoaded = listed;
+      } catch (error) { state.historyError = '이전 대화를 불러오지 못했어요. ' + error.message; }
+      finally { state.historyBusy = false; emit(); }
+    }
+    async function retrySave() {
+      const saved = await save();
+      if (!historyLoaded && !state.messages.length && !state.sessionId) await loadHistory();
+      else await refreshSessions();
+      return saved;
+    }
+    async function selectSession(id) {
+      if (state.pending || state.historyBusy || (state.play && state.play.status === 'running')) return false;
+      state.historyBusy = true; emit();
+      try {
+        if (!(await save())) return false;
+        const data = await historyCall('GET', chatPath(cid, '/sessions/' + encodeURIComponent(id)));
+        state.sessionId = data.id; state.revision = data.revision; state.dirty = false;
+        state.play = null; state.announce = null; reaction = null; state.historyNotice = '';
+        applyMessages(data.messages); cache();
+        state.historyError = '';
+        return true;
+      } catch (error) { state.historyError = '이전 대화를 불러오지 못했어요. ' + error.message; return false; }
+      finally { state.historyBusy = false; emit(); }
+    }
+
+    async function historyCall(method, path, body) {
+      const ctl = AbortCtl ? new AbortCtl() : null;
+      let timer;
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error('기록 서버의 응답이 늦어지고 있어요. 다시 시도해 주세요.'));
+          if (ctl) ctl.abort();
+        }, o.historyTimeoutMs == null ? 15000 : o.historyTimeoutMs);
+      });
+      try { return await Promise.race([call(method, path, body, ctl && ctl.signal), timeout]); }
+      finally { clearTimeout(timer); }
     }
 
     async function call(method, path, body, signal) {
@@ -177,17 +325,19 @@
 
     async function load() {
       state.phase = 'loading'; state.error = ''; state.reason = '';
+      restore();
       emit();
       try {
         const meta = await call('GET', chatPath(cid, '/meta'));
         if (destroyed) return state;
         state.meta = meta;
-        if (meta.ready) { state.phase = 'ready'; if (!state.messages.length) restore(); }
+        if (meta.ready) { state.phase = 'ready'; }
         else { state.phase = 'not-ready'; state.reason = text(meta.reason).trim() || '아직 대화할 준비가 되지 않았어요.'; }
       } catch (error) {
         if (error.status === 404) { state.phase = 'missing'; state.reason = '지웠거나 주소가 바뀌었을 수 있어요. 목록에서 다시 골라 주세요.'; }
         else { state.phase = 'error'; state.error = error.message; }
       }
+      if (!destroyed) await loadHistory();
       emit();
       if (state.phase === 'ready' && !destroyed) await loadClips();
       return state;
@@ -202,7 +352,7 @@
       emit();
       return state.clips;
     }
-    // 반응 영상 고르기(약속 6). 대화 내용은 서버에 남지 않는다.
+    // 반응 영상 고르기(약속 6). 기록 저장과는 별도 요청이다.
     function pickClip(body) { return call('POST', chatPath(cid, '/clip'), body || {}); }
 
     function startReaction(userMessage, replyText) {
@@ -221,7 +371,30 @@
     function failedLast() { const m = last(); return m && m.role === 'user' && m.error ? m : null; }
     function history() { return state.messages.map((m) => ({ role: m.role, content: m.content })); }
     function scenarios() { return (state.meta && Array.isArray(state.meta.scenarios)) ? state.meta.scenarios : []; }
-    function canSend() { return state.phase === 'ready' && !state.pending && !(state.play && state.play.status === 'running'); }
+    function canSend() { return state.phase === 'ready' && !state.historyBusy && !destroyed && !cacheUnreadable && !state.pending && !(state.play && state.play.status === 'running'); }
+
+    function validateInput(raw) {
+      const content = text(raw).trim();
+      let error = '';
+      const messages = snapshot().slice(0, failedLast() ? -1 : undefined);
+      if (content.length > 16000) error = '한 번에 16,000자까지 보낼 수 있어요. 말을 나누어 보내 주세요.';
+      else if (messages.some((m) => m.content.length > 16000)) error = '이전 기록에 모델 입력 한도를 넘는 말이 있어요. 기록을 남기고 새 대화로 이어 주세요.';
+      else if (messages.length >= 100) error = '이 대화의 메시지가 많아요. 기록을 남기고 새 대화로 이어 주세요.';
+      else {
+        messages.push({ role: 'user', content });
+        const encoded = JSON.stringify(messages);
+        let bytes = 0;
+        for (const char of encoded) {
+          const cp = char.codePointAt(0);
+          bytes += cp <= 0x7f ? 1 : cp <= 0x7ff ? 2 : cp <= 0xffff ? 3 : 4;
+        }
+        // Leave room for one reply and its bounded diagnostic metadata.
+        if (bytes > 1536 * 1024) error = '대화 기록이 길어졌어요. 저장된 기록을 남기고 새 대화로 이어 주세요.';
+      }
+      state.inputError = error;
+      if (error) emit();
+      return !error;
+    }
 
     // 마지막 사람 말에 대한 답을 한 번 받는다. 성공하면 true.
     async function reply() {
@@ -254,7 +427,7 @@
       const msg = { id: 'm' + (++seq), role: 'assistant', content: text(data.reply), ms, rejected: rejectedCount(data.rejected), reasons: rejectedReasons(data.rejected), model: text(data.model) };
       state.messages.push(msg);
       state.announce = { id: msg.id, text: msg.content };
-      save();
+      await save();
       emit();
       startReaction(user && user.role === 'user' ? user.content : '', msg.content);
       return true;
@@ -269,8 +442,16 @@
     // 직접 보내기. 마지막 말이 실패해 있으면 그 말을 새 말로 바꾼다(사람 말이 두 번 연달아 가지 않게).
     async function send(raw) {
       const content = text(raw).trim();
-      if (!content || !canSend()) return false;
-      if (failedLast()) state.messages.pop();
+      if (!content || !canSend() || !validateInput(content)) return false;
+      if (failedLast()) {
+        // Preserve the failed turn in its original session before replacing it.
+        state.historyBusy = true;
+        const saved = await save();
+        state.historyBusy = false;
+        if (!saved) { emit(); return false; }
+        state.sessionId = newId(); state.revision = 0;
+        state.messages.pop();
+      }
       if (state.play) state.play = null; // 직접 말을 걸면 재생은 끝나고 자유 대화가 된다
       pushUser(content);
       save();
@@ -281,8 +462,8 @@
     async function play(scenarioId) {
       const sc = scenarios().find((s) => s.id === scenarioId);
       const turns = sc && Array.isArray(sc.turns) ? sc.turns.map(text).filter((t) => t.trim()) : [];
-      if (state.phase !== 'ready' || !turns.length || state.pending) return false;
-      state.messages = [];
+      if (state.phase !== 'ready' || !turns.length || state.pending || state.historyBusy) return false;
+      if (!(await reset())) return false;
       state.play = { scenarioId: sc.id, title: text(sc.title) || '상황', turns, index: 0, status: 'running', token: ++playSeq };
       save();
       emit();
@@ -297,6 +478,7 @@
           if (reaction) { await reaction; if (!live()) return false; }
           if (gap) { await pause(gap); if (!live()) return false; }
         }
+        if (!validateInput(state.play.turns[state.play.index])) { state.play.status = 'stopped'; emit(); return false; }
         pushUser(state.play.turns[state.play.index]);
         save();
         const ok = await reply();
@@ -315,7 +497,7 @@
     // 실패한 말을 다시 보낸다. 재생 중 실패였으면 그 말부터 재생을 이어 간다.
     async function retry() {
       const failed = failedLast();
-      if (!failed || state.pending || state.phase !== 'ready') return false;
+      if (!failed || state.pending || state.historyBusy || state.phase !== 'ready' || !validateInput(failed.content)) return false;
       failed.error = ''; failed.stopped = false;
       const p = state.play;
       if (p && (p.status === 'error' || p.status === 'stopped')) p.status = 'running';
@@ -332,7 +514,7 @@
     // 멈춘 재생을 이어 간다. 답을 받던 말이 있으면 그 말부터 다시 보낸다.
     async function resume() {
       const p = state.play;
-      if (!p || p.status !== 'stopped' || state.pending || state.phase !== 'ready') return false;
+      if (!p || p.status !== 'stopped' || state.pending || state.historyBusy || state.phase !== 'ready') return false;
       if (failedLast()) return retry();
       p.status = 'running';
       emit();
@@ -348,21 +530,25 @@
       return changed;
     }
 
-    function reset() {
-      if (state.pending) state.pending.abort();
-      state.pending = null;
-      state.play = null;
-      state.messages = [];
-      state.announce = null;
-      reaction = null;
-      save();
+    async function reset() {
+      if (state.pending || state.historyBusy) return false;
+      state.historyBusy = true;
+      if (state.play) state.play.status = 'stopped';
       emit();
+      try {
+        if (!(await save()) || destroyed) return false;
+        state.sessionId = newId(); state.revision = 0; state.dirty = false;
+        state.play = null; state.messages = []; state.announce = null; state.inputError = '';
+        state.historyNotice = ''; reaction = null;
+        cache();
+        return true;
+      } finally { state.historyBusy = false; emit(); }
     }
 
     function subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); }
-    function destroy() { if (state.pending) state.pending.abort(); destroyed = true; listeners.clear(); }
+    function destroy() { if (state.pending) state.pending.abort(); cache(); destroyed = true; listeners.clear(); }
 
-    return { state, load, loadClips, pickClip, send, play, stop, resume, retry, reset, subscribe, destroy, canSend, history, scenarios, characterId: cid };
+    return { state, load, loadClips, pickClip, send, play, stop, resume, retry, reset, retrySave, refreshSessions, selectSession, subscribe, destroy, canSend, validateInput, history, scenarios, characterId: cid };
   }
 
   // ---------------- 영상 통화 ----------------
@@ -652,8 +838,8 @@
     const doc = (o.root && o.root.nodeType === 9) ? o.root : (o.root && o.root.ownerDocument) || global.document;
     const $ = (sel) => doc.querySelector(sel);
     const R = {
-      side: $('[data-side]'), head: $('[data-top]'), call: $('[data-call]'), list: $('[data-list]'), state: $('[data-state]'),
-      form: $('[data-composer]'), input: $('[data-input]'), sendBtn: $('[data-send]'), hint: $('[data-composer-hint]'),
+      history: $('[data-history]'), side: $('[data-side]'), head: $('[data-top]'), call: $('[data-call]'), list: $('[data-list]'), state: $('[data-state]'),
+      inputError: $('[data-input-error]'), form: $('[data-composer]'), input: $('[data-input]'), sendBtn: $('[data-send]'), hint: $('[data-composer-hint]'),
       panel: $('[data-panel]'), live: $('[data-live]'), playbar: $('[data-playbar]'), stage: $('[data-stage]'),
       video: $('[data-video]'), sound: $('[data-sound]'), vcap: $('[data-vcap]'),
       players: Array.prototype.slice.call(doc.querySelectorAll('[data-player]'))
@@ -770,7 +956,27 @@
         (isMotif(m.origin) ? '<p class="ch-note">' + E(MOTIF_NOTE) + '</p>' : '') +
         (ready && s.clips ? videoNote(m, s.clips, factoryHref(chat.characterId)) : '') +
         (info.length ? '<details class="ch-set" data-open-key="set"' + (ui.open.has('set') ? ' open' : '') + '><summary data-key="sum:set">설정 보기</summary><p class="ch-info" aria-label="대화 설정">' + info.join('<span class="dot" aria-hidden="true">·</span>') + '</p></details>' : '') + '</div>' +
-        (ready ? '<div class="ch-acts"><button type="button" class="btn" data-act="reset" data-key="reset"' + (hasTalk ? '' : ' disabled') + '>' + icon('refresh') + '새 대화</button></div>' : '');
+        (ready ? '<div class="ch-acts"><button type="button" class="btn" data-act="reset" data-key="reset"' + (hasTalk && !s.pending && !s.historyBusy ? '' : ' disabled') + '>' + icon('refresh') + '새 대화</button></div>' : '');
+    }
+
+    function renderHistory() {
+      if (!R.history) return;
+      const s = chat && chat.state;
+      R.history.hidden = !s;
+      if (!s) { R.history.innerHTML = ''; return; }
+      const locked = s.historyBusy || !!s.pending || !!(s.play && s.play.status === 'running');
+      const selected = s.sessions.some((item) => item.id === s.sessionId);
+      const items = s.sessions.map((item) => '<option value="' + E(item.id) + '"' + (item.id === s.sessionId ? ' selected' : '') + '>' +
+        E(item.title || '새 대화') + ' · ' + E(createdLabel(item.updatedAt) + ' ' + clockLabel(item.updatedAt)) + ' · 말 ' + E(item.messageCount) + '개</option>').join('');
+      const errors = [s.saveError, s.historyError, s.storageError].filter(Boolean);
+      const status = s.saving ? '대화를 저장하는 중이에요' : s.dirty ? '아직 서버에 저장하지 못한 내용이 있어요' : s.revision ? '대화를 저장했어요' : '대화하면 기록이 저장돼요';
+      R.history.innerHTML = '<div class="ch-history-row"><label for="ch-history-select">이전 대화</label>' +
+        '<select id="ch-history-select" data-history-select data-key="history-select"' + (locked ? ' disabled' : '') + '>' +
+        (!selected ? '<option value="" selected>현재 대화</option>' : '') + items + '</select>' +
+        '<button type="button" class="btn" data-act="refresh-history" data-key="refresh-history"' + (locked ? ' disabled' : '') + '>목록 새로고침</button></div>' +
+        '<p class="ch-save-status" role="status">' + E(s.historyNotice || status) + '</p>' +
+        (errors.length ? '<div class="ch-history-error" role="alert"><span>' + E(errors.join(' ')) + '</span>' +
+          '<button type="button" class="btn" data-act="save-history" data-key="save-history"' + (s.saving || s.historyBusy ? ' disabled' : '') + '>저장 다시 시도</button></div>' : '');
     }
 
     function playbarHTML(s) {
@@ -819,7 +1025,7 @@
     function renderList() {
       const s = chat ? chat.state : null;
       if (!R.list) return;
-      const ready = !!(s && s.phase === 'ready');
+      const ready = !!(s && (s.phase === 'ready' || s.messages.length));
       R.list.hidden = !ready;
       if (R.playbar) { R.playbar.innerHTML = ready ? playbarHTML(s) : ''; R.playbar.hidden = !(ready && s.play); }
       if (!ready) { R.list.innerHTML = ''; return; }
@@ -871,9 +1077,10 @@
       const ready = !!(s && s.phase === 'ready');
       R.form.hidden = !ready;
       if (!ready) return;
+      if (R.inputError) { R.inputError.textContent = s.inputError; R.inputError.hidden = !s.inputError; }
       const playing = !!(s.play && s.play.status === 'running');
       const busy = !!s.pending || playing;
-      R.input.disabled = playing;
+      R.input.disabled = playing || s.historyBusy;
       R.input.placeholder = playing ? '상황을 재생하는 중이에요. 멈추면 이어서 말할 수 있어요.' : nameOf() + '에게 말을 걸어 보세요';
       const mode = busy ? 'stop' : 'send';
       if (R.sendBtn.dataset.mode !== mode) {
@@ -881,7 +1088,7 @@
         R.sendBtn.innerHTML = busy ? icon('stop') + '<span>멈추기</span>' : icon('send') + '<span>보내기</span>';
       }
       R.sendBtn.setAttribute('aria-label', busy ? (playing ? '재생 멈추기' : '답 받기 멈추기') : '보내기');
-      R.sendBtn.disabled = !busy && !text(R.input.value).trim();
+      R.sendBtn.disabled = !busy && (!chat.canSend() || !text(R.input.value).trim());
       if (R.hint) R.hint.textContent = busy ? 'Esc를 눌러도 멈춰요' : 'Enter로 보내고 Shift+Enter로 줄을 바꿔요';
     }
 
@@ -907,7 +1114,7 @@
       // 뺀 기본 상황의 받아 둔 답도 함께 뺀다(같은 제목이 두 번 보이지 않게).
       groups.dropped.forEach((id) => byScenario.delete(id));
       const p = s.play;
-      const locked = !!s.pending || !!(p && p.status === 'running');
+      const locked = s.historyBusy || !!s.pending || !!(p && p.status === 'running');
       const itemHTML = (sc) => {
         const turns = Array.isArray(sc.turns) ? sc.turns : [];
         const on = !!(p && p.scenarioId === sc.id);
@@ -917,7 +1124,7 @@
         const mine = byScenario.get(text(sc.id)) || [];
         byScenario.delete(text(sc.id));
         const title = text(sc.title) || '상황';
-        // 누르면 지금 대화를 지우고 새로 시작하므로 단추에 그 사실을 적는다.
+        // 지금 대화를 보존한 뒤 새로 시작한다는 사실을 단추에 적는다.
         const sub = on
           ? (now ? '재생 중 · ' + Math.min(done + 1, turns.length) + '/' + turns.length : (p.status === 'done' ? '모두 재생했어요' : '멈춤 · ' + done + '/' + turns.length))
           : '말 ' + turns.length + '개 · 새 대화로 시작해요';
@@ -1007,7 +1214,7 @@
     function render() {
       const active = doc.activeElement;
       const key = active && active.getAttribute ? active.getAttribute('data-key') : null;
-      renderVideo(); renderCall(); renderState(); renderList(); renderComposer(); renderPanel(); announce(); syncTick();
+      renderVideo(); renderCall(); renderHistory(); renderState(); renderList(); renderComposer(); renderPanel(); announce(); syncTick();
       if (!key) return;
       const find = (k) => { const el = doc.querySelector('[data-key="' + k.replace(/"/g, '') + '"]'); return el && !el.disabled ? el : null; };
       let el = find(key);
@@ -1045,7 +1252,7 @@
     function submit() {
       if (!chat || !R.input) return;
       const value = R.input.value;
-      if (!text(value).trim() || !chat.canSend()) return;
+      if (!text(value).trim() || !chat.canSend() || !chat.validateInput(value)) return;
       R.input.value = '';
       autosize();
       ui.stick = true;
@@ -1070,7 +1277,15 @@
       else if (act === 'resume') { ui.stick = true; chat.resume(); }
       else if (act === 'retry') { ui.stick = true; chat.retry(); }
       else if (act === 'reload') chat.load();
+      else if (act === 'save-history') chat.retrySave();
+      else if (act === 'refresh-history') chat.refreshSessions();
       else if (act === 'reset') { chat.reset(); if (call) call.reset(); if (R.input) { R.input.disabled = false; R.input.focus(); } }
+    });
+    doc.addEventListener('change', (ev) => {
+      if (chat && ev.target && ev.target.matches('[data-history-select]') && ev.target.value) {
+        ui.stick = true;
+        chat.selectSession(ev.target.value).then((ok) => { if (ok && call) call.reset(); renderHistory(); });
+      }
     });
     doc.addEventListener('toggle', (ev) => {
       const d = ev.target;
@@ -1097,6 +1312,9 @@
     });
     if (media && media.addEventListener) media.addEventListener('change', () => { if (ui.theme === 'system') applyTheme(); });
     global.addEventListener('hashchange', open);
+    global.addEventListener('beforeunload', (ev) => {
+      if (chat && (chat.state.dirty || chat.state.saving)) { ev.preventDefault(); ev.returnValue = ''; }
+    });
 
     applyTheme();
     open();

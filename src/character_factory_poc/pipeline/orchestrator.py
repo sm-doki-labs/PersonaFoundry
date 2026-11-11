@@ -68,6 +68,8 @@ class RunOptions:
     confirmed: set[str] = field(default_factory=set)  # 사람이 실행을 확인·허락한 단계
     # 물결 실행의 작업 스레드를 감싸는 함수(워크숍이 작업 로그를 스레드별로 모을 때 쓴다)
     wrap_worker: Callable[[Callable], Callable] | None = None
+    # 시연 모드(demo-mode.json). run_until이 캐릭터 폴더에서 읽어 채운다.
+    demo: bool = False
 
 
 @dataclass
@@ -477,6 +479,38 @@ def _step(
         state = ctx.state(cid)
         st = state.stage(sid)
         reusable = True
+    if sid == "s8" and (reusable or st.status == "AWAITING_HUMAN"):
+        from character_factory_poc.stages.s8_prompts.evidence_pipeline import (
+            is_evidence,
+            verify_review,
+        )
+
+        prompt_dir = ctx.character_dir(cid) / "s8-prompts" / str(st.currentRev)
+        if is_evidence(prompt_dir):
+            try:
+                verify_review(ctx, cid, prompt_dir, approved=st.status == "APPROVED")
+            except (OSError, ValueError, KeyError, TypeError):
+                log.add(
+                    "s8: 검토한 원천 또는 설정이 변경됐다. 해당 원천을 바로잡고 S8을 다시 생성한다"
+                )
+                log.blocked.append("s8")
+                return "break"
+    if reusable and sid == "s8c":
+        from character_factory_poc.common.canonical import sha256_file
+        from character_factory_poc.common.store import read_json
+        from character_factory_poc.stages.s8_prompts.evidence_pipeline import is_evidence
+
+        prompt_rev = state.stage("s8").currentRev
+        prompt_dir = ctx.character_dir(cid) / "s8-prompts" / str(prompt_rev)
+        if is_evidence(prompt_dir):
+            pinned = ctx.character_dir(cid) / "s8-chapters" / str(st.currentRev) / "inputs.json"
+            inputs = read_json(pinned) if pinned.is_file() else {}
+            pair_path = prompt_dir / "prompt-pair.json"
+            reusable = (
+                pair_path.is_file()
+                and inputs.get("promptRevision") == prompt_rev
+                and inputs.get("promptPairSha256") == sha256_file(pair_path)
+            )
     if reusable and (not opt.video_only or _matches_video_scope(ctx, cid, sid, st.currentRev)):
         log.add(f"{sid}: 이미 {st.status}({st.currentRev}) — 건너뜀")
     elif st.status == "AWAITING_HUMAN" and stage.gate:
@@ -493,6 +527,7 @@ def _step(
 
         if (
             opt.web
+            and not opt.demo
             and sid not in opt.confirmed
             and (paid_stage(ctx, sid) or gpu_eval_held(ctx, cid, sid))
         ):
@@ -556,12 +591,31 @@ def _step(
     # 관문 처리: 자동 승인 플래그가 없으면 기다리는 관문으로 모으고 다른 갈래를 계속 진행한다
     state = ctx.state(cid)
     gate = stage.gate
-    if auto_review and sid == "s8":
+    evidence_review = False
+    if sid in {"s8", "s8c"} and state.gate("G6").rev:
+        from character_factory_poc.stages.s8_prompts.evidence_pipeline import is_evidence
+
+        evidence_review = is_evidence(ctx.character_dir(cid) / "s8-prompts" / state.gate("G6").rev)
+    if auto_review and sid == "s8" and not evidence_review:
         gate = None  # 챕터 설정과 대화 표본까지 준비된 뒤 프롬프트를 승인한다.
     if auto_review and sid == "s8c" and state.stage(sid).status == "APPROVED":
         gate = "G6"
     if gate and state.gate(gate).status == "AWAITING_HUMAN":
-        if opt.video_only:
+        if opt.demo:
+            from character_factory_poc.pipeline.demo import approve_demo
+
+            try:
+                approve_demo(ctx, cid, gate)
+                log.add(f"{gate}: 시연 자동 승인")
+            except (FactoryError, ValueError, KeyError, OSError) as exc:
+                log.add(f"{gate}: 시연 자동 승인 실패 — {exc}")
+                if gate not in log.waiting:
+                    log.waiting.append(gate)
+        elif gate == "G6" and evidence_review:
+            log.add("G6: 원문 근거와 적용 조건 검토 대기")
+            if gate not in log.waiting:
+                log.waiting.append(gate)
+        elif opt.video_only:
             approve_gate(
                 ctx,
                 cid,
@@ -607,8 +661,34 @@ def _finish(log: RunLog) -> RunLog:
 
 
 def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
+    from character_factory_poc.pipeline.demo import read_demo_mode
+
+    demo = read_demo_mode(ctx.character_dir(cid))
+    if demo is None:
+        return _run_until(ctx, cid, opt)
+    # 시연 모드: 패키지 승인(G9)까지 직렬로 돌고, 승인되면 테스터 미리보기로 발행한다.
+    # 앱 내보내기(sx)의 로컬 시연 DB용 고정 id 묶음은 쓰지 않는다(발행이 따로 만든다).
+    opt = replace(opt, until="G9", max_parallel=1, demo=True)
+    log = RunLog()
+    try:
+        log = _run_until(ctx, cid, opt, demo_budget=(demo.budgetUsd, demo.enabledAt))
+    except Exception as exc:  # 알림을 보내고 원래 오류를 그대로 올린다
+        from character_factory_poc.pipeline.demo_flow import after_demo_run
+
+        after_demo_run(ctx, cid, demo, log, error=f"{type(exc).__name__}: {exc}")
+        raise
+    from character_factory_poc.pipeline.demo_flow import after_demo_run
+
+    after_demo_run(ctx, cid, demo, log)
+    return log
+
+
+def _run_until(
+    ctx: Context, cid: str, opt: RunOptions, *, demo_budget: tuple[float, str] | None = None
+) -> RunLog:
     validate_until(opt.until)
-    validate_auto_approve(opt.auto_approve)
+    if not opt.demo:
+        validate_auto_approve(opt.auto_approve)
     from character_factory_poc.pipeline.origin import graph_for_dir, read_auto_review
 
     char_dir = ctx.character_dir(cid)
@@ -629,7 +709,7 @@ def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
     scope = graph
     if opt.video_only:
         scope = VIDEO_STAGES
-    elif auto_review:
+    elif auto_review and not opt.demo:
         scope = {"s0", "s3", "s7", "s8", "s8c"} | opt.confirmed
         if opt.web:
             # 버튼의 목표에 필요한 단계만 연다. 유료 확인은 _step에서 그대로 받는다.
@@ -648,6 +728,15 @@ def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
     for sid in graph:
         if sid not in scope:
             continue
+        if demo_budget is not None:
+            from character_factory_poc.pipeline.demo import spent_since
+
+            limit, since = demo_budget
+            spent = spent_since(ctx, cid, since)
+            if spent >= limit:
+                log.add(f"{sid}: 시연 예산 상한 도달 — 추정 ${spent:.2f} / ${limit:.2f}")
+                log.held.append(sid)
+                break
         note = _skip_note(ctx, cid, sid, runners)
         if note is not None:
             if note:
@@ -657,6 +746,8 @@ def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
         if (auto_review and log.held) or (
             (opt.video_only or (auto_review and not opt.web)) and (log.blocked or log.held)
         ):
+            break
+        if opt.demo and (log.blocked or log.held or log.waiting):
             break
         if action == "break":
             break

@@ -37,9 +37,6 @@ from character_factory_poc.stages.s8_prompts.source import (
 from character_factory_poc.stages.s8_prompts.twin import (
     approved_facts,
     approved_voice,
-    motif_facts,
-    motif_limits,
-    voice_lines,
 )
 
 FILLED_BY_FACTORY = ("SYSTEM_RULES", "OUTPUT")
@@ -143,6 +140,38 @@ def plan_calls(retries: int, probes: int) -> list[CallPlan]:
     ]
 
 
+def motif_plan_calls(
+    probes: int,
+    scene_traits: bool = False,
+    trait_method: str = "focus",
+    motif_compiler: str = "evidence-v4",
+) -> list[CallPlan]:
+    if motif_compiler in {
+        "evidence-v1",
+        "evidence-v2",
+        "evidence-v3",
+        "evidence-v4",
+        "evidence-v5",
+    }:
+        return [
+            CallPlan("s8", "원문 조건별 특징 후보 추출 (G6 직접 검토 필요)", 1, None),
+            plan_calls(0, probes)[1],
+        ]
+    if motif_compiler != "v3":
+        raise ValueError(
+            "motif_compiler는 evidence-v5, evidence-v4, evidence-v3, evidence-v2, evidence-v1 또는 v3여야 한다"
+        )
+    choices = {
+        "contrast": ("대조 특질 발견·답 가린 예측·독립 검토", 3),
+        "focus": ("대화 특질 발견·독립 검토", 2),
+    }
+    if trait_method not in choices:
+        raise ValueError("trait_method는 focus 또는 contrast여야 한다")
+    name, n = choices[trait_method]
+    extra = [CallPlan("s8", name + " (최대)", n, None)] if scene_traits else []
+    return extra + [CallPlan("s8", "모티브 V3 조립", 1, None), plan_calls(0, probes)[1]]
+
+
 def load_latest_trait_sheet(ctx: Context, cid: str) -> tuple[TraitSheet, Path]:
     state = ctx.state(cid)
     rev = state.stage("s7").currentRev
@@ -172,8 +201,8 @@ def run_s8(
         from character_factory_poc.stages.s8_prompts.formation import run_formation_s8
 
         return run_formation_s8(ctx, cid, voice_probes)
-    if ctx.text_deck_enabled:
-        return run_deck_s8(ctx, cid, voice_probes)
+    if twin or ctx.text_deck_enabled:
+        return run_deck_s8(ctx, cid, voice_probes, allow_same_family)
     plan, plan_path = load_approved_plan(ctx, cid)
     sheet, sheet_path = load_latest_trait_sheet(ctx, cid)
     char_dir = ctx.character_dir(cid)
@@ -199,11 +228,6 @@ def run_s8(
     rules_text, rules_ref = load_system_rules(ctx)
     source = project_plan(plan, sha256_file(plan_path))
     canonical = canonical_sections(source, sheet)
-    if twin:
-        source["sourceVoice"] = approved_voice(ctx, cid, plan)
-        canonical["PERSONA / VOICE"] = "\n".join(
-            voice_lines(plan.voiceSummary, source["sourceVoice"])
-        )
     empty_body = {s: "" for s in sections}
     base_chars = len(
         assemble(sections, empty_body, plan.name, rules_text, canonical, creator_plan=plan)
@@ -306,12 +330,26 @@ def _probe_path(rev_dir: Path) -> Path:
 def _finish_s8(cid, state, rev_dir: Path, rev: str, plan, sheet, pair, probe_doc) -> None:
     long_text, short_text = pair.long.text, pair.short.text
     write_once_json(_probe_path(rev_dir), dump(probe_doc))
+    evidence_path = rev_dir / "evidence-review.json"
+    evidence_sections = []
+    if evidence_path.exists():
+        evidence_sections = [
+            (
+                "원문과 조건별 해석: 자동 검사가 의미를 승인하지는 않습니다",
+                evidence_path.read_text("utf-8"),
+            ),
+            (
+                "승인 방법",
+                "원문 근거와 적용 조건을 읽은 뒤 답 JSON에 evidenceReviewed: true를 넣어 승인합니다. 수정 요청·반려에는 필요하지 않습니다.",
+            ),
+        ]
     page = render_gate_page(
         title=f"G6 페르소나 검토 · {plan.name} · {rev}",
         subject_id=cid,
         gate="G6",
         rev=rev,
-        sections=[
+        sections=evidence_sections
+        + [
             ("특질 시트", json.dumps(dump(sheet), ensure_ascii=False, indent=2)),
             (f"긴 프롬프트 ({pair.long.chars}자)", long_text),
             (f"짧은 프롬프트 ({pair.short.chars}자) · 운영 미채택(D-0006)", short_text),
@@ -443,7 +481,9 @@ def run_probes(
     )
 
 
-def run_deck_s8(ctx: Context, cid: str, voice_probes: list[str]) -> Path:
+def run_deck_s8(
+    ctx: Context, cid: str, voice_probes: list[str], allow_same_family: bool = False
+) -> Path:
     """Preserve approved prose; the compatibility short slot is an uncompressed copy."""
     from character_factory_poc.stages.s8_prompts.actor_persona import (
         compose_approved_sheet,
@@ -452,7 +492,8 @@ def run_deck_s8(ctx: Context, cid: str, voice_probes: list[str]) -> Path:
 
     if not ctx.execute:
         raise ValueError("--execute is required")
-    if voice_probes:
+    motif = read_origin(ctx.character_dir(cid)) == SOURCE
+    if voice_probes and not motif:
         raise ValueError(
             "모델 덱 제작은 대화 시험을 자동 수행하지 않는다. 개발 평가는 별도로 실행한다"
         )
@@ -461,43 +502,8 @@ def run_deck_s8(ctx: Context, cid: str, voice_probes: list[str]) -> Path:
     plan, plan_path = load_approved_plan(ctx, cid)
     sheet, sheet_path = load_latest_trait_sheet(ctx, cid)
     source = project_plan(plan, sha256_file(plan_path))
-    voice = None
-    limits = None
-    reviewed = None
-    facts = None
-    if read_origin(ctx.character_dir(cid)) == SOURCE:
-        source["sourceVoice"] = approved_voice(ctx, cid, plan)
-        voice = voice_lines(plan.voiceSummary, source["sourceVoice"])
-        reviewed = approved_facts(ctx, cid)
-        facts = motif_facts(reviewed)
-        limits = motif_limits(reviewed)
-    rules, rules_ref = load_actor_rules(ctx, origin=SOURCE if reviewed is not None else None)
     ledger_path = sheet_path.parent / "trait-ledger.json"
-    if ledger_path.exists():
-        from character_factory_poc.stages.s8_prompts.actor_persona import compose_from_ledger
-
-        ledger = validate("trait-ledger-v1", json.loads(ledger_path.read_text("utf-8")))
-        text, sections = compose_from_ledger(
-            plan, ledger, rules_text=rules, voice=voice, limits=limits, facts=facts
-        )
-        compiler = "actor-trait-ledger-v1"
-    else:
-        text, sections = compose_approved_sheet(
-            plan, sheet, rules_text=rules, voice=voice, limits=limits, facts=facts
-        )
-        compiler = "actor-approved-sheet-v1"
-    from character_factory_poc.common.errors import NeedsInputError
-
-    gate = state.gate("G6")
-    previous = ctx.character_dir(cid) / "s8-prompts" / str(gate.rev)
-    record = read_json(ctx.character_dir(cid) / gate.recordRef) if gate.recordRef else {}
-    rework = load_rework(ctx, cid, "G6")
-    if rework is not None or record.get("decision") == "REQUEST_CHANGES":
-        old_pair = previous / "prompt-pair.json"
-        if old_pair.exists() and read_json(old_pair)["long"]["sha256"] == sha256_text(text):
-            raise NeedsInputError(
-                "G6 수정 요청이 남아 있다. S3/S7 원천이나 시스템 규칙을 먼저 수정한 뒤 조립한다"
-            )
+    budget = ctx.budget()
     source_binding_path = sheet_path.parent / "text-deck-binding.json"
     source_generation = (
         read_json(source_binding_path)
@@ -508,15 +514,154 @@ def run_deck_s8(ctx: Context, cid: str, voice_probes: list[str]) -> Path:
         sheet_path
     ):
         raise ValueError("trait source generation binding hash mismatch")
+    base = ctx.character_dir(cid) / "s8-prompts"
+    rev = next_rev(base, "pv")
+    folder = base / rev
+    assembly = None
+    previous_gate = state.gate("G6").model_copy(deep=True)
+    from character_factory_poc.stages.s8_prompts import evidence_pipeline
+
+    evidence_mode = motif and evidence_pipeline.selected(ctx)
+    current = state.stage("s8")
+    if evidence_mode and current.status in {"RUNNING", "CHECK_FAILED"} and current.currentRev:
+        interrupted = base / current.currentRev
+        if (interrupted / "evidence-binding.json").is_file() and not (
+            interrupted / "prompt-pair.json"
+        ).exists():
+            prior_binding = read_json(interrupted / "evidence-binding.json")
+            if prior_binding.get("compiler") == evidence_pipeline.version_for(ctx):
+                rev, folder = current.currentRev, interrupted
+    if evidence_mode:
+        if ctx.config.stage("s8").get("example_turns", 0):
+            raise ValueError("근거 표준은 예시 대화를 주입하지 않는다. example_turns를 0으로 둔다")
+        budget.check_plan(motif_plan_calls(len(voice_probes)))
+        rework_path = folder / "evidence-rework.json"
+        if rework_path.exists():
+            saved_rework = read_json(rework_path)["brief"]
+            brief = validate("rework-brief-v1", saved_rework) if saved_rework else None
+        else:
+            brief = load_rework(ctx, cid, "G6")
+            write_once_json(rework_path, {"brief": dump(brief) if brief else None})
+        write_once_json(
+            folder / "evidence-intent.json", {"compiler": evidence_pipeline.version_for(ctx)}
+        )
+        state.transition("s8", "RUNNING", rev=rev)
+        state.set_gate("G6", "PENDING", rev, None)
+        try:
+            source["sourceVoice"] = approved_voice(ctx, cid, plan)
+            text, assembly = evidence_pipeline.build(
+                ctx,
+                cid,
+                plan,
+                plan_path,
+                sheet_path,
+                folder,
+                budget,
+                dump(brief) if brief else None,
+            )
+        except Exception:
+            state.transition(
+                "s8",
+                "CHECK_FAILED",
+                rev=rev,
+                error="원문 근거 후보를 확인하지 못했다. 검토 자료를 확인한다",
+            )
+            raise
+        sections = list(evidence_pipeline.SECTIONS)
+        compiler = assembly["compiler"]
+        rules, rules_ref = evidence_pipeline.instructions(compiler), "builtin:" + compiler
+    elif motif:
+        from character_factory_poc.stages.s8_prompts import motif_v3
+
+        scene_traits = ctx.config.stage("s8").get("scene_traits", False)
+        budget.check_plan(
+            motif_plan_calls(
+                len(voice_probes),
+                scene_traits,
+                ctx.config.stage("s8").get("trait_method", "focus"),
+                "v3",
+            )
+        )
+        source["sourceVoice"] = approved_voice(ctx, cid, plan)
+        reviewed = approved_facts(ctx, cid)
+        data = motif_v3.packet(
+            ctx,
+            cid,
+            plan,
+            sheet,
+            source["sourceVoice"],
+            reviewed,
+            read_json(ledger_path) if ledger_path.exists() else {},
+        )
+        brief = load_rework(ctx, cid, "G6")
+        state.transition("s8", "RUNNING", rev=rev)
+        try:
+            if scene_traits:
+                from character_factory_poc.stages.s8_prompts.response_traits import analyze
+
+                findings = analyze(ctx, cid, budget, rev, plan.planRev)
+                write_once_json(folder / "response-traits.json", findings)
+                if findings.get("measured"):
+                    data["analysis"][
+                        "다른 대화에서도 재현된 행동 차이 (빈도이지 고정 규칙이 아님)"
+                    ] = [x["summary"] for x in findings["measured"]]
+                if findings["patterns"]:
+                    data["analysis"]["반복 관찰된 조건별 반응"] = [
+                        x["trait"] for x in findings["patterns"]
+                    ]
+            write_once_json(folder / "assembler-input.json", data)
+            text, assembly = motif_v3.assemble(
+                ctx.text_model(cid, budget), data, f"{cid}/{rev}/v3", dump(brief) if brief else None
+            )
+            example_count = int(ctx.config.stage("s8").get("example_turns", 0))
+            if example_count > 0:
+                from character_factory_poc.stages.s8_prompts.example_turns import from_source
+
+                turns = from_source(ctx, cid, assembly["frame"], data["facts"], example_count)
+                if turns:
+                    write_once_json(folder / "example-turns.json", turns)
+        except Exception:
+            state.transition(
+                "s8", "CHECK_FAILED", rev=rev, error="모티브 조립 응답을 확인하지 못했다"
+            )
+            raise
+        sections = ["확인된 설정과 정보", "자료에서 고른 발화 참고"]
+        compiler = motif_v3.VERSION
+        rules, rules_ref = motif_v3.instructions(), "builtin:" + compiler
+    else:
+        rules, rules_ref = load_actor_rules(ctx)
+    if not motif and ledger_path.exists():
+        from character_factory_poc.stages.s8_prompts.actor_persona import compose_from_ledger
+
+        ledger = validate("trait-ledger-v1", json.loads(ledger_path.read_text("utf-8")))
+        text, sections = compose_from_ledger(plan, ledger, rules_text=rules)
+        compiler = "actor-trait-ledger-v1"
+    elif not motif:
+        text, sections = compose_approved_sheet(plan, sheet, rules_text=rules)
+        compiler = "actor-approved-sheet-v1"
+    from character_factory_poc.common.errors import NeedsInputError
+
+    gate = previous_gate
+    previous = ctx.character_dir(cid) / "s8-prompts" / str(gate.rev)
+    record = read_json(ctx.character_dir(cid) / gate.recordRef) if gate.recordRef else {}
+    rework = brief if evidence_mode else load_rework(ctx, cid, "G6")
+    if rework is not None or record.get("decision") == "REQUEST_CHANGES":
+        old_pair = previous / "prompt-pair.json"
+        if old_pair.exists() and read_json(old_pair)["long"]["sha256"] == sha256_text(text):
+            if motif:
+                state.transition("s8", "CHECK_FAILED", rev=rev, error="수정 요청 뒤 본문이 같다")
+            raise NeedsInputError(
+                "G6 수정 요청이 남아 있다. S3/S7 원천이나 시스템 규칙을 먼저 수정한 뒤 조립한다"
+            )
     limit = int(ctx.config.stage("s8").get("long_prompt_max_chars", 8000))
-    if reviewed is not None:
+    if motif:
         limit = min(limit, 8000)
     if len(text) > limit:
+        if motif:
+            state.transition("s8", "CHECK_FAILED", rev=rev, error="본문 길이 초과")
         raise ValueError(f"정본 {len(text)}자가 S8 상한 {limit}자를 넘는다. 내용을 자르지 않는다")
-    folder = ctx.character_dir(cid) / "s8-prompts"
-    rev = next_rev(folder, "pv")
-    folder = folder / rev
-    state.transition("s8", "RUNNING", rev=rev)
+    if not motif:
+        state.transition("s8", "RUNNING", rev=rev)
     content = dict(text=text, sha256=sha256_text(text), chars=len(text))
     pair = PromptPair(
         characterId=cid,
@@ -528,11 +673,15 @@ def run_deck_s8(ctx: Context, cid: str, voice_probes: list[str]) -> Path:
         systemRulesSha256=sha256_text(rules),
         shortAdopted=False,
     )
+    if assembly is not None:
+        write_once_json(folder / "assembly.json", assembly)
     write_once_json(folder / "source-plan.json", source)
     write_once_json(
         folder / "text-deck-binding.json",
         dict(
-            selectedConfiguration=ctx.config.text_binding("voice"),
+            selectedConfiguration=ctx.config.text_binding("voice")
+            if ctx.text_deck_enabled and not motif
+            else None,
             sourceGeneration=source_generation,
             completionCheck="NOT_RUN",
             compiler=compiler,
@@ -551,5 +700,7 @@ def run_deck_s8(ctx: Context, cid: str, voice_probes: list[str]) -> Path:
         judgeModel="",
         note="제작 중 대화 시험 미실행; short는 압축하지 않은 동일 본문",
     )
+    if voice_probes:
+        probe = run_probes(ctx, cid, budget, pair, sheet, voice_probes, allow_same_family)
     _finish_s8(cid, state, folder, rev, plan, sheet, pair, probe)
     return folder
