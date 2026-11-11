@@ -641,7 +641,7 @@
   }
   // 'video: xai_video/grok-video' 같은 공급자 표기를 쉬운 말로(D-0129).
   const KIND_KO = { video: '영상', image: '이미지', text: '글', judge: '검토' };
-  const ADAPTER_KO = { xai_video: 'xAI 그록 영상', grok_oauth: '그록(계정 연결)', grok_web: '그록 웹', fake_video: '시험용 가짜 영상', fake: '시험용 가짜 모델', fake_image: '시험용 가짜 이미지', codex_image: 'Codex 이미지', openai: 'OpenAI', gemini: 'Gemini', vertex_gemini: 'Vertex Gemini' };
+  const ADAPTER_KO = { xai_video: 'xAI 그록 영상', grok: '그록(계정 연결 우선)', grok_oauth: '그록(계정 연결)', grok_web: '그록 웹', fake_video: '시험용 가짜 영상', fake: '시험용 가짜 모델', fake_image: '시험용 가짜 이미지', codex_image: 'Codex 이미지', openai: 'OpenAI', gemini: 'Gemini', vertex_gemini: 'Vertex Gemini' };
   function providerKo(p) {
     const m = /^(?:(\w+):\s*)?([\w-]+)(?:\/(.+))?$/.exec(text(p).trim());
     if (!m) return text(p);

@@ -38,11 +38,37 @@ class XaiFramesClient:
     poll_s: float = 5.0
     timeout_s: float = 900.0
 
+    #: 사용자 2026-11-12: 시험 경로도 Grok 로그인(opencodex) 먼저, 안 되면 API 키.
+    auth: str = "auto"  # auto | oauth | key
+    token_file: str = ""
+
+    def _auth_options(self) -> list[tuple[str, dict[str, str]]]:
+        """쓸 수 있는 인증을 우선순위대로. 토큰·키 값은 기록하지 않는다."""
+        from character_factory_poc.common.errors import VideoGenerationError
+        from character_factory_poc.providers.grok_oauth import TokenSource
+
+        options, reasons = [], []
+        if self.auth in {"auto", "oauth"}:
+            try:
+                token = TokenSource(token_file=self.token_file or None).token()
+                options.append(("grok_oauth", token))
+            except VideoGenerationError as exc:
+                reasons.append(f"grok_oauth: {exc}")
+        if self.auth in {"auto", "key"}:
+            key = os.environ.get(self.api_key_env, "")
+            if key:
+                options.append(("xai_video", key))
+            else:
+                reasons.append(f"xai_video: {self.api_key_env} 환경변수가 비었다")
+        if not options:
+            raise VideoApiError("Grok 영상을 만들 인증이 없다. " + " / ".join(reasons))
+        return [
+            (name, {"Authorization": f"Bearer {secret}", "Content-Type": "application/json"})
+            for name, secret in options
+        ]
+
     def _headers(self) -> dict[str, str]:
-        key = os.environ.get(self.api_key_env, "")
-        if not key:
-            raise VideoApiError(f"{self.api_key_env} 환경변수가 비었다")
-        return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+        return self._auth_options()[0][1]
 
     def body(
         self, prompt: str, first: Path, last: Path | None, duration: int, resolution: str
@@ -67,18 +93,23 @@ class XaiFramesClient:
         duration: int = 6,
         resolution: str = "720p",
     ) -> tuple[bytes, dict[str, Any]]:
-        h = self._headers()
-        key = h["Authorization"][7:]
+        body = self.body(prompt, first, last, duration, resolution)
         with httpx.Client(timeout=120.0) as c:
-            r = c.post(
-                f"{self.base_url}/videos/generations",
-                headers=h,
-                json=self.body(prompt, first, last, duration, resolution),
-            )
-            if r.status_code >= 400:
-                raise VideoApiError(
-                    f"제출 실패 HTTP {r.status_code}: {r.text.replace(key, '***')[:500]}"
-                )
+            refused = []
+            for auth_name, h in self._auth_options():
+                key = h["Authorization"][7:]
+                r = c.post(f"{self.base_url}/videos/generations", headers=h, json=body)
+                if r.status_code in (401, 402, 403):
+                    # 인증·구독·크레딧 거절은 과금되지 않는다. 다음 인증으로 넘어간다.
+                    refused.append(f"{auth_name} HTTP {r.status_code}")
+                    continue
+                if r.status_code >= 400:
+                    raise VideoApiError(
+                        f"제출 실패 HTTP {r.status_code}: {r.text.replace(key, '***')[:500]}"
+                    )
+                break
+            else:
+                raise VideoApiError("모든 인증이 거절됐다: " + ", ".join(refused))
             job = r.json().get("request_id") or r.json().get("id")
             t0 = time.monotonic()
             while True:
@@ -111,5 +142,6 @@ class XaiFramesClient:
             "elapsedS": round(time.monotonic() - t0, 1),
             "estUsd": round(PRICE_PER_SECOND.get(resolution, 0) * seconds, 3),
             "lastFramePinned": last is not None,
+            "auth": auth_name,
         }
         return d.content, meta

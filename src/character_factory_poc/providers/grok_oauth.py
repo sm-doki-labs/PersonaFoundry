@@ -9,12 +9,12 @@ url·file_id를 받고 첫 프레임이 되며, 길이는 1~15초(기본 8초), 
 가격표(2026-10-27)는 영상 1초당 과금이다. 같은 문서의 모든 호출 예시는
 `Authorization: Bearer $XAI_API_KEY`를 쓰고, API 키는 Management API에서 팀에 발급한다.
 
-확인하지 못한 것(2026-10-27): xAI OAuth 로그인 접근 토큰을 api.x.ai의 영상 엔드포인트에 Bearer로
-보냈을 때 받아 주는지 공식 문서에서 확인하지 못했다. 공식 문서의 OAuth 언급은 Grok CLI의
-`grok login`, auth.x.ai, cli-chat-proxy.grok.com 경로에 한정된다. 로컬 opencodex 설정이 xai를
-api.x.ai/v1 + authMode=oauth로 두고 있는 것은 확인했지만 공식 근거가 아니다. 영상 호출은 P-03·P-24에
-따라 실제로 부르지 않는다. 따라서 실제 성공과 xAI 이용 조건 준수는 미확인이고, 토큰 갱신도 하지
-않는다.
+실제 호출 확인(2026-11-12, D-0183): 구독이 살아 있는 xAI 계정의 opencodex 로그인 토큰을
+Bearer로 보내 grok-imagine-video-1.5-lite 480p 2초와 grok-imagine-video-1.5 1080p 2초가
+만들어졌다. 구독·크레딧이 끝난 계정은 모든 요청이 402·403으로 거절됐다. 공식 문서의 OAuth
+언급은 Grok CLI 경로에 한정되므로 보장된 방식은 아니다. 토큰 갱신은 opencodex가 하고(잠금·세대
+번호로 auth.json을 고친다) 이 어댑터는 auth.json을 쓰지 않는다. 기본 경로는 이 어댑터를 먼저 쓰고
+API 키로 넘어가는 grok(grok_chain)이다.
 
 토큰은 opencodex auth.json의 xai.accounts 가운데 xai.activeAccountId와 id가 같은 계정의
 credential.access에서 읽고, credential.expires는 epoch 밀리초로 가정해 검증한다(2026-10-27 로컬
@@ -147,7 +147,7 @@ class TokenSource:
 
 
 class GrokOAuthVideoModel(XaiVideoModel):
-    """xAI 영상 API를 OAuth 로그인 토큰으로 부르는 VideoModel. 실제 호출은 아직 검증하지 않았다.
+    """xAI 영상 API를 OAuth 로그인 토큰으로 부르는 VideoModel(2026-11-12 실제 호출 확인).
 
     요청 본문·조회·다운로드·비용 추정은 XaiVideoModel을 그대로 상속한다. 다른 점은 인증 헤더와
     provider 이름뿐이다. 토큰이 없거나 만료됐으면 네트워크를 부르기 전에 다시 로그인하라는

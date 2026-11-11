@@ -27,6 +27,7 @@ MODEL_DEFAULT = {
     ("image", "codex_image"): "gpt-6.1-sol",
     ("video", "fake"): "fake-video",
     ("video", "grok_web"): "grok-imagine-web",
+    ("video", "grok"): "grok-imagine-video-1.5-lite",
     ("video", "grok_oauth"): "grok-imagine-video-1.5-lite",
     ("video", "xai_video"): "grok-imagine-video-1.5-lite",
 }
@@ -48,7 +49,7 @@ def _plan(ctx, kinds, resolution):
             raise FactoryError(f"{kind} 공급자 설정을 확인해 주세요.")
         model = cfg.model or default
         cost = 0.0
-        if cfg.adapter in {"grok_oauth", "xai_video"}:
+        if cfg.adapter in {"grok", "grok_oauth", "xai_video"}:
             cost = estimate_cost(model, resolution, DURATION, cfg.extra.get("price_per_second"))
         if cost is not None and (not math.isfinite(cost) or cost < 0):
             raise FactoryError("영상 단가를 확인해 주세요.")

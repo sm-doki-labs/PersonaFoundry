@@ -76,12 +76,17 @@ base_photo = "picked"
 image_size = "1024x1024"
 
 
-# S5 소개 영상(D-0028). 어댑터는 xai_video(공식 API, 유료) / grok_web(웹, 기본 꺼짐) / fake.
-# 이 절이 없으면 fake다. 실제 호출은 --execute와 사용자 지시가 있을 때만 한다.
+# S5·S6 영상(D-0028). 어댑터는 grok(기본: Grok 로그인 먼저, 안 되면 API 키) / grok_oauth(로그인만) /
+# xai_video(API 키만) / grok_web(웹, 기본 꺼짐) / fake. 이 절이 없으면 fake다.
+# grok은 opencodex에 로그인한 xAI 계정(~/.opencodex/auth.json의 활성 계정) 토큰을 먼저 쓰고,
+# 로그인이 없거나 만료됐거나 401·402·403으로 거절되면 XAI_API_KEY로 넘어간다(D-0183).
+# 토큰 갱신은 opencodex가 한다. 로그인 경로는 공식 문서가 보장하지 않아 막힐 수 있다.
 [providers.video]
-adapter = "xai_video"
+adapter = "grok"
+order = ["grok_oauth", "xai_video"]
 model = "grok-imagine-video-1.5-lite"  # 720p 1초 $0.03 + 입력 이미지 $0.01 (2026-10-21 공식 단가)
 api_key_env = "XAI_API_KEY"
+# token_file = "~/.opencodex/auth.json"  # 기본값
 poll_interval_s = 5
 timeout_s = 600
 # 단가가 바뀌면 덮어쓴다. 모델 → 해상도 → 1초당 USD. 입력 이미지 $0.01은 따로 더한다.
@@ -102,8 +107,9 @@ timeout_s = 600
 # 화면 선택자는 2026-10-21 한국어 UI에 맞춘 기본값이 있다. 화면이 바뀌면 [providers.video.selectors]로 덮어쓴다
 # (키: video_mode, option, audio, upload, uploaded, prompt, submit).
 
-# grok_oauth는 같은 xAI 영상 API를 opencodex의 xAI OAuth 로그인 토큰으로 부른다(D-0044 (3)).
-# 토큰을 Bearer로 받는지, 이용 조건에 맞는지는 실제 호출 전 미확인이다. 토큰 값은 출력·기록하지 않는다.
+# grok_oauth는 같은 xAI 영상 API를 opencodex의 xAI OAuth 로그인 토큰으로만 부른다(D-0044 (3)).
+# 2026-11-12 실제 호출로 토큰이 Bearer로 받아들여짐을 확인했다(D-0183). 공식 문서가 보장하는 경로는 아니다.
+# API 키로 넘어가지 않게 로그인만 쓰려면 아래를 쓴다. 토큰 값은 출력·기록하지 않는다.
 # [providers.video]
 # adapter = "grok_oauth"
 # model = "grok-imagine-video-1.5-lite"

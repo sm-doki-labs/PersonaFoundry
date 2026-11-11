@@ -120,6 +120,29 @@ def make_video_model(cfg: ProviderConfig) -> VideoModel:
             timeout_s=float(x.get("timeout_s", 600)),
             prices=x.get("price_per_second"),
         )
+    if cfg.adapter == "grok":
+        # 사용자 2026-11-12: 시연·시험의 1순위 기본은 OAuth 로그인, 안 되면 API 키.
+        from character_factory_poc.providers.grok_chain import GrokVideoChain
+
+        order = list(x.get("order") or ["grok_oauth", "xai_video"])
+        bad = [a for a in order if a not in {"grok_oauth", "xai_video"}]
+        if bad or not order:
+            raise ValueError(
+                f"[providers.video] order는 grok_oauth·xai_video 가운데서 고른다: {bad or order}"
+            )
+        members = [
+            make_video_model(
+                ProviderConfig(
+                    adapter=adapter,
+                    model=cfg.model,
+                    base_url=cfg.base_url,
+                    api_key_env=cfg.api_key_env if adapter == "xai_video" else "",
+                    extra=x,
+                )
+            )
+            for adapter in order
+        ]
+        return GrokVideoChain(members)
     if cfg.adapter == "grok_web":
         # D-0029: xAI 이용 정책은 봇·스크립트 접근을 금지한다. 위험을 알고 켠다는 표시가 있어야 만든다.
         if x.get("accept_terms_risk") is not True:
@@ -137,6 +160,6 @@ def make_video_model(cfg: ProviderConfig) -> VideoModel:
             timeout_s=float(x.get("timeout_s", 600)),
         )
     raise ValueError(
-        f"알 수 없는 영상 어댑터: '{cfg.adapter}'. xai_video(공식 API), "
+        f"알 수 없는 영상 어댑터: '{cfg.adapter}'. grok(로그인 먼저, 안 되면 API 키), xai_video(공식 API), "
         "grok_oauth(OAuth 로그인 토큰), grok_web(웹, 기본 꺼짐), fake 중 하나다"
     )
