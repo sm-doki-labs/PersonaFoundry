@@ -266,3 +266,11 @@ S4 시그니처 중간 사진은 [providers.signature_image]의 Grok 이미지 �
 근거: 사용자 "공장 쪽 발행 코드를 이 넣기 API 부르게 바꿔줘. 프로필·페르소나·영상·음성(Fish id) 한 번에 올라가게". 맥에서는 dev DB·버킷에 직접 쓸 수 없고(api-svc load_call_clips 머리말), 저장소 data/ 전체 재발행은 dev 발행본이 저장소와 다르면 멈췄다.
 버린 안: NAT 경유 DB 직접 쓰기, api-svc 에 넣기 API 추가, backoffice 승격 경로(사람 검토 필요).
 
+
+### D-0207 — 앱 통화 클립을 jev 가 고르기 좋게 내보낸다: 반응 키워드·Lite 감정 분류·'이럴 때' 문구 (확정, 2026-11-13)
+
+dev api-svc 는 통화 몸짓을 jev(CLIP_PICK_LLM_PROVIDER=opencode, jev-latest)로 고른다. 후보 한 줄은 "제목 | 밝음/어두움 | 설명 | 이럴 때: use_when"이고 clip_mode 가 emotion 인 클립만 후보다. 내보내기(doki_app/api_svc + clip_labels)를 이렇게 바꾼다. (1) 반응 키워드 character_clip_trigger 를 운영 감정 세트처럼 감정 클립마다 이름 첫 낱말 하나로 넣는다(대기·말하기·특별 행동은 없다). jev 후보 줄과 앱은 이 값을 고르는 데 쓰지 않는다. (2) 모티브 Lite(D-0191)의 파이팅·웃음·인사(cheering/laughing/greeting_good)를 pick_role=emotion 으로 낸다 — 지금까지 special 로 나가 자동 선택 후보에서 빠져 있었다. (3) 공장이 지은 몸짓(시그니처 포즈·Lite 셋)의 use_when 을 운영 세트 모양("감정 — 상황. 상대가 하는 말 예: 「…」. 틀지 않는다: … → 다른 몸짓")으로 바꾸고, '틀지 않는다' 는 이 캐릭터에게 있는 몸짓만 가리킨다. 사용자가 적은 시그니처 '이럴 때' 는 "그 밖에" 로 남긴다. (4) file_store.length 에 영상 길이(초). s6 의 useWhen 은 바꾸지 않는다 — signature_matches 가 비교해 바뀌면 시그니처 영상을 다시 만든다.
+
+근거: 사용자 "공장에서 반응 키워드 운영 세트처럼 채우고, 시그니처 포즈 use_when 문구도 jev가 잘 고르게 다듬어줘". dev 와 같은 api-svc 판(6bfba75) clip_picker.pick_clip·jev-latest 로 Lite 4편 후보를 비교했다: 문구와 함께 고른 말 10개 × 3회 followup 21/30 → 30/30, 문구 예시에 없는 말 8개 × 3회 reaction 18/24 → 21/24, followup 18/24 → 21/24. 남은 오답은 돌려 말한 팬심("실물 보는 것 같아요")이 시그니처 대신 none·웃음으로 간 경우. 소표본·작성자 판정이다.
+버린 안: s6 영상 단계의 useWhen 을 바꾸기(이미 만든 시그니처 영상 재생성), 반응 키워드에 여러 낱말(운영 세트는 하나).
+

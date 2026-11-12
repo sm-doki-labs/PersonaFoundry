@@ -17,6 +17,11 @@ from typing import Any
 from uuid import UUID
 
 from character_factory_poc.contracts.release import CharacterPackage, Video
+from character_factory_poc.stages.export.doki_app.clip_labels import (
+    CALL_LOOP_REACTIONS,
+    jev_use_when,
+    trigger_of,
+)
 from character_factory_poc.stages.export.doki_app.naming import (
     api_seed_ids,
     chapter_uid,
@@ -40,6 +45,7 @@ SEED_TABLES = [
     "character_media",
     "character_clip",
     "character_clip_slot",
+    "character_clip_trigger",
     "character_video",
 ]
 #: 옛 스키마 표. 들어 있으면 적재가 거절한다(api-svc `validate_stage_bundle`).
@@ -354,7 +360,7 @@ def build_seed(
     media_no = 0
     files: dict[str, Path] = {}
 
-    def add_media(path: Path, media_type: str, rel: str) -> int:
+    def add_media(path: Path, media_type: str, rel: str, length_s: float | None = None) -> int:
         nonlocal media_no
         index = media_no
         media_no += 1
@@ -387,7 +393,8 @@ def build_seed(
                 len(data),
                 size[0] if size else None,
                 size[1] if size else None,
-                None,
+                # 운영 통화 세트처럼 영상 길이(초)를 둔다(api-svc register_clip).
+                round(length_s) if length_s else None,
                 key,
             ],
         )
@@ -482,14 +489,15 @@ def build_seed(
         )
 
     clip_no = 0
-    for video in sorted(
-        (v for v in package.videos if v.kind == "ACTION"),
-        key=lambda v: (v.chapterNo or 0, v.clipKey),
-    ):
+    trigger_no = 0
+    actions = [v for v in package.videos if v.kind == "ACTION"]
+    for video in sorted(actions, key=lambda v: (v.chapterNo or 0, v.clipKey)):
         chapter_no = video.chapterNo or 1
         clip_no += 1
         rel = f"chapters/ch{chapter_no}/{video.clipKey}.mp4"
-        media_id = add_media(relative_file(package_dir, video.file), "video", rel)
+        media_id = add_media(relative_file(package_dir, video.file), "video", rel, video.durationS)
+        chapter_videos = [v for v in actions if (v.chapterNo or 1) == chapter_no]
+        use_when = jev_use_when(video, chapter_videos) or video.useWhen or None
         builder.add(
             "character_clip",
             [
@@ -533,7 +541,7 @@ def build_seed(
                 "free",
                 "ALL",
                 None,
-                video.useWhen or None,
+                use_when,
                 _pick_role(video),
             ],
         )
@@ -555,10 +563,25 @@ def build_seed(
                 True,
             ],
         )
+        # 반응 키워드: 운영 감정 세트처럼 감정 클립마다 이름 첫 낱말 하나.
+        # 대기·말하기·특별 행동에는 없다.
+        trigger = trigger_of(video.clipKey) if _pick_role(video) == "emotion" else None
+        if trigger:
+            builder.add(
+                "character_clip_trigger",
+                ["id", "clip_id", "value"],
+                [
+                    row_id("character_clip_trigger", trigger_no),
+                    row_id("character_clip", clip_no),
+                    trigger,
+                ],
+            )
+            trigger_no += 1
     mapping.append(
         (
             "videos[ACTION]",
-            "api-svc character_clip(clip_key·title·description·use_when·pick_role)",
+            "api-svc character_clip(clip_key·title·description·use_when·pick_role)"
+            " + character_clip_trigger",
             "표정은 mood(good/bad)로 바꾼다",
         )
     )
@@ -614,6 +637,10 @@ def build_seed(
         ]
     )
     unmapped.extend(clip_count_warnings(builder.bundle))
+    # 행이 없는 표(영상 없는 패키지의 트리거 등)는 순서 목록에서도 뺀다.
+    builder.bundle["table_order"] = [
+        t for t in builder.bundle["table_order"] if t in builder.bundle["tables"]
+    ]
     return ApiSeed(bundle=builder.bundle, mapping=mapping, unmapped=unmapped, files=files)
 
 
@@ -631,7 +658,11 @@ def _pick_role(video: Video) -> str | None:
 #: S6 앱 카탈로그(APP_CLIPS)는 api-svc 감정 세트 사본이라 전부 감정이다. 여기서 빠지면
 #: pick_role=special로 나가 서버의 답변 뒤 몸짓 후보(followup-clip)에서 사라진다.
 #: 모티브 시그니처 포즈(D-0165)도 '이럴 때'를 보고 자동으로 고르는 감정 반응으로 내보낸다.
-_EMOTION_KEYS = frozenset({clip["key"] for clip in APP_CLIPS} | {SIGNATURE_KEY}) | frozenset(
+#: 모티브 Lite 반응(파이팅·웃음·인사, D-0191)도 jev 가 자동으로 고르는 감정 반응이다.
+#: 빠지면 special 로 나가 api-svc 자동 선택 후보(clip_mode == emotion)에서 빠진다.
+_EMOTION_KEYS = frozenset(
+    {clip["key"] for clip in APP_CLIPS} | {SIGNATURE_KEY} | CALL_LOOP_REACTIONS
+) | frozenset(
     {
         "idle_good",
         "idle_bad",
