@@ -388,13 +388,10 @@ max_retries = 0
 # content.segments preview 지정·대기 → 사진·영상 업로드 → api-svc 등록 → chat-svc 발행 → 대화 켜기 →
 # 로그인 없는 목록·검색에 없는지 확인. 접속 정보는 .env(CFP_PREVIEW_*)에만 둔다.
 [publish.preview]
-target = "test"                                 # test | live
-api_svc_repo = "~/projects/_wt/api-svc-live"    # 실서비스 배포 판 체크아웃(.venv 포함)
-chat_svc_repo = "~/projects/_wt/chat-svc-live"  # 실서비스 배포 판 체크아웃(data/ = 실서비스 발행본)
-api_base_url = "http://127.0.0.1:8899"          # api-svc 주소(/api/v1 앞)
-storage = "none"                                # none(시험) | s3(실서비스)
-s3_bucket = ""
-aws_profile = ""
-wait_seconds = 35                               # api-svc 설정 캐시(30초)보다 길게
-allow_live = false
+# D-0206: dev 넣기 서비스(backoffice factory-import)를 부른다. 토큰은 .env 의 FACTORY_IMPORT_TOKEN.
+target = "dev"
+base_url = "https://factory-import.dev.dokilabs.com"  # 비우면 FACTORY_IMPORT_BASE_URL
+chat_svc_repo = "~/projects/_wt/chat-svc-live"        # dev 배포 판 chat-svc 체크아웃(.venv 포함). 컴파일만 한다
+expires_minutes = 60                                  # 넣기 기록에 남기는 만료 시각(지우기는 cfp preview remove)
+# default_voice_id = ""                               # Fish 음성 ID 가 없을 때 이을 voice-svc Voice UUID
 

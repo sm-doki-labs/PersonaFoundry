@@ -1,18 +1,19 @@
-"""테스터 전용 미리보기 발행 — 공장 캐릭터를 실제 앱의 테스터에게만 보이게 올린다.
+"""테스터 전용 미리보기 발행 — 공장 캐릭터를 dev 앱의 테스터에게만 보이게 한 번에 올린다.
 
-순서가 안전장치다(사용자 2026-11-12, 실서비스 = 개발 서버).
+dev VPC 안의 넣기 서비스(backoffice factory-import, api-svc/docs/factory-import.md)를 부른다. 공장은 형식을
+만들고, 쓰기·되돌리기는 넣기 서비스가 한다. 사람 승인 단계는 없다(사용자 2026-11-13).
 
-1. 읽기 점검: 대상 api-svc·chat-svc 스키마, 같은 캐릭터 유무, chat-svc 발행본이 저장소
-   data/와 똑같은지(다르면 새 발행이 다른 캐릭터를 되돌리므로 멈춘다), 테스터 명단.
-2. 대상 DB 시퀀스에서 id를 예약한다. 고정 200만 번대 id는 로컬 시연 DB 전용이다.
-3. 그 id를 content.segments에 preview로 먼저 넣고, 다시 읽어 확인한 뒤 서버 설정 캐시
-   (30초)보다 오래 기다린다. 그 전에는 캐릭터 행이 없다.
-4. 사진·영상을 api-svc 키 규칙(public/protected·무작위 폴더)으로 올린다.
-5. api-svc 행을 한 트랜잭션으로 넣는다. 대화·통화는 꺼진 채다.
-6. chat-svc에 저장소 data/ + 우리 조각을, 점검한 발행본 위에서만(expected head) 발행한다.
-7. 대화·통화를 켜고, 로그인하지 않은 요청의 목록·검색에 없는지 확인한다.
+1. 상태(GET /state): 같은 캐릭터 유무, 표·id 시퀀스, 테스터 명단, chat 발행본, voice-svc 도달.
+2. id 예약(POST /reservations) → api-svc 시드 묶음(doki_app.api_svc)을 그 번호로 만든다.
+3. chat 콘텐츠: dev 배포 판 chat-svc 체크아웃의 data/ 위에 우리 조각을 얹어 그 저장소 컴파일러로
+   컴파일하고 이 캐릭터의 버전·소속만 뽑는다(preview_scripts).
+4. 사진·영상: 업로드 주소(POST /uploads)를 받아 바로 PUT 한다. 키(api-svc ADR-0032)는 넣기 서비스가 정한다.
+5. 넣기(POST /characters): 프로필·단계·미디어·통화 클립(api) + 페르소나·챕터(chat) + 음성을 한 번에.
+   음성은 패키지의 Fish Audio 음성 ID(D-0205)면 새 Voice 로 발행, 없으면 twin.voiceId·default_voice_id 의
+   voice-svc UUID 를 잇는다. 넣기 서비스가 preview 지정 → 행 → chat 발행본 → 대화·통화 켜기 순으로 올리고
+   중간에 실패하면 되돌린다.
 
-content.segments는 목록·탐색·검색·피드에서만 뺀다. id로 직접 부르는 상세·대화는 막지 않는다.
+지우기는 remove_preview(DELETE /characters/{id}).
 """
 
 from __future__ import annotations
@@ -28,9 +29,9 @@ import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +39,7 @@ from character_factory_poc.common.errors import FactoryError
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.stages.export.doki_app import api_svc, chat_svc
 from character_factory_poc.stages.export.doki_app.naming import character_uid, slug_for
-from character_factory_poc.stages.export.preview_scripts import API_DB_SCRIPT, CHAT_DB_SCRIPT
+from character_factory_poc.stages.export.preview_scripts import CHAT_COMPILE_SCRIPT
 from character_factory_poc.stages.export.verify import _overlay_tree
 from character_factory_poc.stages.s11_release.package import (
     load_package,
@@ -46,13 +47,9 @@ from character_factory_poc.stages.s11_release.package import (
     verify_package_files,
 )
 
-SEGMENTS_KEY = "content.segments"
-#: api-svc app_settings.CACHE_TTL_SECONDS(30) + 여유.
-DEFAULT_WAIT_S = 35.0
-_PUBLIC_KINDS = frozenset({"profile_photo"})
-_SEGMENT_KEYS = frozenset(
-    {"preview_member_ids", "new_member_ids", "new_member_since", "characters", "shorts"}
-)
+API = "/api/v1/factory-import"
+DEFAULT_CHAT_REPO = Path("~/projects/_wt/chat-svc-live")
+_VOICE_TABLES = ("character_voice", "character_voice_language")
 
 
 class PreviewError(FactoryError):
@@ -64,47 +61,33 @@ class PreviewError(FactoryError):
 
 @dataclass(frozen=True)
 class PreviewSettings:
-    target: str = "test"  # test | live
-    api_svc_repo: Path = Path("~/projects/_wt/api-svc-live").expanduser()
-    chat_svc_repo: Path = Path("~/projects/_wt/chat-svc-live").expanduser()
-    api_base_url: str = ""  # 예: https://api.example.com (경로 /api/v1 앞)
-    storage: str = "none"  # none | s3
-    s3_bucket: str = ""
-    aws_profile: str = ""
-    wait_s: float = DEFAULT_WAIT_S
-    allow_live: bool = False
-    chat_env: dict[str, str] = field(default_factory=lambda: {"RQC_ENV": "local"})
-    api_db_url_env: str = "CFP_PREVIEW_API_DB_URL"
-    chat_db_url_env: str = "CFP_PREVIEW_CHAT_DB_URL"
-    admin_token_env: str = "CFP_PREVIEW_ADMIN_TOKEN"
-    live_confirm_env: str = "CFP_PREVIEW_LIVE_CONFIRM"
+    target: str = "dev"
+    base_url: str = ""  # 예: https://factory-import.dev.dokilabs.com
+    token_env: str = "FACTORY_IMPORT_TOKEN"
+    # dev 에 배포된 판의 chat-svc 체크아웃(.venv 포함). 컴파일만 하고 DB 에는 붙지 않는다.
+    chat_svc_repo: Path = DEFAULT_CHAT_REPO
+    expires_minutes: int = 60
+    # 패키지에 Fish 음성 ID 가 없을 때 이을 voice-svc Voice UUID(twin.voiceId 가 먼저다).
+    default_voice_id: str | None = None
+    timeout_s: float = 240.0
 
-    def secret(self, name: str) -> str:
-        value = os.environ.get(name, "").strip()
+    def token(self) -> str:
+        value = os.environ.get(self.token_env, "").strip()
         if not value:
-            raise PreviewError(f"발행 설정이 비었어요: 환경변수 {name}")
+            raise PreviewError(f"발행 설정이 비었어요: 환경변수 {self.token_env}")
         return value
 
     def require_ready(self) -> None:
-        if self.target not in {"test", "live"}:
-            raise PreviewError("발행 대상(target)은 test 또는 live여야 해요")
-        if not self.api_base_url.strip():
-            raise PreviewError("발행 설정이 비었어요: [publish.preview] api_base_url")
-        for env in (self.api_db_url_env, self.chat_db_url_env, self.admin_token_env):
-            self.secret(env)
-        if self.target == "live":
-            if not self.allow_live:
-                raise PreviewError("실서비스 발행이 꺼져 있어요([publish.preview] allow_live)")
-            if os.environ.get(self.live_confirm_env, "").strip() != "1":
-                raise PreviewError(
-                    f"실서비스 발행 확인값이 없어요(환경변수 {self.live_confirm_env}=1)"
-                )
-            if self.storage != "s3" or not self.s3_bucket:
-                raise PreviewError(
-                    "실서비스 발행에는 사진·영상 업로드(storage=s3, s3_bucket)가 필요해요"
-                )
-            if self.wait_s < DEFAULT_WAIT_S:
-                raise PreviewError(f"실서비스 대기 시간은 {DEFAULT_WAIT_S:.0f}초 이상이어야 해요")
+        if not self.base_url.startswith(("https://", "http://")):
+            raise PreviewError(
+                "발행 설정이 비었어요: [publish.preview] base_url(또는 FACTORY_IMPORT_BASE_URL)"
+            )
+        self.token()
+        repo = self.chat_svc_repo.expanduser()
+        if not (repo / "data").is_dir():
+            raise PreviewError(
+                f"chat-svc 체크아웃이 없어요: {repo} (dev 배포 판, [publish.preview] chat_svc_repo)"
+            )
 
 
 def load_preview_settings(ctx: Context) -> PreviewSettings:
@@ -113,30 +96,37 @@ def load_preview_settings(ctx: Context) -> PreviewSettings:
     if source is not None and Path(source).is_file():
         data = tomllib.loads(Path(source).read_text(encoding="utf-8"))
     raw = (data.get("publish") or {}).get("preview") or {}
+    doki = ((data.get("export") or {}).get("doki_app")) or {}
     base = PreviewSettings()
-
-    def path(key: str, default: Path) -> Path:
-        value = raw.get(key)
-        return Path(value).expanduser() if isinstance(value, str) and value.strip() else default
-
-    chat_env = raw.get("chat_env")
+    repo = raw.get("chat_svc_repo")
     return PreviewSettings(
         target=str(raw.get("target", base.target)),
-        api_svc_repo=path("api_svc_repo", base.api_svc_repo),
-        chat_svc_repo=path("chat_svc_repo", base.chat_svc_repo),
-        api_base_url=str(raw.get("api_base_url", "")).rstrip("/"),
-        storage=str(raw.get("storage", base.storage)),
-        s3_bucket=str(raw.get("s3_bucket", "")),
-        aws_profile=str(raw.get("aws_profile", "")),
-        wait_s=float(raw.get("wait_seconds", base.wait_s)),
-        allow_live=bool(raw.get("allow_live", False)),
-        chat_env={str(k): str(v) for k, v in chat_env.items()}
-        if isinstance(chat_env, dict)
-        else base.chat_env,
+        base_url=str(raw.get("base_url") or os.environ.get("FACTORY_IMPORT_BASE_URL", "")).rstrip(
+            "/"
+        ),
+        token_env=str(raw.get("token_env", base.token_env)),
+        chat_svc_repo=Path(repo).expanduser()
+        if isinstance(repo, str) and repo.strip()
+        else base.chat_svc_repo,
+        expires_minutes=int(raw.get("expires_minutes", base.expires_minutes)),
+        default_voice_id=raw.get("default_voice_id")
+        or doki.get("default_voice_id")
+        or os.environ.get("CFP_DEFAULT_VOICE_ID")
+        or None,
+        timeout_s=float(raw.get("timeout_seconds", base.timeout_s)),
     )
 
 
 # ------------------------------------------------------------------ 바깥과 닿는 곳
+
+
+@dataclass
+class Ports:
+    """발행이 바깥과 닿는 모든 곳. 시험은 가짜로 바꿔 순서와 몸통을 확인한다."""
+
+    api: Callable[[str, str, dict | None], tuple[int, Any]]  # (method, path, json) → (status, json)
+    put_file: Callable[[str, dict[str, str], Path], int]
+    compile_chat: Callable[[Path, str], dict]  # (data_dir, characterUid) → {content, problems}
 
 
 def _venv_python(repo: Path) -> list[str]:
@@ -144,123 +134,77 @@ def _venv_python(repo: Path) -> list[str]:
     return [str(venv)] if venv.is_file() else ["uv", "run", "python"]
 
 
-def _run_script(argv: list[str], script: str, payload: dict, *, cwd: Path, env: dict) -> dict:
-    merged = dict(os.environ)
-    merged.update(env)
-    done = subprocess.run(
-        [*argv, "-c", script],
-        input=json.dumps(payload, ensure_ascii=False),
-        capture_output=True,
-        text=True,
-        cwd=str(cwd),
-        env=merged,
-        timeout=900,
-        check=False,
-    )
-    if done.returncode != 0:
-        lines = (done.stderr or done.stdout).strip().splitlines()
-        detail = " / ".join(line.strip() for line in lines[-3:] if line.strip())[:400]
-        raise PreviewError(detail or "DB 작업이 이유 없이 실패했어요")
-    return json.loads(done.stdout or "{}")
-
-
-@dataclass
-class Ports:
-    """발행이 바깥과 닿는 모든 곳. 시험은 가짜로 바꿔 순서를 확인한다."""
-
-    api_db: Callable[[dict], dict]
-    chat_db: Callable[[dict], dict]
-    http: Callable[[str, str, dict[str, str], bytes | None], tuple[int, Any]]
-    upload: Callable[[Path, str], None]
-    sleep: Callable[[float], None] = time.sleep
-
-
-def _http(method: str, url: str, headers: dict[str, str], body: bytes | None) -> tuple[int, Any]:
-    req = urllib.request.Request(url, data=body, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as res:
-            raw = res.read()
-            return res.status, json.loads(raw) if raw else None
-    except urllib.error.HTTPError as exc:
-        return exc.code, None
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise PreviewError(
-            f"api-svc에 닿지 못했어요: {exc.reason if hasattr(exc, 'reason') else exc}"
-        ) from exc
-
-
 def default_ports(settings: PreviewSettings) -> Ports:
-    api_env = {"CFP_PG_DSN": settings.secret(settings.api_db_url_env)}
-    chat_env = dict(settings.chat_env)
-    chat_env["RQC_CONTENT_DATABASE_URL"] = settings.secret(settings.chat_db_url_env)
-    if chat_env.get("RQC_ENV") == "local":
-        chat_env.setdefault("RQC_DATABASE_URL", chat_env["RQC_CONTENT_DATABASE_URL"])
+    base = settings.base_url.rstrip("/")
+    token = settings.token()
 
-    def api_db(payload: dict) -> dict:
-        return _run_script(
-            _venv_python(settings.api_svc_repo),
-            API_DB_SCRIPT,
-            payload,
-            cwd=settings.api_svc_repo,
-            env=api_env,
+    def api(method: str, path: str, body: dict | None) -> tuple[int, Any]:
+        data = None if body is None else json.dumps(body, ensure_ascii=False).encode()
+        headers = {"X-Factory-Import-Token": token, "Accept": "application/json"}
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(base + path, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=settings.timeout_s) as res:
+                raw = res.read()
+                return res.status, json.loads(raw) if raw else None
+        except urllib.error.HTTPError as exc:
+            raw = exc.read()
+            try:
+                return exc.code, json.loads(raw) if raw else None
+            except ValueError:
+                return exc.code, None
+        except (urllib.error.URLError, TimeoutError) as exc:
+            reason = getattr(exc, "reason", exc)
+            raise PreviewError(f"넣기 서비스에 닿지 못했어요: {reason}") from exc
+
+    def put_file(url: str, headers: dict[str, str], path: Path) -> int:
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            req = urllib.request.Request(
+                url, data=handle, method="PUT", headers={**headers, "Content-Length": str(size)}
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=600) as res:
+                    return res.status
+            except urllib.error.HTTPError as exc:
+                return exc.code
+            except (urllib.error.URLError, TimeoutError) as exc:
+                raise PreviewError(
+                    f"파일을 올리지 못했어요({path.name}): {getattr(exc, 'reason', exc)}"
+                ) from exc
+
+    def compile_chat(data_dir: Path, uid: str) -> dict:
+        repo = settings.chat_svc_repo.expanduser()
+        done = subprocess.run(
+            [*_venv_python(repo), "-c", CHAT_COMPILE_SCRIPT],
+            input=json.dumps({"dataDir": str(data_dir), "characterUid": uid}),
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+            env={**os.environ, "RQC_ENV": "local"},
+            timeout=900,
+            check=False,
         )
-
-    def chat_db(payload: dict) -> dict:
-        return _run_script(
-            _venv_python(settings.chat_svc_repo),
-            CHAT_DB_SCRIPT,
-            payload,
-            cwd=settings.chat_svc_repo,
-            env=chat_env,
-        )
-
-    def upload(path: Path, key: str) -> None:
-        if settings.storage == "none":
-            return
-        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        argv = [
-            "aws",
-            "s3",
-            "cp",
-            str(path),
-            f"s3://{settings.s3_bucket}/{key}",
-            "--content-type",
-            content_type,
-            "--only-show-errors",
-        ]
-        if settings.aws_profile:
-            argv += ["--profile", settings.aws_profile]
-        done = subprocess.run(argv, capture_output=True, text=True, timeout=600, check=False)
         if done.returncode != 0:
-            raise PreviewError(f"사진·영상 업로드 실패: {(done.stderr or '').strip()[-300:]}")
+            lines = (done.stderr or done.stdout).strip().splitlines()
+            detail = " / ".join(line.strip() for line in lines[-3:] if line.strip())[:400]
+            raise PreviewError(f"chat-svc 컴파일 실패: {detail or '이유 없음'}")
+        return json.loads(done.stdout or "{}")
 
-    return Ports(api_db=api_db, chat_db=chat_db, http=_http, upload=upload)
+    return Ports(api=api, put_file=put_file, compile_chat=compile_chat)
+
+
+def _call(ports: Ports, method: str, path: str, body: dict | None, what: str) -> Any:
+    status, payload = ports.api(method, API + path, body)
+    if 200 <= status < 300:
+        return payload or {}
+    detail = (payload or {}).get("detail") if isinstance(payload, dict) else None
+    message = detail.get("message") if isinstance(detail, dict) else detail
+    raise PreviewError(f"{what} 실패(HTTP {status}){': ' + str(message) if message else ''}")
 
 
 # ------------------------------------------------------------------ 계획(순수 함수)
-
-
-def merge_segments(raw: str | None, character_id: int) -> tuple[str, dict]:
-    """기존 값을 지키고 캐릭터 하나만 preview로 더한다. 테스터가 없으면 멈춘다."""
-    value = json.loads(raw) if raw and raw.strip() else {}
-    if not isinstance(value, dict):
-        raise PreviewError("content.segments 값이 JSON 객체가 아니에요")
-    unknown = set(value) - _SEGMENT_KEYS
-    if unknown:
-        raise PreviewError(f"content.segments에 모르는 키가 있어요: {', '.join(sorted(unknown))}")
-    testers = value.get("preview_member_ids") or []
-    if not testers:
-        raise PreviewError(
-            "테스터 명단(content.segments의 preview_member_ids)이 비어 있어요. "
-            "테스터 회원 id를 먼저 넣어 주세요"
-        )
-    characters = dict(value.get("characters") or {})
-    current = characters.get(str(character_id))
-    if current not in (None, "preview"):
-        raise PreviewError(f"캐릭터 {character_id}가 이미 {current}로 지정돼 있어요")
-    characters[str(character_id)] = "preview"
-    value["characters"] = characters
-    return json.dumps(value, ensure_ascii=False, separators=(",", ":")), value
 
 
 class _Recorder:
@@ -292,36 +236,83 @@ def _allocator(reserved: dict[str, list[int]], used: dict[str, set[int]]):
     return row_id
 
 
-def _canonical_keys(
-    bundle: dict, character_id: int, files: dict[str, Path]
-) -> list[tuple[Path, str]]:
-    """file_store 키를 api-svc 규칙(ADR-0032)으로 바꾸고 (파일, 키) 목록을 돌려준다."""
+def split_voice(package, bundle: dict) -> tuple[dict | None, str]:
+    """음성 묶음 행을 빼고 넣기 API 의 voice 칸으로 바꾼다. 묶음은 넣기 서비스가 만든다."""
     tables = bundle["tables"]
-    usage: dict[int, str] = {}
-    cm = tables.get("character_media")
-    if cm:
-        mi, ui = cm["columns"].index("media_id"), cm["columns"].index("usage_type")
-        for row in cm["rows"]:
-            usage.setdefault(row[mi], row[ui])
+    language_rows = tables.pop("character_voice_language", None)
+    tables.pop("character_voice", None)
+    bundle["table_order"] = [t for t in bundle["table_order"] if t not in _VOICE_TABLES]
+    character = tables["character"]
+    if "voice_id" in character["columns"]:
+        character["rows"][0][character["columns"].index("voice_id")] = None
+    if package.voice is not None:
+        voice = {
+            "fishReferenceId": package.voice.referenceId,
+            "displayName": package.profile.name[:64],
+            "language": package.locale,
+        }
+        return voice, f"Fish {package.voice.referenceId} → 새 Voice 발행"
+    if language_rows and language_rows["rows"]:
+        row = dict(zip(language_rows["columns"], language_rows["rows"][0], strict=True))
+        return {
+            "voiceId": str(row["voice_id"]),
+            "language": str(row["language"]),
+        }, f"voice-svc {row['voice_id']}"
+    return None, "없음"
+
+
+def upload_plan(bundle: dict, files: dict[str, Path]) -> list[tuple[str, Path, dict]]:
+    """file_store 행마다 (지금 키, 파일, 업로드 요청 한 줄). 같은 media 는 같은 자산 폴더다."""
+    tables = bundle["tables"]
+    kind: dict[int, str] = {}
+    for table, column, label in (
+        ("character_media", "usage_type", None),
+        ("character_clip", None, "call_clip"),
+        ("character_video", None, "call_video"),
+    ):
+        spec = tables.get(table)
+        if not spec:
+            continue
+        mi = spec["columns"].index("media_id")
+        ui = spec["columns"].index(column) if column else None
+        for row in spec["rows"]:
+            kind.setdefault(row[mi], row[ui] if ui is not None else label)
     fs = tables.get("file_store")
     if not fs:
         return []
     cols = fs["columns"]
-    mi, ki = cols.index("media_id"), cols.index("key")
-    si = cols.index("source_ref") if "source_ref" in cols else None
-    uploads: list[tuple[Path, str]] = []
+    mi, ki, vi = cols.index("media_id"), cols.index("key"), cols.index("variant_type")
+    plan = []
     for row in fs["rows"]:
         local = files.get(row[ki])
         if local is None or not local.is_file():
             raise PreviewError(f"올릴 파일을 찾지 못했어요: {row[ki]}")
-        access = "public" if usage.get(row[mi]) in _PUBLIC_KINDS else "protected"
-        ext = local.suffix.lstrip(".").lower() or "bin"
-        key = f"api-svc/{access}/characters/{character_id}/{uuid.uuid4().hex}/original.{ext}"
-        row[ki] = key
+        plan.append(
+            (
+                row[ki],
+                local,
+                {
+                    "ref": row[ki],
+                    "asset": f"media-{row[mi]}",
+                    "kind": kind.get(row[mi], "media"),
+                    "variant": row[vi] or "original",
+                    "ext": local.suffix.lstrip(".").lower() or "bin",
+                    "contentType": mimetypes.guess_type(local.name)[0]
+                    or "application/octet-stream",
+                },
+            )
+        )
+    return plan
+
+
+def _rekey(bundle: dict, keys: dict[str, str]) -> None:
+    fs = bundle["tables"]["file_store"]
+    ki = fs["columns"].index("key")
+    si = fs["columns"].index("source_ref") if "source_ref" in fs["columns"] else None
+    for row in fs["rows"]:
+        row[ki] = keys[row[ki]]
         if si is not None:
-            row[si] = key
-        uploads.append((local, key))
-    return uploads
+            row[si] = row[ki]
 
 
 # ------------------------------------------------------------------ 결과
@@ -338,11 +329,14 @@ class PreviewStep:
 class PreviewResult:
     characterId: str
     target: str
-    status: str = "FAILED"  # PUBLISHED | FAILED
+    status: str = "FAILED"  # PUBLISHED | FAILED | REMOVED
     apiCharacterId: int | None = None
     characterUid: str = ""
     name: str = ""
     visibleTo: str = "preview"
+    voice: dict | None = None
+    chatReleaseId: str | None = None
+    expiresAt: str | None = None
     steps: list[PreviewStep] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     stoppedSafely: bool = True
@@ -368,7 +362,7 @@ def publish_preview(
     settings: PreviewSettings | None = None,
     ports: Ports | None = None,
 ) -> PreviewResult:
-    """G9 승인 패키지를 테스터 전용으로 발행한다. 실패해도 결과 파일을 남긴다."""
+    """G9 승인 패키지를 테스터 전용으로 dev 에 올린다. 실패해도 결과 파일을 남긴다."""
     settings = settings or load_preview_settings(ctx)
     result = PreviewResult(characterId=cid, target=settings.target, startedAt=now_iso())
     current = "준비"
@@ -383,150 +377,146 @@ def publish_preview(
             raise PreviewError("패키지 파일이 맞지 않아요: " + "; ".join(problems[:3]))
         if package.twin and package.twin.servingRoute:
             raise PreviewError(
-                "전용 대화 모델을 쓰는 캐릭터예요. "
-                "실서비스 chat-svc에는 캐릭터별 모델 경로가 없어요"
+                "전용 대화 모델을 쓰는 캐릭터예요. dev chat-svc 에는 캐릭터별 모델 경로가 없어요"
             )
         result.name = package.profile.name
         uid, handle = str(character_uid(cid)), slug_for(cid)
         result.characterUid = uid
         result.step("준비", f"{package.packageRev} · {package.profile.name}")
 
-        current = "api-svc 점검"
+        current = "넣기 서비스 점검"
         recorder = _Recorder()
         api_svc.build_seed(
-            package, package_dir, exported_at=now_iso(), alembic_revision="", row_id=recorder
+            package,
+            package_dir,
+            exported_at=now_iso(),
+            alembic_revision="",
+            default_voice_id=settings.default_voice_id,
+            row_id=recorder,
         )
         tables = sorted(recorder.used)
-        api = ports.api_db({"op": "inspect", "tables": tables, "uid": uid, "handle": handle})
+        query = urllib.parse.urlencode(
+            {"characterUid": uid, "handle": handle, "tables": ",".join(tables)}
+        )
+        state = _call(ports, "GET", f"/state?{query}", None, "상태 조회")
+        api, chat, voice_svc = (
+            state.get("api") or {},
+            state.get("chat") or {},
+            state.get("voice") or {},
+        )
         if api.get("existing") is not None:
-            raise PreviewError(f"이미 발행된 캐릭터예요(api-svc id {api['existing']})")
-        missing = [t for t in tables if not api["sequences"].get(t)]
+            raise PreviewError(
+                f"이미 발행된 캐릭터예요(앱 캐릭터 {api['existing']}). 먼저 지워 주세요"
+            )
+        missing = [t for t in tables if not (api.get("sequences") or {}).get(t)]
         if missing:
             raise PreviewError("id 시퀀스가 없는 표가 있어요: " + ", ".join(missing))
-        result.step(current, "스키마 " + ",".join(api["heads"]))
-
-        current = "chat-svc 점검"
-        repo_data = settings.chat_svc_repo / "data"
-        chat = ports.chat_db({"op": "inspect", "dataDir": str(repo_data)})
-        if chat.get("drift"):
-            sample = ", ".join(f"{d['owner']}({d['reason']})" for d in chat["drift"][:4])
+        if not api.get("testers"):
             raise PreviewError(
-                "실서비스 chat-svc 발행본이 저장소 data/와 달라요. 지금 발행하면 다른 캐릭터 "
-                f"콘텐츠가 되돌아가요: {sample}"
+                "테스터 명단(content.segments 의 preview_member_ids)이 비어 있어요. 테스터 회원 id 를 먼저 넣어 주세요"
             )
-        expected_head = chat["releaseHead"]
-        result.step(current, f"스키마 {','.join(chat['heads'])} · 발행본 {expected_head} · 차이 0")
-
-        current = "테스터 명단"
-        admin = settings.api_base_url + "/api/v1/admin/content/config"
-        token = {"X-Admin-Token": settings.secret(settings.admin_token_env)}
-        status, rows = ports.http("GET", admin, token, None)
-        if status != 200 or not isinstance(rows, list):
-            raise PreviewError(f"관리자 설정을 읽지 못했어요(HTTP {status})")
-        before = next((r.get("value") for r in rows if r.get("key") == SEGMENTS_KEY), None)
-        merge_segments(before, 1)  # 테스터 명단·형식을 예약 전에 확인한다
         result.step(
-            current, f"테스터 {len(json.loads(before or '{}').get('preview_member_ids') or [])}명"
+            current,
+            f"스키마 {','.join(api.get('heads') or [])} · 테스터 {api['testers']}명 · "
+            f"chat 발행본 {chat.get('releaseHead')} · voice-svc {'닿음' if voice_svc.get('reachable') else '안 닿음'}",
         )
 
         current = "id 예약"
-        reserved = ports.api_db(
-            {"op": "reserve", "counts": {t: len(o) for t, o in recorder.used.items()}}
-        )["ids"]
+        counts = {t: len(o) for t, o in recorder.used.items()}
+        reserved = _call(ports, "POST", "/reservations", {"counts": counts}, "id 예약")["ids"]
         row_id = _allocator(reserved, recorder.used)
         seed = api_svc.build_seed(
             package,
             package_dir,
             exported_at=now_iso(),
-            alembic_revision=",".join(api["heads"]),
+            alembic_revision=",".join(api.get("heads") or []),
+            default_voice_id=settings.default_voice_id,
             row_id=row_id,
         )
         bundle = seed.bundle
         character_id = row_id("character", 0)
         result.apiCharacterId = character_id
-        ch = bundle["tables"]["character"]
-        for col, value in (("chat_enabled", False), ("call_enabled", False), ("is_active", True)):
-            ch["rows"][0][ch["columns"].index(col)] = value
-        dropped = sorted(
-            f"{t}.{c}"
-            for t, spec in bundle["tables"].items()
-            for c in spec["columns"]
-            if c not in set(api["columns"].get(t) or [])
-        )
-        if dropped:
-            result.warnings.append("실서비스 스키마에 없어 빼는 칸: " + ", ".join(dropped))
+        voice, voice_note = split_voice(package, bundle)
+        if voice is None:
+            result.warnings.append(
+                "음성이 없어요 — 통화를 열면 409(VOICE_LANGUAGE_NOT_AVAILABLE). Fish 음성 ID 나 default_voice_id 를 주세요"
+            )
+        elif voice.get("fishReferenceId") and not voice_svc.get("reachable"):
+            raise PreviewError("넣기 서비스가 voice-svc 에 닿지 못해 Fish 음성을 발행할 수 없어요")
+        # dev 스키마에 없는 칸은 넣기 서비스가 빼고 warnings 로 돌려준다.
         problems = api_svc.validate_seed_bundle(bundle)
         tree = chat_svc.build_tree(package, package_dir)
         problems += chat_svc.validate_content_tree(tree.files)
         if problems:
             raise PreviewError("변환 결과 검사 실패: " + "; ".join(problems[:3]))
-        uploads = _canonical_keys(bundle, character_id, seed.files)
-        result.step(current, f"캐릭터 id {character_id} · 표 {len(reserved)}개")
+        result.step(current, f"앱 캐릭터 {character_id} · 표 {len(reserved)}개 · 음성 {voice_note}")
 
-        current = "사진·영상 업로드"
-        for local, key in uploads:
-            ports.upload(local, key)
-        result.step(
-            current,
-            f"{len(uploads)}개"
-            + (" (업로드 생략: 시험 대상)" if settings.storage == "none" else ""),
-        )
-
-        current = "테스터 전용 지정"
-        status, rows = ports.http("GET", admin, token, None)
-        latest = next((r.get("value") for r in (rows or []) if r.get("key") == SEGMENTS_KEY), None)
-        merged, _ = merge_segments(latest, character_id)
-        body = json.dumps({"value": merged}, ensure_ascii=False).encode()
-        status, _ = ports.http(
-            "PUT", f"{admin}/{SEGMENTS_KEY}", {**token, "Content-Type": "application/json"}, body
-        )
-        if status != 200:
-            raise PreviewError(f"테스터 전용 지정을 저장하지 못했어요(HTTP {status})")
-        status, rows = ports.http("GET", admin, token, None)
-        saved = next((r.get("value") for r in (rows or []) if r.get("key") == SEGMENTS_KEY), "{}")
-        if (json.loads(saved or "{}").get("characters") or {}).get(str(character_id)) != "preview":
-            raise PreviewError("저장한 테스터 전용 지정을 다시 읽지 못했어요")
-        ports.sleep(settings.wait_s)
-        result.step(current, f"preview 확인 · {settings.wait_s:.0f}초 대기")
-
-        current = "api-svc 등록"
-        result.stoppedSafely = True
-        inserted = ports.api_db(
-            {
-                "op": "insert",
-                "uid": uid,
-                "handle": handle,
-                "order": bundle["table_order"],
-                "tables": bundle["tables"],
-            }
-        )
-        result.step(current, ", ".join(f"{t} {n}" for t, n in inserted["inserted"].items()))
-
-        current = "chat-svc 발행"
+        current = "chat 콘텐츠 컴파일"
+        repo_data = settings.chat_svc_repo.expanduser() / "data"
         work = Path(tempfile.mkdtemp(prefix="cfp-preview-"))
         try:
             fragment = work / "fragment"
             chat_svc.write_tree(fragment, tree)
             note = _overlay_tree(repo_data, fragment, work / "data")
-            published = ports.chat_db(
-                {"op": "publish", "dataDir": str(work / "data"), "expectedHead": expected_head}
-            )
+            compiled = ports.compile_chat(work / "data", uid)
         finally:
             shutil.rmtree(work, ignore_errors=True)
-        if published.get("driftAfter"):
-            raise PreviewError("발행 뒤 chat-svc 대조에서 차이가 남았어요")
-        report = published["report"]
+        content = compiled.get("content") or {}
+        if not content.get("releaseCharacters") or not content.get("releaseChapters"):
+            raise PreviewError("chat-svc 컴파일 결과에 이 캐릭터가 없어요")
+        for problem in compiled.get("problems") or []:
+            result.warnings.append(f"chat-svc 전체 트리 검사: {problem}")
         result.step(
-            current, f"{note} · 발행본 {report['releaseId']} · 캐릭터 {report['characters']}명"
+            current,
+            f"{note} · 캐릭터 버전 {len(content['characterVersions'])} · "
+            f"챕터 {len(content['releaseChapters'])} · 생성 프로필 {len(content.get('generationProfiles') or [])}",
         )
 
-        current = "대화 켜기"
-        call = any(v.kind == "ACTION" for v in package.videos)
-        ports.api_db({"op": "enable", "id": character_id, "chat": True, "call": call})
-        result.step(current, "대화 켬" + (" · 통화 켬" if call else ""))
+        current = "사진·영상 업로드"
+        plan = upload_plan(bundle, seed.files)
+        if plan:
+            answer = _call(
+                ports,
+                "POST",
+                "/uploads",
+                {"characterId": character_id, "files": [spec for _, _, spec in plan]},
+                "업로드 주소 받기",
+            )
+            by_ref = {item["ref"]: item for item in answer.get("files") or []}
+            keys: dict[str, str] = {}
+            for ref, local, _spec in plan:
+                target = by_ref.get(ref)
+                if target is None:
+                    raise PreviewError(f"업로드 주소를 받지 못했어요: {local.name}")
+                status = ports.put_file(target["url"], target.get("headers") or {}, local)
+                if not 200 <= status < 300:
+                    raise PreviewError(f"파일을 올리지 못했어요({local.name}: HTTP {status})")
+                keys[ref] = target["key"]
+            _rekey(bundle, keys)
+        result.step(current, f"{len(plan)}개")
 
-        current = "노출 확인"
-        result.step(current, _check_hidden(ports, settings.api_base_url, character_id, result.name))
+        current = "넣기"
+        expires = datetime.now(UTC) + timedelta(minutes=settings.expires_minutes)
+        result.expiresAt = expires.replace(microsecond=0).isoformat()
+        call = any(v.kind == "ACTION" for v in package.videos)
+        payload = {
+            "characterUid": uid,
+            "handle": handle,
+            "api": {"tables": bundle["tables"]},
+            "chat": content,
+            "voice": voice,
+            "enable": {"chat": True, "call": call},
+            "expiresAt": result.expiresAt,
+            "source": f"PersonaFoundry {cid} {package.packageRev}",
+        }
+        done = _call(ports, "POST", "/characters", payload, "넣기")
+        result.voice = done.get("voice")
+        result.chatReleaseId = done.get("releaseId")
+        for item in done.get("steps") or []:
+            result.step(f"넣기 · {item.get('name')}", str(item.get("detail") or ""))
+            if str(item.get("detail") or "").startswith("경고"):
+                result.warnings.insert(0, f"{item.get('name')}: {item.get('detail')}")
+        result.warnings += list(done.get("warnings") or [])
         result.status = "PUBLISHED"
     except (PreviewError, FactoryError, KeyError, ValueError, OSError) as exc:
         result.steps.append(PreviewStep(current, False, str(exc)[:600]))
@@ -536,32 +526,68 @@ def publish_preview(
     return result
 
 
-def _check_hidden(ports: Ports, base: str, character_id: int, name: str) -> str:
-    """로그인하지 않은 요청(웹·안드로이드·iOS)의 목록·검색에 이 캐릭터가 없어야 한다."""
-    checked = 0
-    for platform in ("web", "android", "ios"):
-        headers = {"X-Client-Platform": platform}
-        for path in (
-            "/api/v1/characters?sort=new&limit=50",
-            "/api/v1/characters/search?" + urllib.parse.urlencode({"q": name, "limit": 50}),
-        ):
-            status, payload = ports.http("GET", base + path, headers, None)
-            if status != 200 or not isinstance(payload, dict):
-                raise PreviewError(
-                    f"공개 목록을 읽지 못했어요({platform} {path.split('?')[0]}: HTTP {status})"
-                )
-            ids = {item.get("id") for item in payload.get("characters") or []}
-            if character_id in ids:
-                raise PreviewError(f"일반 사용자 목록에 보여요({platform} {path.split('?')[0]})")
-            checked += 1
-    return f"로그인 없는 목록·검색 {checked}곳에서 안 보임"
+def latest_published(ctx: Context, cid: str) -> dict | None:
+    root = Path(ctx.character_dir(cid)) / "px-preview"
+    for path in sorted(root.glob("*.json"), reverse=True):
+        try:
+            data = json.loads(path.read_text("utf-8"))
+        except (OSError, ValueError):
+            continue
+        if data.get("status") in {"PUBLISHED", "REMOVED"}:
+            return data if data["status"] == "PUBLISHED" else None
+    return None
+
+
+def remove_preview(
+    ctx: Context,
+    cid: str,
+    *,
+    settings: PreviewSettings | None = None,
+    ports: Ports | None = None,
+) -> PreviewResult:
+    """마지막으로 발행한 테스터 전용 캐릭터를 dev 에서 지운다(넣기 서비스가 넣은 것만)."""
+    settings = settings or load_preview_settings(ctx)
+    result = PreviewResult(characterId=cid, target=settings.target, startedAt=now_iso())
+    current = "지우기"
+    try:
+        settings.require_ready()
+        ports = ports or default_ports(settings)
+        published = latest_published(ctx, cid)
+        if not published or not published.get("apiCharacterId"):
+            raise PreviewError("지울 발행 기록이 없어요")
+        result.apiCharacterId = int(published["apiCharacterId"])
+        result.characterUid = published.get("characterUid") or ""
+        result.name = published.get("name") or ""
+        done = _call(ports, "DELETE", f"/characters/{result.apiCharacterId}", None, "지우기")
+        deleted = done.get("deleted") or {}
+        voice = done.get("voice") or {}
+        result.voice = voice or None
+        result.step(
+            current,
+            f"앱 캐릭터 {result.apiCharacterId} · 행 {sum(deleted.values())}개 · 파일 {done.get('filesDeleted', 0)}개"
+            + (f" · 음성 {voice.get('removed')}" if voice else ""),
+        )
+        if isinstance(voice.get("removed"), str):
+            result.warnings.append(voice["removed"])
+        result.status = "REMOVED"
+    except (PreviewError, FactoryError, KeyError, ValueError, OSError) as exc:
+        result.steps.append(PreviewStep(current, False, str(exc)[:600]))
+    finally:
+        result.finishedAt = now_iso()
+        _write_result(ctx, cid, result)
+    return result
 
 
 def _write_result(ctx: Context, cid: str, result: PreviewResult) -> Path:
     root = ctx.character_dir(cid) / "px-preview"
     root.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    path = root / f"{stamp}-{result.target}.json"
+    suffix = "removed" if result.status == "REMOVED" else result.target
+    path = root / f"{stamp}-{suffix}.json"
+    n = 1
+    while path.exists():
+        n += 1
+        path = root / f"{stamp}-{n}-{suffix}.json"
     path.write_text(
         json.dumps(asdict(result), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
@@ -574,7 +600,10 @@ __all__ = [
     "PreviewResult",
     "PreviewSettings",
     "default_ports",
+    "latest_published",
     "load_preview_settings",
-    "merge_segments",
     "publish_preview",
+    "remove_preview",
+    "split_voice",
+    "upload_plan",
 ]

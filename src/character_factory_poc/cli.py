@@ -1007,6 +1007,19 @@ def cmd_preview_publish(args) -> int:
     return 0 if result.status == "PUBLISHED" else 1
 
 
+def cmd_preview_remove(args) -> int:
+    """마지막으로 발행한 테스터 전용 캐릭터를 dev 에서 지운다(넣기 서비스 DELETE)."""
+    from character_factory_poc.stages.export.preview import remove_preview
+
+    result = remove_preview(_ctx(args), args.character_id)
+    for step in result.steps:
+        print(f"  {'ok ' if step.ok else 'NG '} {step.name} {step.detail}")
+    for warning in result.warnings:
+        print(f"  참고: {warning}")
+    print(f"테스터 전용 지우기: {result.status}")
+    return 0 if result.status == "REMOVED" else 1
+
+
 def cmd_demo_mode(args) -> int:
     from character_factory_poc.pipeline.demo import write_demo_mode
 
@@ -1615,6 +1628,9 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("character_id")
     s.add_argument("--notify", action="store_true", help="결과를 디스코드로 알린다")
     s.set_defaults(fn=cmd_preview_publish)
+    s = preview.add_parser("remove", help="마지막으로 발행한 테스터 전용 캐릭터를 dev 에서 지운다")
+    s.add_argument("character_id")
+    s.set_defaults(fn=cmd_preview_remove)
 
     s = sub.add_parser("demo", help="시연 모드: 모든 관문 자동 승인 → 테스터 발행 → 알림")
     s.add_argument("character_id")
