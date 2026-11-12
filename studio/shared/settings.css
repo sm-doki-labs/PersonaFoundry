@@ -1,0 +1,59 @@
+/* 설정 화면(D-0211). 원문 화면의 카드·버튼을 쓰고 이 화면의 상태 표시만 더한다. 색은 foundry-tokens 의미 토큰만. */
+.set-card{display:flex;flex-direction:column;gap:var(--fd-space-3)}
+.set-row{display:flex;align-items:center;gap:var(--fd-space-3)}
+.set-row h2{margin:0;font-size:var(--fd-fs-5);font-weight:620;letter-spacing:-.015em}
+.set-lead{margin:0;color:var(--fd-fg-muted);font-size:var(--fd-fs-3);max-width:64ch;text-wrap:pretty}
+.set-acts{display:flex;gap:var(--fd-space-2);flex-wrap:wrap}
+.set-pill{margin-left:auto;display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:999px;font-size:var(--fd-fs-2);font-weight:550;background:var(--fd-bg-subtle);color:var(--fd-fg-muted);border:1px solid var(--fd-line)}
+.set-pill .dot{width:6px;height:6px;border-radius:50%;background:var(--fd-slate-8)}
+.set-pill.ok{background:var(--fd-success-bg);color:var(--fd-success-fg);border-color:transparent}
+.set-pill.ok .dot{background:var(--fd-success-solid)}
+.set-pill.wait{background:var(--fd-attention-bg);color:var(--fd-attention-fg);border-color:var(--fd-attention-line)}
+.set-pill.wait .dot{background:var(--fd-attention-solid);animation:set-blink 1.4s var(--fd-ease) infinite}
+@media (prefers-reduced-motion:reduce){.set-pill.wait .dot{animation:none}}
+@keyframes set-blink{50%{opacity:.35}}
+/* 승인 코드: 사람이 xAI 화면과 한 글자씩 맞춰 보는 값이라 크게, 고정폭으로 둔다. */
+.set-code{display:flex;align-items:center;justify-content:space-between;gap:var(--fd-space-4);flex-wrap:wrap;padding:var(--fd-space-4);border-radius:var(--fd-r-3);background:var(--fd-bg-inset);border:1px dashed var(--fd-line-strong)}
+.set-code .lbl{display:block;font-size:var(--fd-fs-2);color:var(--fd-fg-subtle);margin-bottom:4px}
+.set-code .code{font-family:var(--fd-mono);font-size:28px;font-weight:600;letter-spacing:.14em;font-variant-numeric:tabular-nums;color:var(--fd-fg);outline:none}
+.set-code .btn{height:36px;padding:0 14px}
+.set-code .btn .i{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.set-note{margin:0;font-size:var(--fd-fs-2);color:var(--fd-fg-muted)}
+.set-note .left{white-space:nowrap;margin-left:4px;color:var(--fd-fg-subtle)}
+.set-note .left b{font-variant-numeric:tabular-nums;color:var(--fd-fg-muted);font-weight:600}
+.set-facts{margin:0;display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;font-size:var(--fd-fs-3)}
+.set-facts div{display:contents}
+.set-facts dt{color:var(--fd-fg-subtle)}
+.set-facts dd{margin:0;color:var(--fd-fg);word-break:break-all}
+.set-err{margin:0;padding:8px 10px;border-radius:var(--fd-r-2);background:var(--fd-danger-bg);color:var(--fd-danger-fg);font-size:var(--fd-fs-2)}
+.set .fd-side .fd-ops[aria-current="page"]{color:var(--fd-accent-fg);background:var(--fd-accent-bg)}
+
+/* 텍스트 모델 창(예전 시안의 독립 대화 상자)을 새 디자인 색으로 다시 칠한다. 밝은·어두운 화면을 함께 따른다. */
+.fl .ftp-layer{
+  --ftp-bg:var(--fd-bg-surface);--ftp-text:var(--fd-fg);--ftp-muted:var(--fd-fg-muted);--ftp-faint:var(--fd-fg-subtle);
+  --ftp-line:var(--fd-line);--ftp-line-2:var(--fd-line-strong);--ftp-solid:var(--fd-primary-bg);--ftp-solid-ink:var(--fd-primary-fg);
+  --ftp-ok:var(--fd-success-fg);--ftp-warn:var(--fd-attention-fg);--ftp-bad:var(--fd-danger-fg);
+  --ftp-ok-soft:var(--fd-success-bg);--ftp-warn-soft:var(--fd-attention-bg);--ftp-bad-soft:var(--fd-danger-bg);
+  --ftp-well:var(--fd-bg-inset);--ftp-well-line:var(--fd-line);
+  --ftp-r-panel:var(--fd-r-4);--ftp-r-card:var(--fd-r-3);--ftp-r-inner:var(--fd-r-2);--ftp-font:var(--fd-font);
+  color-scheme:light dark;
+}
+
+/* 예전 시안은 어두운 유리 배경에 흰색 반투명 덧칠을 박아 두었다. 새 디자인 면·덧칠 토큰으로 바꾼다. */
+.fl .ftp-backdrop{background:color-mix(in srgb,var(--fd-slate-12) 32%,transparent);-webkit-backdrop-filter:none;backdrop-filter:none}
+.fl .ftp-dialog{background:var(--fd-bg-surface);border-color:var(--fd-line);box-shadow:var(--fd-shadow-lg);-webkit-backdrop-filter:none;backdrop-filter:none}
+.fl .ftp-scroll{scrollbar-color:var(--fd-slate-7) transparent}
+.fl .ftp-scroll::-webkit-scrollbar-thumb{background:var(--fd-slate-7)}
+.fl .ftp-icon-btn,.fl .ftp-scope,.fl .ftp-option,.fl .ftp-option.is-disabled:hover,.fl .ftp-char,.fl .ftp-pill,.fl .ftp-pill--muted,.fl .ftp-btn{background:var(--fd-bg-subtle)}
+.fl .ftp-icon-btn:hover,.fl .ftp-option:hover,.fl .ftp-char:hover,.fl .ftp-btn:hover,.fl .ftp-btn--quiet:hover,.fl .ftp-table tbody tr:hover td{background:var(--fd-bg-hover)}
+.fl .ftp-option.is-on,.fl .ftp-option:has(input:focus-visible),.fl .ftp-pill--active{background:var(--fd-bg-active)}
+.fl .ftp-option.is-on .ftp-radio{box-shadow:inset 0 0 0 3.5px var(--fd-bg-surface)}
+.fl .ftp-scope-mark{box-shadow:0 0 0 3px var(--fd-bg-hover)}
+.fl .ftp-char-av,.fl .ftp-record-av{background:var(--fd-bg-active)}
+.fl .ftp-char.is-on .ftp-char-av{background:color-mix(in srgb,var(--fd-primary-fg) 18%,transparent)}
+.fl .ftp-char.is-on code{color:color-mix(in srgb,var(--fd-primary-fg) 70%,transparent)}
+.fl .ftp-table th{background:var(--fd-bg-subtle)}
+.fl .ftp-artifact{background:var(--fd-bg-subtle)}
+.fl .ftp-btn--quiet{background:transparent}
+.fl .ftp-alert{border-color:var(--fd-danger-line);color:var(--fd-danger-fg)}
+.fl .ftp-tag--same{border-color:var(--fd-success-bg)}

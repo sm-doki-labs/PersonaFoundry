@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>설정 · Foundry</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%236e56cf'/%3E%3Cpath d='M8.5 17V7h7.5M8.5 12h5' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='16.4' cy='16.4' r='1.7' fill='white'/%3E%3C/svg%3E">
+<script>
+  (function () { try { var t = localStorage.getItem('fd-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-fd-theme', t); } catch (e) {} })();
+</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="shared/foundry-tokens.css">
+<link rel="stylesheet" href="shared/flow.css">
+<link rel="stylesheet" href="shared/sources.css">
+<link rel="stylesheet" href="shared/text-pipeline.css">
+<link rel="stylesheet" href="shared/settings.css">
+</head>
+<body class="fl src set">
+<a class="src-skip" href="#set-main">본문으로 건너뛰기</a>
+<div class="fd-shell">
+<aside class="fd-side" data-side aria-label="탐색"></aside>
+<div class="fd-main">
+<header class="fd-head src-head">
+  <nav class="fd-crumb" aria-label="위치"><a class="up" href="factory.html#all">전체 캐릭터</a><span class="sep" aria-hidden="true">/</span><b aria-current="page">설정</b></nav>
+  <button type="button" class="fd-head-theme" data-act="theme-next" aria-label="화면 테마 바꾸기"></button>
+</header>
+<div class="src-scroll">
+<main class="src-main" id="set-main" tabindex="-1">
+  <div class="src-title">
+    <h1>설정</h1>
+    <p>이 공장 서버의 모든 캐릭터에 적용돼요. 영상을 만들 계정과 대화·분석 모델을 여기서 바꿔요.</p>
+  </div>
+  <section class="src-card set-card" aria-labelledby="set-grok-h" data-grok>
+    <p class="hint">불러오는 중이에요</p>
+  </section>
+  <section class="src-card set-card" aria-labelledby="set-text-h">
+    <div class="set-row">
+      <h2 id="set-text-h">텍스트 모델</h2>
+    </div>
+    <p class="set-lead">원문 분석, 프롬프트, 대화에 쓰는 모델을 고르고 최근 호출 기록을 봐요.</p>
+    <div class="set-acts"><button type="button" class="btn" data-text-open aria-haspopup="dialog">모델 설정 열기</button></div>
+  </section>
+  <p class="sr" data-live aria-live="polite"></p>
+</main>
+</div>
+</div>
+</div>
+<div data-text-pipeline-root></div>
+<script src="shared/sources.js"></script>
+<script src="shared/text-pipeline.js"></script>
+<script src="shared/settings.js"></script>
+</body>
+</html>
