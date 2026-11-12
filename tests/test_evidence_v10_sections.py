@@ -5,6 +5,8 @@ Synthetic data only; no paid calls and no real chat text.
 
 import json
 
+import pytest
+
 from character_factory_poc.stages.s8_prompts import evidence_pipeline as pipeline
 from character_factory_poc.stages.s8_prompts import evidence_sections as v10
 from tests.test_evidence_v7_compact import claim
@@ -204,3 +206,26 @@ def test_hedged_call_uses_the_faster_duplicate_and_keeps_the_slow_one_running():
 def test_self_report_share_is_twenty_percent():
     assert v10.section_rule("LIFE_AND_TASTES", "conversation")["minShare"] == 0.2
     assert v10.section_rule("WANTS_AND_FEARS", "interview")["minShare"] == 0.2
+
+
+@pytest.mark.text_default
+def test_default_is_v10_when_s3_scene_analysis_exists_else_v4(tmp_path):
+    import shutil
+
+    from tests.test_evidence_pipeline import ready
+
+    ctx, _, cid = ready(tmp_path)
+    ctx.config.stages["s8"].pop("motif_compiler", None)
+    rev = ctx.state(cid).gate("G3").rev
+    folder = ctx.character_dir(cid) / "s3-plan" / str(rev) / "scene-analysis"
+    shutil.rmtree(folder, ignore_errors=True)  # a plan made before S3 scene analysis
+    value, note = pipeline.configured_compiler(ctx, cid)
+    assert (value, bool(note)) == ("evidence-v4", True)
+    assert pipeline.version_for(ctx, cid) != v10.SECTIONED_VERSION
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in ("voice", "behavior", "facts-limits"):
+        (folder / f"{name}.json").write_text("{}", encoding="utf-8")
+    assert pipeline.configured_compiler(ctx, cid) == ("evidence-v10", None)
+    assert pipeline.version_for(ctx, cid) == v10.SECTIONED_VERSION
+    ctx.config.stages["s8"]["motif_compiler"] = "evidence-v4"  # explicit setting always wins
+    assert pipeline.configured_compiler(ctx, cid) == ("evidence-v4", None)

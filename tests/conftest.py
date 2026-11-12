@@ -51,3 +51,21 @@ def known_target_heads(monkeypatch):
         "read_heads",
         lambda settings, runner: export.TargetHeads(api_svc=API_SVC_HEAD, chat_svc=CHAT_SVC_HEAD),
     )
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "text_default: run with the shipped S8 text standard default (evidence-v10)"
+    )
+
+
+@pytest.fixture(autouse=True)
+def previous_text_standard(request, monkeypatch):
+    """Flow tests answer S8 with fake model replies written for evidence-v4. Keep them on it
+    when they do not choose a compiler; tests of the default itself use @pytest.mark.text_default.
+    """
+    if request.node.get_closest_marker("text_default"):
+        return
+    from character_factory_poc.stages.s8_prompts import evidence_pipeline
+
+    monkeypatch.setattr(evidence_pipeline, "DEFAULT_COMPILER", "evidence-v4")

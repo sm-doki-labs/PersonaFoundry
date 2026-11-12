@@ -147,3 +147,9 @@ v7c의 후보 12개를 고정하고, 익준 대상 응답 2,155개(개발 1,452�
 - 표준: `[stages.s8] motif_compiler="evidence-v10"`, `text_standard="source_shape"`, `evidence_workers=4`. 표시 모델은 `[providers.labeler]` Gemini API 키 경로의 `gemini-4-argon`(openai_compat, base_url `https://generativelanguage.googleapis.com/v1beta/openai`, `api_key_env="GEMINI_API_KEY"`, `timeout_s=1200`, `max_retries=0`). 속도 기본값 `evidence_hedge_s=240`, `evidence_light_reasoning="low"`.
 - 코드 기본값은 아직 evidence-v4다. v10은 S3 장면 분석(scene-analysis) 결과가 필요한데 그 코드(`s3_plan/scene_analysis.py` 등)는 다른 작업에서 아직 커밋되지 않았다. S3 장면 분석이 커밋되면 기본값을 v10으로 바꾼다.
 - 남은 과제: 손흥민 "진짜" 쏠림·"것 같" 과다, 비공개 일정 전제 부정 1/3, 인터뷰 장면 고정(팬 통화용 장면 필요), 익준 말풍선 나누기·답 길이, 카톡 원문 statedFacts의 개인정보 처리 방침, 카드 분류 괄호 정리.
+## 기본값 전환 (2026-11-13)
+
+- `motif_compiler`를 적지 않으면 `evidence-v10`을 쓴다(`evidence_pipeline.DEFAULT_COMPILER`). 승인된 S3 기획에 장면 분석(voice·behavior·facts-limits)이 없으면 `evidence-v4`로 돌아가고, 텍스트 표준 기록에 `defaultFallback` 사유를 남긴다. 값을 적으면 그대로 강제한다.
+- `factory.example.toml`: motif_compiler 줄을 주석으로 바꿔 기본값을 쓰게 하고, `evidence_workers = 4`, 속도 설정 설명, `[providers.labeler]` Gemini API 키 Argon 블록을 넣었다.
+- 시험: 기존 흐름 시험의 가짜 S8 응답은 v4용이라 `tests/conftest.py`의 자동 고정(`previous_text_standard`)으로 v4에 둔다. 기본값 자체는 `@pytest.mark.text_default` 시험이 확인한다.
+- 실행 중인 8776·8781~8783 서버는 각자 runtime 사본을 쓰므로 이번 변경의 영향을 받지 않는다.

@@ -60,6 +60,32 @@ def version_for(ctx, cid=None):
 
 
 TEXT_STANDARDS = ("source_shape", "chapter_template")
+# Text standard confirmed 2026-11-13 (D-0201, D-0202). v10 starts from the S3 scene analysis,
+# so a character whose approved plan has none falls back to the previous standard. An
+# explicit [stages.s8] motif_compiler always wins and is never replaced.
+DEFAULT_COMPILER = "evidence-v10"
+FALLBACK_COMPILER = "evidence-v4"
+_SCENE_ANALYSIS = ("voice", "behavior", "facts-limits")
+
+
+def has_scene_analysis(ctx, cid):
+    gate = ctx.state(cid).gate("G3")
+    if gate.status != "APPROVED" or not gate.rev:
+        return False
+    folder = ctx.character_dir(cid) / "s3-plan" / str(gate.rev) / "scene-analysis"
+    return all((folder / f"{name}.json").is_file() for name in _SCENE_ANALYSIS)
+
+
+def configured_compiler(ctx, cid=None):
+    """(motif_compiler value, fallback note or None)."""
+    cfg = ctx.config.stage("s8")
+    if "motif_compiler" in cfg:
+        return cfg["motif_compiler"], None
+    if cid is not None and has_scene_analysis(ctx, cid):
+        return DEFAULT_COMPILER, None
+    if DEFAULT_COMPILER == FALLBACK_COMPILER:
+        return FALLBACK_COMPILER, None
+    return FALLBACK_COMPILER, "S3 장면 분석 결과가 없어 이전 표준(evidence-v4)을 쓴다"
 
 
 def select_standard(ctx, cid=None):
@@ -70,7 +96,7 @@ def select_standard(ctx, cid=None):
     cannot be judged or [stages.s8] text_standard = "chapter_template".
     """
     cfg = ctx.config.stage("s8")
-    value = cfg.get("motif_compiler", "evidence-v4")
+    value, fallback = configured_compiler(ctx, cid)
     conversation = {
         "evidence-v4": TENDENCY_VERSION,
         "evidence-v7": COMPACT_VERSION,
@@ -110,6 +136,8 @@ def select_standard(ctx, cid=None):
             )
             if shape:
                 record.update(label=shape["label"], sourceShape=shape)
+            if fallback:
+                record["defaultFallback"] = fallback
             return version, record
     return {
         "evidence-v1": LEGACY_VERSION,
@@ -126,7 +154,7 @@ def select_standard(ctx, cid=None):
 
 
 def selected(ctx):
-    value = ctx.config.stage("s8").get("motif_compiler", "evidence-v4")
+    value = ctx.config.stage("s8").get("motif_compiler", DEFAULT_COMPILER)
     if value not in {
         "evidence-v1",
         "evidence-v2",

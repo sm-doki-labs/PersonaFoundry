@@ -22,7 +22,9 @@ max_cost_usd_per_command = 20.0
 max_check_retries = 3
 
 [stages.s8]
-motif_compiler = "evidence-v4" # 현행 표준: 익준 pv6 생성 공정. evidence-v5는 명시적 실험용이다.
+# motif_compiler를 적지 않으면 확정 표준 evidence-v10(섹션별 후보·응답별 전수 표시, D-0201·D-0202)을 쓴다.
+# S3 장면 분석이 없는 캐릭터는 evidence-v4로 돌아간다. 값을 적으면 그 공정을 강제한다.
+# motif_compiler = "evidence-v10"
 interview_compiler = "interview-editor-v2" # 인터뷰의 질문 유형·길이와 검토된 관찰을 조립한다. inherit는 공통 컴파일러를 사용한다.
 # evidence_scenes = { "character-id" = "친구끼리 메신저로 이야기한다." } # 인물별 장면이 공통값보다 우선
 evidence_max_records = 80 # evidence-v1 전용 표본 상한(2~160). 기본 evidence-v4는 전체 처리
@@ -30,7 +32,9 @@ evidence_max_records = 80 # evidence-v1 전용 표본 상한(2~160). 기본 evid
 scene_traits = false  # V3 비교 경로만: 두 말차례의 관심·대응 추가 분석
 trait_method = "focus"  # focus: 최대 2회. contrast: 반응을 가르는 단서 예측·검토, 최대 3회
 evidence_chunk_chars = 24000 # 모든 자료를 나눠 전달하는 호출별 크기 상한
-evidence_workers = 2
+evidence_workers = 4
+# evidence_hedge_s = 240  # evidence-v10: 표시 호출이 이 초 안에 안 오면 같은 요청을 한 번 더 보낸다(0이면 끔)
+# evidence_light_reasoning = "low"  # evidence-v10: 응답 표시·보충 단계의 추론 강도("" = 공급자 기본)
 example_turns = 0  # evidence-v1/v2/v3는 반드시 0. V3 비교 경로에서만 실제 문답 주입 가능
 motif_demo_chat_temperature = 0.8  # 모티브 대화 표본의 발화에만 적용
 long_prompt_max_chars = 8000  # 덱의 무압축 정본 상한
@@ -318,8 +322,15 @@ max_retries = 2
 # 로컬에서 다른 지역을 쓰면 project와 location을 함께 지정한다.
 location = "global"
 
-# 원문 조건부 경향 공정은 [stages.s8]의 motif_compiler = "evidence-v4"로 선택한다.
-# 기능·언어 형식 분리와 혼합 근거 보존을 적용하며 G6 검토를 유지한다.
+# evidence-v10 응답별 표시 모델(D-0201). 확정 설정은 Gemini API 키 경로의 Argon이다.
+# 이 블록이 없으면 [providers.analyzer](없으면 생성 모델)를 쓴다.
+[providers.labeler]
+adapter = "openai_compat"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+model = "gemini-4-argon"
+api_key_env = "GEMINI_API_KEY"
+timeout_s = 1200
+max_retries = 0
 
 # 테스터 전용 미리보기 발행(cfp preview publish, 시연 모드). 순서: 읽기 점검 → id 예약 →
 # content.segments preview 지정·대기 → 사진·영상 업로드 → api-svc 등록 → chat-svc 발행 → 대화 켜기 →

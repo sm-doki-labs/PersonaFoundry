@@ -144,7 +144,7 @@ def motif_plan_calls(
     probes: int,
     scene_traits: bool = False,
     trait_method: str = "focus",
-    motif_compiler: str = "evidence-v4",
+    motif_compiler: str = "evidence-v10",
 ) -> list[CallPlan]:
     if motif_compiler in {
         "evidence-v1",
