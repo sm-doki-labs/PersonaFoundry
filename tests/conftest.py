@@ -26,8 +26,11 @@ def fake_tendency_tags(monkeypatch):
     original = FakeTextModel._lookup
 
     def lookup(self, req):
-        if is_tagging(req) and not {f"{req.stage}:{req.ref}", req.ref} & self.responses.keys():
-            return fake_tags
+        if not {f"{req.stage}:{req.ref}", req.ref} & self.responses.keys():
+            if is_tagging(req):
+                return fake_tags
+            if req.stage == "s3" and "/scene-analysis/" in req.ref:
+                return {"observations": []}
         return original(self, req)
 
     monkeypatch.setattr(FakeTextModel, "_lookup", lookup)

@@ -108,7 +108,7 @@ def test_s3_binds_traits_to_tendencies_and_reuses_tags(tmp_path, monkeypatch):
         }
 
     model.add(f"s3:{cid}/pr1/tendencies/0", tags)
-    ctx.config.stages["s3t"] = {"max_check_retries": 0}
+    ctx.config.stages["s3t"] = {"analysis_mode": "exhaustive", "max_check_retries": 0}
     # 기본 응답은 세 번째 선택의 근거로 한 번만 나온 답을 쓴다.
     with pytest.raises(CheckFailed, match="주요 경향"):
         run_s3_twin(ctx, cid)

@@ -53,6 +53,21 @@ def make_text_model(cfg: ProviderConfig) -> TextModel:
                 ttl_s=float(x.get("token_ttl_s", DEFAULT_TTL_S)),
             ),
         )
+    if cfg.adapter == "anthropic":
+        from character_factory_poc.providers.anthropic_messages import AnthropicTextModel
+
+        if not cfg.model:
+            raise ValueError('anthropic 어댑터에는 model이 필요하다(예: "claude-opus-5-5")')
+        x = cfg.extra
+        return AnthropicTextModel(
+            model=cfg.model,
+            api_key_env=cfg.api_key_env or "ANTHROPIC_API_KEY",
+            base_url=cfg.base_url or "https://api.anthropic.com/v1",
+            timeout=float(x.get("timeout_s", 900)),
+            max_retries=int(x.get("max_retries", 2)),
+            effort=x.get("effort"),
+            max_output_tokens=int(x.get("max_output_tokens", 64_000)),
+        )
     raise ValueError(f"알 수 없는 텍스트 어댑터: {cfg.adapter}")
 
 

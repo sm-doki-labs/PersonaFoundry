@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from threading import Lock
 
 from character_factory_poc.common.config import BudgetConfig
 from character_factory_poc.common.errors import BudgetExceeded
@@ -21,6 +22,7 @@ class Budget:
     config: BudgetConfig
     max_calls_override: int | None = None
     used_calls: int = 0
+    _lock: object = field(default_factory=Lock, repr=False, compare=False)
 
     @property
     def max_calls(self) -> int:
@@ -39,9 +41,10 @@ class Budget:
             )
 
     def consume(self, n: int = 1) -> None:
-        if self.used_calls + n > self.max_calls:
-            raise BudgetExceeded(f"실행 중 호출 상한 {self.max_calls}회에 닿았다")
-        self.used_calls += n
+        with self._lock:
+            if self.used_calls + n > self.max_calls:
+                raise BudgetExceeded(f"실행 중 호출 상한 {self.max_calls}회에 닿았다")
+            self.used_calls += n
 
 
 def format_plan(plans: list[CallPlan]) -> str:

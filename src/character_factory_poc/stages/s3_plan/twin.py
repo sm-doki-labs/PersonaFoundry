@@ -1,14 +1,15 @@
 """G0가 승인한 원문에서 한 사람의 기획을 정리하고 G3에서 인용과 대조한다.
 
-D-0148: 원문 전체의 답을 상황·반응으로 표시해 되풀이된 경향을 센다.
-평소 행동과 상황별 첫 행동은 경향에만 묶는다.
+기본 경로는 세 관점의 장면 분석과 한 번의 근거 기반 조립이다.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from html import escape
+from itertools import pairwise
 from pathlib import Path
 
 from character_factory_poc.common.budget import CallPlan
@@ -38,6 +39,10 @@ from character_factory_poc.stages.s3_plan.speech_profile import (
     render_voice_definition,
     source_registers,
 )
+from character_factory_poc.stages.s8_prompts.evidence_source import _UNSAFE, MAX_TURN_CHARS
+
+_ASSEMBLY_CHARS = 200_000
+_ASSEMBLY_MESSAGES = 1500
 
 _ARCS = {
     "FAN_CALL": (
@@ -83,7 +88,7 @@ _FACT_FIELDS = {"age", "gender", "job", "background", "tagline"}
 TENDENCY_FIELDS = ("coreTraits", "choices")
 
 
-def _sample(rows: list[dict], cap: int, must: list[str] = ()) -> list[dict]:
+def _sample(rows: list[dict], cap: int, must: list[str] = (), *, prior_ids=None) -> list[dict]:
     """원문 전체에 걸쳐 대상 발화와 같은 대화의 바로 앞 줄을 짝지어 뽑는다.
 
     D-0148: must(경향 예시, 앞쪽이 먼저)를 상한의 3분의 1까지 먼저 넣고 나머지를 고르게 뽑는다.
@@ -93,13 +98,26 @@ def _sample(rows: list[dict], cap: int, must: list[str] = ()) -> list[dict]:
         raise CheckFailed("s3", ["SUBJECT 발화가 필요하다"])
     selected: set[int] = set()
     where = {rows[i]["msgId"]: i for i in subjects}
+
+    def add(i):
+        selected.add(i)
+        if not i or len(selected) >= cap:
+            return
+        before, current = rows[i - 1], rows[i]
+        same_source = (before.get("textId"), before["convId"]) == (
+            current.get("textId"),
+            current["convId"],
+        )
+        if same_source and (
+            prior_ids is None or prior_ids.get(current["msgId"]) == before["msgId"]
+        ):
+            selected.add(i - 1)
+
     reserve = cap // 3
     for i in (where[m] for m in must if m in where):
         if len(selected) >= reserve:
             break
-        selected.add(i)
-        if len(selected) < cap and i and rows[i - 1]["convId"] == rows[i]["convId"]:
-            selected.add(i - 1)
+        add(i)
     n = min(len(subjects), max(1, cap // 2))
     anchors = [subjects[k * (len(subjects) - 1) // max(1, n - 1)] for k in range(n)]
     for i in (*anchors, *subjects):
@@ -107,9 +125,7 @@ def _sample(rows: list[dict], cap: int, must: list[str] = ()) -> list[dict]:
             continue
         if len(selected) >= cap:
             break
-        selected.add(i)
-        if len(selected) < cap and i and rows[i - 1]["convId"] == rows[i]["convId"]:
-            selected.add(i - 1)
+        add(i)
     return [
         {k: rows[i][k] for k in ("msgId", "convId", "speaker", "text")} for i in sorted(selected)
     ]
@@ -436,6 +452,17 @@ def _settings(ctx: Context) -> dict:
 
 def plan_calls(ctx: Context, answers: int = 0) -> list[CallPlan]:
     cfg = _settings(ctx)
+    if _analysis_mode(ctx) == "scenes":
+        retries = _assembly_retries(ctx)
+        return [
+            CallPlan("s3", "원문 분석: 말투, 반응·판단, 사실·한계", 3, None),
+            CallPlan(
+                "s3-twin",
+                f"원문 근거 기획 조립 (고쳐 쓰기 포함 최대 {1 + sum(retries)}회)",
+                1 + sum(retries),
+                None,
+            ),
+        ]
     return [
         CallPlan("s3-twin", f"원문 답 경향 표시 (답 {T.BATCH}개당 1회)", T.n_calls(answers), None),
         CallPlan(
@@ -445,6 +472,58 @@ def plan_calls(ctx: Context, answers: int = 0) -> list[CallPlan]:
             None,
         ),
     ]
+
+
+def _assembly_retries(ctx: Context) -> tuple[int, int]:
+    """조립 단계의 형식 오류·검사 오류 고쳐 쓰기 횟수. 기본은 형식 1회, 검사 2회다."""
+    cfg = ctx.config.stage("s3t")
+    values = (cfg.get("assembly_format_retries", 1), cfg.get("assembly_check_retries", 2))
+    if any(type(v) is not int or not 0 <= v <= 3 for v in values):
+        raise FactoryError("[stages.s3t] assembly_*_retries는 0~3 정수여야 한다")
+    return values
+
+
+def _analysis_mode(ctx: Context) -> str:
+    mode = ctx.config.stage("s3t").get("analysis_mode", "scenes")
+    if mode not in ("scenes", "exhaustive"):
+        raise FactoryError("[stages.s3t] analysis_mode는 scenes 또는 exhaustive여야 한다")
+    return mode
+
+
+def _assembly_sample(corpus, flags, cap, preferred, max_chars=_ASSEMBLY_CHARS):
+    safe = [
+        r
+        for r in corpus
+        if r["msgId"] not in flags
+        and 0 < len(r["text"].strip()) <= MAX_TURN_CHARS
+        and not _UNSAFE.search(unicodedata.normalize("NFKC", r["text"]))
+    ]
+    prior_ids = {r["msgId"]: before["msgId"] for before, r in pairwise(corpus)}
+    sampled = _sample(safe, cap, preferred, prior_ids=prior_ids)
+    # Give the assembler the cited source first, then remaining sampled context.
+    priority = set(preferred)
+    positions = {r["msgId"]: i for i, r in enumerate(safe)}
+    keep = set(priority)
+    for rid in priority & positions.keys():
+        i = positions[rid]
+        if (
+            i
+            and prior_ids.get(rid) == safe[i - 1]["msgId"]
+            and (safe[i - 1]["textId"], safe[i - 1]["convId"])
+            == (
+                safe[i]["textId"],
+                safe[i]["convId"],
+            )
+        ):
+            keep.add(safe[i - 1]["msgId"])
+    picked = set()
+    remaining = max_chars
+    for r in sorted(sampled, key=lambda r: r["msgId"] not in keep):
+        size = len(json.dumps(r, ensure_ascii=False)) + 2
+        if size <= remaining:
+            remaining -= size
+            picked.add(r["msgId"])
+    return [r for r in sampled if r["msgId"] in picked]
 
 
 def _tags(ctx: Context, cid: str, base: Path, rev: str, source_rev: str, pairs, budget) -> list:
@@ -488,28 +567,54 @@ def run_s3_twin(ctx: Context, cid: str) -> Path:
     cfg = _settings(ctx)
     budget = ctx.budget()
     kinds = {t.textId: t.kind for t in index.texts}
-    pairs = T.pair_answers(corpus, kinds)
+    scenes = _analysis_mode(ctx) == "scenes"
+    pairs = [] if scenes else T.pair_answers(corpus, kinds)
     budget.check_plan(plan_calls(ctx, len(pairs)))
     base = char_dir / "s3-plan"
     rev = next_rev(base, "pr")
     folder = base / rev
     state.transition("s3", "RUNNING", rev=rev)
     try:
-        tags = _tags(ctx, cid, base, rev, index.sourceRev, pairs, budget)
-        agg = T.aggregate(pairs, tags)
-        # 기획이 검사에 걸려도 다음 revision이 표시를 다시 부르지 않도록 먼저 남긴다.
-        write_once_json(
-            folder / "tendency-tags.json",
-            {"sourceRev": index.sourceRev, "promptSha": T.prompt_sha(), "tags": tags},
-        )
-        write_once_json(folder / "tendencies.json", agg)
-        sample = _sample(corpus, cfg["max_agent_messages"], T.example_ids(agg))
-        sample_ids = {r["msgId"] for r in sample if r["speaker"] == "SUBJECT"}
-        member = T.tendency_cells(agg)
-        tendencies = {
-            **T.agent_view(agg),
-            "answerCells": {m: c for m, c in member.items() if m in sample_ids},
-        }
+        analysis, agg = None, None
+        if scenes:
+            from character_factory_poc.stages.s3_plan import scene_analysis
+
+            digest = read_json(char_dir / STAGE_DIR / index.sourceRev / "digest.json")
+            flags = {item["msgId"] for item in digest["piiFlags"]}
+            try:
+                analysis = scene_analysis.run(
+                    ctx, cid, rev, folder, budget, corpus, flags, pack.chapterTemplate
+                )
+            except ValueError as exc:
+                raise CheckFailed("s3", [str(exc)]) from exc
+            s3t = ctx.config.stage("s3t")
+            sample = _assembly_sample(
+                corpus,
+                flags,
+                int(s3t.get("assembly_max_messages", _ASSEMBLY_MESSAGES)),
+                analysis["priorityIds"],
+                int(s3t.get("assembly_max_chars", _ASSEMBLY_CHARS)),
+            )
+            shown = {r["msgId"] for r in sample if r["speaker"] == "SUBJECT"}
+            observations = [
+                item for item in analysis["observations"] if set(item["evidence"]) <= shown
+            ]
+            tendencies = {"enforced": False}
+        else:
+            tags = _tags(ctx, cid, base, rev, index.sourceRev, pairs, budget)
+            agg = T.aggregate(pairs, tags)
+            write_once_json(
+                folder / "tendency-tags.json",
+                {"sourceRev": index.sourceRev, "promptSha": T.prompt_sha(), "tags": tags},
+            )
+            write_once_json(folder / "tendencies.json", agg)
+            sample = _sample(corpus, cfg["max_agent_messages"], T.example_ids(agg))
+            sample_ids = {r["msgId"] for r in sample if r["speaker"] == "SUBJECT"}
+            member = T.tendency_cells(agg)
+            tendencies = {
+                **T.agent_view(agg),
+                "answerCells": {m: c for m, c in member.items() if m in sample_ids},
+            }
         # v2의 필수 seedRev 자리에 G0 revision 번호를 대응시키고 원래 spN도 보존한다.
         seed = "sd" + index.sourceRev.removeprefix("sp")
         ids = dict(characterId=cid, planRev=rev, seedRev=seed, variantId="v1")
@@ -529,8 +634,8 @@ def run_s3_twin(ctx: Context, cid: str) -> Path:
             role="source_planner",
             output_contract="character-plan-v2",
             stage="s3-twin",
-            max_format_retries=cfg["max_format_retries"],
-            max_check_retries=cfg["max_check_retries"],
+            max_format_retries=_assembly_retries(ctx)[0] if scenes else cfg["max_format_retries"],
+            max_check_retries=_assembly_retries(ctx)[1] if scenes else cfg["max_check_retries"],
         )
         inputs = {
             "source": source,
@@ -539,14 +644,16 @@ def run_s3_twin(ctx: Context, cid: str) -> Path:
             "tendencies": tendencies,
             "output-schema": CharacterPlanV2.model_json_schema(),
         }
+        if scenes:
+            inputs["scene-analysis"] = {"observations": observations}
         result = run_agent(
             spec,
             folder / "workspace",
             inputs,
             [check],
-            ctx.text_model(cid, budget),
+            ctx.planner_model(cid, budget) if scenes else ctx.text_model(cid, budget),
             ref=f"{cid}/{rev}/s3-twin",
-            backend=ctx.agent_backend(cid, budget, "s3-twin"),
+            backend=None if scenes else ctx.agent_backend(cid, budget, "s3-twin"),
         )
         if not result.ok:
             raise CheckFailed("s3", result.problems)

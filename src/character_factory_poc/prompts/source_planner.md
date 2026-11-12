@@ -5,11 +5,14 @@
 - evidence의 키는 칸 이름이다. 목록은 값과 **같은 순서, 같은 개수**로 근거를 하나씩 적는다. choices는 실제로 겪은 상황과 그때 대상이 먼저 한 반응이다. voiceSummary에 관찰한 말높임과 종결형을 적고, voiceExamples에는 실제 인용을 그대로 넣는다. 비어 있지 않은 profileCard 하위 칸은 profileCard.hobby처럼 따로 근거를 단다.
 - SOURCE는 {"kind":"SOURCE","ref":"메시지의 msgId","quote":"그 메시지 text의 정확한 일부"}다. 줄임표나 띄어쓰기 수정 없이, 그 주장을 뒷받침하는 구절을 인용한다. age·gender·job은 수치·성별·직업이 명시된 인용만 쓴다. 다른 사람에 대한 언급을 본인의 사실로 쓰지 않는다.
 - age·gender·job·background 등 필수 사실을 원문으로 확인할 수 없으면 source.knownFacts에 사람이 명시한 값만 USER로 옮긴다. ref는 knownFacts.age 같은 경로, quote는 그 값 전체다. relation은 background에 그대로 쓸 수 있다. 행동·말투·생활 취향에는 USER를 쓰지 않는다.
+- background의 USER 근거는 knownFacts.background나 knownFacts.relation뿐이다. knownFacts.age·gender·job은 그 칸의 근거로만 쓰고 background 근거로 옮기지 않는다. 둘 다 없으면 corpus-sample의 SUBJECT 발화(scene-analysis 사실·한계 관찰의 evidence를 먼저 본다)에서 본인이 직접 말한 생활 사실을 SOURCE로 인용하고, background는 그 인용이 말한 범위로만 쓴다.
 - name과 chapterArc는 source에서 이미 정해졌으므로 evidence를 쓰지 않는다. 나머지는 채운 모든 칸에 근거가 필요하다. 모르는 선택 칸은 비운다. 필수 칸에 쓸 자료마저 없으면 그 칸은 생략한다. 계약 검사가 필요한 칸을 사람에게 돌려준다. 재시도에서도 모르는 사실을 만들어 통과시키지 않는다.
 
 source.sharedSpeechEndings는 승인 원문 전체에서 센 대상 발화의 마지막 종결형 표지 수다. 미분류는 등급을 알 수 없다는 뜻이다. 챕터별로 나뉜 관측이 아니므로 관계가 깊어지면 반말로 바뀐다고 가정하지 않는다. 말투의 구체적인 판단에는 여전히 직접 인용이 필요하다.
 
-tendencies는 승인 원문 전체의 대상 답을 상황 하나와 반응 몇 개로 표시해 센 표다(D-0148). tendencies.tendencies는 서로 다른 자리(영상·글과 날짜) 여러 곳에서 되풀이됐고 그 상황 답의 mainShare 이상에서 나온 주요 경향이며, share는 그 상황의 답 가운데 그 반응이 나온 비율이다. tendencies.minor는 드물게 나오거나 몇 자리에서만 나온 반응이다.
+scene-analysis가 있으면 말투, 반응·판단, 사실·한계를 따로 읽은 장면 표본의 관찰이다. 각 관찰의 evidence ID를 corpus-sample의 SUBJECT 원문에서 찾아 의미와 화자를 대조한다. 관찰 설명을 인용으로 쓰지 않는다. 한 장면의 반응을 평소 성격으로 키우거나, 표본을 원문 전체의 빈도라고 단정하지 않는다. 반대 반응이 보이면 상황이나 관계의 조건을 좁힌다. 질문의 전제는 본인 진술과 구분한다. 관찰이 빠진 경우에도 명시된 원문 근거가 있으면 쓸 수 있다.
+
+전수 비교 설정에만 실제 tendencies 표가 있다. tendencies.tendencies는 여러 자리에서 되풀이되고 그 상황 답의 mainShare 이상에서 나온 주요 경향이며, share는 그 상황의 답 가운데 그 반응이 나온 비율이다. tendencies.minor는 드물게 나오거나 몇 자리에서만 나온 반응이다.
 
 - enforced가 true이면 coreTraits와 choices는 경향에서만 쓴다. 근거 msgId는 tendencies.answerCells에 있는 답이어야 하고, 문장은 그 답이 속한 경향의 반응을 쓴다. 한 상황에 여러 반응이 있으면 share가 큰 반응을 먼저 쓰고, 작은 반응을 그 상황의 대표 행동으로 올리지 않는다.
 - minor와 한 번만 나온 말은 lifeAndTastes처럼 생활·취향 칸에만 쓴다. 드문 반응 하나를 평소 행동이나 상황별 첫 행동으로 일반화하지 않는다.

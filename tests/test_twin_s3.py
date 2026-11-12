@@ -256,7 +256,11 @@ def test_bad_output_never_opens_g3(tmp_path, bad, reason):
 
 def test_limited_sample_and_retry(tmp_path):
     ctx, model, cid = _ready(tmp_path)
-    ctx.config.stages["s3t"] = {"max_agent_messages": 4, "max_format_retries": 0}
+    ctx.config.stages["s3t"] = {
+        "analysis_mode": "exhaustive",
+        "max_agent_messages": 4,
+        "max_format_retries": 0,
+    }
 
     def inspect(req):
         rows = _input(req, "corpus-sample")
@@ -269,7 +273,7 @@ def test_limited_sample_and_retry(tmp_path):
     model.add("AGENT", inspect)
     with pytest.raises(CheckFailed, match="Field required"):
         run_s3_twin(ctx, cid)
-    del ctx.config.stages["s3t"]
+    ctx.config.stages["s3t"] = {"analysis_mode": "exhaustive"}
 
     def invalid(req):
         out = _answer(req)
