@@ -87,6 +87,9 @@ STAGES: dict[str, Stage] = {
             gate="G9",
             implemented=True,
         ),
+        # D-0212: 테스터 발행. G9 승인 패키지를 dev 넣기 서비스로 올리고(테스터 전용) 알린다.
+        # 실행 범위가 목록 순서를 따르므로 sx 앞에 둔다(--until px 가 sx 를 돌리지 않게).
+        Stage("px", "테스터 발행", deps=frozenset({"G9"}), implemented=True),
         Stage("sx", "우리 앱 내보내기", deps=frozenset({"G9"}), implemented=True),
     ]
 }

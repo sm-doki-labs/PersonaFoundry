@@ -618,6 +618,38 @@ def remove_preview(
     return result
 
 
+def run_px(ctx: Context, cid: str) -> Path:
+    """테스터 발행 노드(D-0212). G9 승인 패키지를 dev 넣기 서비스로 올리고 디스코드로 알린다.
+
+    예전에는 시연 후처리나 서버 명령(cfp preview publish)으로만 발행했다. 공정 그래프의
+    한 단계로 두어 화면·시연 모드·G9 승인 뒤 자동 진행이 같은 길로 발행한다.
+    """
+    from character_factory_poc.common.errors import CheckFailed
+    from character_factory_poc.common.notify import notify
+
+    state = ctx.state(cid)
+    root = Path(ctx.character_dir(cid)) / "px-preview"
+    rev = f"pp{len(list(root.glob('*.json'))) + 1}"
+    state.transition("px", "RUNNING", rev=rev)
+    result = publish_preview(ctx, cid)
+    files = sorted(root.glob("*.json"), key=lambda p: p.stat().st_mtime)
+    newest = files[-1] if files else root
+    name = result.name or cid
+    if result.status == "PUBLISHED":
+        lines = [
+            "테스터 계정의 앱 목록에서 볼 수 있어요. 일반 사용자에게는 보이지 않아요.",
+            f"앱 캐릭터 번호 {result.apiCharacterId} · 대상 {result.target}",
+            *result.warnings[:3],
+        ]
+        notify("published", name, lines, character_id=cid)
+        state.transition("px", "APPROVED", rev=rev)
+        return newest
+    failure = result.failure or "발행하지 못했어요"
+    notify("failed", name, [f"테스터 발행에서 멈췄어요: {failure[:400]}"], character_id=cid)
+    state.transition("px", "CHECK_FAILED", rev=rev, error=failure[:300])
+    raise CheckFailed("px", [failure])
+
+
 def _write_result(ctx: Context, cid: str, result: PreviewResult) -> Path:
     root = ctx.character_dir(cid) / "px-preview"
     root.mkdir(parents=True, exist_ok=True)
@@ -635,6 +667,7 @@ def _write_result(ctx: Context, cid: str, result: PreviewResult) -> Path:
 
 
 __all__ = [
+    "run_px",
     "Ports",
     "PreviewError",
     "PreviewResult",

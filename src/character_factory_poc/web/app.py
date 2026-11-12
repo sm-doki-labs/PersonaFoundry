@@ -70,6 +70,17 @@ class _StudioStaticFiles(_DevStaticFiles):
         return await super().get_response(path, scope)
 
 
+def _preview_ready(ctx) -> bool:
+    """dev 넣기 서비스 주소와 토큰이 있으면 참(D-0212). 없으면 G9 뒤 예전 자동 재개를 따른다."""
+    from character_factory_poc.stages.export.preview import PreviewError, load_preview_settings
+
+    try:
+        load_preview_settings(ctx).require_ready()
+    except (PreviewError, ValueError, OSError):
+        return False
+    return True
+
+
 def create_app(
     root: Path, config_path: Path | None = None, *, runner=None, jobs_dir: Path | None = None
 ) -> FastAPI:
@@ -375,7 +386,16 @@ def create_app(
         )
         jobs.publish_state(character_id, force=True)
         # D-0049(LLD §6.7): 결정 뒤 의존이 풀린 갈래를 이어서 돌린다.
-        resume = jobs.request_resume(character_id)
+        # D-0212: 패키지 승인(G9)은 곧바로 테스터 발행 노드(px)까지 돌려 dev 에 넣고 알린다.
+        if gate == "G9" and answer["decision"] in {"APPROVE", "SELECT"} and _preview_ready(ctx):
+            try:
+                resume = jobs.submit(character_id, until="px", trigger="publish")
+            except WebError as exc:
+                if exc.status != 409:
+                    raise
+                resume = None
+        else:
+            resume = jobs.request_resume(character_id)
         return {
             "characterId": character_id,
             "gate": gate,

@@ -48,14 +48,14 @@ def opened(gate_id: str, rev: str, at: str) -> dict:
 
 def test_downstream_stages_follows_gate_to_gate() -> None:
     g3 = downstream_stages("G3")
-    for sid in ("s4a", "s7", "s8", "s9s", "s11", "sx"):
+    for sid in ("s4a", "s7", "s8", "s9s", "s11", "px", "sx"):
         assert sid in g3, sid
     # 그 관문이 결정하는 단계 자체(s3)는 풀어 주는 뒤쪽 단계가 아니다.
     assert "s3" not in g3
     # STAGES 순서를 지킨다.
     assert g3 == [sid for sid in STAGES if sid in set(g3)]
-    # 소개 영상 관문은 패키지와 내보내기만 연다.
-    assert downstream_stages("G5") == ["s11", "sx"]
+    # 소개 영상 관문은 패키지와 테스터 발행·내보내기만 연다(D-0212).
+    assert downstream_stages("G5") == ["s11", "px", "sx"]
 
 
 def test_g3_waits_before_g5_because_it_unblocks_more(tmp_path: Path) -> None:
@@ -75,11 +75,11 @@ def test_g3_waits_before_g5_because_it_unblocks_more(tmp_path: Path) -> None:
     assert queue[0].rev == "pr1" and queue[0].stage == "s3"
     assert queue[0].openedAt == "2026-10-28T00:30:00+00:00"
     assert queue[1].openedAt == "2026-10-28T00:00:00+00:00"
-    assert queue[1].unblockedStages == ["s11", "sx"]
+    assert queue[1].unblockedStages == ["s11", "px", "sx"]
 
 
 def test_same_count_uses_the_gate_opened_earlier(tmp_path: Path) -> None:
-    # G5와 G8은 뒤쪽 단계가 둘씩이라 같은 수다.
+    # G5와 G8은 뒤쪽 단계가 셋씩이라 같은 수다(패키지·테스터 발행·내보내기).
     char = write_char(
         tmp_path,
         gates={"G5": gate("AWAITING_HUMAN", "vi1"), "G8": gate("AWAITING_HUMAN", "ev1")},
@@ -91,7 +91,7 @@ def test_same_count_uses_the_gate_opened_earlier(tmp_path: Path) -> None:
     state = State.model_validate(json.loads((char / "state.json").read_text("utf-8")))
     queue = gate_queue(char, state)
     assert [item.gate for item in queue] == ["G8", "G5"]
-    assert [item.unblocks for item in queue] == [2, 2]
+    assert [item.unblocks for item in queue] == [3, 3]
 
 
 def test_same_count_and_same_time_uses_gate_order(tmp_path: Path) -> None:

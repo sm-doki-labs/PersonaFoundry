@@ -119,6 +119,15 @@ def demo_answer(ctx, cid: str, gate: str) -> dict:
         answer.update(decision="SELECT", adopted=options[0])
     elif gate in {"G7a", "G7"}:
         raise FactoryError(f"{gate}: 학습 데이터 판정은 시연 자동 승인 대상이 아니에요")
+    elif gate == "G9":
+        # D-0212: 실존 인물 공개 점검의 사람 확인 필수 항목도 시연 모드에서는 자동으로 표시한다.
+        # 기록의 reviewer 가 "시연 자동 승인"이라 사람이 확인한 것과 구분된다.
+        from character_factory_poc.stages.s11_release.presentation import CHECK_FILE
+
+        check = char_dir / "s11-release" / str(rev) / CHECK_FILE
+        if check.is_file():
+            items = read_json(check).get("humanChecks") or []
+            answer["presentationChecks"] = {h["id"]: True for h in items if h.get("required")}
     return answer
 
 

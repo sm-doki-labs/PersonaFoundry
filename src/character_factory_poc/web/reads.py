@@ -68,6 +68,7 @@ STAGE_DIRS = {
     "s10": "s10-eval",
     "s11": "s11-release",
     "sx": "sx-export",
+    "px": "px-preview",
 }
 
 GATE_TITLES = {
@@ -192,7 +193,7 @@ LANES = [
     {"id": "data", "label": "데이터", "stages": ("s9s", "s9")},
     {"id": "training", "label": "학습", "stages": ("s10t", "s10")},
     {"id": "voice", "label": "음성", "stages": ("sv",)},
-    {"id": "release", "label": "패키지", "stages": ("s11", "sx")},
+    {"id": "release", "label": "패키지", "stages": ("s11", "sx", "px")},
 ]
 
 
