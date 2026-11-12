@@ -20,7 +20,7 @@ function server(initial) {
   return db;
 }
 
-test('Lite draft sends reference config, signature and chapter, never enables demo; other tiers keep their contract', async () => {
+test('Lite draft sends reference config, signature and chapter, and keeps demo mode (D-0212); other tiers keep their contract', async () => {
   for (const videoTier of ['light', 'none', 'standard']) {
     let draft, sent;
     const fetch = async (url, init) => {
@@ -39,7 +39,7 @@ test('Lite draft sends reference config, signature and chapter, never enables de
     assert.equal(sent.knownFacts.background, '인물 배경', 'person facts never become visual background');
     if (videoTier === 'light') {
       assert.deepEqual(sent.referenceImage, { wardrobe: '흰 셔츠', background: '' });
-      assert.equal(sent.demoMode, undefined);
+      assert.equal(sent.demoMode, true, 'D-0212: demo mode also auto-approves the reference photo');
       assert.equal(sent.signaturePose.title, '인사');
       const reopened = Sources.createIntake({ fetch, XHR: null });
       await reopened.load('synthetic');

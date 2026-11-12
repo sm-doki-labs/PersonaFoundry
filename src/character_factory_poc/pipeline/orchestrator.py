@@ -34,7 +34,7 @@ from character_factory_poc.pipeline.graph import (
 )
 
 # 외모 축(S1·S2)을 탄 캐릭터만 도는 단계
-APPEARANCE_STAGES = ("s2", "s4a", "s4b", "s4", "s5", "s6", "s11", "sx")
+APPEARANCE_STAGES = ("s2", "s4a", "s4b", "s4", "s5", "s6", "s11", "sx", "px")
 # 사람 판정 자체가 관문의 내용이라 자동 승인하지 않는다(G7a 클러스터별 판정, G8 블라인드 20쌍)
 HUMAN_ONLY_GATES = {
     "G7a": "클러스터마다 샘플을 판정해야 한다",
@@ -256,6 +256,11 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
         _, rev_dir = export_doki_app(ctx, cid, verify=opt.verify_export)
         return rev_dir
 
+    def px():
+        from character_factory_poc.stages.export.preview import run_px
+
+        return run_px(ctx, cid)
+
     from character_factory_poc.stages.s9_data.build import run_build
     from character_factory_poc.stages.s9_data.samples import run_samples
     from character_factory_poc.stages.s11_release.package import build_package
@@ -291,6 +296,7 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
         # 패키지는 외모·장면·영상 산출물이 있어야 만든다(LLD §8.10)
         runners["s11"] = lambda: build_package(ctx, cid)
         runners["sx"] = sx
+        runners["px"] = px
     from character_factory_poc.pipeline.origin import read_origin
 
     if read_origin(ctx.character_dir(cid)) == SOURCE:
@@ -323,6 +329,7 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
                 "s6": lambda: run_s6(ctx, cid),
                 "s11": lambda: build_package(ctx, cid),
                 "sx": sx,
+                "px": px,
             }
         )
         from character_factory_poc.pipeline.graph import TRAIN
@@ -619,7 +626,11 @@ def _step(
     if gate and state.gate(gate).status == "AWAITING_HUMAN":
         from character_factory_poc.pipeline.origin import read_reference_image
 
-        if gate == "G4" and read_reference_image(ctx.character_dir(cid)) is not None:
+        if (
+            gate == "G4"
+            and not opt.demo
+            and read_reference_image(ctx.character_dir(cid)) is not None
+        ):
             log.add("G4: 기준 사진 확인 대기 — 확인 전에는 영상을 만들지 않는다")
             if gate not in log.waiting:
                 log.waiting.append(gate)
@@ -688,9 +699,9 @@ def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
     demo = read_demo_mode(ctx.character_dir(cid))
     if demo is None:
         return _run_until(ctx, cid, opt)
-    # 시연 모드: 패키지 승인(G9)까지 돌고, 승인되면 테스터 미리보기로 발행한다.
-    # 앱 내보내기(sx)의 로컬 시연 DB용 고정 id 묶음은 쓰지 않는다(발행이 따로 만든다).
-    opt = replace(opt, until="G9", demo=True, videos_with_chat=False)
+    # 시연 모드(D-0212): 모든 관문(기준 사진 G4·패키지 G9 포함)을 자동 승인하고 테스터 발행
+    # 노드(px)까지 간다. 발행을 끈 시연은 G9 에서 멈춘다. 앱 내보내기(sx)는 쓰지 않는다.
+    opt = replace(opt, until="px" if demo.publish else "G9", demo=True, videos_with_chat=False)
     log = RunLog()
     try:
         log = _run_until(ctx, cid, opt, demo_budget=(demo.budgetUsd, demo.enabledAt))

@@ -1389,7 +1389,7 @@
     function setupHTML() {
       const g = state.graph;
       const target = state.target || defaultTarget();
-      const opts = g.gates.map((gate) => [gate.id, gate.title + '까지']).concat([['sx', '끝까지 · 우리 앱 내보내기']]);
+      const opts = g.gates.map((gate) => [gate.id, gate.title + '까지']).concat([['sx', '끝까지 · 우리 앱 내보내기'], ['px', '테스터 발행 · dev 앱(테스터 전용)']]);
       const scope = ancestors(g, target);
       let gates = 0;
       let paid = 0;

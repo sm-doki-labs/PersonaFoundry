@@ -133,8 +133,6 @@ class Draft(Strict):
     def reference_tier(self):
         if self.referenceImage is not None and self.videoTier != "light":
             raise ValueError("기준 사진 확인 흐름은 Lite 영상 6개에서 사용할 수 있어요.")
-        if self.referenceImage is not None and self.demoMode:
-            raise ValueError("기준 사진 확인 흐름에서는 전체 자동 발행을 끄고 시작해 주세요.")
         self.voiceReferenceId = normalize_reference_id(self.voiceReferenceId)
         return self
 
@@ -872,10 +870,12 @@ def install_source_routes(app, conf, jobs):
             save(inside(folder, "source-pack.json"), pack.model_dump(mode="json"))
             from character_factory_poc.pipeline.demo import read_demo_mode
 
-            if draft.get("referenceImage") is not None:
-                job = video_job(cid, prepare_chat=True)
-            elif read_demo_mode(folder):
+            # D-0212: 시연 모드는 기준 사진 흐름이어도 사진 확인(G4)까지
+            # 자동 승인하고 발행까지 간다.
+            if read_demo_mode(folder):
                 job = demo_job(cid, draft.get("subject", {}).get("displayName") or cid)
+            elif draft.get("referenceImage") is not None:
+                job = video_job(cid, prepare_chat=True)
             elif read_auto_review(folder) and draft["videoTier"] != "none":
                 job = video_job(cid, prepare_chat=True)
             else:
@@ -884,29 +884,11 @@ def install_source_routes(app, conf, jobs):
             return {"jobId": draft["jobId"]}
 
     def demo_job(cid, name):
-        """시연 모드 실행: 패키지 승인(G9)까지 자동 승인으로 돌고 끝나면 발행·알림한다."""
-        from character_factory_poc.common.notify import notify
-        from character_factory_poc.pipeline.demo import read_demo_mode
-        from character_factory_poc.providers.grok_chain import route_summary
+        """시연 모드 실행: 모든 관문을 자동 승인하고 테스터 발행 노드(px)까지 간다.
 
-        job = jobs.submit(cid, until="G9", trigger="demo")
-        try:
-            route = route_summary(load_config(conf.root, conf.config_path).provider("video"))
-        except (ValueError, OSError) as exc:
-            route = f"영상 경로 확인 실패: {exc}"
-        mode = read_demo_mode(reads.character_dir(conf.root, cid))
-        last = (
-            "끝나면 테스터 전용으로 발행해요."
-            if mode is None or mode.publish
-            else "패키지 승인까지만 하고 발행은 하지 않아요."
-        )
-        notify(
-            "started",
-            name,
-            [f"모든 검토를 자동 승인하고, {last}", route],
-            character_id=cid,
-        )
-        return job
+        D-0212: 알림은 발행이 끝났을 때(또는 멈췄을 때) 한 번만 보낸다. 시작 알림은 보내지 않는다.
+        """
+        return jobs.submit(cid, until="G9", trigger="demo")
 
     def video_job(cid, *, prepare_chat=False):
         from character_factory_poc.pipeline.origin import graph_for_dir
@@ -980,10 +962,6 @@ def install_source_routes(app, conf, jobs):
         folder = reads.character_dir(conf.root, cid)
         if not folder.is_dir() or not folder.is_relative_to(conf.root):
             raise WebError(404, "캐릭터를 찾을 수 없어요.")
-        from character_factory_poc.pipeline.origin import read_reference_image
-
-        if body.enabled and read_reference_image(folder) is not None:
-            raise WebError(409, "기준 사진 확인 흐름에서는 사진 확인 후 영상 6개를 만들어 주세요.")
         if jobs.active_for(cid):
             raise WebError(409, "진행 중인 작업이 끝난 뒤에 바꿀 수 있어요.")
         try:

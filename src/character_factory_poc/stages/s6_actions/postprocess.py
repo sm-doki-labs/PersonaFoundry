@@ -30,7 +30,8 @@ def _run(args: list[str]) -> None:
     if proc.returncode:
         detail = proc.stderr.decode(errors="replace")[-400:].strip()
         if proc.returncode < 0:
-            detail = f"ffmpeg가 신호 {-proc.returncode}로 강제 종료됨(메모리 부족 가능) {detail}".strip()
+            note = f"ffmpeg가 신호 {-proc.returncode}로 강제 종료됨(메모리 부족 가능)"
+            detail = f"{note} {detail}".strip()
         raise VideoGenerationError(f"영상 후처리 실패(종료 코드 {proc.returncode}): {detail}")
 
 

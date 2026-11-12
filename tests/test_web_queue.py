@@ -71,14 +71,14 @@ def test_character_detail_carries_the_gate_queue_in_order(tmp_path: Path) -> Non
         detail = client.get(f"/api/characters/{CID}").json()
         projects = client.get("/api/projects").json()
 
-    # G5·G8은 뒤쪽 단계가 둘씩이라, 먼저 열린 G8이 앞선다(GATES 순서와 반대).
+    # G5·G8은 뒤쪽 단계가 셋씩이라, 먼저 열린 G8이 앞선다(GATES 순서와 반대).
     assert [item["gate"] for item in detail["queue"]] == ["G8", "G5"]
     assert [item["gate"] for item in projects["characters"][0]["queue"]] == ["G8", "G5"]
     first = detail["queue"][0]
     assert first["stage"] == "s10"
     assert first["rev"] == "ev1"
-    assert first["unblocks"] == 2
-    assert first["unblockedStages"] == ["s11", "sx"]
+    assert first["unblocks"] == 3
+    assert first["unblockedStages"] == ["s11", "px", "sx"]
     assert first["openedAt"] == "2026-10-28T00:00:00+00:00"
     # 두 목록 모두 같은 값이다.
     assert projects["characters"][0]["queue"] == detail["queue"]

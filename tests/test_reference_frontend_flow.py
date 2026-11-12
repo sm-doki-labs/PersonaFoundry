@@ -251,7 +251,8 @@ def test_approved_bundle_exists_when_gate_is_published(tmp_path, monkeypatch):
     assert observed == [info["revision"]]
 
 
-@pytest.mark.parametrize("mode", ["video_only", "demo", "auto_approve", "stale"])
+# D-0212: 시연 모드는 기준 사진도 자동 승인하므로 여기서 뺀다(tests/test_publish_node.py).
+@pytest.mark.parametrize("mode", ["video_only", "auto_approve", "stale"])
 def test_automatic_paths_cannot_confirm_a_master(tmp_path, monkeypatch, mode):
     from character_factory_poc.pipeline.orchestrator import RunLog, RunOptions, _step
     from character_factory_poc.pipeline.origin import write_reference_image

@@ -71,40 +71,24 @@ def after_demo_run(ctx, cid: str, demo: DemoMode, log, *, error: str | None = No
                 character_id=cid,
             )
             return "packaged"
-        done = _already_published(ctx, cid)
-        if done:
-            log.add(f"발행: 이미 테스터 전용으로 발행됨(앱 캐릭터 {done.get('apiCharacterId')})")
-            return "published"
-        from character_factory_poc.stages.export.preview import publish_preview
-
-        _write_status(ctx, cid, "publishing", "테스터 전용으로 발행하는 중")
-        result = publish_preview(ctx, cid)
-        if result.status == "PUBLISHED":
-            log.add(f"발행: 테스터 전용 발행 완료(앱 캐릭터 {result.apiCharacterId})")
+        # D-0212: 발행은 테스터 발행 노드(px)가 하고 알림도 보낸다. 여기서는 상태만 남긴다.
+        if state.stage("px").status == "APPROVED":
+            done = _already_published(ctx, cid) or {}
+            log.add(f"발행: 테스터 전용 발행 완료(앱 캐릭터 {done.get('apiCharacterId')})")
             _write_status(
                 ctx,
                 cid,
                 "published",
                 "테스터 계정에서 볼 수 있어요",
-                apiCharacterId=result.apiCharacterId,
-                target=result.target,
+                apiCharacterId=done.get("apiCharacterId"),
+                target=done.get("target"),
             )
-            lines = [
-                "테스터 계정의 앱 목록에서 볼 수 있어요. 일반 사용자에게는 보이지 않아요.",
-                f"앱 캐릭터 번호 {result.apiCharacterId} · 대상 {result.target}",
-                cost,
-                *result.warnings[:2],
-            ]
-            notify("published", result.name or name, lines, character_id=cid)
             return "published"
-        log.add(f"발행: 실패 — {result.failure}")
-        _write_status(ctx, cid, "publish_failed", result.failure[:300])
-        notify(
-            "failed",
-            name,
-            [f"발행에서 멈췄어요: {result.failure[:400]}", cost],
-            character_id=cid,
-        )
+        px = state.stage("px")
+        reason = px.lastError or "테스터 발행 노드가 끝나지 않았어요"
+        _write_status(ctx, cid, "publish_failed", reason[:300])
+        if px.status != "CHECK_FAILED":  # 실패했으면 노드가 이미 알렸다
+            notify("failed", name, [f"발행에서 멈췄어요: {reason[:400]}", cost], character_id=cid)
         return "publish_failed"
     budget_stop = next((s for s in log.steps if "시연 예산 상한" in s), None)
     if budget_stop:

@@ -207,6 +207,18 @@
    "paid": []
   },
   {
+   "id": "px",
+   "name": "테스터 발행",
+   "deps": [
+    "G9"
+   ],
+   "needs": [],
+   "after": [],
+   "gate": null,
+   "implemented": true,
+   "paid": []
+  },
+  {
    "id": "sx",
    "name": "우리 앱 내보내기",
    "deps": [
@@ -346,7 +358,8 @@
    "label": "패키지",
    "stages": [
     "s11",
-    "sx"
+    "sx",
+    "px"
    ]
   }
  ],

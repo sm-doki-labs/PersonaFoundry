@@ -624,7 +624,7 @@
       try {
         const modelMode = modeOf(input.modelMode);
         const autoReview = input.autoReview !== false;
-        const demoMode = input.demoMode === true && tierOf(input.videoTier) !== 'light';
+        const demoMode = input.demoMode === true;
         const videoTier = tierOf(input.videoTier);
         const body = {
           displayName: text(input.displayName).trim(),
@@ -1339,7 +1339,6 @@
         }
         if (r.sig) r.sig.hidden = selectedTier === 'none';
         const demo = r.form.querySelector('[name="demoMode"]');
-        if (demo && selectedTier === 'light') { demo.checked = false; demo.disabled = true; }
         if (btn) btn.textContent = S.busy === 'create' ? '저장하는 중…' : '저장하고 원문 올리기';
       }
       if (r.formErr) { r.formErr.textContent = !hasDraft && S.error ? S.error : ''; r.formErr.hidden = !(!hasDraft && S.error); }
@@ -1655,7 +1654,7 @@
         ? '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. G0 출처 확인과 G3 기획 확인은 자동으로 처리하고, G6 원문 근거 검토는 사람이 해요.'
         : '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. 진행 화면에서 출처·기획 확인과 G6 원문 근거 검토를 기다려요.') +
         (tier !== 'none' ? ' 대화가 되면 이어서 ' + vName + ' 영상을 만들어요.' : '');
-      if (set.referenceImage && r.startLead) r.startLead.textContent = Ref.PARALLEL_COPY;
+      if (set.referenceImage && !set.demoMode && r.startLead) r.startLead.textContent = Ref.PARALLEL_COPY;
       if (r.startNote) {
         r.startNote.textContent = set.demoMode
           ? '원문 분석·사진·영상·대화 준비에 모델 사용 비용이 들어요 · 시연 예산 상한 15달러를 넘으면 멈추고 알려요'

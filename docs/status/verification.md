@@ -823,3 +823,10 @@
 - 서버 손흥민 사본으로 로컬 S11: 패키지 pk1(Fish 7406bbcc…, 영상 7편, 챕터 1), 공개 점검 PASS(허용 문구 추가 뒤). 발행 드라이런(실제 dev GET /state, 나머지 요청 흉내): 단계 3·통화 클립 18·업로드 23, chat 컴파일 챕터 3, 음성 새 Voice 발행 예정. 마지막 넣기 요청은 보내지 않았다.
 - 찰칵 크기: 얼굴 비율 오늘 1.18·어제 1.00(Haar alt2), 배경 정합 비율은 둘 다 ≈1.0.
 - 관련 테스트 124 passed·6 skipped(preview·export·doki·s11·package·release·presentation), 106 passed(reference·signature·s4).
+
+## 2026-11-13 — D-0212 테스터 발행 노드·시연 모드 전부 자동
+
+- 전체 pytest 2398 passed·6 skipped(시작 알림 제거 전), 관련 382 passed(제거 후), studio 203 passed.
+- tests/test_publish_node.py: 발행 노드 성공(APPROVED·✅ 알림)·실패(CHECK_FAILED·❌ 알림), 시연 G9 자동 답의 사람 확인 필수 항목만 표시, 기준 사진 흐름 + 시연 모드 웹 전체(가짜 공급자): G4·G9 자동 승인 → px APPROVED, sx 는 돌지 않음, 알림은 발행 완료 한 건.
+- 로컬 공장(발행 설정 없음)은 G9 승인 뒤 예전 자동 재개를 따른다(test_agentic_flow 통과).
+- 미검증: 실제 Railway·dev 에서 시연 모드 한 번(서버는 내려 둠), 실제 디스코드 수신(웹후크 주소 GET 200만 확인).
