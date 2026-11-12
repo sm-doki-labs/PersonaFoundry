@@ -76,6 +76,36 @@
     return text(x.videoLabel).trim();
   }
   function isPhotoName(name) { return PHOTO_EXTENSIONS.indexOf(extOf(name)) >= 0; }
+  // 원문 묶음 설명 파일(meta.json): [{ filename, textId, kind, register, subjectSpeaker, userSpeaker, date, sourceUrl }].
+  // 원문으로 올리지 않고, 같은 이름의 원문 칸을 채운다. { files: [...] } 모양도 받는다.
+  function baseName(name) { return text(name).replace(/^.*[\\/]/, '').trim(); }
+  function isMetaName(name) { return baseName(name).toLowerCase() === 'meta.json'; }
+  function parseSourceMeta(raw) {
+    let data = JSON.parse(text(raw).replace(/^\uFEFF/, ''));
+    if (data && !Array.isArray(data) && Array.isArray(data.files)) data = data.files;
+    if (!Array.isArray(data)) throw new Error('meta.json은 파일 목록(배열)이어야 해요.');
+    const map = {};
+    data.forEach((row) => {
+      if (!row || typeof row !== 'object') return;
+      const name = baseName(row.filename);
+      if (!name) return;
+      const fields = {};
+      META_FIELDS.forEach((f) => { if (row[f] != null && text(row[f]).trim() !== '') fields[f] = text(row[f]).trim(); });
+      if (Object.keys(fields).length) map[name] = fields;
+    });
+    return map;
+  }
+  function readFileText(file) {
+    if (file && typeof file.text === 'function') return file.text();
+    const FR = global && global.FileReader;
+    if (!FR) return Promise.reject(new Error('파일을 읽을 수 없어요.'));
+    return new Promise((resolve, reject) => {
+      const fr = new FR();
+      fr.onload = () => resolve(text(fr.result));
+      fr.onerror = () => reject(fr.error || new Error('파일을 읽을 수 없어요.'));
+      fr.readAsText(file, 'utf-8');
+    });
+  }
   // 시작한 뒤 진행 카드에 보일 말(약속 3 상태, 약속 5 영상). 대화가 먼저 되고 영상은 그 뒤에 만든다.
   // c: 캐릭터 진행(createIntake progress), chat: 대화 준비, o: { auto, tier }(이 화면 설정).
   const DONE_LABEL = { chat_ready: '대화 가능', running: '만드는 중', needs_review: '확인 필요', failed: '실패', stopped: '멈춤', draft: '만드는 중' };
@@ -360,10 +390,12 @@
       chat: null, // 대화 준비 상태(GET /api/characters/{cid}/chat/meta, 계획 2차 약속 1)
       projects: null,
       drafts: null, // 시작하지 않은 초안(GET /api/sources/drafts). 그 API가 없는 서버면 null로 둔다.
+      sourceMeta: {}, // meta.json에서 읽은 파일 이름 → 칸 값. 같은 초안에 나중에 올리는 원문에도 쓴다.
       announce: ''
     };
     let seq = 0;
     let active = 0;
+    let metaReading = null; // meta.json을 읽는 중이면 그 약속. 확인 요청 전에 기다린다.
     let lastStatus = null; // 왼쪽 목록을 다시 읽을지 견줄 직전 진행 상태
     const aborts = {};
     const chains = {};
@@ -446,7 +478,7 @@
 
     async function load(cid) {
       state.signaturePhotoError = null;
-      if (cid !== state.cid) { dropThumbs(); Object.assign(state, { uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, settings: null, character: null, chat: null }); }
+      if (cid !== state.cid) { dropThumbs(); Object.assign(state, { uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, sourceMeta: {}, settings: null, character: null, chat: null }); }
       state.cid = cid;
       state.loading = true;
       state.loadError = null;
@@ -668,7 +700,12 @@
       if (!state.draft) return [];
       const signature = !!(opts && opts.photoRole === 'signature');
       const photoOnly = signature || !!(opts && opts.photoOnly);
-      const selected = Array.from(list || []);
+      let selected = Array.from(list || []);
+      if (!photoOnly) {
+        const metas = selected.filter((f) => isMetaName(f && f.name));
+        selected = selected.filter((f) => !isMetaName(f && f.name));
+        if (metas.length && !state.finalized) metaReading = readMeta(metas[metas.length - 1]);
+      }
       if (signature) {
         if (!selected.length) return [];
         const occupied = photoFiles('signature').length || state.uploads.some((u) => u.photoRole === 'signature' && u.phase !== 'rejected');
@@ -717,12 +754,47 @@
           }
         };
         if (photo && !problem) { const u = makeThumb(file); if (u) state.thumbs[key] = u; }
+        if (!photo && !problem) applyMeta(entry);
         state.uploads.push(entry);
         added.push(key);
       });
       emit();
       pump();
       return added;
+    }
+    // meta.json 값을 올리는 중인 원문에 얹는다. 사람이 고친 칸처럼 다뤄 서버 짐작으로 덮지 않는다.
+    function applyMeta(entry) {
+      const m = state.sourceMeta[baseName(entry.filename)];
+      if (!m) return false;
+      Object.keys(m).forEach((f) => { entry.meta[f] = m[f]; entry.touched[f] = true; });
+      return true;
+    }
+    async function readMeta(file) {
+      const cid = state.cid;
+      let map;
+      try {
+        map = parseSourceMeta(await readFileText(file));
+      } catch (error) {
+        if (cid === state.cid) { state.notice = 'meta.json을 읽지 못했어요. ' + (error && error.message && /[가-힣]/.test(error.message) ? error.message : '[{"filename": ...}] 형식의 JSON인지 확인해 주세요.'); emit(); }
+        return;
+      }
+      if (cid !== state.cid) return;
+      Object.assign(state.sourceMeta, map);
+      const names = Object.keys(map);
+      const seen = new Set();
+      state.uploads.forEach((u) => { if (u.fileType === 'text' && u.phase !== 'rejected' && applyMeta(u)) seen.add(baseName(u.filename)); });
+      textFiles().forEach((rec) => {
+        const m = map[baseName(rec.filename)];
+        if (!m || state.uploads.some((u) => u.fileId === rec.fileId)) return;
+        seen.add(baseName(rec.filename));
+        const now = metaOfRecord(rec);
+        const next = Object.assign({}, now, m);
+        if (!sameMeta(now, next)) queuePatch(rec.fileId, next);
+      });
+      const left = names.length - seen.size;
+      state.notice = 'meta.json에서 원문 ' + seen.size + '개의 정보를 채웠어요.' + (left > 0 ? ' 목록에 있지만 아직 올리지 않은 파일 ' + left + '개는 올리면 채워요.' : '');
+      state.announce = state.notice;
+      emit();
     }
     function pump() {
       while (active < concurrency) {
@@ -768,6 +840,7 @@
         entry.phase = 'checking';
         entry.progress = 1;
         emit();
+        if (entry.fileType !== 'photo' && metaReading) { await metaReading; applyMeta(entry); }
         // 사진에는 원문 정보가 없어 빈 본문으로 확인만 한다(서버가 사진에 화자 정보를 받지 않는다).
         const body = entry.fileType === 'photo' ? {} : metaBody(entry.meta);
         // 파일명 추정은 확정값이 아니다. 사람이 고르지 않았으면 서버가 본문을 판별한다.
@@ -1060,7 +1133,7 @@
       Object.keys(aborts).forEach((k) => aborts[k]());
       dropThumbs();
       state.signaturePhotoError = null;
-      Object.assign(state, { cid: null, draft: null, uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, busy: null, finalized: null, loadError: null, settings: null, character: null, chat: null, announce: '초안과 올린 원문을 지웠어요.' });
+      Object.assign(state, { cid: null, draft: null, uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, sourceMeta: {}, busy: null, finalized: null, loadError: null, settings: null, character: null, chat: null, announce: '초안과 올린 원문을 지웠어요.' });
       if (o.onCid) o.onCid(null);
       emit();
       // 지운 초안이 만들던 초안 목록과 왼쪽 캐릭터 목록에서도 빠지게 둘 다 다시 읽는다(QA v5 A-04).
@@ -1070,7 +1143,7 @@
     function reset() {
       dropThumbs();
       state.signaturePhotoError = null;
-      Object.assign(state, { cid: null, draft: null, uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, busy: null, finalized: null, loadError: null, error: null, notice: null, settings: null, character: null, chat: null });
+      Object.assign(state, { cid: null, draft: null, uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, sourceMeta: {}, busy: null, finalized: null, loadError: null, error: null, notice: null, settings: null, character: null, chat: null });
       emit();
     }
     function dismiss(key) {
@@ -1903,7 +1976,7 @@
     };
   }
 
-  const api = { sigOf, factSheetLines, factSheetProblem, FACT_SHEET_MAX_LINES, FACT_SHEET_MAX_CHARS, MAX_BYTES, EXTENSIONS, PHOTO_EXTENSIONS, PHOTO_MAX_BYTES, VIDEO_TIERS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, speakerChoices, ro, shortDate, suggestTextId, checkFile, isPhotoName, isPhotoRecord, tierOf, tierName, tierCardsHTML, videoText, doneView, wantsPoll, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
+  const api = { sigOf, factSheetLines, factSheetProblem, FACT_SHEET_MAX_LINES, FACT_SHEET_MAX_CHARS, MAX_BYTES, EXTENSIONS, PHOTO_EXTENSIONS, PHOTO_MAX_BYTES, VIDEO_TIERS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, speakerChoices, ro, shortDate, suggestTextId, checkFile, isPhotoName, isMetaName, parseSourceMeta, isPhotoRecord, tierOf, tierName, tierCardsHTML, videoText, doneView, wantsPoll, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global) global.SourceIntake = api;
 })(typeof window !== 'undefined' ? window : null);

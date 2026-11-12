@@ -1014,3 +1014,57 @@ test('fact sheet: one trimmed fact per line is sent only when filled, and limits
   assert.deepEqual(intake.validateDraft(Object.assign({}, base, { factSheet: lines(S.FACT_SHEET_MAX_LINES + 1) })), { factSheet: '사실은 40줄까지 적을 수 있어요.' });
   assert.deepEqual(intake.validateDraft(Object.assign({}, base, { factSheet: '짧은 사실\n' + '가'.repeat(301) })), { factSheet: '사실 2번째 줄은 300자까지 적을 수 있어요.' });
 });
+
+// meta.json(원문 묶음 설명)은 원문으로 올리지 않고, 같은 이름의 원문 칸을 채운다.
+const metaFile = (rows) => ({ name: 'meta.json', size: 300, type: 'application/json', text: async () => (typeof rows === 'string' ? rows : JSON.stringify(rows)) });
+const SON_META = [
+  { filename: 'asiangames-20180901.txt', textId: 'asiangames', kind: 'INTERVIEW', register: 'FORMAL', subjectSpeaker: '손흥민', userSpeaker: '기자', date: '2018-09-01', sourceUrl: 'https://example.com/a' },
+  { filename: 'missing.txt', kind: 'ARTICLE', date: '2020-01-01' }
+];
+
+test('meta.json dropped with the sources fills their fields and is never uploaded as a source', async () => {
+  const server = fakeServer();
+  const intake = await ready(server);
+  server.calls.length = 0;
+  const keys = intake.addFiles([metaFile(SON_META), file('asiangames-20180901.txt'), file('other.txt')]);
+  assert.equal(keys.length, 2);
+  await settle();
+  assert.ok(!server.calls.some((c) => c.body && c.body.filename === 'meta.json'));
+  const completes = server.calls.filter((c) => c.path.endsWith('/complete'));
+  const first = completes.find((c) => c.path.includes('/f1/')).body;
+  assert.deepEqual(first, { textId: 'asiangames', kind: 'INTERVIEW', register: 'FORMAL', subjectSpeaker: '손흥민', userSpeaker: '기자', date: '2018-09-01', sourceUrl: 'https://example.com/a' });
+  const second = completes.find((c) => c.path.includes('/f2/')).body;
+  assert.equal(second.kind, null);
+  assert.equal(second.date, null);
+  assert.match(intake.state.notice, /원문 1개의 정보를 채웠어요/);
+  assert.match(intake.state.notice, /아직 올리지 않은 파일 1개/);
+  const rec = intake.state.draft.files.find((f) => f.filename === 'asiangames-20180901.txt');
+  assert.equal(rec.date, '2018-09-01');
+});
+
+test('meta.json added after the sources patches the files already uploaded', async () => {
+  const server = fakeServer();
+  const intake = await ready(server);
+  intake.addFiles([file('asiangames-20180901.txt')]);
+  await settle();
+  server.calls.length = 0;
+  intake.addFiles([metaFile({ files: SON_META })]);
+  await settle();
+  const patch = server.calls.filter((c) => c.method === 'PATCH').pop();
+  assert.ok(patch, 'the existing file is patched');
+  assert.equal(patch.body.date, '2018-09-01');
+  assert.equal(patch.body.sourceUrl, 'https://example.com/a');
+  assert.equal(patch.body.textId, 'asiangames');
+  assert.ok(!server.calls.some((c) => c.method === 'POST' && c.path.endsWith('/files')));
+});
+
+test('a broken meta.json is reported in plain words and uploads nothing', async () => {
+  const server = fakeServer();
+  const intake = await ready(server);
+  server.calls.length = 0;
+  intake.addFiles([metaFile('{not json')]);
+  await settle();
+  assert.match(intake.state.notice, /meta\.json을 읽지 못했어요/);
+  assert.ok(!server.calls.some((c) => c.method === 'POST'));
+  assert.deepEqual(S.parseSourceMeta('\uFEFF[{"filename":"x/y.txt","kind":"ARTICLE","extra":1}]'), { 'y.txt': { kind: 'ARTICLE' } });
+});
