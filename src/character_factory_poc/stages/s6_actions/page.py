@@ -78,6 +78,13 @@ def render_g5b_page(
             for clip in (c for c in clips if c.actionId == action.actionId):
                 asset = clip.asset
                 marker = f" · {_e(clip.reusedFrom)} 재사용" if clip.reusedFrom else ""
+                if asset.postprocess:
+                    parts.append(
+                        '<p class="hint">복귀 검사: '
+                        f"{_e(asset.postprocess.get('status'))} · "
+                        f"{_e(asset.postprocess.get('reason', '품질 미검증'))} · "
+                        f"실제 {_e(asset.probe.durationS)}초. 자동 품질 승인이 아닙니다.</p>"
+                    )
                 parts.append(
                     f'<figure><video src="{_e(asset.filePath)}" controls loop muted playsinline '
                     f'preload="metadata" aria-label="{aid} {_e(asset.candidateId)}"></video>'

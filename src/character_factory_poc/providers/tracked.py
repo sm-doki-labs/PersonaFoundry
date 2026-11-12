@@ -28,7 +28,7 @@ from character_factory_poc.providers.base import (
     VisionResult,
 )
 
-DEFAULT_LIMITS = {"text": 4, "judge": 0, "image": 2, "vision": 2, "video": 2, "tuning": 1}
+DEFAULT_LIMITS = {"text": 4, "judge": 0, "image": 2, "vision": 2, "video": 6, "tuning": 1}
 WAIT_FILE = "provider-waits.jsonl"
 _pool_lock = threading.Lock()
 _pools = {}
@@ -552,6 +552,11 @@ class TrackedVideoModel:
         self.inner = inner
         self.ledger = ledger
         self.budget = budget
+
+    def job_slot(self, stage):
+        from character_factory_poc.providers.video_concurrency import video_job_slot
+
+        return video_job_slot(browser=self.inner.name == "grok_web")
 
     @property
     def name(self) -> str:

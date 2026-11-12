@@ -323,3 +323,15 @@ def test_one_scene_motif_package(tmp_path: Path):
     assert (pk / "chapters/ch1/facts.json").is_file() and not (pk / "chapters/ch2").exists()
     keys = {v.get("clipKey") for v in pkg["videos"]}
     assert "signature_good" in keys
+
+
+def test_short_backchannel_is_not_treated_as_source_quote():
+    """원문 맞장구 '네'가 사실 줄의 '네 번째'를 지우지 않는다.
+    4글자 이상 발화는 계속 지운다(D-0188)."""
+    from character_factory_poc.stages.s11_release.twin import SourceQuotes, quote_pattern
+
+    quotes = SourceQuotes(quote_pattern({"네", "아니 ", "저는 그냥 열심히 했어요"}))
+    fact = "2026 북중미 월드컵이 네 번째 월드컵이다."
+    text = fact + "\n말투: 저는 그냥 열심히 했어요 라고 한다."
+    public = quotes.public_prompt(text)
+    assert fact in public and "열심히 했어요" not in public

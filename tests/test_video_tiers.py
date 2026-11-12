@@ -60,7 +60,7 @@ def test_old_standard_is_a_preset_only(tmp_path):
 
 @pytest.mark.parametrize(
     ("tier", "total", "seconds"),
-    [("light", 5, 55), ("standard", 20, 210), ("pro", 28, 290), ("max", 37, 380)],
+    [("light", 5, 30), ("standard", 20, 210), ("pro", 28, 290), ("max", 37, 380)],
 )
 def test_motif_tiers_are_one_scene(tmp_path, tier, total, seconds):
     """D-0164·D-0167: 모티브는 배경 하나·같은 옷. 등급은 몸짓 수로만 갈린다. 라이트는 5+1편이고
@@ -77,14 +77,18 @@ def test_motif_tiers_are_one_scene(tmp_path, tier, total, seconds):
     assert cfg["chapters"] == ("ch1",) and len(cfg["actions"]) == total + 1
     assert cfg["actions"][-1] == "signature_good"
     tier_keys = cfg["actions"][:-1]
-    assert set(MOTIF_VIDEO_TIERS["light"].actions) <= set(tier_keys) <= set(APP_KEYS)
+    if tier == "light":
+        assert tuple(tier_keys) == MOTIF_VIDEO_TIERS["light"].actions
+    else:
+        assert set(tier_keys) <= set(APP_KEYS)
     assert len(set(tier_keys)) == total
     *image, video = plan_calls(ctx, cfg)
     assert [p.calls for p in image] == ([] if tier == "light" else [1])
     assert video.calls == total + 1
-    assert (
-        sum(cfg["durations"]["idle" if k.startswith("idle") else "emotion"] for k in cfg["actions"])
-        == seconds + 10
+    from character_factory_poc.stages.s6_actions.run import _duration
+
+    assert sum(_duration(cfg, k) for k in cfg["actions"]) == seconds + (
+        6 if tier == "light" else 10
     )
 
 

@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="shared/foundry-tokens.css">
 <link rel="stylesheet" href="shared/flow.css">
+<link rel="stylesheet" href="shared/reference.css">
 <link rel="stylesheet" href="shared/sources.css">
 </head>
 <body class="fl src">
@@ -32,6 +33,8 @@
   <div class="src-card src-resume" data-resume hidden></div>
   <div data-banner></div>
   <p class="sr" data-live aria-live="polite"></p>
+
+  <div data-reference hidden></div>
 
   <ol class="src-steps">
     <li class="src-step" data-step="info" data-state="active">
@@ -69,6 +72,7 @@
               <div class="src-fld"><label for="src-job">하는 일</label><input id="src-job" name="job" maxlength="60" autocomplete="off" placeholder="예: 축구선수" aria-describedby="src-job-e"><p class="src-ferr" id="src-job-e" data-err="job" hidden></p></div>
             </div>
             <div class="src-fld"><label for="src-bg">한 줄 배경 <span class="opt">선택</span></label><textarea id="src-bg" name="background" rows="2" maxlength="400" placeholder="예: 토트넘에서 10년을 뛰고 2025년 LAFC로 옮겼어요." aria-describedby="src-bg-e"></textarea><p class="src-ferr" id="src-bg-e" data-err="background" hidden></p></div>
+            <div class="src-fld"><label for="src-factsheet">사실 목록 <span class="opt">선택</span></label><textarea id="src-factsheet" name="factSheet" rows="5" autocomplete="off" placeholder="예: 2025년 8월 토트넘에서 LAFC로 이적했다.&#10;2024-25 시즌 프리미어리그 30경기 7골 10도움을 기록했다." aria-describedby="src-factsheet-h src-factsheet-e"></textarea><p class="src-fhint" id="src-factsheet-h">경력, 지금 소속 팀, 시즌 기록, 가족 관계처럼 대화에서 틀리면 안 되는 사실을 한 줄에 하나씩 적어요. 적은 그대로 대화의 사실 목록에 들어가고, 말투보다 먼저 지켜요. 40줄, 한 줄에 300자까지 적을 수 있고 연락처는 넣지 않아요.</p><p class="src-ferr" id="src-factsheet-e" data-err="factSheet" hidden></p></div>
           </fieldset>
 
           <div class="src-fld">
@@ -87,9 +91,16 @@
           <fieldset class="src-fld src-choice" data-tier-choice aria-describedby="src-tier-h">
             <legend>영상</legend>
             <div class="vt-grid" data-tier-cards></div>
-            <p class="src-fhint" id="src-tier-h">영상을 고르면 대화가 된 뒤에 배경 하나·같은 옷으로 여러 몸짓 영상을 만들어요. 영상 단계는 비용이 들어요.</p>
+            <p class="src-fhint" id="src-tier-h">라이트는 9:16 기준 사진을 먼저 확인한 뒤 영상 6편(대기 1편·동작 4편·시그니처 1편)을 만들어요. 원문 분석·프롬프트 준비는 병렬로 진행하며, 이미지 생성과 영상 단계는 비용이 들어요.</p>
             <p class="src-fhint" data-tier-hint hidden>다음 단계에서 원문과 함께 얼굴이 잘 보이는 사진을 1장 이상 올려 주세요.</p>
-          <div class="src-sig" data-sig hidden>
+          <div class="src-fld" data-reference-inputs>
+            <label for="src-ref-wardrobe">복장 <span class="opt">선택</span></label>
+            <textarea id="src-ref-wardrobe" name="referenceWardrobe" rows="2" aria-describedby="src-ref-h" placeholder="예: 흰색 셔츠"></textarea>
+            <label for="src-ref-background">배경 <span class="opt">선택</span></label>
+            <textarea id="src-ref-background" name="referenceBackground" rows="2" aria-describedby="src-ref-h" placeholder="예: 햇빛이 드는 거실"></textarea>
+            <p class="src-fhint" id="src-ref-h">비워 두면 업로드한 사진의 옷과 배경을 유지해요. 라이트에서만 적용하며, 영상 제작 전에 이미지를 직접 승인해야 해요.</p>
+          </div>
+          <div class="src-sig" data-sig>
             <p class="src-sig-h"><b>시그니처 포즈</b><span class="src-fhint">모든 영상 등급에 한 편씩 들어가요. 이 사람 하면 떠오르는 동작을 적어 주세요.</span></p>
             <div class="src-fld"><label for="src-sig-title">이름</label><input id="src-sig-title" name="sigTitle" maxlength="30" autocomplete="off" placeholder="예: 찰칵 세리머니" aria-describedby="src-sig-title-e"><p class="src-ferr" id="src-sig-title-e" data-err="sigTitle" hidden></p></div>
             <div class="src-fld"><label for="src-sig-motion">어떤 동작인가요</label><textarea id="src-sig-motion" name="sigMotion" rows="2" maxlength="400" placeholder="예: 두 손으로 카메라 모양을 만들어 눈앞에 대고 찰칵 누르는 시늉을 해요." aria-describedby="src-sig-motion-e"></textarea><p class="src-ferr" id="src-sig-motion-e" data-err="sigMotion" hidden></p></div>
@@ -103,7 +114,7 @@
               <input type="checkbox" id="src-auto" name="autoReview" role="switch" checked aria-describedby="src-auto-h">
             </label>
             <label class="src-switch-row" for="src-demo">
-              <span class="src-switch-tx"><b>시연 모드</b><small id="src-demo-h">모든 검토를 자동 승인하고, 끝나면 테스터 계정에만 보이게 앱에 올린 뒤 디스코드로 알려요. 품질 검토가 아니에요. 예산 상한 15달러.</small></span>
+              <span class="src-switch-tx"><b>시연 모드</b><small id="src-demo-h">기존 제작 흐름의 시연용 설정이에요. 라이트 기준 사진 흐름에서는 사용할 수 없어요. 기준 사진은 자동 진행·시연 모드에서도 직접 승인해야 해요.</small></span>
               <input type="checkbox" id="src-demo" name="demoMode" role="switch" aria-describedby="src-demo-h">
             </label>
           </div>
@@ -124,8 +135,10 @@
           <div><dt>표시 이름</dt><dd data-sum-name></dd></div>
           <div><dt>구분</dt><dd data-sum-kind></dd></div>
           <div><dt>기본 정보</dt><dd data-sum-facts></dd></div>
+          <div hidden><dt>사실 목록</dt><dd data-sum-factsheet style="white-space: pre-line"></dd></div>
           <div><dt>모델 준비 방식</dt><dd data-sum-mode></dd></div>
           <div><dt>영상</dt><dd><span data-sum-video></span> <button type="button" class="link src-sum-edit" data-act="tier-edit" aria-expanded="false" aria-controls="src-tier-edit">바꾸기</button></dd></div>
+          <div hidden><dt>기준 사진 설정</dt><dd data-sum-reference></dd></div>
           <div hidden><dt>시그니처 포즈</dt><dd data-sum-sig></dd></div>
           <div><dt>진행 방식</dt><dd data-sum-auto></dd></div>
           <div><dt>메모</dt><dd data-sum-notes></dd></div>
@@ -160,6 +173,19 @@
             <button type="button" class="src-photo-add" data-act="pick-photo"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span>사진 고르기</span><small>끌어다 놓아도 돼요</small></button>
           </div>
           <input type="file" data-photo-picker multiple accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" hidden aria-hidden="true" tabindex="-1">
+        </section>
+
+        <section class="src-photos src-signature-photos" data-signature-photos aria-labelledby="st-signature-photos" hidden>
+          <div class="src-h"><h3 id="st-signature-photos">시그니처 포즈 참고 사진 <span class="src-count">선택</span></h3><span class="src-count" data-signature-photo-count></span></div>
+          <p class="src-fhint" id="src-signature-photo-h">Lite(라이트)에서 한 장만 사용할 수 있어요. 시그니처 동작 중간에만 이 사진의 포즈를 쓰고, 시작과 끝은 승인한 기준 사진으로 돌아와요.</p>
+          <p class="src-fhint">이 사진은 손 모양과 자세만 참고해요. 기준 사진을 만든 뒤 같은 인물·복장·배경에 이 동작만 입힌 중간 프레임을 한 장 더 만들고, 기준 사진과 함께 확인한 다음 영상에 써요. 사진이 없으면 적어 둔 동작 설명만 사용해요.</p>
+          <p class="src-fhint" id="src-signature-photo-state" data-signature-photo-hint>jpg, png, webp · 15MB까지 · 인물 확인용 사진은 별도로 올려 주세요.</p>
+          <div class="src-photo-grid">
+            <div class="src-photo-list" data-signature-photo-list aria-label="올린 시그니처 포즈 참고 사진"></div>
+            <button type="button" class="src-photo-add" data-act="pick-signature-photo" aria-describedby="src-signature-photo-h src-signature-photo-state src-signature-photo-e"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span>참고 사진 고르기</span><small>한 장을 끌어다 놓아도 돼요</small></button>
+          </div>
+          <input type="file" data-signature-photo-picker accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" hidden aria-hidden="true" tabindex="-1" aria-label="시그니처 포즈 참고 사진" aria-describedby="src-signature-photo-h src-signature-photo-state src-signature-photo-e">
+          <p class="src-ferr" id="src-signature-photo-e" data-signature-photo-error aria-live="polite" hidden></p>
         </section>
 
         <details class="src-adv" data-adv hidden>
@@ -202,6 +228,7 @@
 </div>
 </div>
 </div>
+<script src="shared/reference.js"></script>
 <script src="shared/sources.js"></script>
 <script>
   window.sourceIntake = window.SourceIntake.mount({ root: document, apiBase: '' });

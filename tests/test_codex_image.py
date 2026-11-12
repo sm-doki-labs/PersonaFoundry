@@ -101,7 +101,7 @@ def test_factory_builds_codex_image_from_config():
     assert isinstance(m, CodexImageModel)
     assert (m.timeout_s, m.disable_features, m.reasoning_effort) == (120, ("apps",), "medium")
     with pytest.raises(ValueError, match="codex_image"):
-        make_image_model(ProviderConfig(adapter="openai_images"))
+        make_image_model(ProviderConfig(adapter="unknown_image_adapter"))
 
 
 def test_s1_previews_through_codex_image(tmp_path):

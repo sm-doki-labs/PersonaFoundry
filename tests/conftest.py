@@ -5,6 +5,21 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
+def no_real_video_pacing(monkeypatch):
+    """오프라인 공급자 시험은 기다리지 않는다. 속도 제한 자체는 별도 가상 시계로 검증한다."""
+    from character_factory_poc.providers import xai_video
+
+    class NoWait:
+        def wait(self):
+            pass
+
+        def defer(self, seconds):
+            pass
+
+    monkeypatch.setattr(xai_video, "get_submission_pacer", lambda base: NoWait())
+
+
+@pytest.fixture(autouse=True)
 def no_network(monkeypatch):
     """기본 테스트는 네트워크를 막는다 (NFR-08)."""
 

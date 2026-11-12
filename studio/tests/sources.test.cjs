@@ -567,7 +567,7 @@ test('five video tiers with plain names, no clip counts, and the same cards on b
   assert.ok(!/\d+\s*개|클립/.test(html), 'no clip counts anywhere, not even in labels');
   assert.equal((html.match(/type="radio"/g) || []).length, 5);
   assert.match(html, /value="none" checked/, 'no video is the default');
-  assert.match(visible, /자주 쓰는 기본 감정만, 가장 빨리 확인해요/);
+  assert.match(visible, /말하기·파이팅·웃음·인사와 시그니처를 만들어요/);
   assert.match(visible, /가장 오래 걸리고 비용도 가장 커요/);
   assert.ok(!S.tierCardsHTML('x', 'light', { paidOnly: true }).includes('value="none"'));
   assert.equal(S.tierOf('ultra'), 'none');
@@ -599,7 +599,7 @@ test('a chosen tier goes with the draft; photos use the same upload and the star
   let st = intake.startState();
   assert.equal(st.ready, false);
   assert.ok(st.needPhoto);
-  assert.ok(st.reasons.some((x) => /얼굴이 잘 보이는 사진을 1장 이상/.test(x)), st.reasons.join(' / '));
+  assert.ok(st.reasons.some((x) => /얼굴이 잘 보이는 인물사진 한 장/.test(x)), st.reasons.join(' / '));
   server.calls.length = 0;
   intake.addFiles([photo('face.jpg')]);
   assert.equal(intake.photoItems()[0].tone, 'run', 'the photo is on its way');
@@ -996,4 +996,21 @@ test('a photo the server cannot open shows an icon instead of a broken image (A-
   assert.equal(ph.thumb, '');
   assert.match(ph.problems[0], /지우고/);
   assert.equal(ph.removable, true);
+});
+
+test('fact sheet: one trimmed fact per line is sent only when filled, and limits match the server', async () => {
+  const server = fakeServer();
+  const intake = S.createIntake({ fetch: server.fetch, origin: ORIGIN, XHR: null });
+  const base = { displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', age: '34세', gender: '남성', job: '축구선수' };
+  await intake.createDraft(Object.assign({}, base, { factSheet: '  2025년 8월 LAFC로 이적했다.  \r\n\n  \n2024-25 시즌 7골 10도움\n' }));
+  assert.deepEqual(server.calls[0].body.factSheet, ['2025년 8월 LAFC로 이적했다.', '2024-25 시즌 7골 10도움'], 'lines are kept verbatim apart from edge spaces');
+
+  const blank = fakeServer();
+  await S.createIntake({ fetch: blank.fetch, origin: ORIGIN, XHR: null }).createDraft(Object.assign({}, base, { factSheet: ' \n ' }));
+  assert.equal('factSheet' in blank.calls[0].body, false, 'an empty sheet is not sent, so older servers keep accepting the draft');
+
+  const lines = (n) => Array.from({ length: n }, (_, i) => '사실 ' + i).join('\n');
+  assert.deepEqual(intake.validateDraft(Object.assign({}, base, { factSheet: lines(S.FACT_SHEET_MAX_LINES) })), {});
+  assert.deepEqual(intake.validateDraft(Object.assign({}, base, { factSheet: lines(S.FACT_SHEET_MAX_LINES + 1) })), { factSheet: '사실은 40줄까지 적을 수 있어요.' });
+  assert.deepEqual(intake.validateDraft(Object.assign({}, base, { factSheet: '짧은 사실\n' + '가'.repeat(301) })), { factSheet: '사실 2번째 줄은 300자까지 적을 수 있어요.' });
 });

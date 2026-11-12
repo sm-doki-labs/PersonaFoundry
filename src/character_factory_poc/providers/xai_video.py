@@ -13,6 +13,7 @@ import base64
 import os
 import time
 from collections.abc import Callable
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ import httpx
 from character_factory_poc.common.errors import VideoGenerationError, VideoTimeoutError
 from character_factory_poc.providers.base import VideoRequest, VideoResult
 from character_factory_poc.providers.tracked import native_retry_sleep
+from character_factory_poc.providers.video_concurrency import get_submission_pacer
 
 # 출력 영상 1초당 USD (docs.x.ai/developers/pricing, 2026-10-21). 설정으로 덮어쓴다.
 DEFAULT_PRICES: dict[str, dict[str, float]] = {
@@ -33,12 +35,17 @@ FAILED = {"failed", "error", "expired", "cancelled"}
 
 
 def estimate_cost(
-    model: str, resolution: str, seconds: float, prices: dict[str, dict[str, float]] | None = None
+    model: str,
+    resolution: str,
+    seconds: float,
+    prices: dict[str, dict[str, float]] | None = None,
+    *,
+    input_images: int = 1,
 ) -> float | None:
     table = (prices or DEFAULT_PRICES).get(model)
     if not table or resolution not in table:
         return None
-    return round(table[resolution] * seconds + IMAGE_INPUT_USD, 4)
+    return round(table[resolution] * seconds + IMAGE_INPUT_USD * input_images, 4)
 
 
 def data_uri(path: str) -> str:
@@ -53,7 +60,7 @@ class XaiVideoModel:
 
     def __init__(
         self,
-        model: str = "grok-imagine-video-1.5-lite",
+        model: str = "grok-imagine-video-1.5",
         api_key_env: str = "XAI_API_KEY",
         base_url: str = "https://api.x.ai/v1",
         poll_interval_s: float = 5.0,
@@ -84,16 +91,39 @@ class XaiVideoModel:
     def _request(self, method: str, url: str, **kw: Any) -> httpx.Response:
         """429·5xx는 지수 대기 3회(LLD §9)."""
         last: httpx.Response | None = None
+        submission = method.upper() == "POST" and url.endswith("/videos/generations")
+        pacer = get_submission_pacer(self.base_url) if submission else None
         for attempt in range(4):
+            if pacer is not None:
+                pacer.wait()
             last = self.client.request(method, url, **kw)
             if last.status_code != 429 and last.status_code < 500:
                 return last
+            delay = float(2**attempt)
+            if last.status_code == 429:
+                raw = last.headers.get("Retry-After", "")
+                try:
+                    delay = max(delay, float(raw))
+                except ValueError:
+                    try:
+                        delay = max(delay, parsedate_to_datetime(raw).timestamp() - time.time())
+                    except (ValueError, TypeError, OverflowError):
+                        pass
+                if pacer is not None:
+                    pacer.defer(delay)
             if attempt < 3:
-                native_retry_sleep(self.sleep, 2**attempt, last.status_code)
+                native_retry_sleep(self.sleep, delay, last.status_code)
         assert last is not None
         return last
 
     def body(self, request: VideoRequest) -> dict[str, Any]:
+        if request.last_frame or request.keyframes:
+            if self.model != "grok-imagine-video-1.5":
+                raise VideoGenerationError(
+                    "시작·끝 프레임 지정은 grok-imagine-video-1.5를 사용한다"
+                )
+            if request.resolution not in {"480p", "720p"}:
+                raise VideoGenerationError("시작·끝 프레임 지정은 480p 또는 720p만 지원한다")
         body: dict[str, Any] = {
             "model": self.model,
             "prompt": request.prompt,
@@ -104,6 +134,21 @@ class XaiVideoModel:
         }
         if request.aspect_ratio:
             body["aspect_ratio"] = request.aspect_ratio
+        if request.last_frame:
+            body["last_frame"] = {"url": data_uri(request.last_frame)}
+        if request.keyframes:
+            times = [at for at, _ in request.keyframes]
+            if (
+                len(times) > 4
+                or times != sorted(set(times))
+                or len({int(at * 3 + 0.5) for at in times}) != len(times)
+                or any(not 0 < at < request.duration for at in times)
+            ):
+                raise VideoGenerationError("중간 프레임은 길이 안쪽의 서로 다른 시점 최대4개다")
+            body["keyframes"] = [
+                {"image": {"url": data_uri(path)}, "timestamp_s": at}
+                for at, path in request.keyframes
+            ]
         return body
 
     def submit(self, request: VideoRequest) -> str:
@@ -157,5 +202,11 @@ class XaiVideoModel:
             elapsed_ms=int((self.clock() - t0) * 1000),
             job_id=job_id,
             seconds=seconds,
-            est_cost_usd=estimate_cost(self.model, request.resolution, seconds, self.prices),
+            est_cost_usd=estimate_cost(
+                self.model,
+                request.resolution,
+                seconds,
+                self.prices,
+                input_images=(2 if request.last_frame else 1) + len(request.keyframes),
+            ),
         )

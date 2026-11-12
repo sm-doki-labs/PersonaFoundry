@@ -196,6 +196,7 @@ class JobManager:
         self._jobs: dict[str, Job] = {}
         self._active: dict[str, str] = {}
         self._rerun: dict[str, bool] = {}
+        self._reference_rerun: set[str] = set()
         self._seq = itertools.count(1)
         self._signatures: dict[str, str] = {}
         self._router: _StdoutRouter | None = None
@@ -334,6 +335,46 @@ class JobManager:
         elif kind not in SKIP_ALLOWED:
             raise WebError(409, f"지금은 학습 없이 진행을 고를 수 없어요(학습 상태 {kind})")
 
+    def request_reference_resume(self, character_id: str) -> dict | None:
+        """Explicit master-photo consent authorizes only its remaining video branch."""
+        from character_factory_poc.pipeline.origin import (
+            VIDEO_STAGES,
+            graph_for_dir,
+            read_reference_image,
+            read_video_tier,
+        )
+
+        folder = reads.character_dir(self.root, character_id)
+        if read_reference_image(folder) is None or read_video_tier(folder) != "light":
+            raise WebError(409, "기준 사진 확인 흐름이 아니에요.")
+        state, error = reads.read_state(folder)
+        if error or state.get("gates", {}).get("G4", {}).get("status") != "APPROVED":
+            raise WebError(409, "기준 사진을 먼저 확인해 주세요.")
+        video = state.get("stages", {}).get("s6", {})
+        if video.get("status") in {"APPROVED", "AWAITING_HUMAN"}:
+            data = reads.read_json_file(folder / "s6-actions" / video["currentRev"] / "inputs.json")
+            if data and data.get("frameRev") == state["gates"]["G4"]["rev"]:
+                return None
+        with self._lock:
+            if self._active.get(character_id):
+                self._reference_rerun.add(character_id)
+                return None
+        try:
+            return self.submit(
+                character_id,
+                until="G5b",
+                trigger="videos",
+                confirm=[s for s in VIDEO_STAGES if s in graph_for_dir(folder)],
+            )
+        except WebError as exc:
+            if exc.status != 409:
+                raise
+            with self._lock:
+                if not self._active.get(character_id):
+                    raise
+                self._reference_rerun.add(character_id)
+            return None
+
     def request_resume(self, character_id: str) -> dict | None:
         """관문 결정 뒤 이어서 돌린다(D-0049, LLD §6.7). 이미 돌고 있으면 끝난 뒤 한 번 더."""
         pending = self._reviewed_video_job(character_id)
@@ -447,10 +488,18 @@ class JobManager:
         self._run_locked(job)
         with self._lock:
             again = self._rerun.pop(job.character_id, False)
+            reference = job.character_id in self._reference_rerun
+            self._reference_rerun.discard(job.character_id)
         # 학습이 끝나면 평가부터 이어서 돈다(자동 재개 설정일 때). 평가가 GPU를 빌려야 하면
         # 오케스트레이터가 실행 확인을 받는다(D-0130).
         trained = job.action == "train" and job.status == "succeeded" and job.stopped_at == "s10t"
-        if again or trained:
+        if reference:
+            state, _ = reads.read_state(reads.character_dir(self.root, job.character_id))
+            # Consent received during this job is not an automatic retry after a
+            # failed paid video attempt. The user can explicitly retry that job.
+            if state.get("stages", {}).get("s6", {}).get("status") != "CHECK_FAILED":
+                self.request_reference_resume(job.character_id)
+        elif again or trained:
             self.request_resume(job.character_id)
 
     def _run_locked(self, job: Job) -> None:
@@ -503,7 +552,7 @@ class JobManager:
 
         values: dict[str, Any] = {
             "until": job.until,
-            "max_parallel": int(orch.get("max_parallel", 1)),
+            "max_parallel": int(orch.get("max_parallel", 3)),
             "web": True,
             "confirmed": set(job.confirm),
             "wrap_worker": wrap,
@@ -599,38 +648,51 @@ class JobManager:
                     gate = ctx.state(job.character_id).gate("G6")
                     if gate.status != "APPROVED" or gate.rev != job.review_revision:
                         raise ValueError("영상을 기다리던 원문 근거의 G6 승인을 확인해 주세요.")
-                chat = run_until(
-                    ctx, job.character_id, replace(options, until="s8c", confirmed=set())
-                )
-                state = ctx.state(job.character_id)
-                gate = state.gate("G6")
-                if (
-                    chat.stopped_at == "s8c"
-                    and state.stage("s8c").status == "APPROVED"
-                    and gate.status == "AWAITING_HUMAN"
-                    and gate.rev
-                    and chat.waiting == ["G6"]
-                    and not chat.blocked
-                    and not chat.held
-                ):
-                    from character_factory_poc.stages.s8_prompts.evidence_pipeline import (
-                        is_evidence,
-                    )
-
-                    if is_evidence(ctx.character_dir(job.character_id) / "s8-prompts" / gate.rev):
-                        job.review_revision = gate.rev
-                        chat.stopped_at = "G6"
-                        chat.add(
-                            "G6 근거 검토 대기: 승인하면 허락한 영상 만들기를 이어서 진행해요."
-                        )
-                        return chat
-                if (
-                    chat.stopped_at != "s8c"
-                    or ctx.state(job.character_id).gate("G6").status != "APPROVED"
-                ):
-                    raise ValueError("대화 준비를 마치지 못했어요.")
-            options = replace(options, video_only=True)
+                options = replace(options, videos_with_chat=True)
+            else:
+                options = replace(options, video_only=True)
         log = run_until(ctx, job.character_id, options)
+        from character_factory_poc.pipeline.origin import read_reference_image
+
+        if job.trigger in VIDEO_TRIGGERS and read_reference_image(
+            ctx.character_dir(job.character_id)
+        ):
+            state = ctx.state(job.character_id)
+            if (
+                state.gate("G4").status == "AWAITING_HUMAN"
+                and state.stage("s4").status == "AWAITING_HUMAN"
+                and not (set(log.blocked) - {"s6"})
+                and not log.held
+            ):
+                log.blocked = []  # S6 is intentionally waiting for this photo, not a failure.
+                log.stopped_at = "G4"
+                log.add("기준 사진 확인 대기: 확인 후 영상 6개를 만들어요.")
+                return log
+        if job.trigger == "videos-with-chat":
+            # 시연은 run_until이 별도 허락된 G9 범위를 처리한다.
+            from character_factory_poc.pipeline.demo import read_demo_mode
+
+            if read_demo_mode(ctx.character_dir(job.character_id)) is not None:
+                return log
+            state = ctx.state(job.character_id)
+            gate = state.gate("G6")
+            if (
+                state.stage("s8c").status == "APPROVED"
+                and gate.status == "AWAITING_HUMAN"
+                and gate.rev
+                and log.waiting == ["G6"]
+                and not log.blocked
+                and not log.held
+            ):
+                from character_factory_poc.stages.s8_prompts.evidence_pipeline import is_evidence
+
+                if is_evidence(ctx.character_dir(job.character_id) / "s8-prompts" / gate.rev):
+                    job.review_revision = gate.rev
+                    log.stopped_at = "G6"
+                    log.add("G6 근거 검토 대기: 원문 근거를 승인한 뒤 대화 준비를 마쳐요.")
+                    return log
+            if state.stage("s8c").status != "APPROVED" or gate.status != "APPROVED":
+                raise ValueError("대화 준비를 마치지 못했어요.")
         if job.trigger in VIDEO_TRIGGERS and (
             log.stopped_at != "G5b" or ctx.state(job.character_id).gate("G5b").status != "APPROVED"
         ):

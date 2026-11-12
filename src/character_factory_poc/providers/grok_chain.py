@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Sequence
+from contextvars import ContextVar
 
 from character_factory_poc.common.errors import VideoGenerationError
 from character_factory_poc.providers.base import VideoRequest, VideoResult
@@ -57,6 +58,7 @@ class GrokVideoChain:
         self.members = list(members)
         self.model = self.members[0].model
         self._used = None
+        self._worker_used = ContextVar("grok_video_route", default=None)
         self._jobs: dict[str, object] = {}
         self.skipped: list[str] = []  # 이번 제출에서 건너뛴 경로와 이유(기록용)
 
@@ -66,6 +68,9 @@ class GrokVideoChain:
     @property
     def name(self) -> str:
         """지금 쓰는(또는 쓸) 경로 이름. 제출 기록의 provider로 남는다."""
+        member = self._worker_used.get()
+        if member is not None:
+            return member.name
         if self._used is not None:
             return self._used.name
         for member in self.members:
@@ -88,6 +93,7 @@ class GrokVideoChain:
                     continue
                 raise
             self._used = member
+            self._worker_used.set(member)
             self._jobs[job] = member
             self.skipped = reasons
             return job
@@ -99,6 +105,7 @@ class GrokVideoChain:
     def collect(self, job_id: str, request: VideoRequest) -> VideoResult:
         member = self._jobs.get(job_id)
         if member is not None:
+            self._worker_used.set(member)
             return member.collect(job_id, request)
         # 이전 실행이 남긴 job: 어느 경로로 냈는지 모르므로 쓸 수 있는 경로로 차례로 조회한다.
         last: VideoGenerationError | None = None
@@ -113,6 +120,7 @@ class GrokVideoChain:
                 last = exc
                 continue
             self._used = candidate
+            self._worker_used.set(candidate)
             return result
         raise last or VideoGenerationError(
             "이전 영상 작업을 조회할 경로가 없다. cfp grok login이나 XAI_API_KEY를 확인한다"

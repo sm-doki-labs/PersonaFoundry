@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from threading import Lock
+
 from character_factory_poc.providers.base import VideoRequest, VideoResult
 
 # ISO BMFF 시그니처(4~8바이트 'ftyp')만 갖춘 더미. 재생 가능한 영상은 아니다.
 FAKE_MP4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2" + b"\x00" * 64
+_submit_lock = Lock()
 
 
 class FakeVideoModel:
@@ -18,8 +21,9 @@ class FakeVideoModel:
         self.collects: list[str] = []
 
     def submit(self, request: VideoRequest) -> str:
-        self.submits.append(request)
-        return f"fake-job-{len(self.submits)}"
+        with _submit_lock:
+            self.submits.append(request)
+            return f"fake-job-{len(self.submits)}"
 
     def collect(self, job_id: str, request: VideoRequest) -> VideoResult:
         self.collects.append(job_id)

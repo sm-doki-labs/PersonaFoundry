@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
+from threading import Event
 
 import cv2
 import pytest
@@ -123,6 +124,8 @@ def test_offline_l2_pins_good_and_neutral_frames_and_records_18_clips(flow):
         assert app[key]["motion"] in req.prompt and STAGE_NOTES[ch] in req.prompt
         mood = app[key]["mood"]
         assert req.first_frame == str(out / f"first-frames/{ch}-{mood}.png")
+        assert req.last_frame == req.first_frame  # 영상을 갈아 끼워도 자세가 이어진다(D-0185)
+    assert inputs["pinLastFrame"] is True
     clips = read_json(out / "clips.json")
     assert [c["actionId"] for c in clips] == [
         f"ch{ch}-{key}"
@@ -142,6 +145,7 @@ def test_offline_l2_pins_good_and_neutral_frames_and_records_18_clips(flow):
         assert job["status"] == "DONE" and job["stage"] == "s6"
         chapter = next(ch for ch in inputs["chapters"] if ch["chapterId"] == clip["chapterId"])
         assert job["firstFrameSha256"] == chapter[f"{clip['mood']}Frame"]["sha256"]
+        assert job["settings"]["pinLastFrame"] is True
         assert read_json(out / "assets" / name) == asset
     page = (out / "gate-G5b.html").read_text("utf-8")
     assert page.count("<video ") == 18 and page.count("<img ") == 6
@@ -339,6 +343,7 @@ def test_repeated_partial_regeneration_preserves_reused_prompt_and_note(flow):
         "resolution",
         "aspect_ratio",
         "generate_audio",
+        "pin_last_frame",
         "frames",
         "reject",
     ],
@@ -370,6 +375,7 @@ def test_changed_inputs_or_reject_regenerate_full_set(flow, changed):
                 "resolution": "480p",
                 "aspect_ratio": "1:1",
                 "generate_audio": True,
+                "pin_last_frame": False,
             }
             ctx.config.stages["s6"] = {changed: values[changed]}
     count = 36 if changed == "candidates" else 18
@@ -383,10 +389,12 @@ def test_changed_inputs_or_reject_regenerate_full_set(flow, changed):
 @pytest.mark.parametrize("timeout", [False, True])
 def test_resume_reuses_revision_and_completed_jobs(flow, timeout):
     ctx, cid, _ = flow
+    good_collected = Event()
 
     class Flaky(FakeVideoModel):
         def collect(self, job_id, request):
-            if len(self.collects) == 1:
+            if request.ref.endswith("/ch1-idle_bad-v1"):
+                assert good_collected.wait(5)
                 self.collects.append(job_id)
                 error = (
                     VideoTimeoutError(job_id, "대기 중")
@@ -394,7 +402,10 @@ def test_resume_reuses_revision_and_completed_jobs(flow, timeout):
                     else VideoGenerationError("실패")
                 )
                 raise error
-            return super().collect(job_id, request)
+            result = super().collect(job_id, request)
+            if request.ref.endswith("/ch1-idle_good-v1"):
+                good_collected.set()
+            return result
 
     flaky = Flaky()
     ctx.use_video(flaky)
@@ -405,15 +416,19 @@ def test_resume_reuses_revision_and_completed_jobs(flow, timeout):
     before_images = len(ctx._image.requests)
     inputs = (first_dir / "inputs.json").read_bytes()
     done = (first_dir / "assets/ch1-idle_good-v1.json").read_bytes()
+    completed = {p.stem: p.read_bytes() for p in (first_dir / "assets").glob("*.json")}
     job = read_json(first_dir / "jobs/ch1-idle_bad-v1.json")
     assert job["status"] == ("SUBMITTED" if timeout else "FAILED")
     working = FakeVideoModel()
     ctx.use_video(working)
     out = run(ctx, cid)
     assert len(ctx._image.requests) == before_images
-    assert out == first_dir and len(working.submits) == (16 if timeout else 17)
-    assert len(working.collects) == 17
-    assert not any(r.ref.endswith("ch1-idle_good-v1") for r in working.submits)
+    assert out == first_dir and len(working.submits) == 18 - len(completed) - int(timeout)
+    assert len(working.collects) == 18 - len(completed)
+    assert not any(r.ref.rsplit("/", 1)[-1] in completed for r in working.submits)
+    assert all(
+        (out / "assets" / f"{name}.json").read_bytes() == data for name, data in completed.items()
+    )
     assert (out / "inputs.json").read_bytes() == inputs
     assert (out / "assets/ch1-idle_good-v1.json").read_bytes() == done
 
@@ -456,6 +471,8 @@ def test_resume_after_process_interrupt(flow):
         {"aspect_ratio": "0:16"},
         {"aspect_ratio": None},
         {"aspect_ratio": []},
+        {"pin_last_frame": "yes"},
+        {"resolution": "1080p"},  # 끝 화면 고정은 720p까지(xAI 제약, D-0185)
     ],
 )
 def test_bad_config_fails_before_calls_or_writes(flow, cfg):
@@ -556,16 +573,16 @@ def test_catalog_prompts_and_cost_plans(flow):
             assert "speaking" not in prompt.lower()
     assert build_prompt("glad_good", "ch2", review_note="slower").endswith("Reviewer note: slower")
     ctx.config.providers["video"] = ProviderConfig(
-        adapter="xai_video", model="grok-imagine-video-1.5-lite"
+        adapter="xai_video", model="grok-imagine-video-1.5"
     )
     plans = plan_calls(ctx, s6_config(ctx))
     assert [p.calls for p in plans] == [3, 18]
-    assert plans[-1].est_cost_usd == pytest.approx(6 * (15 * 0.03 + 0.01) + 12 * (10 * 0.03 + 0.01))
+    assert plans[-1].est_cost_usd == pytest.approx(6 * (15 * 0.14 + 0.02) + 12 * (10 * 0.14 + 0.02))
     ctx.config.stages["s6"] = {"preset": "standard"}
     standard = plan_calls(ctx, s6_config(ctx))
     assert [p.calls for p in standard] == [3, 111]
     assert standard[-1].est_cost_usd == pytest.approx(
-        6 * (15 * 0.03 + 0.01) + 105 * (10 * 0.03 + 0.01)
+        6 * (15 * 0.14 + 0.02) + 105 * (10 * 0.14 + 0.02)
     )
     ctx.config.providers["video"] = replace(ctx.config.providers["video"], model="unknown")
     with pytest.raises(CheckFailed, match="단가"):

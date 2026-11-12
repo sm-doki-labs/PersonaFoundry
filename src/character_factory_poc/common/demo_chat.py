@@ -423,6 +423,11 @@ def chat_clips(folder: Path, chapter: str, *, for_picker: bool = False) -> dict:
         mood = row.get("mood") or defaults.get("mood")
         if raw in {"idle_good", "idle_bad"}:
             result["idle"][raw.removeprefix("idle_")] = item
+        elif row.get("playType") == "speaking":
+            result["speaking"] = item
+            # Legacy viewer can hold the pinned opening frame when no idle clip exists.
+            if result["idle"]["good"] is None:
+                result["idle"]["good"] = item | {"freeze": True}
         elif raw.startswith(("idle", "speak")) or raw.endswith("_talking"):
             continue
         else:

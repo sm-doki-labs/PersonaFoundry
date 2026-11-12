@@ -136,7 +136,7 @@ def approve_g5b(ctx: Context, cid: str, answer: dict) -> Path:
                         "title": specs[c.actionId].title,
                         "description": specs[c.actionId].description,
                         "useWhen": specs[c.actionId].useWhen,
-                        "duration": specs[c.actionId].duration,
+                        "duration": c.asset.probe.durationS or specs[c.actionId].duration,
                         "videoId": c.asset.videoId,
                         "video": {
                             "id": c.asset.candidateId,

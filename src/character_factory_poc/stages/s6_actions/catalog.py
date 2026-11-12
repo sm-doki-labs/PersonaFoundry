@@ -68,10 +68,9 @@ _MOTIF_PRO = _PRO + (
     "wistful_good",
     "dumbfounded_good",
 )
-# 라이트는 가장 빨리 확인하는 판이다. 몸짓 5개 + 시그니처 포즈 1개 = 6편(D-0167).
-# 무표정 대기가 없어 무표정 첫 화면도 만들지 않는다. 앱은 단계당 10편 미만이면 단계를 열지 않으니
-# 앱 내보내기에서는 경고가 난다(D-0119). 대화해 보기의 옅은 반응 대체(반가움·피식)는 남는다.
-_MOTIF_LIGHT = ("idle_good", "glad_good", "amused_good", "shy_good", "pouty_good")
+# D-0191: Lite는 idle + 말하기·파이팅·웃음·인사 + 시그니처, 총6편이다.
+# legacy 상위 등급은 유지한다.
+_MOTIF_LIGHT = ("idle_good", "speak_good", "cheering_good", "laughing_good", "greeting_good")
 MOTIF_VIDEO_TIERS = {
     "light": VideoTier(("ch1",), _MOTIF_LIGHT),
     "standard": VideoTier(("ch1",), _PRO),
@@ -139,18 +138,58 @@ def signature_clip(signature: dict) -> dict:
 
 def clip_of(key: str, cfg: dict) -> dict:
     """카탈로그 몸짓, 또는 이 캐릭터의 시그니처 포즈."""
+    if cfg.get("production_profile") == "call-loop-v1":
+        from .call_loop import clip
+
+        return clip(key, cfg)
     if key == SIGNATURE_KEY:
         return signature_clip(cfg["signature"])
     return CATALOG[key]
 
 
-def signature_matches(inputs: dict, signature: dict | None) -> bool:
+def signature_matches(inputs: dict, signature: dict | None, folder=None) -> bool:
     """만든 영상 입력의 시그니처가 지금 설정과 같은가. 시그니처를 바꾸면 영상을 다시 만든다."""
     actions = [a for ch in inputs.get("chapters", []) for a in ch.get("actions", [])]
     made = next((a for a in actions if a.get("actionKey") == SIGNATURE_KEY), None)
     if not signature:
         return made is None
-    want = signature_clip(signature)
+    if inputs.get("productionProfile") == "call-loop-v1":
+        if folder is not None:
+            from character_factory_poc.common.canonical import sha256_file
+            from character_factory_poc.common.source_store import inside
+            from character_factory_poc.common.store import read_json
+
+            settings_path = folder / "video-settings.json"
+            settings = read_json(settings_path) if settings_path.exists() else {}
+            scene = settings.get("videoScene") or {}
+            if any(inputs.get("videoScene", {}).get(k) != v for k, v in scene.items()):
+                return False
+            if signature.get("middleFramePath"):
+                try:
+                    path = inside(folder, signature["middleFramePath"])
+                    if not made or made.get("production", {}).get("middleFrame", {}).get(
+                        "sha256"
+                    ) != sha256_file(path):
+                        return False
+                except (OSError, ValueError):
+                    return False
+        from .call_loop import clip
+
+        want = clip(
+            SIGNATURE_KEY,
+            {
+                "production_profile": "call-loop-v1",
+                "signature": signature,
+                "video_scene": inputs.get("videoScene", {}),
+            },
+        )
+        if made and any(
+            made.get("production", {}).get(k) != want["production"].get(k)
+            for k in ("middleFramePath", "middleFrameAtS")
+        ):
+            return False
+    else:
+        want = signature_clip(signature)
     return bool(made) and all(made.get(k) == want[k] for k in ("title", "description", "useWhen"))
 
 
@@ -182,6 +221,10 @@ def build_prompt(
     clip: dict | None = None,
 ) -> str:
     """앱 움직임 원문에 관계 단계·외형 유지 조건과 사람 수정 메모만 덧붙인다."""
+    if clip and clip.get("production"):
+        from .call_loop import prompt as loop_prompt
+
+        return loop_prompt(clip, review_note)
     prompt = (
         f"{(clip or CATALOG[key])['motion']} {stage_note(chapter_id, motif=motif)} "
         "Keep the same person, face, outfit and background as the first frame. "

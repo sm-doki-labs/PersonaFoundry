@@ -43,6 +43,7 @@ class Context:
     _analyzer: TextModel | None = None
     _labeler: TextModel | None = None
     _labeler_effort: dict | None = None
+    _signature_image: ImageModel | None = None
     _codex: object | None = None
     _image: ImageModel | None = None
     _video: VideoModel | None = None
@@ -346,6 +347,20 @@ class Context:
     def use_image(self, image: ImageModel) -> None:
         self._image = image
         self._injected["_image"] = image
+
+    def signature_image_model(self, character_id: str, budget: Budget) -> TrackedImageModel:
+        """S4 시그니처 중간 사진 모델. [providers.signature_image]가 없으면 이미지 모델을 쓴다.
+
+        기준 사진의 몸 폭을 바꾸지 않는 편집 모델(Grok 이미지 편집)을 따로 지정할 수 있다.
+        """
+        if "signature_image" not in self.config.providers or "_image" in self._injected:
+            return self.image_model(character_id, budget)
+        with self._lazy:
+            if self._signature_image is None:
+                self._signature_image = make_image_model(self.config.provider("signature_image"))
+        return self._limited(
+            TrackedImageModel(self._signature_image, self.ledger(character_id), budget), "image"
+        )
 
     def video_model(self, character_id: str, budget: Budget) -> TrackedVideoModel:
         with self._lazy:

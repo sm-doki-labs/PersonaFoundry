@@ -199,6 +199,8 @@ def plan_calls(
     ctx: Context, cid: str, *, models: Mapping[str, ChatModel] | None = None
 ) -> list[CallPlan]:
     char, _, scenes, prompts = _inputs(ctx, cid)
+    if ctx.config.stage("s10").get("comparison", "run") == "skip":
+        return []
     folder = char / "s10-eval" / (ctx.state(cid).stage("s10").currentRev or "-")
     return _plan(ctx, _routes(ctx, cid, prompts, folder, models, len(scenes)), len(scenes))
 
@@ -371,7 +373,12 @@ def build_comparison(ctx, cid, folder, *, models=None):
             raise FactoryError("비교 세트가 바뀌었다. 새 G8 판이 필요하다")
         return
     routes = _routes(ctx, cid, prompts, folder, models, len(scenes))
-    plans = _plan(ctx, routes, len(scenes))
+    choice = ctx.config.stage("s10").get("comparison", "run")
+    if choice not in ("run", "skip"):
+        raise FactoryError('[stages.s10] comparison은 "run" 또는 "skip"이다')
+    # skip: 비교 생성·심사를 하지 않고 G8에 평가 생략으로 남긴다(D-0187).
+    skip = choice == "skip"
+    plans = [] if skip else _plan(ctx, routes, len(scenes))
     width = ctx.config.stage("s10").get("comparison_overlap_chars", 20)
     if type(width) is not int or width < 1:
         raise FactoryError("comparison_overlap_chars는 양의 정수여야 한다")
@@ -381,10 +388,10 @@ def build_comparison(ctx, cid, folder, *, models=None):
     if ctx.execute and unknown:
         raise FactoryError("유료 비교 전에 [stages.s10] comparison_call_usd_upper를 설정한다")
     for r in routes:
-        if r.gpu and r.gpu.usd > r.gpu.budget_usd:
+        if not skip and r.gpu and r.gpu.usd > r.gpu.budget_usd:
             raise BudgetExceeded("비교 생성 GPU 비용 상한을 넘는다")
     judge_cfg = ctx.config.provider("judge")
-    judge = ctx.judge_model(cid, budget) if ctx.execute else None
+    judge = ctx.judge_model(cid, budget) if ctx.execute and not skip else None
     # 공급자 설정이 전혀 없는 로컬 공장은 채택 화면은 열되 심사 성과를 만들지 않는다.
     unconfigured = bool(
         judge
@@ -405,13 +412,15 @@ def build_comparison(ctx, cid, folder, *, models=None):
                 if m
             }:
                 raise FactoryError("생성 모델과 판정 모델의 계열이 같다(D-0010)")
-    active = ctx.execute and not unconfigured
+    active = ctx.execute and not unconfigured and not skip
     index = _overlap_index(ctx, cid, prompts, width) if active else {}
     conditions, pages = [], []
     for r in routes:
         status = (
             "NO_SERVING"
             if not r.served
+            else "SKIPPED"
+            if skip
             else "NO_JUDGE"
             if unconfigured
             else "COMPLETE"

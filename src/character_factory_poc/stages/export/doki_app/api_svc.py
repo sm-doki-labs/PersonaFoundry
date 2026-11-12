@@ -533,13 +533,14 @@ def build_seed(
         # 재생 위치. 앱은 슬롯이 있어야 통화 화면(call-clips)에 클립을 싣는다.
         # 운영 데이터와 같은 규칙: idle_* → idle, 나머지 → reaction(시작 무드 = 클립 무드).
         is_idle = video.clipKey.startswith("idle")
+        is_speaking = video.clipKey.startswith("speak") or video.clipKey.endswith("_talking")
         builder.add(
             "character_clip_slot",
             ["id", "clip_id", "play_type", "mood_from", "label", "icon", "sort_order", "is_active"],
             [
                 row_id("character_clip_slot", clip_no),
                 row_id("character_clip", clip_no),
-                "idle" if is_idle else "reaction",
+                "idle" if is_idle else "speaking" if is_speaking else "reaction",
                 None if is_idle else _mood(video),
                 None,
                 None,

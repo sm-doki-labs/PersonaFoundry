@@ -215,6 +215,10 @@ body.fl.src{overflow:hidden}
 .src-photo-add small{font-weight:400;color:var(--fd-fg-muted);font-size:11px}
 .src-photo-add .i{width:18px;height:18px}
 .src-photo-add[hidden]{display:none}
+.src-signature-photos .src-h{flex-wrap:wrap}
+.src-signature-photos .src-photo-grid{grid-template-columns:repeat(auto-fit,minmax(112px,160px))}
+.fl .src-signature-photos .btn.src-photo-x{width:44px;height:44px}
+.fl .src-signature-photos .btn.src-photo-retry{min-height:44px;height:auto}
 
 /* 시작한 뒤 영상 줄 */
 .src-vline{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:var(--fd-fs-2);color:var(--fd-run-fg)}

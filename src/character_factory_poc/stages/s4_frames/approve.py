@@ -86,6 +86,12 @@ def approve_g4(ctx: Context, cid: str, answer: dict) -> Path:
             seen.add(change["field"])
     elif decision != "REJECT":
         raise FactoryError("G4 결정은 APPROVE·SELECT·REQUEST_CHANGES·REJECT 중 하나다")
+    # Make the immutable handoff visible before publishing G4=APPROVED. A video
+    # worker can start as soon as that state is visible, even while a persona
+    # worker and the confirmation HTTP request are still running.
+    if approved:
+        write_once_json(rev_dir / "approved-frames.json", dump(approved))
+        _bind_signature_seed(ctx, cid, gate.rev, rev_dir)
     rec = write_gate_record(
         ctx.character_dir(cid),
         state,
@@ -99,8 +105,6 @@ def approve_g4(ctx: Context, cid: str, answer: dict) -> Path:
         **details,
     )
     ctx.ledger(cid).record_human(gate="G4", minutes=rec.minutes, ref=f"{cid}/{gate.rev}")
-    if approved:
-        write_once_json(rev_dir / "approved-frames.json", dump(approved))
     write_manifest(rev_dir)
     return rev_dir
 
@@ -114,3 +118,28 @@ def load_approved_frames(ctx: Context, cid: str) -> tuple[ApprovedFrames, Path]:
     if not path.exists():
         raise GateNotApprovedError(f"{cid}: G4가 프레임을 고르지 않았다")
     return validate("chapter-frames-approved-v1", read_json(path)), rev_dir
+
+
+def _bind_signature_seed(ctx: Context, cid: str, rev: str, rev_dir: Path) -> None:
+    """Approving G4 also approves the generated signature seed shown with it.
+
+    S6 then reads the approved seed through the existing middleFramePath contract,
+    so the raw gesture upload never reaches the video model.
+    """
+    from character_factory_poc.pipeline.origin import read_signature, write_signature
+    from character_factory_poc.stages.s4_frames.reference import read_signature_frame
+
+    folder = ctx.character_dir(cid)
+    signature = read_signature(folder)
+    if not signature:
+        return
+    seed = read_signature_frame(rev_dir)
+    updated = dict(signature)
+    if seed:
+        updated["middleFramePath"] = f"s4-frames/{rev}/{seed['filePath']}"
+        updated["middleFrameAtS"] = seed["middleFrameAtS"]
+    elif str(updated.get("middleFramePath", "")).startswith("s4-frames/"):
+        updated.pop("middleFramePath", None)
+        updated.pop("middleFrameAtS", None)
+    if updated != signature:
+        write_signature(folder, updated)

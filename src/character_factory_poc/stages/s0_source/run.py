@@ -242,6 +242,15 @@ def _page(
             f"동의: {basis.consentBy or '-'} / {basis.consentDate or '-'}\n"
             f"메모: {basis.notes or '-'}",
         ),
+    ]
+    if pack.factSheet:
+        sections.append(
+            (
+                "사용자가 준 사실 (대화 [FACTS]에 그대로 들어감)",
+                "\n".join(f"- {line}" for line in pack.factSheet),
+            )
+        )
+    sections += [
         (
             "원문",
             "\n".join(

@@ -1,18 +1,20 @@
 """물결 실행과 유료 단계 판정 (LLD §6.6·§6.7, 명세 §7.1, D-0049).
 
 실행 순서와 의존은 그래프(graph.py)가 정한다. 여기서는 지금 시작할 수 있는 단계를 결정적으로
-계산하고(ready_stages), 그 단계를 동시에 돌린 뒤 다시 계산하기를 더 돌 단계가 없을 때까지
-반복한다(run_waves). 한 번의 실행 안에서 같은 단계는 한 번만 시도한다.
+계산하고(ready_stages), 한 단계가 끝날 때마다 빈 실행 자리를 채운다(run_waves).
+한 번의 실행 안에서 같은 단계는 한 번만 시도한다.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import replace
 
-from character_factory_poc.common.errors import GateNotApprovedError
+from character_factory_poc.common.errors import CheckFailed, GateNotApprovedError
 from character_factory_poc.pipeline.context import Context
-from character_factory_poc.pipeline.graph import CREATED, stages_for
+from character_factory_poc.pipeline.graph import CREATED, Stage, stages_for
 from character_factory_poc.pipeline.state import StateFile
 
 RUNNABLE = frozenset({"PENDING", "RUNNING", "CHECK_FAILED", "REJECTED"})
@@ -93,9 +95,15 @@ def extra_needs_for(appearance_axis: bool) -> dict[str, frozenset[str]]:
     return {"s3": frozenset({"s2"})} if appearance_axis else {}
 
 
-def until_scope(until: str, origin: str = CREATED, mode: str = "TRAIN") -> list[str]:
+def until_scope(
+    until: str,
+    origin: str = CREATED,
+    mode: str = "TRAIN",
+    *,
+    graph: Mapping[str, Stage] | None = None,
+) -> list[str]:
     """--until까지의 단계(갈래 그래프 순서). 순차 훑기가 until에서 멈추는 것과 같은 범위다."""
-    graph = stages_for(origin, mode)
+    graph = stages_for(origin, mode) if graph is None else graph
     order = list(graph)
     if until in graph:
         return order[: order.index(until) + 1]
@@ -118,26 +126,101 @@ def _gate_stage(gate: str, origin: str = CREATED) -> str:
     return next((sid for sid, s in stages_for(origin).items() if s.gate == gate), gate)
 
 
-def run_waves(ctx: Context, cid: str, opt) -> object:
+def _demo_stage_budget(ctx: Context, cid: str, sid: str) -> tuple[Context, float]:
+    """예약과 worker의 계획 상한을 함께 정한다. 완료된 관문 처리는 예약하지 않는다."""
+    from character_factory_poc.common.budget import Budget
+    from character_factory_poc.pipeline.origin import stage_def
+
+    state = ctx.state(cid)
+    status = state.stage(sid).status
+    if (status in {"APPROVED", "SKIPPED"} and sid != "s8c") or (
+        status == "AWAITING_HUMAN" and stage_def(ctx.character_dir(cid), sid).gate
+    ):
+        return ctx, 0.0
+    real = (
+        any(p.adapter != "fake" for p in ctx.config.providers.values())
+        or ctx.config.text_pipeline.get("enabled", False)
+        or ctx.config.agent.get("backend") == "codex_exec"
+    )
+    if not real:
+        return ctx, 0.0
+    # 영상은 재개/부분 재생성을 포함한 실제 계획을 사용한다. 단가를 모르는 어댑터가
+    # 돌려주는 0은 실제 비용 추정으로 쓰지 않고 아래의 unknown cap을 적용한다.
+    if sid in {"s5", "s6"} and ctx.config.provider("video").adapter in {
+        "xai_video",
+        "grok_oauth",
+        "grok",
+    }:
+        if sid == "s5":
+            from character_factory_poc.stages.s5_intro.run import plan_calls, s5_config
+
+            plans = plan_calls(ctx, s5_config(ctx))
+        else:
+            from character_factory_poc.stages.s6_actions.run import plan_calls, s6_config
+
+            plans = plan_calls(ctx, s6_config(ctx, cid), cid)
+        Budget(ctx.config.budget, max_calls_override=ctx.max_calls).check_plan(plans)
+        if all(p.est_cost_usd is not None for p in plans):
+            cost = sum(p.est_cost_usd for p in plans)
+            if math.isfinite(cost) and cost >= 0:
+                return ctx, cost
+    cap = min(
+        float(ctx.config.budget.max_cost_usd_per_command),
+        float(ctx.config.orchestrator.get("parallel_stage_cost_cap_usd", 10.0)),
+    )
+    if not math.isfinite(cap) or cap <= 0:
+        raise ValueError("시연 병렬 단계 비용 상한은 유한한 양수여야 한다")
+    config = replace(ctx.config, budget=replace(ctx.config.budget, max_cost_usd_per_command=cap))
+    worker = replace(ctx, config=config)
+    if ctx._run_budget is not None:
+        # 기존 공유 호출/토큰 예산을 버리거나 초기화하지 않고 계획 비용 검사만 더한다.
+        worker._run_budget = _CappedStageBudget(ctx._run_budget, config.budget, ctx.max_calls)
+    return worker, cap
+
+
+class _CappedStageBudget:
+    def __init__(self, shared, config, max_calls):
+        from character_factory_poc.common.budget import Budget
+
+        self.shared = shared
+        self.local = Budget(config, max_calls_override=max_calls)
+
+    def check_plan(self, plans):
+        self.local.check_plan(plans)
+        self.shared.check_plan(plans)
+
+    def __getattr__(self, name):
+        return getattr(self.shared, name)
+
+
+def run_waves(
+    ctx: Context, cid: str, opt, *, scope=None, auto_review=False, demo_budget=None
+) -> object:
     """의존이 풀린 단계를 opt.max_parallel개까지 동시에 돌린다(LLD §6.6)."""
     from character_factory_poc.pipeline.orchestrator import (
         RunLog,
         _appearance_axis,
         _finish,
+        _mark_failed,
         _skip_note,
         _stage_runners,
         _step,
     )
-    from character_factory_poc.pipeline.origin import read_model_mode, read_origin
+    from character_factory_poc.pipeline.origin import graph_for_dir, read_origin
 
     log = RunLog()
     origin = read_origin(ctx.character_dir(cid))
-    mode = read_model_mode(ctx.character_dir(cid))
+    graph = graph_for_dir(ctx.character_dir(cid))
+    owners = {stage.gate: sid for sid, stage in graph.items() if stage.gate}
     runners = _stage_runners(ctx, cid, opt)
     # 외모 축의 s3 ← s2 선행은 오리지널에만 있다. 모티브의 s3는 G0만 기다린다(D-0128).
     extra = extra_needs_for(origin == CREATED and _appearance_axis(ctx, cid, opt))
+    allowed = set(scope) if scope is not None else None
     scope: list[str] = []
-    for sid in until_scope(opt.until, origin, mode):
+    ordered = list(graph) if opt.videos_with_chat else until_scope(opt.until, graph=graph)
+    for sid in ordered:
+        if allowed is not None and sid not in allowed:
+            continue
         note = _skip_note(ctx, cid, sid, runners)
         if note is not None:
             if note:
@@ -147,9 +230,19 @@ def run_waves(ctx: Context, cid: str, opt) -> object:
     in_scope = {sid: runners[sid] for sid in scope}
     wrap = getattr(opt, "wrap_worker", None) or (lambda fn: fn)
 
-    def one(sid: str):
+    def one(sid: str, worker: Context = ctx):
         sub = RunLog()
-        action = _step(ctx, cid, sid, opt, runners, sub)
+        stage_runners = runners if worker is ctx else _stage_runners(worker, cid, opt)
+        from character_factory_poc.pipeline.origin import VIDEO_STAGES
+
+        step_opt = opt
+        if opt.videos_with_chat:
+            step_opt = replace(
+                opt,
+                video_only=sid in VIDEO_STAGES,
+                confirmed=opt.confirmed.intersection(VIDEO_STAGES),
+            )
+        action = _step(worker, cid, sid, step_opt, stage_runners, sub, auto_review=auto_review)
         return sub, action
 
     def merge(sub) -> None:
@@ -163,33 +256,141 @@ def run_waves(ctx: Context, cid: str, opt) -> object:
 
     attempted: set[str] = set()
     stopped = False
-    while not stopped:
-        wave = ready_stages(ctx.state(cid), in_scope, attempted, extra)
-        if not wave:
-            break
-        log.waves.append(list(wave))
-        attempted.update(wave)
-        workers = max(1, min(int(opt.max_parallel), len(wave)))
-        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix=f"cfp-{cid}") as ex:
-            futures = {sid: ex.submit(wrap(one), sid) for sid in wave}
-            results = {sid: futures[sid].result() for sid in wave}
-        for sid in wave:
-            sub, action = results[sid]
+    results = {}
+    workers = max(1, int(opt.max_parallel))
+    reserved: dict[str, float] = {}
+
+    def budget_available(sid, amount=0.0, *, defer=False):
+        if demo_budget is None:
+            return True
+        from character_factory_poc.pipeline.demo import spent_since
+
+        limit, since = demo_budget
+        spent = spent_since(ctx, cid, since)
+        if spent >= limit:
+            log.add(f"{sid}: 시연 예산 상한 도달 — 추정 ${spent:.2f} / ${limit:.2f}")
+            log.held.append(sid)
+            return False
+        outstanding = sum(reserved.values())
+        if spent + outstanding + amount > limit:
+            if not defer:
+                log.add(
+                    f"{sid}: 시연 예산 상한 — 추정 ${spent:.2f} + 실행 중 예약 "
+                    f"${outstanding:.2f} + 단계 예약 ${amount:.2f} > ${limit:.2f}"
+                )
+                log.held.append(sid)
+            return False
+        return True
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix=f"cfp-{cid}") as ex:
+        pending = {}
+        while True:
+            if not stopped:
+                state = ctx.state(cid)
+                active = set(pending.values())
+                ready = {
+                    sid
+                    for sid in ready_stages(state, in_scope, attempted, extra)
+                    if not active.intersection(
+                        graph[sid].needs
+                        | graph[sid].after
+                        | extra.get(sid, frozenset())
+                        | {owners[g] for g in graph[sid].deps}
+                        | ({"s8c"} if auto_review and "G6" in graph[sid].deps else set())
+                    )
+                }
+                # 이미 생성된 관문도 _step에서 처리해야 자동 승인이 후속 의존을 푼다.
+                candidates = [sid for sid in scope if sid in ready]
+                candidates.extend(
+                    sid
+                    for sid in scope
+                    if sid not in attempted
+                    and sid not in ready
+                    and state.stage(sid).status not in RUNNABLE
+                )
+                batch = []
+                for sid in candidates:
+                    if len(pending) >= workers:
+                        break
+                    try:
+                        worker, reservation = (
+                            _demo_stage_budget(ctx, cid, sid)
+                            if demo_budget is not None
+                            else (ctx, 0.0)
+                        )
+                    except CheckFailed as exc:
+                        _mark_failed(ctx, cid, sid, str(exc))
+                        sub = RunLog()
+                        sub.add(f"{sid}: 검사 실패 — {exc}")
+                        sub.blocked.append(sid)
+                        attempted.add(sid)
+                        results[sid] = sub
+                        if opt.until == sid and not opt.videos_with_chat:
+                            sub.stopped_at = sid
+                            stopped = True
+                            break
+                        continue
+                    if not budget_available(sid, reservation, defer=bool(pending)):
+                        if log.held:
+                            stopped = True
+                            break
+                        continue  # 실행 중인 단계가 예약을 반납하면 다시 판단한다.
+                    reserved[sid] = reservation
+                    attempted.add(sid)
+                    batch.append(sid)
+                    pending[ex.submit(wrap(one), sid, worker)] = sid
+                if batch:
+                    log.waves.append(batch)
+            if not pending:
+                break
+            # A reference photo can be confirmed from the UI while a long text
+            # worker is still running. Notice that gate without waiting for the
+            # text call to finish so the now-ready video branch can start.
+            done, _ = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
+            for future in done:
+                sid = pending.pop(future)
+                # worker가 끝난 뒤에만 예약을 해제한다. 다음 admission은 spent_since를
+                # 다시 읽으므로 확정 비용을 포함한다(미확인 비용의 기존 0 정책은 그대로).
+                try:
+                    sub, action = future.result()
+                finally:
+                    reserved.pop(sid, None)
+                results[sid] = sub
+                if action == "return" and not opt.videos_with_chat:
+                    stopped = True
+                # 실패/사람 대기는 해당 갈래만 막는다. 의존이 풀린 다른 갈래는 계속한다.
+                # 유료 확인을 만난 자동검토의 실행 중단 규칙은 그대로 보존한다.
+                if auto_review and sub.held:
+                    stopped = True
+    # 출력 순서는 완료 경합에 좌우되지 않게 그래프 순서로 합친다.
+    for sid in scope:
+        if sid in results:
+            merge(results[sid])
+    # 더 실행할 수 없을 때만 대기/의존 상태를 설명한다. 중단 뒤 새 단계는 실행하지 않는다.
+    if not stopped:
+        for sid in scope:
+            if sid in attempted:
+                continue
+            if not budget_available(sid):
+                break
+            sub, action = one(sid)
             merge(sub)
             if action == "return":
                 stopped = True
-    # 이번 실행에서 돌지 않은 단계: 대기 관문·이미 끝남·시작 불가를 순차 훑기 문장으로 남긴다.
-    for sid in scope:
-        if sid in attempted:
-            continue
-        sub, action = one(sid)
-        merge(sub)
-        if action == "return":
-            stopped = True
-            break
-    log.waiting = _sort(log.waiting, lambda g: _gate_stage(g, origin), origin)
+                break
+    state = ctx.state(cid)
+    log.waiting = _sort(
+        [gate for gate in log.waiting if state.gate(gate).status != "APPROVED"],
+        lambda g: _gate_stage(g, origin),
+        origin,
+    )
     log.blocked = _sort(log.blocked, lambda s: s, origin)
     log.held = _sort(log.held, lambda s: s, origin)
-    if stopped:
+    if opt.videos_with_chat and not log.blocked and not log.held:
+        state = ctx.state(cid)
+        if state.stage("s8c").status == "APPROVED" and state.gate("G5b").status == "APPROVED":
+            log.stopped_at = "G5b"
+            return log
+    if stopped and log.stopped_at:
         return log
     return _finish(log)

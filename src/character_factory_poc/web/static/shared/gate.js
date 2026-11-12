@@ -2351,6 +2351,23 @@
       return speaker + ': ' + turn.text;
     }).filter(Boolean).join('\n');
   }
+  function heldEvidence(held, records) {
+    var claim = held.claim || {};
+    var phase = { 'tendency-discover': '원문 묶음에서 특징 추출', 'tendency-consolidate': '후보 특징 통합' }[held.phase];
+    return '<article class="doc">' + facts([
+      ['특징', claim.function || claim.rule || '기록 없음'],
+      ['적용 조건', claim.trigger], ['언어학적 설명', claim.realization],
+      ['적용 한계', claim.exclusion], ['제외·보류 이유', held.reason],
+      ['제외한 단계', phase], ['분석 묶음', held.chunkId],
+      ['후보 위치', typeof held.index === 'number' ? held.index + 1 : held.index]
+    ].filter(function (f) { return f[1] !== undefined && f[1] !== null; })) +
+    list(claim.evidence).map(function (id) {
+      var record = records.find(function (r) { return r && r.id === id; });
+      return '<details class="gate-more"><summary>후보가 참조한 원문 ' + esc(id) + '</summary>' +
+        (record ? facts([['앞선 맥락', record.context], ['본인 반응', record.target]]) :
+          '<p class="qa-note">이 검토 기록에는 해당 원문이 없어요.</p>') + '</details>';
+    }).join('') + '</article>';
+  }
   function evidenceCards(items) {
     var review = items.evidenceReview;
     if (!review) return '';
@@ -2382,8 +2399,12 @@
       }).join('') : '<p class="empty">검토할 규칙이 없어요. 보류 이유와 프롬프트 원문을 확인해 주세요.</p>') +
       (list(review.held).length ? '<details class="gate-more"><summary>보류한 규칙 ' + list(review.held).length + '개</summary>' +
         list(review.held).map(function (held) {
-          return facts([['후보 위치', typeof held.index === 'number' ? held.index + 1 : held.index], ['보류 이유', held.reason]]);
+          return heldEvidence(held, records);
         }).join('') + '</details>' : '') +
+      (list(review.excludedClaims).length ? '<details class="gate-more"><summary>추출에서 제외한 특징 ' + list(review.excludedClaims).length + '개</summary>' +
+        '<p class="section-sub">후보의 설명과 제외 이유를 보존했어요. 아래 내용은 내부 검토용이며 최종 프롬프트에 들어가지 않아요.</p>' +
+        list(review.excludedClaims).map(function (held) { return heldEvidence(held, records); }).join('') + '</details>' : '') +
+      (list(review.excludedClaimsIssues).length ? '<p class="qa-note is-bad">일부 분석 기록이 없거나 저장 당시와 달라 제외 특징을 모두 확인할 수 없어요.</p>' : '') +
       (isRecord() ? '' : '<p><label class="plan-toggle"><input type="checkbox" data-evidence-reviewed>' +
         '원문 근거와 적용 조건을 읽고 확인했어요</label></p>') + '</section>';
   }
@@ -3080,7 +3101,8 @@
     COMPLETE: ['심사 완료', 'is-good'],
     NO_SERVING: ['서빙 없음', ''],
     PLANNED: ['실행 전', ''],
-    NO_JUDGE: ['심사 모델 미설정', 'is-warn']
+    NO_JUDGE: ['심사 모델 미설정', 'is-warn'],
+    SKIPPED: ['평가 생략', 'is-warn']
   };
   var OVERLAP_KO = { TRAIN: '학습 대화', PROMPT: '대화 프롬프트', VOICE: '말투 예시' };
   function isTwinDecision(items) {
@@ -3724,8 +3746,18 @@
     );
   }
 
+  function qualityNotice(view, items) {
+    var automatic = view.record && view.record.reviewer === '시연 자동 승인';
+    var skipped = list((items.twin || {}).conditions).some(function (c) { return c.status === 'SKIPPED'; });
+    if (!automatic && !skipped) return '';
+    return banner('warn', '품질 검증 미완료',
+      (automatic ? '시연을 진행하려고 자동 승인했어요. 사람이 원문과 응답 품질을 확인한 기록이 아니에요. ' : '') +
+      (skipped ? '비교 평가를 생략했어요. 품질 합격 결과가 아니에요.' : '승인 상태와 품질 검증 결과는 별개예요.'));
+  }
   function renderBanners(view, items) {
     var out = [];
+    var quality = qualityNotice(view, items);
+    if (quality) out.push(quality);
     if (view.connected === false) {
       out.push(
         banner(

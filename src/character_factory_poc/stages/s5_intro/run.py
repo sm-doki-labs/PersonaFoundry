@@ -28,6 +28,7 @@ from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.origin import is_twin
 from character_factory_poc.pipeline.rework import load_rework
 from character_factory_poc.providers.base import ImageRequest, VideoRequest
+from character_factory_poc.providers.video_concurrency import run_video_jobs
 from character_factory_poc.providers.xai_video import estimate_cost
 from character_factory_poc.stages.s1_reference.preview import subject_phrase
 from character_factory_poc.stages.s2_hero.approve import load_appearance_spec
@@ -76,7 +77,7 @@ def estimate(ctx: Context, cfg: dict[str, Any]) -> float:
     if pcfg.adapter not in {"xai_video", "grok_oauth", "grok"}:
         return 0.0
     each = estimate_cost(
-        pcfg.model or "grok-imagine-video-1.5-lite",
+        pcfg.model or "grok-imagine-video-1.5",
         str(cfg["resolution"]),
         float(cfg["duration"]),
         pcfg.extra.get("price_per_second"),
@@ -267,73 +268,76 @@ def _run(ctx, cid, rev, rev_dir, spec, hero, cfg, budget, brief: ReworkBrief | N
         aspect_ratio=settings["aspectRatio"],
         generate_audio=settings["generateAudio"],
     )
-    assets: list[VideoAsset] = []
-    for n in range(1, total + 1):
+
+    def generate(n: int) -> VideoAsset:
         cand = f"v{n}"
         vid = f"vd-{cid}-intro-{rev}-{n}"
         asset_path = rev_dir / "assets" / f"{cand}.json"
         if asset_path.exists():  # 재개: 이미 받은 영상은 다시 만들지 않는다
-            assets.append(validate("video-asset-v1", json.loads(asset_path.read_text("utf-8"))))  # type: ignore[arg-type]
-            continue
-        req = VideoRequest(ref=f"{cid}/{rev}/{cand}", **req_base)
-        job_path = rev_dir / "jobs" / f"{cand}.json"
-        job: dict[str, Any] | None = None
-        if job_path.exists() and video.resumable:
-            prev = json.loads(job_path.read_text("utf-8"))
-            if prev.get("status") == "SUBMITTED":
-                job = prev
-        if job is None:
-            job_id = video.submit(req)
-            job = dump(
-                validate(
-                    "video-job-v1",
-                    {
-                        "videoId": vid,
-                        "candidateId": cand,
-                        "stage": "s5",
-                        "provider": video.name,
-                        "model": video.model,
-                        "jobId": job_id,
-                        "status": "SUBMITTED",
-                        "settings": settings,
-                        "firstFrameSha256": first["sha256"],
-                        "estCostUsd": estimate(ctx, cfg | {"candidates": 1}),
-                    },
+            return validate("video-asset-v1", json.loads(asset_path.read_text("utf-8")))  # type: ignore[return-value]
+        with video.job_slot("s5"):
+            req = VideoRequest(ref=f"{cid}/{rev}/{cand}", **req_base)
+            job_path = rev_dir / "jobs" / f"{cand}.json"
+            job: dict[str, Any] | None = None
+            if job_path.exists() and video.resumable:
+                prev = json.loads(job_path.read_text("utf-8"))
+                if prev.get("status") == "SUBMITTED":
+                    job = prev
+            if job is None:
+                job_id = video.submit(req)
+                job = dump(
+                    validate(
+                        "video-job-v1",
+                        {
+                            "videoId": vid,
+                            "candidateId": cand,
+                            "stage": "s5",
+                            "provider": video.name,
+                            "model": video.model,
+                            "jobId": job_id,
+                            "status": "SUBMITTED",
+                            "settings": settings,
+                            "firstFrameSha256": first["sha256"],
+                            "estCostUsd": estimate(ctx, cfg | {"candidates": 1}),
+                        },
+                    )
                 )
+                _write_json(job_path, job)
+            try:
+                res = video.collect(job["jobId"], req)
+            except VideoGenerationError as e:
+                if not hasattr(
+                    e, "job_id"
+                ):  # 시간 초과가 아니면 실패로 남긴다. 시간 초과는 SUBMITTED로 두고 이어 받는다
+                    _write_json(job_path, job | {"status": "FAILED", "error": str(e)[:500]})
+                raise
+            if res.data[4:8] != b"ftyp":
+                _write_json(job_path, job | {"status": "FAILED", "error": "MP4가 아니다"})
+                raise VideoGenerationError(f"{cand}: 받은 파일이 MP4가 아니다")
+            rel = f"videos/{cand}.mp4"
+            write_once_bytes(rev_dir / rel, res.data)
+            asset: VideoAsset = validate(  # type: ignore[assignment]
+                "video-asset-v1",
+                {
+                    "videoId": vid,
+                    "candidateId": cand,
+                    "jobId": res.job_id,
+                    "provider": res.provider,
+                    "model": res.model,
+                    "filePath": rel,
+                    "fileSha256": sha256_file(rev_dir / rel),
+                    "bytes": len(res.data),
+                    "settings": settings,
+                    "probe": dump(probe_video(rev_dir / rel)),
+                    "estCostUsd": res.est_cost_usd,
+                },
             )
-            _write_json(job_path, job)
-        try:
-            res = video.collect(job["jobId"], req)
-        except VideoGenerationError as e:
-            if not hasattr(
-                e, "job_id"
-            ):  # 시간 초과가 아니면 실패로 남긴다. 시간 초과는 SUBMITTED로 두고 이어 받는다
-                _write_json(job_path, job | {"status": "FAILED", "error": str(e)[:500]})
-            raise
-        if res.data[4:8] != b"ftyp":
-            _write_json(job_path, job | {"status": "FAILED", "error": "MP4가 아니다"})
-            raise VideoGenerationError(f"{cand}: 받은 파일이 MP4가 아니다")
-        rel = f"videos/{cand}.mp4"
-        write_once_bytes(rev_dir / rel, res.data)
-        asset: VideoAsset = validate(  # type: ignore[assignment]
-            "video-asset-v1",
-            {
-                "videoId": vid,
-                "candidateId": cand,
-                "jobId": res.job_id,
-                "provider": res.provider,
-                "model": res.model,
-                "filePath": rel,
-                "fileSha256": sha256_file(rev_dir / rel),
-                "bytes": len(res.data),
-                "settings": settings,
-                "probe": dump(probe_video(rev_dir / rel)),
-                "estCostUsd": res.est_cost_usd,
-            },
-        )
-        write_once_json(asset_path, dump(asset))
-        _write_json(job_path, job | {"status": "DONE"})
-        assets.append(asset)
+            write_once_json(asset_path, dump(asset))
+            _write_json(job_path, job | {"status": "DONE"})
+            return asset
+
+    workers = 1 if video.name == "grok_web" else min(6, getattr(video.limits, "limit", 6))
+    assets = run_video_jobs(generate, range(1, total + 1), workers=workers)
     write_once_json(rev_dir / "videos.json", [dump(a) for a in assets])
     write_once_text(
         rev_dir / "gate-G5.html",

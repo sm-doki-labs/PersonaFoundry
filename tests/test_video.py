@@ -150,14 +150,14 @@ def test_s5_offline_to_g5_human_select(ctx):
 
 
 class Flaky(FakeVideoModel):
-    """첫 수집에서 시간 초과를 내고, 그 뒤로는 정상."""
+    """v1의 첫 수집에서 시간 초과를 내고, 그 뒤로는 정상."""
 
     def __init__(self):
         super().__init__()
         self.fail_next = True
 
     def collect(self, job_id, request):
-        if self.fail_next:
+        if request.ref.endswith("/v1") and self.fail_next:
             self.fail_next = False
             self.collects.append(job_id)
             raise VideoTimeoutError(job_id, "아직 생성 중")
@@ -172,13 +172,14 @@ def test_s5_resumes_same_job_after_timeout(ctx):
         run_s5(ctx, cid)
     assert ctx.state(cid).stage("s5").status == "CHECK_FAILED"
     job = json.loads((ctx.character_dir(cid) / "s5-intro" / "vi1" / "jobs" / "v1.json").read_text())
-    assert job["status"] == "SUBMITTED" and job["jobId"] == "fake-job-1"
+    assert job["status"] == "SUBMITTED"
     image = FakeImageModel()
     ctx.use_image(image)
     out = run_s5(ctx, cid)
     assert out.name == "vi1"  # 같은 rev에서 이어 간다
     assert len(flaky.submits) == 2  # v1은 다시 제출하지 않았다(v1 1회 + v2 1회)
-    assert flaky.collects == ["fake-job-1", "fake-job-1", "fake-job-2"]
+    assert len(flaky.collects) == 3 and flaky.collects.count(job["jobId"]) == 2
+    assert len(set(flaky.collects)) == 2
     assert image.requests == []  # 첫 프레임도 다시 만들지 않았다
 
 
@@ -325,13 +326,16 @@ def test_xai_submit_poll_download(tmp_path, monkeypatch):
     assert post.url.path == "/v1/videos/generations"
     assert post.headers["authorization"] == "Bearer test-key"
     body = json.loads(post.content)
-    assert body["model"] == "grok-imagine-video-1.5-lite" and body["prompt"] == "smile"
+    assert body["model"] == "grok-imagine-video-1.5" and body["prompt"] == "smile"
     assert body["image"]["url"].startswith("data:image/png;base64,")
     assert (body["duration"], body["resolution"], body["generate_audio"]) == (8, "720p", False)
     assert "aspect_ratio" not in body
+    assert "last_frame" not in body
+    pinned = replace(req, last_frame=req.first_frame)
+    assert m.body(pinned)["last_frame"] == body["image"]  # 끝 화면 = 첫 화면(D-0185)
     res = m.collect(job, req)
     assert res.data == FAKE_MP4 and res.seconds == 8.0 and res.job_id == "req-123"
-    assert res.est_cost_usd == pytest.approx(8 * 0.03 + 0.01)
+    assert res.est_cost_usd == pytest.approx(8 * 0.14 + 0.01)
     assert "authorization" not in {
         k.lower() for k in seen[-1].headers
     }  # CDN에는 키를 보내지 않는다

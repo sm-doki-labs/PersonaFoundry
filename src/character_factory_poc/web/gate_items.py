@@ -767,7 +767,9 @@ def prompts(char_dir: Path, character_id: str, stage_dir: str, rev: str) -> dict
     pair = read_json(folder / "prompt-pair.json")
     probe = read_json(folder / "prompt-probe.json")
     # Private dialogue stays in this gate view, pinned to the displayed S8 revision.
-    evidence_review = read_json(folder / "evidence-review.json")
+    from character_factory_poc.web.evidence_review import with_excluded_claims
+
+    evidence_review = with_excluded_claims(folder, read_json(folder / "evidence-review.json"))
     if pair is None:
         return _empty("prompts", ["prompt-pair.json이 없다. S8을 먼저 돌린다"])
     bundle = read_json(folder / "persona-bundle.json")

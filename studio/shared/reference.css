@@ -1,0 +1,21 @@
+.ref-card{display:grid;grid-template-columns:minmax(120px,200px) minmax(0,1fr);gap:var(--fd-space-4);padding:var(--fd-space-4);margin:var(--fd-space-4) 0;background:var(--fd-bg-surface);border:1px solid var(--fd-line);border-radius:var(--fd-r-4);box-shadow:var(--fd-shadow-xs)}
+.ref-preview{aspect-ratio:9/16;align-self:start;display:grid;place-items:center;background:var(--fd-bg-inset);border-radius:var(--fd-r-3);overflow:hidden;text-align:center;color:var(--fd-fg-muted);font-size:var(--fd-fs-2)}
+.ref-preview img{width:100%;height:100%;object-fit:contain;min-height:0}
+.ref-content{display:flex;flex-direction:column;gap:var(--fd-space-3);min-width:0}
+.ref-content h2{margin:0;font-size:var(--fd-fs-5);letter-spacing:-.015em}
+.ref-content p{margin:0;line-height:1.6;overflow-wrap:anywhere}
+.ref-muted,.ref-fields label span{color:var(--fd-fg-muted);font-size:var(--fd-fs-2)}
+.ref-warning{color:var(--fd-attention-fg);background:var(--fd-attention-bg);padding:var(--fd-space-2);border-radius:var(--fd-r-2)}
+.ref-error{color:var(--fd-danger-fg)}
+.ref-fields{display:grid;gap:var(--fd-space-2)}
+.ref-fields label{font-size:var(--fd-fs-2);font-weight:550}
+.ref-fields textarea{width:100%;box-sizing:border-box;resize:vertical;font:inherit;color:var(--fd-fg);background:var(--fd-bg-surface);border:1px solid var(--fd-line-strong);border-radius:var(--fd-r-2);padding:8px 10px}
+.ref-fields textarea:focus-visible{outline:2px solid var(--fd-focus);outline-offset:2px}
+.ref-actions{display:flex;flex-wrap:wrap;gap:var(--fd-space-2)}
+.ref-actions .btn{min-height:36px;white-space:normal;text-align:center}
+.ref-card.has-signature{grid-template-columns:minmax(240px,400px) minmax(0,1fr)}
+.ref-previews{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--fd-space-2);align-self:start}
+.ref-shot{margin:0;display:flex;flex-direction:column;gap:6px;min-width:0}
+.ref-shot figcaption{font-size:var(--fd-fs-1,12px);color:var(--fd-fg-muted);text-align:center}
+@media(max-width:600px){.ref-card.has-signature{grid-template-columns:minmax(0,1fr)}.ref-previews{width:min(100%,400px);justify-self:center}}
+@media(max-width:600px){.ref-card{grid-template-columns:minmax(0,1fr)}.ref-preview{width:min(100%,200px);justify-self:center}.ref-actions .btn{min-height:44px}}

@@ -19,6 +19,20 @@ from character_factory_poc.providers.openai_compat import OpenAICompatTextModel
 from tests.test_source_s0 import _good_digest, _write_pack
 
 
+def test_judge_slots_are_unbounded_by_default(tmp_path):
+    ctx = Context.load(tmp_path, execute=False)
+    limit = tracked.ProviderLimits(ctx.config.orchestrator, "judge", ctx.ledger("synthetic"))
+    barrier = threading.Barrier(3)
+
+    def acquire(_):
+        with limit.slot("s10"):
+            return barrier.wait(timeout=3)
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        assert set(pool.map(acquire, range(3))) == {0, 1, 2}
+    assert not (ctx.ledger("synthetic").folder / tracked.WAIT_FILE).exists()
+
+
 def _spec(tmp):
     rows = []
     for slug, mode, kind in [

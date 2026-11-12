@@ -17,7 +17,7 @@ FAMILY_DEFAULTS = {
     },
 }
 RELAY_PREFIX = "google-antigravity/"
-API_HOSTS = frozenset({"api.openai.com", "generativelanguage.googleapis.com"})
+API_HOSTS = frozenset({"api.openai.com", "generativelanguage.googleapis.com", "api.anthropic.com"})
 RELAY_HOSTS = frozenset({"127.0.0.1", "localhost"})
 ENV_NAME_RE = re.compile(r"[A-Z_][A-Z0-9_]*")
 ENV_NAME_MAX = 64

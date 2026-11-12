@@ -574,7 +574,7 @@
     (Array.isArray(list) ? list : []).forEach((c) => {
       if (!c || !c.url || !c.clipKey || seen.has(c.clipKey)) return;
       if (STRUCTURAL.test(clipBareKey(c.clipKey))) return; // 대기·말하기는 감정이 아니다
-      if (clipBaseKey(c.clipKey) === 'signature') return; // 시그니처 포즈는 아무 말에나 대신 틀지 않는다(D-0167)
+      if (['signature', 'cheering', 'laughing', 'greeting'].indexOf(clipBaseKey(c.clipKey)) >= 0) return; // 시그니처 포즈는 아무 말에나 대신 틀지 않는다(D-0167)
       seen.add(c.clipKey);
       pool.push(c);
     });
@@ -596,7 +596,7 @@
   function videoClips(data) {
     if (!data || data.ready !== true) return null;
     const idle = data.idle || {};
-    const one = (x) => (x && x.url ? { clipKey: text(x.clipKey), url: text(x.url) } : null);
+    const one = (x) => (x && x.url ? Object.assign({ clipKey: text(x.clipKey), url: text(x.url) }, x.freeze ? { freeze: true } : {}) : null);
     const good = one(idle.good);
     const bad = one(idle.bad);
     if (!good && !bad) return null;
@@ -717,7 +717,7 @@
       const ok = await prime(back, target.url, true, set);
       if (p !== playToken || dead || !ok) return false;
       // 움직임 줄이기 설정이면 대기 영상은 첫 화면에 멈춰 두고 반응만 튼다.
-      if (!reduced && !(await run(players[back]))) return false;
+      if (!reduced && !target.freeze && !(await run(players[back]))) return false;
       await frame(players[back]);
       if (p !== playToken || dead) return false;
       state.mode = 'idle';

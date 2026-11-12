@@ -63,6 +63,7 @@ class RunOptions:
     source_pack: Path | None = None
     # D-0049(LLD §6.6·§6.7)
     video_only: bool = False  # 영상 요청은 지정한 다섯 단계만 돈다.
+    videos_with_chat: bool = False  # 허락한 영상 단계와 대화 준비만 같은 실행에 넣는다.
     max_parallel: int = 1  # 동시에 돌릴 단계 수. 1이면 순차 훑기
     web: bool = False  # 워크숍이 시작한 실행. 유료 공급자 단계는 확인을 받는다
     confirmed: set[str] = field(default_factory=set)  # 사람이 실행을 확인·허락한 단계
@@ -408,12 +409,18 @@ def _matches_video_scope(ctx, cid, sid, rev):
     if sid == "s2":
         return True
     state = ctx.state(cid)
+    if sid == "s4":
+        from character_factory_poc.pipeline.origin import read_reference_image
+        from character_factory_poc.stages.s4_frames.reference import matches_reference_inputs
+
+        if read_reference_image(folder) is not None:
+            return matches_reference_inputs(ctx, cid, rev)
     if sid == "s6":
         data = read_json(folder / "s6-actions" / rev / "inputs.json")
         return (
             data["preset"] == f"tier:{tier}"
             and data["frameRev"] == state.gate("G4").rev
-            and (not is_twin(folder) or signature_matches(data, read_signature(folder)))
+            and (not is_twin(folder) or signature_matches(data, read_signature(folder), folder))
         )
     locations = {
         "s4a": ("s4a-backgrounds", "background-candidates.json"),
@@ -463,6 +470,12 @@ def _step(
         and not _matches_video_scope(ctx, cid, sid, st.currentRev)
     )
     if stale:
+        from character_factory_poc.pipeline.origin import read_reference_image
+
+        if sid == "s4" and read_reference_image(ctx.character_dir(cid)) is not None:
+            log.add("G4: 기준 사진 조건이 바뀌었다. 화면에서 다시 만든 뒤 확인한다")
+            log.blocked.append("s4")
+            return None
         # D-0166: 다른 등급으로 만들다 기다리던 후보는 정리하고 이 등급으로 다시 만든다.
         # 같은 첫 화면·같은 지시의 영상은 다시 만들 때 옮겨 온다(_carry).
         approve_gate(
@@ -601,7 +614,13 @@ def _step(
     if auto_review and sid == "s8c" and state.stage(sid).status == "APPROVED":
         gate = "G6"
     if gate and state.gate(gate).status == "AWAITING_HUMAN":
-        if opt.demo:
+        from character_factory_poc.pipeline.origin import read_reference_image
+
+        if gate == "G4" and read_reference_image(ctx.character_dir(cid)) is not None:
+            log.add("G4: 기준 사진 확인 대기 — 확인 전에는 영상을 만들지 않는다")
+            if gate not in log.waiting:
+                log.waiting.append(gate)
+        elif opt.demo:
             from character_factory_poc.pipeline.demo import approve_demo
 
             try:
@@ -666,9 +685,9 @@ def run_until(ctx: Context, cid: str, opt: RunOptions) -> RunLog:
     demo = read_demo_mode(ctx.character_dir(cid))
     if demo is None:
         return _run_until(ctx, cid, opt)
-    # 시연 모드: 패키지 승인(G9)까지 직렬로 돌고, 승인되면 테스터 미리보기로 발행한다.
+    # 시연 모드: 패키지 승인(G9)까지 돌고, 승인되면 테스터 미리보기로 발행한다.
     # 앱 내보내기(sx)의 로컬 시연 DB용 고정 id 묶음은 쓰지 않는다(발행이 따로 만든다).
-    opt = replace(opt, until="G9", max_parallel=1, demo=True)
+    opt = replace(opt, until="G9", demo=True, videos_with_chat=False)
     log = RunLog()
     try:
         log = _run_until(ctx, cid, opt, demo_budget=(demo.budgetUsd, demo.enabledAt))
@@ -697,17 +716,13 @@ def _run_until(
         # 모티브의 프롬프트 검토에는 첫 장면도 함께 준비한다.
         opt = replace(opt, until="s8c")
     auto_review = read_auto_review(char_dir)
-    if not opt.video_only and not auto_review and opt.max_parallel > 1:
-        # D-0049(LLD §6.6): 의존이 풀린 단계를 동시에 돌린다.
-        from character_factory_poc.pipeline.scheduler import run_waves
-
-        return run_waves(ctx, cid, opt)
-    log = RunLog()
-    runners = _stage_runners(ctx, cid, opt)
     from character_factory_poc.pipeline.origin import VIDEO_STAGES
 
     scope = graph
-    if opt.video_only:
+    if opt.videos_with_chat:
+        opt = replace(opt, until="s8c")
+        scope = set(VIDEO_STAGES) | {"s0", "s3", "s7", "s8", "s8c"}
+    elif opt.video_only:
         scope = VIDEO_STAGES
     elif auto_review and not opt.demo:
         scope = {"s0", "s3", "s7", "s8", "s8c"} | opt.confirmed
@@ -725,6 +740,14 @@ def _run_until(
                 todo.extend(stage.needs | stage.after | {owners[g] for g in stage.deps})
                 if "G6" in stage.deps:
                     todo.append("s8c")  # 자동 승인은 첫 장면이 준비된 뒤에 한다.
+    if opt.videos_with_chat or (not opt.video_only and opt.max_parallel > 1):
+        from character_factory_poc.pipeline.scheduler import run_waves
+
+        return run_waves(
+            ctx, cid, opt, scope=scope, auto_review=auto_review, demo_budget=demo_budget
+        )
+    log = RunLog()
+    runners = _stage_runners(ctx, cid, opt)
     for sid in graph:
         if sid not in scope:
             continue
