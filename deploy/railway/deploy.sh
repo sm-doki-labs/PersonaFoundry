@@ -19,4 +19,4 @@ mkdir -p "$stage/vendor/chat-svc"
 git -C "$chat_repo" archive "$chat_rev" pyproject.toml uv.lock README.md src data | tar -x -C "$stage/vendor/chat-svc"
 echo "공장 $(git -C "$root" rev-parse --short HEAD) · chat-svc ${chat_rev:0:8}"
 cd "$stage"
-railway up --ci -p "$project" -e "$env" -s "$service" "$@" .
+railway up --ci --path-as-root -p "$project" -e "$env" -s "$service" "$@" .
