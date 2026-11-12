@@ -156,6 +156,11 @@ def cmd_persona_prompts(args) -> int:
                 "evidence-v3",
                 "evidence-v4",
                 "evidence-v5",
+                "evidence-v6",
+                "evidence-v7",
+                "evidence-v8",
+                "evidence-v9",
+                "evidence-v10",
             }:
                 from character_factory_poc.stages.s8_prompts.evidence_pipeline import full_plan
 

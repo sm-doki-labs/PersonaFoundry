@@ -1,5 +1,7 @@
 """Original interview authoring is selected by the approved scene, not the character name."""
 
+import json
+
 import pytest
 
 from character_factory_poc.common.demo_chat import Scene
@@ -9,8 +11,17 @@ from character_factory_poc.providers.fake import FakeTextModel
 from character_factory_poc.stages.s3_plan.twin import run_s3_twin
 from character_factory_poc.stages.s7_traits.sheet import run_s7
 from character_factory_poc.stages.s8_prompts.build import run_s8
-from character_factory_poc.stages.s8_prompts.evidence_compiler import compile_prompt
-from character_factory_poc.stages.s8_prompts.evidence_pipeline import full_plan, version_for
+from character_factory_poc.stages.s8_prompts.evidence_compiler import (
+    FACTS_GUARD,
+    FACTS_GUARD_CARD,
+    NEUTRAL,
+    compile_prompt,
+)
+from character_factory_poc.stages.s8_prompts.evidence_pipeline import (
+    full_plan,
+    verify_review,
+    version_for,
+)
 from tests.support.interview import interview_author, interview_judge
 from tests.support.web_gates import trait_sheet_for
 from tests.test_evidence_compiler import packet
@@ -88,8 +99,19 @@ def test_interview_source_through_g6_and_demo(tmp_path, retry):
     approved = {"decision": "APPROVE", "reviewer": "test", "evidenceReviewed": True}
     s8_requests = [r for m in (model, judge) for r in m.requests if r.stage == "s8"]
 
-    assert sum(p.calls for p in plan) == len(s8_requests) == 3
+    # The plan reserves one format repair; valid authored cards never use it.
+    assert sum(p.calls for p in plan) == 4 and len(s8_requests) == 3
     assert all(CANARY not in m.content for r in s8_requests for m in r.messages)
+    author = next(r for r in s8_requests if r.ref.endswith("/author"))
+    records = json.loads(author.messages[-1].content)["records"]
+    assert records and all(r["questionType"] == "기타" for r in records)
+    assert evidence["sampling"]["version"] == "source-cluster-v2"
+    assert set(evidence["sampling"]["authorIds"]) <= set(evidence["sampling"]["questionIds"])
+    long_text = result["long"]["text"]
+    # New interview packets carry the facts guard and no meta filler for empty sections.
+    assert evidence["cards"][-1] == FACTS_GUARD_CARD
+    assert "\n[KNOWS_AND_LIMITS]\n" + FACTS_GUARD + "\n" in long_text
+    assert NEUTRAL not in long_text and "자료" not in long_text
     assert result["systemRulesRef"] == "builtin:interview-editor-v2"
     assert len(result["sections"]) == 8
     assert evidence["cards"][0]["scope"] == "LOCAL"
@@ -107,3 +129,45 @@ def test_interview_source_through_g6_and_demo(tmp_path, retry):
     scene = Scene.read(ctx.character_dir(cid))
     assert scene.compose() == result["long"]["text"].rstrip("\n")
     assert [m.role for m in scene.opening()] == ["system"]
+
+
+REPAIRED_LIMIT = "공적인 판단을 묻는 장면까지 넓히지 않는다."
+
+
+def _author_with_empty_limit(req):
+    if req.ref.endswith("/repair"):
+        data = json.loads(req.messages[-1].content)
+        assert [c["fix"] for c in data["cards"]] == [
+            {"limit": "비어 있다. 반드시 한 문장으로 쓴다"}
+        ]
+        return {"cards": [dict(id=data["cards"][0]["id"], limit=REPAIRED_LIMIT)]}
+    out = interview_author(req)
+    if req.ref.endswith("/author"):
+        out["cards"][0]["limit"] = ""
+    return out
+
+
+def test_interview_card_with_empty_limit_is_repaired_once_and_reaches_g6(tmp_path):
+    ctx, model, cid = _ready(tmp_path, template="INTERVIEW")
+    judge = FakeTextModel(model="fake-interview-judge")
+    ctx.use_models(model, judge)
+    run_s3_twin(ctx, cid)
+    approve_gate(ctx, cid, "G3", {"decision": "SELECT", "selections": ["v1"], "reviewer": "test"})
+    model.add("AGENT", lambda req: trait_sheet_for(ctx, cid))
+    run_s7(ctx, cid)
+    model.add("AGENT", _author_with_empty_limit)
+    judge.add("JUDGE", interview_judge)
+    folder = run_s8(ctx, cid, [])
+    phases = [
+        r.ref.rsplit("/", 1)[-1] for m in (model, judge) for r in m.requests if r.stage == "s8"
+    ]
+    assert sorted(phases) == ["author", "classify", "judge", "repair"]
+    evidence = read_json(folder / "evidence-review.json")
+    assert evidence["formatRepair"]["cards"] == [
+        dict(id="card-01", fields=["limit"], outcome="CANDIDATE_FOR_G6")
+    ]
+    assert evidence["cards"][0]["limit"] == REPAIRED_LIMIT
+    assert REPAIRED_LIMIT in read_json(folder / "prompt-pair.json")["long"]["text"]
+    approved = {"decision": "APPROVE", "reviewer": "test", "evidenceReviewed": True}
+    approve_gate(ctx, cid, "G6", approved)
+    verify_review(ctx, cid, folder, approved=True)

@@ -186,6 +186,11 @@ class Scene:
             "evidence-pipeline-v3",
             "evidence-pipeline-v4",
             "evidence-pipeline-v5",
+            "evidence-pipeline-v6",
+            "evidence-pipeline-v7",
+            "evidence-pipeline-v8",
+            "evidence-pipeline-v9",
+            "evidence-pipeline-v10",
         }
 
     def compose(self, *, for_review=False):
@@ -202,6 +207,11 @@ class Scene:
             "evidence-pipeline-v3",
             "evidence-pipeline-v4",
             "evidence-pipeline-v5",
+            "evidence-pipeline-v6",
+            "evidence-pipeline-v7",
+            "evidence-pipeline-v8",
+            "evidence-pipeline-v9",
+            "evidence-pipeline-v10",
         }:
             return None
         data = load_json(self.prompt / "example-turns.json") if self.prompt else None

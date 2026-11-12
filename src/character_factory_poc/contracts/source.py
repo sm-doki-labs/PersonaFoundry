@@ -7,10 +7,12 @@
 
 from __future__ import annotations
 
-from typing import Literal
+import re
+import unicodedata
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import BeforeValidator, Field, model_serializer
 
 from character_factory_poc.common.schema import register
 from character_factory_poc.contracts.common import Strict
@@ -68,12 +70,68 @@ class HoldoutPolicy(Strict):
     gapHours: float = Field(default=6.0, gt=0, description="이 시간보다 길게 끊기면 새 대화로 본다")
 
 
+FACT_SHEET_MAX_LINES = 40
+FACT_SHEET_MAX_CHARS = 300
+_DATE = re.compile(r"^\d{4}-(0?[1-9]|1[0-2])-(0?[1-9]|[12]\d|3[01])$")
+
+
+def fact_sheet_lines(value) -> list[str]:
+    """사용자가 준 사실표를 한 줄 한 사실로 정리한다. 앞뒤 공백을 떼고 빈 줄은 버린다.
+
+    S8 [FACTS]에 글자 그대로 들어가므로 연락처와 프롬프트 구역·대화 예시처럼 보이는 줄은
+    받지 않는다.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw = value.splitlines()
+    elif isinstance(value, list) and all(isinstance(x, str) for x in value):
+        raw = [part for x in value for part in (x.splitlines() or [""])]
+    else:
+        raise ValueError("사실은 한 줄에 하나씩 글로 적어 주세요.")
+    lines = [x.strip() for x in raw if x.strip()]
+    if len(lines) > FACT_SHEET_MAX_LINES:
+        raise ValueError(f"사실은 {FACT_SHEET_MAX_LINES}줄까지 적을 수 있어요.")
+    # Lazy imports: parse imports this module, and the compiler is a standalone file.
+    from character_factory_poc.stages.s0_source.parse import _ACCOUNT, _EMAIL, _PHONE
+    from character_factory_poc.stages.s8_prompts.evidence_compiler import _text
+
+    for n, line in enumerate(lines, 1):
+        if len(line) > FACT_SHEET_MAX_CHARS:
+            raise ValueError(f"사실 {n}번째 줄은 {FACT_SHEET_MAX_CHARS}자까지 적을 수 있어요.")
+        if any(unicodedata.category(ch) == "Cc" for ch in line):
+            raise ValueError(f"사실 {n}번째 줄에 보이지 않는 제어 문자가 있어요.")
+        if (
+            _EMAIL.search(line)
+            or _PHONE.search(line)
+            or any(not _DATE.match(m.group()) for m in _ACCOUNT.finditer(line))
+        ):
+            raise ValueError(
+                f"사실 {n}번째 줄에 연락처나 계좌처럼 보이는 번호가 있어요. 빼고 적어 주세요."
+            )
+        try:
+            _text(line, "factSheet", literal=True)
+        except ValueError:
+            raise ValueError(
+                f"사실 {n}번째 줄은 대화 예시(질문:·답변:), 화살표(→, =>), "
+                "[FACTS] 같은 구역 이름 없이 적어 주세요."
+            ) from None
+    return lines
+
+
+FactSheet = Annotated[list[str], BeforeValidator(fact_sheet_lines)]
+
+
 @register("source-pack-v1")
 class SourcePack(Strict):
     schemaVersion: Literal["source-pack-v1"] = "source-pack-v1"
     subject: SourceSubject
     factsPath: str | None = Field(default=None, min_length=1, description="공개 사실 JSON 경로")
     knownFacts: dict[str, str] = Field(default_factory=dict)
+    factSheet: FactSheet = Field(
+        default_factory=list,
+        description="사용자가 준 사실. 한 줄에 하나, S8 [FACTS]에 글자 그대로 넣는다",
+    )
     chapterTemplate: ChapterTemplate = Field(
         default_factory=lambda data: (
             "FAN_CALL" if data["subject"].kind == "PUBLIC_FIGURE" else "FAMILY_CALL"
@@ -84,6 +142,14 @@ class SourcePack(Strict):
     photos: list[SourcePhoto] = Field(default_factory=list)
     texts: list[SourceText] = Field(min_length=1)
     holdout: HoldoutPolicy = Field(default_factory=HoldoutPolicy)
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_fact_sheet(self, handler):
+        # Packs without a fact sheet keep their earlier bytes and hashes.
+        data = handler(self)
+        if not data.get("factSheet"):
+            data.pop("factSheet", None)
+        return data
 
 
 class TextStats(Strict):

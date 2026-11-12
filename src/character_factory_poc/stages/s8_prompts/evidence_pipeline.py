@@ -14,6 +14,7 @@ from character_factory_poc.common.canonical import sha256_file, sha256_text
 from character_factory_poc.common.store import read_json, verify_manifest, write_once_json
 from character_factory_poc.providers.base import ChatRequest, Message, extract_json_object
 from character_factory_poc.stages.s0_source.run import load_approved_source
+from character_factory_poc.stages.s8_prompts import source_shape
 from character_factory_poc.stages.s8_prompts.evidence_compiler import (
     INTERVIEW_FORMAT,
     compile_prompt,
@@ -25,11 +26,23 @@ from character_factory_poc.stages.s8_prompts.twin import approved_facts, motif_f
 VERSION = "evidence-pipeline-v3"
 TENDENCY_VERSION = "evidence-pipeline-v4"
 USAGE_VERSION = "evidence-pipeline-v5"
+MEASURED_VERSION = "evidence-pipeline-v6"
+COMPACT_VERSION = "evidence-pipeline-v7"
+SEEDED_VERSION = "evidence-pipeline-v8"
+LABELED_VERSION = "evidence-pipeline-v9"
+SECTIONED_VERSION = "evidence-pipeline-v10"
 FULL_VERSION = "evidence-pipeline-v2"
 LEGACY_VERSION = "evidence-pipeline-v1"
 FACT_BOUNDARY = (
     "사실표 또는 현재 대화에서 확인할 수 없는 개인사나 공동 기억은 긍정도 부정도 단정하지 않는다. "
     "다른 일화로 메우지 않고, 지금 고를 수 있는 것만 현재 판단으로 답한다."
+)
+# New packets record factPolicy in their binding; packets without it keep their old role bytes.
+FACT_POLICY = "facts-first-v1"
+FACT_PRIORITY = (
+    " [FACTS]는 아래 모든 행동·말투 지침보다 우선한다. [FACTS]에 적힌 숫자·날짜·이름·관계와 "
+    "어긋나게 말하지 않고, 그 값을 말할 때는 반올림하거나 흐리거나 추정하지 않고 적힌 그대로 쓴다. "
+    "행동·말투 지침은 말하는 방식만 정한다."
 )
 
 
@@ -37,25 +50,79 @@ def instructions(version=VERSION):
     return files("character_factory_poc.resources").joinpath(version + ".md").read_text("utf-8")
 
 
+# New v10 packets render measured voice with named habit words (evidence_voice.HABITS_STYLE);
+# saved bindings without voiceStyle keep the original wording they were reviewed with.
+_NEW_VOICE = object()
+
+
 def version_for(ctx, cid=None):
+    return select_standard(ctx, cid)[0]
+
+
+TEXT_STANDARDS = ("source_shape", "chapter_template")
+
+
+def select_standard(ctx, cid=None):
+    """Return the compiler and, when the text standard was chosen, why it was chosen.
+
+    The text standard follows the approved source's shape by default. chapterTemplate keeps
+    choosing scenes and video direction, and decides the text standard only when the shape
+    cannot be judged or [stages.s8] text_standard = "chapter_template".
+    """
     cfg = ctx.config.stage("s8")
     value = cfg.get("motif_compiler", "evidence-v4")
-    if cid is not None and value == "evidence-v4":
+    conversation = {
+        "evidence-v4": TENDENCY_VERSION,
+        "evidence-v7": COMPACT_VERSION,
+        "evidence-v8": SEEDED_VERSION,
+        "evidence-v9": LABELED_VERSION,
+        "evidence-v10": SECTIONED_VERSION,
+    }
+    if cid is not None and value in conversation:
         interview = cfg.get("interview_compiler", INTERVIEW_FORMAT)
         if interview not in (INTERVIEW_FORMAT, "inherit"):
             raise ValueError("interview_compiler는 interview-editor-v2 또는 inherit여야 한다")
+        mode = cfg.get("text_standard", "source_shape")
+        if mode not in TEXT_STANDARDS:
+            raise ValueError("text_standard는 source_shape 또는 chapter_template여야 한다")
         gate = ctx.state(cid).gate("G0")
         if interview == INTERVIEW_FORMAT and gate.status == "APPROVED" and gate.rev:
-            source_pack = ctx.character_dir(cid) / "s0-source" / gate.rev / "source-pack.json"
-            if read_json(source_pack).get("chapterTemplate") == "INTERVIEW":
-                return INTERVIEW_FORMAT
+            folder = ctx.character_dir(cid) / "s0-source" / gate.rev
+            template = read_json(folder / "source-pack.json").get("chapterTemplate")
+            shape = source_shape.analyze_folder(folder) if mode == "source_shape" else None
+            if shape and shape["shape"]:
+                standard, basis = shape["shape"], "source_shape"
+            else:
+                interview_scene = template == "INTERVIEW"
+                standard = source_shape.INTERVIEW if interview_scene else source_shape.CONVERSATION
+                basis = "chapter_template"
+            # v10 handles both shapes itself; earlier conversation versions hand interviews
+            # to the interview editor.
+            sectioned = value == "evidence-v10"
+            interview_editor = standard == source_shape.INTERVIEW and not sectioned
+            version = INTERVIEW_FORMAT if interview_editor else conversation[value]
+            record = dict(
+                mode=mode,
+                basis=basis,
+                standard=standard,
+                compiler=version,
+                chapterTemplate=template,
+            )
+            if shape:
+                record.update(label=shape["label"], sourceShape=shape)
+            return version, record
     return {
         "evidence-v1": LEGACY_VERSION,
         "evidence-v2": FULL_VERSION,
         "evidence-v3": VERSION,
         "evidence-v4": TENDENCY_VERSION,
         "evidence-v5": USAGE_VERSION,
-    }[value]
+        "evidence-v6": MEASURED_VERSION,
+        "evidence-v7": COMPACT_VERSION,
+        "evidence-v8": SEEDED_VERSION,
+        "evidence-v9": LABELED_VERSION,
+        "evidence-v10": SECTIONED_VERSION,
+    }[value], None
 
 
 def selected(ctx):
@@ -66,13 +133,30 @@ def selected(ctx):
         "evidence-v3",
         "evidence-v4",
         "evidence-v5",
+        "evidence-v6",
+        "evidence-v7",
+        "evidence-v8",
+        "evidence-v9",
+        "evidence-v10",
         "v3",
     }:
         raise ValueError(
-            "motif_compiler는 evidence-v5, evidence-v4, evidence-v3, evidence-v2, "
-            "evidence-v1 또는 v3여야 한다"
+            "motif_compiler는 evidence-v10, evidence-v9, evidence-v8, evidence-v7, evidence-v6, "
+            "evidence-v5, "
+            "evidence-v4, evidence-v3, evidence-v2, evidence-v1 또는 v3여야 한다"
         )
-    return value in {"evidence-v1", "evidence-v2", "evidence-v3", "evidence-v4", "evidence-v5"}
+    return value in {
+        "evidence-v1",
+        "evidence-v2",
+        "evidence-v3",
+        "evidence-v4",
+        "evidence-v5",
+        "evidence-v6",
+        "evidence-v7",
+        "evidence-v8",
+        "evidence-v9",
+        "evidence-v10",
+    }
 
 
 def is_evidence(folder):
@@ -84,14 +168,38 @@ def is_evidence(folder):
         "builtin:" + VERSION,
         "builtin:" + TENDENCY_VERSION,
         "builtin:" + USAGE_VERSION,
+        "builtin:" + MEASURED_VERSION,
+        "builtin:" + COMPACT_VERSION,
+        "builtin:" + SEEDED_VERSION,
+        "builtin:" + LABELED_VERSION,
+        "builtin:" + SECTIONED_VERSION,
         "builtin:" + LEGACY_VERSION,
         "builtin:" + FULL_VERSION,
         "builtin:" + INTERVIEW_FORMAT,
     }
 
 
-def _inputs(ctx, cid, plan, plan_path, sheet_path, *, version=None):
-    version = version or version_for(ctx, cid)
+def _inputs(
+    ctx,
+    cid,
+    plan,
+    plan_path,
+    sheet_path,
+    *,
+    version=None,
+    fact_policy=FACT_POLICY,
+    text_standard=None,
+    voice_style=_NEW_VOICE,
+):
+    # A saved revision passes its own compiler and record; it is never routed again.
+    if not version:
+        version, text_standard = select_standard(ctx, cid)
+    elif text_standard is not None and text_standard.get("compiler") != version:
+        raise ValueError("저장된 텍스트 표준 기록과 컴파일러가 다르다")
+    if voice_style is _NEW_VOICE:
+        from character_factory_poc.stages.s8_prompts.evidence_voice import HABITS_STYLE
+
+        voice_style = HABITS_STYLE if version == SECTIONED_VERSION else None
     pack, index, corpus = load_approved_source(ctx, cid)
     root = ctx.character_dir(cid)
     folder = root / "s0-source" / index.sourceRev
@@ -141,6 +249,7 @@ def _inputs(ctx, cid, plan, plan_path, sheet_path, *, version=None):
         for k, v in pack.knownFacts.items()
         if k in {"age", "gender", "job", "background", "relation"}
     ]
+    info += pack.factSheet  # User-provided lines, verbatim, before collected public facts.
     info += motif_facts(approved_facts(ctx, cid))
     if pack.subject.kind == "PUBLIC_FIGURE":
         info += [
@@ -153,7 +262,16 @@ def _inputs(ctx, cid, plan, plan_path, sheet_path, *, version=None):
         "제공된 사실과 조건별 언어 행동에 따라 AI 모티브 캐릭터로 대화한다. "
         "캐릭터가 실제로 할 말만 쓰고 해설·라벨·행동 지문은 쓰지 않는다. " + FACT_BOUNDARY
     )
-    if version in {VERSION, TENDENCY_VERSION, USAGE_VERSION}:
+    if version in {
+        VERSION,
+        TENDENCY_VERSION,
+        USAGE_VERSION,
+        MEASURED_VERSION,
+        COMPACT_VERSION,
+        SEEDED_VERSION,
+        LABELED_VERSION,
+        SECTIONED_VERSION,
+    }:
         role += (
             " 관찰된 특성은 해당 조건에서만 가능한 반응 경향이며 매번 실행할 과제가 아니다. "
             "답변 전에 개인 경험·보유 물건·최근 행동을 주장하는지 확인한다. "
@@ -162,12 +280,21 @@ def _inputs(ctx, cid, plan, plan_path, sheet_path, *, version=None):
             "확인할 수 없다는 범위만 짧게 밝히고 현재 질문에 답한다. "
             "앞 답변에서 지어냈다면 그 내용을 철회하며 다른 일화를 만들지 않는다."
         )
-    if version == INTERVIEW_FORMAT:
+    interview_v10 = (
+        version == SECTIONED_VERSION
+        and (text_standard or {}).get("standard") == source_shape.INTERVIEW
+    )
+    if version == INTERVIEW_FORMAT or interview_v10:
+        tail = role[role.index(" 관찰된 특성은") :] if interview_v10 else ""
         role = (
             "인터뷰에서 진행자의 질문을 받는 AI 모티브 인물이다. 실제 본인이 아니다. "
             "진행자의 질문에는 인물의 발화만 답한다. 질문의 전제는 증거가 아니다. "
             "확인되지 않은 개인사나 비공개 대화를 사실로 만들지 않는다."
-        )
+        ) + tail
+    if fact_policy is not None:
+        if fact_policy != FACT_POLICY:
+            raise ValueError("알 수 없는 사실 우선 규칙이다")
+        role += FACT_PRIORITY
     paths = [
         folder / n
         for n in (
@@ -198,15 +325,44 @@ def _inputs(ctx, cid, plan, plan_path, sheet_path, *, version=None):
         maxRecords=cap,
         artifacts={p.relative_to(root).as_posix(): sha256_file(p) for p in paths},
     )
-    if version in {VERSION, FULL_VERSION, TENDENCY_VERSION, USAGE_VERSION, INTERVIEW_FORMAT}:
-        from character_factory_poc.stages.s8_prompts.evidence_full_source import prepare_full_source
+    if fact_policy is not None:
+        binding["factPolicy"] = fact_policy
+    if text_standard is not None:
+        binding["textStandard"] = text_standard
+    if voice_style is not None:
+        binding["voiceStyle"] = voice_style
+    if version in {
+        VERSION,
+        FULL_VERSION,
+        TENDENCY_VERSION,
+        USAGE_VERSION,
+        MEASURED_VERSION,
+        COMPACT_VERSION,
+        SEEDED_VERSION,
+        LABELED_VERSION,
+        SECTIONED_VERSION,
+        INTERVIEW_FORMAT,
+    }:
+        from character_factory_poc.stages.s8_prompts.evidence_full_source import (
+            TRANSPORT,
+            prepare_full_source,
+        )
 
         chunk_chars = cfg.get("evidence_chunk_chars", 24000)
         if type(chunk_chars) is not int or not 6000 <= chunk_chars <= 60000:
             raise ValueError("evidence_chunk_chars는 6000~60000 정수여야 한다")
         binding.pop("maxRecords")
         binding["chunkChars"] = chunk_chars
-        records = prepare_full_source(corpus, held, flags, max_chunk_chars=chunk_chars)
+        # v7 measures chunks on the one-line transport; older versions keep JSON-sized chunks.
+        compact = version in {COMPACT_VERSION, SEEDED_VERSION, LABELED_VERSION, SECTIONED_VERSION}
+        transport = TRANSPORT if compact else "json"
+        if compact:
+            binding["sourceTransport"] = TRANSPORT
+        if version in {SEEDED_VERSION, LABELED_VERSION, SECTIONED_VERSION}:
+            binding["seed"] = "s3-scene-analysis"
+        records = prepare_full_source(
+            corpus, held, flags, max_chunk_chars=chunk_chars, transport=transport
+        )
     else:
         records = prepare_records(corpus, held, flags, max_records=cap)
         # Bound the total transport, not just the number of windows. Never cut a turn.
@@ -227,10 +383,29 @@ def _inputs(ctx, cid, plan, plan_path, sheet_path, *, version=None):
         trainIds=[r["id"] for r in records["records"]],
         holdoutIds=records["holdoutIds"],
     )
-    if version in {VERSION, FULL_VERSION, TENDENCY_VERSION, USAGE_VERSION}:
+    if version in {
+        VERSION,
+        FULL_VERSION,
+        TENDENCY_VERSION,
+        USAGE_VERSION,
+        MEASURED_VERSION,
+        COMPACT_VERSION,
+        SEEDED_VERSION,
+        LABELED_VERSION,
+    }:
         packet["formatVersion"] = "evidence-conditions-v2"
     if version == INTERVIEW_FORMAT:
         packet["formatVersion"] = INTERVIEW_FORMAT
+    if version in {MEASURED_VERSION, SECTIONED_VERSION}:
+        from character_factory_poc.stages.s8_prompts.evidence_voice import measured_voice_lines
+        from character_factory_poc.stages.s8_prompts.twin import approved_voice
+
+        packet["formatVersion"] = "evidence-conditions-v3"
+        voice = measured_voice_lines(
+            approved_voice(ctx, cid, plan).get("speechProfile"), voice_style
+        )
+        if voice:
+            packet["voice"] = voice
     compile_prompt(packet)  # Validate immutable literal fields before paying for extraction.
     return packet, records, binding
 
@@ -248,7 +423,79 @@ def full_plan(ctx, cid, probes=0):
         from character_factory_poc.stages.s8_prompts.interview_authoring import plan_calls
 
         return plan_calls(source) + [CallPlan("s8", "요청한 추가 응답 표본", probes, None)]
-    if version in {TENDENCY_VERSION, USAGE_VERSION}:
+    if version == SECTIONED_VERSION:
+        from character_factory_poc.stages.s8_prompts.evidence_full_pipeline import ATOMIC_RETRIES
+        from character_factory_poc.stages.s8_prompts.evidence_sections import (
+            plan_count,
+            speed_settings,
+        )
+        from character_factory_poc.stages.s8_prompts.evidence_tendencies import _labeled_partition
+
+        dev, check, _ = _labeled_partition(source)
+        hedged = speed_settings(ctx.config.stage("s8"))["hedgeSeconds"] > 0
+        return [
+            CallPlan(
+                "s8",
+                f"섹션별 후보 2회(보충 포함)와 응답별 전수 표시 최대 2×{len(dev) + len(check)}회",
+                plan_count(dev, check, hedged) + ATOMIC_RETRIES,
+                None,
+            ),
+            CallPlan("s8", "요청한 추가 응답 표본", probes, None),
+        ]
+    if version == LABELED_VERSION:
+        from character_factory_poc.stages.s8_prompts.evidence_full_pipeline import ATOMIC_RETRIES
+        from character_factory_poc.stages.s8_prompts.evidence_tendencies import _labeled_partition
+
+        dev, check, _ = _labeled_partition(source)
+        return [
+            CallPlan(
+                "s8",
+                f"S3 관찰 통합 1회와 응답별 전수 표시 {len(dev)}+{len(check)}회",
+                1 + len(dev) + len(check) + ATOMIC_RETRIES,
+                None,
+            ),
+            CallPlan("s8", "요청한 추가 응답 표본", probes, None),
+        ]
+    if version == SEEDED_VERSION:
+        from character_factory_poc.stages.s8_prompts.evidence_full_pipeline import ATOMIC_RETRIES
+        from character_factory_poc.stages.s8_prompts.evidence_tendencies import (
+            SeededProfile,
+            _seeded_partition,
+        )
+
+        dev, check, _ = _seeded_partition(source)
+        batch = ctx.config.stage("s8").get("evidence_audit_batch", SeededProfile.AUDIT_BATCH)
+        groups = -(-12 // batch)  # upper bound: consolidation is asked for at most 12
+        return [
+            CallPlan(
+                "s8",
+                f"S3 관찰 통합 1회와 원문 {len(dev)}+{len(check)}덩어리 대화별 대조",
+                1 + (len(dev) + len(check)) * groups + ATOMIC_RETRIES,
+                None,
+            ),
+            CallPlan("s8", "요청한 추가 응답 표본", probes, None),
+        ]
+    if version == COMPACT_VERSION:
+        from character_factory_poc.stages.s8_prompts.evidence_atomic import partition_compact
+        from character_factory_poc.stages.s8_prompts.evidence_full_pipeline import ATOMIC_RETRIES
+        from character_factory_poc.stages.s8_prompts.evidence_tendencies import (
+            COMPACT_AUDIT_BATCH,
+            MAX_CONSOLIDATED,
+        )
+
+        dev, check, _ = partition_compact(source)
+        batch = ctx.config.stage("s8").get("evidence_audit_batch", COMPACT_AUDIT_BATCH)
+        groups = -(-min(12, MAX_CONSOLIDATED) // batch)  # upper bound
+        return [
+            CallPlan(
+                "s8",
+                f"한 줄 원문 {len(dev)}+{len(check)}조각 기능·말투 분리와 대화별 대조",
+                len(dev) + (len(dev) + len(check)) * groups + 1 + ATOMIC_RETRIES,
+                None,
+            ),
+            CallPlan("s8", "요청한 추가 응답 표본", probes, None),
+        ]
+    if version in {TENDENCY_VERSION, USAGE_VERSION, MEASURED_VERSION}:
         from character_factory_poc.stages.s8_prompts.evidence_atomic import partition
         from character_factory_poc.stages.s8_prompts.evidence_full_pipeline import ATOMIC_RETRIES
 
@@ -288,15 +535,67 @@ def full_plan(ctx, cid, probes=0):
 
 
 def build(ctx, cid, plan, plan_path, sheet_path, folder, budget, rework=None):
-    packet, source, binding = _inputs(ctx, cid, plan, plan_path, sheet_path)
+    # A resumed run keeps the policy its interrupted binding was written with.
+    prior = folder / "evidence-binding.json"
+    policy = read_json(prior).get("factPolicy") if prior.is_file() else FACT_POLICY
+    kept = read_json(prior) if prior.is_file() else {}  # Also keep its compiler and standard.
+    packet, source, binding = _inputs(
+        ctx,
+        cid,
+        plan,
+        plan_path,
+        sheet_path,
+        fact_policy=policy,
+        version=kept.get("compiler"),
+        text_standard=kept.get("textStandard"),
+        voice_style=kept.get("voiceStyle") if prior.is_file() else _NEW_VOICE,
+    )
     if binding["compiler"] == INTERVIEW_FORMAT:
         from character_factory_poc.stages.s8_prompts import interview_authoring
 
         return interview_authoring.build(ctx, cid, packet, source, binding, folder, budget, rework)
+    if binding["compiler"] == SECTIONED_VERSION:
+        from character_factory_poc.stages.s8_prompts.evidence_sections import build_sections
+
+        return build_sections(ctx, cid, packet, source, binding, folder, budget, rework)
     if binding["compiler"] == USAGE_VERSION:
         from character_factory_poc.stages.s8_prompts.evidence_usage import build_usage
 
         return build_usage(ctx, cid, packet, source, binding, folder, budget, rework)
+    if binding["compiler"] == MEASURED_VERSION:
+        from character_factory_poc.stages.s8_prompts import evidence_measured
+        from character_factory_poc.stages.s8_prompts.evidence_tendencies import build_tendencies
+
+        return build_tendencies(
+            ctx, cid, packet, source, binding, folder, budget, rework, profile=evidence_measured
+        )
+    if binding["compiler"] == LABELED_VERSION:
+        from character_factory_poc.stages.s8_prompts.evidence_tendencies import (
+            LabeledProfile,
+            build_tendencies,
+        )
+
+        return build_tendencies(
+            ctx, cid, packet, source, binding, folder, budget, rework, profile=LabeledProfile
+        )
+    if binding["compiler"] == SEEDED_VERSION:
+        from character_factory_poc.stages.s8_prompts.evidence_tendencies import (
+            SeededProfile,
+            build_tendencies,
+        )
+
+        return build_tendencies(
+            ctx, cid, packet, source, binding, folder, budget, rework, profile=SeededProfile
+        )
+    if binding["compiler"] == COMPACT_VERSION:
+        from character_factory_poc.stages.s8_prompts.evidence_tendencies import (
+            CompactProfile,
+            build_tendencies,
+        )
+
+        return build_tendencies(
+            ctx, cid, packet, source, binding, folder, budget, rework, profile=CompactProfile
+        )
     if binding["compiler"] == TENDENCY_VERSION:
         from character_factory_poc.stages.s8_prompts.evidence_tendencies import build_tendencies
 
@@ -404,7 +703,15 @@ def verify_review(ctx, cid, folder, *, approved=False):
     _, sheet_path = load_latest_trait_sheet(ctx, cid)
     saved = read_json(folder / "evidence-binding.json")
     current, source, binding = _inputs(
-        ctx, cid, plan, plan_path, sheet_path, version=saved["compiler"]
+        ctx,
+        cid,
+        plan,
+        plan_path,
+        sheet_path,
+        version=saved["compiler"],
+        fact_policy=saved.get("factPolicy"),
+        text_standard=saved.get("textStandard"),
+        voice_style=saved.get("voiceStyle"),
     )
     review = read_json(folder / "evidence-review.json")
     packet = read_json(folder / "evidence-packet.json")
@@ -418,6 +725,8 @@ def verify_review(ctx, cid, folder, *, approved=False):
     ) != sha256_file(folder / "evidence-review.json"):
         raise ValueError("검토 자료가 변경되었다")
     current["sections"] = review["cards"]
+    if "statedFacts" in packet:
+        current["statedFacts"] = review.get("statedFacts")
     if current != packet or source["records"] != review["records"]:
         raise ValueError("검토 카드나 원문 표본이 다르다")
     from character_factory_poc.stages.s8_prompts.evidence_full_pipeline import verify_analysis_files

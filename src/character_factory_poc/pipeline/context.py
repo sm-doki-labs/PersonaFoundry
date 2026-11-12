@@ -39,6 +39,10 @@ class Context:
     max_calls: int | None = None
     _text: TextModel | None = None
     _judge: TextModel | None = None
+    _planner: TextModel | None = None
+    _analyzer: TextModel | None = None
+    _labeler: TextModel | None = None
+    _labeler_effort: dict | None = None
     _codex: object | None = None
     _image: ImageModel | None = None
     _video: VideoModel | None = None
@@ -224,6 +228,81 @@ class Context:
                 self.ledger(character_id),
                 budget,
                 billing=self._billing(self.config.provider("text"), self._text),
+                price_overrides=self.price_overrides(),
+            ),
+            "text",
+        )
+
+    def analyzer_model(self, character_id: str, budget: Budget) -> TextModel:
+        """S3 원문 분석기 모델. [providers.analyzer]가 없으면 조립 모델(planner)을 쓴다."""
+        if "analyzer" not in self.config.providers or "_text" in self._injected:
+            return self.planner_model(character_id, budget)
+        cfg = self.config.provider("analyzer")
+        with self._lazy:
+            if self._analyzer is None:
+                self._analyzer = make_text_model(cfg)
+        return self._limited(
+            TrackedTextModel(
+                self._analyzer,
+                self.ledger(character_id),
+                budget,
+                billing=self._billing(cfg, self._analyzer),
+                price_overrides=self.price_overrides(),
+            ),
+            "text",
+        )
+
+    def labeler_model(
+        self, character_id: str, budget: Budget, reasoning: str | None = None
+    ) -> TextModel:
+        """S8 응답별 표시 모델(evidence-v9). [providers.labeler]가 없으면 S3 분석기 모델을 쓴다.
+
+        reasoning을 주면 같은 공급자 설정에 추론 강도만 바꾼 모델을 쓴다(evidence-v10의
+        표시·보충 단계). 분석기 모델로 대신할 때는 무시한다.
+        """
+        if "labeler" not in self.config.providers or "_text" in self._injected:
+            return self.analyzer_model(character_id, budget)
+        cfg = self.config.provider("labeler")
+        if reasoning is not None:
+            from dataclasses import replace
+
+            cfg = replace(cfg, extra=dict(cfg.extra, reasoning_effort=reasoning))
+        with self._lazy:
+            if reasoning is not None:
+                self._labeler_effort = self._labeler_effort or {}
+                if reasoning not in self._labeler_effort:
+                    self._labeler_effort[reasoning] = make_text_model(cfg)
+                inner = self._labeler_effort[reasoning]
+            elif self._labeler is None:
+                self._labeler = make_text_model(cfg)
+                inner = self._labeler
+            else:
+                inner = self._labeler
+        return self._limited(
+            TrackedTextModel(
+                inner,
+                self.ledger(character_id),
+                budget,
+                billing=self._billing(cfg, inner),
+                price_overrides=self.price_overrides(),
+            ),
+            "text",
+        )
+
+    def planner_model(self, character_id: str, budget: Budget) -> TextModel:
+        """S3 원문 분석·기획 조립 모델. [providers.planner]가 없으면 생성 모델을 쓴다."""
+        if "planner" not in self.config.providers or "_text" in self._injected:
+            return self.text_model(character_id, budget)
+        cfg = self.config.provider("planner")
+        with self._lazy:
+            if self._planner is None:
+                self._planner = make_text_model(cfg)
+        return self._limited(
+            TrackedTextModel(
+                self._planner,
+                self.ledger(character_id),
+                budget,
+                billing=self._billing(cfg, self._planner),
                 price_overrides=self.price_overrides(),
             ),
             "text",

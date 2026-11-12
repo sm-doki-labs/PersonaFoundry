@@ -152,6 +152,11 @@ def motif_plan_calls(
         "evidence-v3",
         "evidence-v4",
         "evidence-v5",
+        "evidence-v6",
+        "evidence-v7",
+        "evidence-v8",
+        "evidence-v9",
+        "evidence-v10",
     }:
         return [
             CallPlan("s8", "원문 조건별 특징 후보 추출 (G6 직접 검토 필요)", 1, None),
@@ -159,7 +164,7 @@ def motif_plan_calls(
         ]
     if motif_compiler != "v3":
         raise ValueError(
-            "motif_compiler는 evidence-v5, evidence-v4, evidence-v3, evidence-v2, evidence-v1 또는 v3여야 한다"
+            "motif_compiler는 evidence-v10, evidence-v9, evidence-v8, evidence-v7, evidence-v6, evidence-v5, evidence-v4, evidence-v3, evidence-v2, evidence-v1 또는 v3여야 한다"
         )
     choices = {
         "contrast": ("대조 특질 발견·답 가린 예측·독립 검토", 3),

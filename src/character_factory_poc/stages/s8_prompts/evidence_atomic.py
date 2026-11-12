@@ -66,6 +66,56 @@ def partition(source):
     )
 
 
+def partition_compact(source):
+    """evidence-v7: the same fixed unit split, each half repacked into as few chunks as fit.
+
+    v4 kept the confirmation half on the original whole-source chunk borders, so many calls
+    carried only a few turns. Here each half is packed again on the one-line transport bound,
+    keeping a conversation in one chunk whenever it fits. Membership is identical to partition().
+    """
+    from character_factory_poc.stages.s8_prompts.evidence_full_source import (
+        TRANSPORT,
+        lines_size,
+        make_chunk,
+        pack_units,
+    )
+
+    transport = source.get("transport") or {}
+    bound = transport.get("maxChunkChars")
+    if transport.get("format") != TRANSPORT or type(bound) is not int:
+        raise ValueError("한 줄 원문 형식으로 준비한 원문이 아니다")
+    dev, check, split = partition(source)
+
+    def repack(chunks, prefix):
+        pieces = [seg for ch in chunks for seg in ch["segments"]]
+        bins = pack_units(pieces, lambda parts: lines_size(parts) <= bound)
+        return [make_chunk(b, f"{prefix}-{n:04d}") for n, b in enumerate(bins, 1)]
+
+    def summary(chunks):
+        return [
+            dict(
+                id=ch["id"],
+                units=[list(u) for u in dict.fromkeys(tuple(s["unit"]) for s in ch["segments"])],
+                turns=sum(len(s["turns"]) for s in ch["segments"]),
+                records=len(ch["recordIds"]),
+                chars=lines_size(ch["segments"]),
+            )
+            for ch in chunks
+        ]
+
+    dev, check = repack(dev, "dev"), repack(check, "check")
+    split = dict(
+        split,
+        schemaVersion="evidence-partition-v2",
+        transport=TRANSPORT,
+        maxChunkChars=bound,
+        developmentChunks=summary(dev),
+        confirmationChunks=summary(check),
+        policy=split["policy"] + "; each half repacked on conversation borders",
+    )
+    return dev, check, split
+
+
 def to_card(c, refs):
     # Letter sequences presented as things to say are lexical examples, even
     # when they evade the quoted-dialogue guard. Describe them linguistically.

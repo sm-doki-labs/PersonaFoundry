@@ -143,10 +143,16 @@ def test_native_build_retains_conditions_and_rejects_analysis_tampering(tmp_path
 
     def fake(ctx, cid, folder, budget, phase, key, p):
         phases.append((phase, p))
+        if phase == "tendency-consolidate":
+            assert all("heldClaims" not in o for o in p["observations"])
         if phase in ["tendency-discover", "tendency-consolidate"]:
             c = {k: v for k, v in claim().items() if k != "id"}
             c.update(dimension="response", evidence=p["allowedIds"][:2])
-            return {"claims": [c]}, "fake"
+            excluded = dict(c, realization="상대에게 '합성 대사입니다'라고 답한다.")
+            return {
+                "claims": [c],
+                "heldClaims": [dict(claim=excluded, reason="예시 대사 보류")],
+            }, "fake"
         ts = {t["id"]: t for seg in p["chunk"]["segments"] for t in seg["turns"]}
         items = []
         for rid, t in p["targets"].items():
@@ -175,6 +181,17 @@ def test_native_build_retains_conditions_and_rejects_analysis_tampering(tmp_path
     )
     review = pipeline.verify_review(ctx, cid, folder)
     assert review["schemaVersion"] == "evidence-review-v4"
+    # Small sources cap the conversation minimum at the conversations they have.
+    assert review["supportRule"]["requiredConversations"] == 3
+    decision = read_json(folder / "evidence-tendency-decisions.json")[0]
+    assert decision["retained"] and decision["support"]["conversations"] == 3
+    excluded = review["excludedClaims"]
+    assert len(excluded) == sum(
+        p in {"tendency-discover", "tendency-consolidate"} for p, _ in phases
+    )
+    assert {x["phase"] for x in excluded} == {"tendency-discover", "tendency-consolidate"}
+    assert all(x["reason"] == "예시 대사 보류" and x["chunkId"] for x in excluded)
+    assert "합성 대사입니다" not in (folder / "long.md").read_text()
     assert ctx.state(cid).gate("G6").status == "AWAITING_HUMAN"
     text = Scene.read(ctx.character_dir(cid), review_preview=True).compose()
     for card in review["cards"]:
@@ -206,3 +223,134 @@ def test_bad_citation_is_quarantined_without_losing_other_valid_evidence():
         [out], [claim()], [{"id": "s1", "unit": ["t", "a"]}, {"id": "s2", "unit": ["t", "a"]}]
     )["tendency-01"]
     assert stats["support"] == ["s2"] and stats["invalidCount"] == 1
+
+
+def test_blank_audit_note_is_marked_not_rejected():
+    m = module()
+    p = {"claims": [claim()], "chunk": chunk(), "targets": m.targets(chunk())}
+    out = {"findings": [dict(claimId="tendency-01", items=[], note="")]}
+    m.validate_transport("tendency-audit", out, p)
+    assert out["findings"][0]["note"] == m.BLANK_NOTE and out["findings"][0]["items"] == []
+    missing = {"findings": []}
+    with pytest.raises(ValueError, match="누락"):
+        m.validate_transport("tendency-audit", missing, p)
+
+
+def test_quoted_discovery_claim_is_held_without_dropping_the_chunk():
+    """발화를 인용한 후보 하나는 보류하고 나머지로 진행한다. 형식 오류는 여전히 거절한다(D-0186)."""
+    m = module()
+    p = {"allowedIds": ["s1", "s2"]}
+    good = {k: v for k, v in claim().items() if k != "id"}
+    quoted = dict(good, realization="답을 시작할 때 '일단은'을 앞에 둔다.")
+    out = {"claims": [good, quoted]}
+    m.validate_transport("tendency-discover", out, p)
+    assert out["claims"] == [good]
+    assert out["heldClaims"][0]["claim"] == quoted
+    assert "dialogue/example" in out["heldClaims"][0]["reason"]
+    unchanged = deepcopy(out)
+    m.validate_transport("tendency-discover", out, p)  # 저장본을 다시 읽어도 같다
+    assert out == unchanged
+    outside = dict(good, evidence=["s9"])
+    with pytest.raises(ValueError, match="허용 원문 밖"):
+        m.validate_transport("tendency-discover", {"claims": [good, outside]}, p)
+    with pytest.raises(ValueError, match="범주"):
+        m.validate_transport("tendency-discover", {"claims": [dict(quoted, section="UNKNOWN")]}, p)
+
+
+def _half(ids, unit_of, variation=()):
+    return dict(
+        support=list(ids),
+        supportUnits=len({unit_of[r] for r in ids}),
+        variation=list(variation),
+        outside=[],
+        unclear=[],
+    )
+
+
+def test_thin_support_is_held_by_conversation_count_and_share():
+    m = module()
+    units = {f"s{i}": ("t", f"c{i}") for i in range(40)}
+    rule = m.support_rule({}, 160)
+    assert (rule["requiredConversations"], rule["minShare"]) == (8, 0.5)
+    # 5 responses from 5 conversations: the shape of a narrow one-off register card.
+    narrow = m.support_stats(
+        _half(["s1", "s2", "s3", "s4"], units, ["s10", "s11"]),
+        _half(["s5"], units, ["s12", "s13"]),
+        units,
+    )
+    assert (narrow["responses"], narrow["conversations"], narrow["applicable"]) == (5, 5, 9)
+    reason = m.thin_support(narrow, rule)
+    assert "대화 수" in reason and "5개(기준 8개)" in reason and "5/9건" in reason
+    broad = m.support_stats(
+        _half([f"s{i}" for i in range(14)], units),
+        _half(["s20", "s21", "s22", "s23"], units),
+        units,
+    )
+    assert broad["conversations"] == 18 and m.thin_support(broad, rule) is None
+    contested = m.support_stats(
+        _half([f"s{i}" for i in range(8)], units, [f"s{i}" for i in range(20, 31)]),
+        _half(["s32", "s33"], units),
+        units,
+    )
+    assert contested["conversations"] == 10 and contested["share"] < 0.5
+    assert "지지 비율" in m.thin_support(contested, rule)
+    # A small source cannot demand more conversations than it has.
+    assert m.support_rule({}, 3)["requiredConversations"] == 3
+    custom = m.support_rule({"evidence_min_support": {"conversations": 4, "share": 0}}, 160)
+    assert m.thin_support(narrow, custom) is None
+    for bad in [{"conversations": 0}, {"share": 1.5}, {"share": True}, {"count": 3}, 8]:
+        with pytest.raises(ValueError, match="evidence_min_support"):
+            m.support_rule({"evidence_min_support": bad}, 160)
+
+
+def test_native_build_holds_thin_cards_with_numbers_in_review(tmp_path, monkeypatch):
+    from character_factory_poc.common.store import read_json
+    from character_factory_poc.stages.s8_prompts.build import run_s8
+    from tests.test_evidence_pipeline import ready
+
+    ctx, _, cid = ready(tmp_path)
+    m = module()
+    ctx.config.stages["s8"]["motif_compiler"] = "evidence-v4"
+    base = {k: v for k, v in claim().items() if k != "id"}
+    functions = ["판단의 근거 설명", "정정 요청에 대한 반박"]
+
+    def fake(ctx, cid, folder, budget, phase, key, p):
+        if phase in ["tendency-discover", "tendency-consolidate"]:
+            ev = p["allowedIds"][:2]
+            claims = [dict(base, dimension="response", function=f, evidence=ev) for f in functions]
+            return {"claims": claims}, "fake"
+        ts = {t["id"]: t for seg in p["chunk"]["segments"] for t in seg["turns"]}
+        items = [
+            dict(
+                responseTurnId=rid,
+                conditionTurnId=t["precedingUserIds"][-1],
+                conditionQuote=ts[t["precedingUserIds"][-1]]["text"],
+                responseQuote=ts[rid]["text"],
+                applicability="yes",
+                functionMatch="present",
+                formMatch="present",
+                reason="합성 검증",
+            )
+            for rid, t in p["targets"].items()
+        ]
+        out = {"findings": [dict(claimId=c["id"], items=items, note="합성") for c in p["claims"]]}
+        m.validate_phase(phase, out, p)
+        return out, "fake"
+
+    # The fixture has 3 one-response conversations; report it as a 30-conversation source so
+    # the default minimum of 8 applies, as it does for a real chat source.
+    real = m.support_rule
+    monkeypatch.setattr(m, "support_rule", lambda cfg, n, default: real(cfg, n * 10, default))
+    monkeypatch.setattr(m, "call", fake)
+    with pytest.raises(ValueError, match="반복 근거"):
+        run_s8(ctx, cid, [])
+    folder = ctx.character_dir(cid) / "s8-prompts/pv1"
+    review = read_json(folder / "evidence-review.json")
+    assert review["status"] == "HELD" and review["cards"] == []
+    assert review["supportRule"]["requiredConversations"] == 8
+    assert [h["claim"]["function"] for h in review["held"]] == functions
+    for h in review["held"]:
+        assert h["support"]["conversations"] == 3 and h["support"]["share"] == 1.0
+        assert h["reason"].startswith("지지 근거가 얇다(대화 수 미달)")
+        assert "3개(기준 8개)" in h["reason"]
+    assert not (folder / "evidence-packet.json").exists()
