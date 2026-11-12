@@ -154,3 +154,4 @@ v7c의 후보 12개를 고정하고, 익준 대상 응답 2,155개(개발 1,452�
 - 시험: 기존 흐름 시험의 가짜 S8 응답은 v4용이라 `tests/conftest.py`의 자동 고정(`previous_text_standard`)으로 v4에 둔다. 기본값 자체는 `@pytest.mark.text_default` 시험이 확인한다.
 - 실행 중인 8776·8781~8783 서버는 각자 runtime 사본을 쓰므로 이번 변경의 영향을 받지 않는다.
 - S3 장면 분석(D-0198)과 분석기·조립기 모델 설정(D-0200)도 커밋했다. 이제 새로 만드는 캐릭터는 S3에서 장면 분석이 생기므로 설정 없이 evidence-v10으로 간다.
+- factory.example.toml에 실측 조합을 켰다: [providers.analyzer] GPT-6.1 Sol(medium, stream, 900초, 재시도 1), [providers.planner] Claude Opus 5.5(effort high, 900초, 재시도 2), [stages.s3t] analysis_mode = "scenes".
