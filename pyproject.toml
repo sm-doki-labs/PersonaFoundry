@@ -56,6 +56,8 @@ select = ["E", "F", "I", "UP", "B"]
 
 # 한국어 안내문·HTML 템플릿 문자열은 포매터가 줄바꿈할 수 없으므로 해당 파일만 줄 길이를 면제한다.
 [tool.ruff.lint.per-file-ignores]
+"src/character_factory_poc/stages/export/preview.py" = ["E501"]
+"src/character_factory_poc/stages/export/preview_scripts.py" = ["E501"]
 "src/character_factory_poc/pipeline/gates.py" = ["E501"]
 "src/character_factory_poc/pipeline/agent.py" = ["E501"]
 "src/character_factory_poc/common/budget.py" = ["E501"]

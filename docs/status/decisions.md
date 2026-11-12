@@ -258,3 +258,11 @@ S4 시그니처 중간 사진은 [providers.signature_image]의 Grok 이미지 �
 
 모든 생성 경로(원문으로 만들기, 새로 지어내기, 실행 화면 등록)에 선택 입력인 Fish Audio 음성 ID 칸을 둔다. 형식은 영문 소문자·숫자 32자이고, 대문자와 앞뒤 공백은 정리하며 틀리면 만들기 전에 거절한다. ID는 voice-settings.json에 저장한다. 모든 갈래 그래프에 sv(음성) 단계를 두며, 모델 호출과 관문이 없다. sv는 voice/vo<n>/voice.json을 쓰고 바로 승인되며, ID가 없어도 "없음"으로 승인된다. 모티브 갈래에서는 다른 단계처럼 G0 뒤에 돈다. s11은 sv 뒤에 오며(after), 승인된 ID가 있으면 패키지에 voice/voice.json과 package.voice(provider, referenceId, voiceRev, record)를 넣는다. ID가 없으면 voice 칸 자체를 빼서 이전 패키지와 바이트가 같다. 공장은 음성을 합성하지 않는다. Doki 앱 내보내기의 api-svc voice_id는 voice-svc UUID라 이 ID를 그대로 넣지 않고 unmapped에 기록한다. 기존 twin.voiceId·default_voice_id 경로는 그대로다.
 
+
+### D-0206 — 테스터 발행을 dev 넣기 서비스(backoffice factory-import) 호출 한 번으로 바꾼다 (확정, 2026-11-13)
+
+테스터 전용 발행(`cfp preview publish`, 시연 모드 G9 뒤)이 api-svc·chat-svc DB 에 직접 쓰고 aws s3 cp 로 올리던 경로를 없앤다. 공장은 dev VPC 안의 넣기 서비스(backoffice `app.factory_import_main`, https://factory-import.dev.dokilabs.com, 인증 `X-Factory-Import-Token`)를 부른다. 순서: 상태 조회(같은 캐릭터·시퀀스·테스터 명단·voice-svc 도달) → id 예약 → api-svc 시드 묶음(doki_app.api_svc) → chat 콘텐츠 컴파일(dev 배포 판 chat-svc 체크아웃 data/ 위에 조각을 얹어 그 저장소 컴파일러로, 이 캐릭터 항목만) → 업로드 주소를 받아 사진·영상 PUT → 넣기 한 번(프로필·단계·미디어·통화 클립 + 페르소나·챕터 + 음성). 음성은 패키지 Fish Audio 음성 ID(D-0205)면 넣기 서비스가 voice-svc 에 새 Voice 로 발행해 잇고, 없으면 twin.voiceId·default_voice_id 의 voice-svc UUID 를 잇는다. 음성 묶음 행은 공장이 보내지 않는다. 사람 승인 단계는 없고, 중간 실패는 넣기 서비스가 되돌린다. `cfp preview remove` 가 마지막 발행을 지운다(새로 발행한 Voice 포함). 대상 DB 열에 없는 칸 경고는 넣기 서비스가 낸다.
+
+근거: 사용자 "공장 쪽 발행 코드를 이 넣기 API 부르게 바꿔줘. 프로필·페르소나·영상·음성(Fish id) 한 번에 올라가게". 맥에서는 dev DB·버킷에 직접 쓸 수 없고(api-svc load_call_clips 머리말), 저장소 data/ 전체 재발행은 dev 발행본이 저장소와 다르면 멈췄다.
+버린 안: NAT 경유 DB 직접 쓰기, api-svc 에 넣기 API 추가, backoffice 승격 경로(사람 검토 필요).
+

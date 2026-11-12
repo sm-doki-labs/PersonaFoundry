@@ -45,15 +45,10 @@ def _write_status(ctx, cid: str, phase: str, detail: str, **extra) -> None:
 
 
 def _already_published(ctx, cid: str) -> dict | None:
-    root = Path(ctx.character_dir(cid)) / "px-preview"
-    for path in sorted(root.glob("*.json"), reverse=True):
-        try:
-            data = json.loads(path.read_text("utf-8"))
-        except (OSError, ValueError):
-            continue
-        if data.get("status") == "PUBLISHED":
-            return data
-    return None
+    # 지운 뒤(REMOVED)에는 다시 발행할 수 있어야 한다 — 가장 최근 기록 하나만 본다.
+    from character_factory_poc.stages.export.preview import latest_published
+
+    return latest_published(ctx, cid)
 
 
 def after_demo_run(ctx, cid: str, demo: DemoMode, log, *, error: str | None = None) -> str:
