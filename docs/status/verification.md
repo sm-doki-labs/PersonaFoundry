@@ -817,3 +817,9 @@
 - 로컬: 같은 묶음으로 `docker build -f deploy/railway/Dockerfile` 성공. 이미지 안 /opt/chat-svc 컴파일러가 기존 캐릭터(481c1c0e…) 버전5·챕터20을 문제0으로 컴파일, `/api/health` 200. 서버 설정으로 공급자 11개(text·judge·dialogue·demo_chat·planner·analyzer·labeler·vision·image·signature_image·video)가 모두 만들어짐.
 - Railway: `deploy/railway/deploy.sh`(공장 273bd2c·chat-svc 864e02b6) 빌드·배포 완료. 공개 주소 `/api/health` 200(root /data/factory, configPath /app/deploy/factory.railway.toml), 첫 화면 200. `railway ssh` 로 서버 안에서 chat-svc 컴파일 같은 결과, dev 넣기 서비스 `GET /api/v1/factory-import/state` 200(토큰 통과).
 - 미검증: 서버에서 실제 캐릭터 생성(유료 호출), 테스터 발행 한 번, 담이 계정 통화 확인, 실제 Fish 음성.
+
+## 2026-11-13 — D-0209·D-0210 Railway 손흥민 G9·발행 준비
+
+- 서버 손흥민 사본으로 로컬 S11: 패키지 pk1(Fish 7406bbcc…, 영상 7편, 챕터 1), 공개 점검 PASS(허용 문구 추가 뒤). 발행 드라이런(실제 dev GET /state, 나머지 요청 흉내): 단계 3·통화 클립 18·업로드 23, chat 컴파일 챕터 3, 음성 새 Voice 발행 예정. 마지막 넣기 요청은 보내지 않았다.
+- 찰칵 크기: 얼굴 비율 오늘 1.18·어제 1.00(Haar alt2), 배경 정합 비율은 둘 다 ≈1.0.
+- 관련 테스트 124 passed·6 skipped(preview·export·doki·s11·package·release·presentation), 106 passed(reference·signature·s4).

@@ -85,6 +85,8 @@ POSE_NEGATIVE = (
 )
 SIGNATURE_FRAME = "signature-frame.json"
 SIGNATURE_AT_S = 2.0
+#: 중간 프레임 인물 크기가 어긋날 때 다시 만드는 횟수까지 합친 최대 생성 수(D-0210).
+SIGNATURE_ATTEMPTS = 3
 # Shared by every signature pose: the seed must keep the master's body, or the video visibly
 # widens and narrows as it passes through the seed (Son 2026-11-12: torso 1.08-1.14x).
 BODY_LOCK = (
@@ -326,19 +328,33 @@ def _signature_seed(ctx, cid, rev, folder, inputs, base_rel, budget) -> str:
     write_once_bytes(copy, source.read_bytes())
     if sha256_file(copy) != pose["sha256"]:
         raise CheckFailed("s4", ["시그니처 참고 사진을 고정하는 동안 원본이 변경됐다"])
-    request = ImageRequest(
-        stage="s4",
-        ref=f"{cid}/{rev}/ch1-sig",
-        prompt=pose["prompt"],
-        negative_prompt=pose["negativePrompt"],
-        size=request_size((9, 16)),
-        reference_images=(str(folder / base_rel), str(copy)),
-    )
-    result = ctx.signature_image_model(cid, budget).generate(request)
-    try:
-        data, _, _ = crop_to_ratio(result.data, (9, 16))
-    except ValueError as exc:
-        raise CheckFailed("s4", [str(exc)]) from exc
+    from character_factory_poc.stages.s4_frames.framing import distance, face_scale
+
+    # D-0210: 인물이 기준 사진보다 커지거나 작아지면 영상이 2초에 확대됐다 돌아온다.
+    # 얼굴 크기 비율이 범위를 벗어나면 최대 두 번 더 만들고 가장 가까운 것을 쓴다.
+    tries: list[dict] = []
+    for attempt in range(1, SIGNATURE_ATTEMPTS + 1):
+        request = ImageRequest(
+            stage="s4",
+            ref=f"{cid}/{rev}/ch1-sig" + (f"-try{attempt}" if attempt > 1 else ""),
+            prompt=pose["prompt"],
+            negative_prompt=pose["negativePrompt"],
+            size=request_size((9, 16)),
+            reference_images=(str(folder / base_rel), str(copy)),
+        )
+        result = ctx.signature_image_model(cid, budget).generate(request)
+        try:
+            data, _, _ = crop_to_ratio(result.data, (9, 16))
+        except ValueError as exc:
+            raise CheckFailed("s4", [str(exc)]) from exc
+        candidate = f"ch1/signature-mid-try{attempt}.png"
+        write_once_bytes(folder / candidate, data)
+        check = face_scale(folder / base_rel, folder / candidate)
+        tries.append({"path": candidate, "data": data, "result": result, "framing": check})
+        if check["ok"] is not False:
+            break
+    best = min(tries, key=lambda t: distance(t["framing"]))
+    data, result, framing = best["data"], best["result"], best["framing"]
     relative = "ch1/signature-mid.png"
     write_once_bytes(folder / relative, data)
     write_once_json(
@@ -355,15 +371,24 @@ def _signature_seed(ctx, cid, rev, folder, inputs, base_rel, budget) -> str:
             "negativePrompt": request.negative_prompt,
             "model": result.model,
             "provider": result.provider,
+            "framing": framing,
+            "attempts": [{"path": t["path"], "framing": t["framing"]} for t in tries],
         },
     )
+    warning = ""
+    if framing["ok"] is False:
+        warning = (
+            f'<p class="warn">중간 프레임의 인물 크기가 기준 사진의 {framing["scale"]:.2f}배예요. '
+            "영상이 2초에 확대·축소돼 보일 수 있어요. 다시 만들기를 권해요.</p>"
+        )
     return (
         '<fieldset><legend>시그니처 중간 프레임</legend><div class="scene">'
         f'<img class="frame" src="{escape(relative)}" '
         'alt="기준 이미지에 시그니처 동작을 입힌 중간 프레임">'
         f'<img class="ref" src="{escape(pose["path"])}" alt="업로드한 동작 참고 사진">'
         "</div><p>얼굴·복장·배경은 기준 이미지와 같고 동작만 참고 사진을 따라야 해요.</p>"
-        "</fieldset>"
+        + warning
+        + "</fieldset>"
     )
 
 
