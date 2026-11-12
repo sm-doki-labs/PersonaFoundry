@@ -30,6 +30,7 @@ from character_factory_poc.pipeline.rework import rework_status
 from character_factory_poc.pipeline.state import gate_events_path, stage_events_path
 from character_factory_poc.web.errors import WebError
 from character_factory_poc.web.gate_items import build_gate_items, file_url
+from character_factory_poc.web.quality_status import derive_quality_status
 
 CHARACTERS_DIR = "runs/characters"
 BRIEFS_DIR = "runs/briefs"
@@ -647,6 +648,10 @@ def job_status(row, job, last):
         status = "running"
     elif status != "needs_review" and last and last["status"] == "failed":
         status = "failed"
+    elif not job and last and last.get("status") == "succeeded" and status != "failed":
+        gates = {g["id"]: g for g in row.get("gates", [])}
+        if any(gates.get(g, {}).get("status") != "APPROVED" for g in last.get("waiting", [])):
+            status = "needs_review"
     row.update(status=status, statusLabel=STATUS_LABELS[status])
 
 
@@ -664,7 +669,7 @@ def video_fields(folder, state):
         inputs = read_json_file(folder / "s6-actions" / approved / "inputs.json") or {}
         preset = inputs.get("preset", "")
     # D-0165: 모티브는 시그니처 포즈를 바꾸면 영상을 다시 만들어야 한다.
-    same_signature = not tier or not is_twin(folder) or signature_matches(inputs, signature)
+    same_signature = not tier or not is_twin(folder) or signature_matches(inputs, signature, folder)
     job = read_json_file(folder / "video-job.json") or {}
     status = "none"
     if not tier and not preset.startswith("tier:"):
@@ -704,6 +709,13 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
     graph, gate_ids, meta = graph_parts(char_dir)
     stages = _stage_rows(state, graph)
     gates = _gate_rows(state, gate_ids)
+    quality = derive_quality_status(char_dir, stages, gates)
+    for stage in stages:
+        review = next((g for g in quality["approvals"] if g["gate"] == stage["gate"]), None)
+        if review:
+            stage["qualityReview"] = dict(review)
+            if stage["id"] == "s10":
+                stage["qualityReview"]["label"] += " · " + quality["comparison"]["label"]
     _add_times(char_dir, stages, gates)
     persona = _persona(char_dir)
     pending = [g for g in gates if g["status"] == "AWAITING_HUMAN"]
@@ -738,6 +750,7 @@ def character_summary(char_dir: Path) -> dict[str, Any]:
         "status": status,
         "statusLabel": STATUS_LABELS[status],
         "chatReady": chat,
+        "qualityStatus": quality,
         "chapterTemplate": (read_json_file(char_dir / "source-pack.json") or {}).get(
             "chapterTemplate", ""
         ),
@@ -834,6 +847,7 @@ def character_detail(root: Path, character_id: str) -> dict[str, Any]:
         "state": state,
         "stateError": error,
         "summary": summary,
+        "qualityStatus": summary["qualityStatus"],
         **{
             k: summary[k]
             for k in (

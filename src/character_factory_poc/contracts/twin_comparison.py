@@ -31,7 +31,8 @@ class Condition(Strict):
     model: str
     promptSha256: str
     servingModel: str | None
-    status: Literal["COMPLETE", "NO_SERVING", "PLANNED", "NO_JUDGE"]
+    # SKIPPED: [stages.s10] comparison = "skip"으로 비교를 건너뛰었다(시연·로컬 시험, D-0187)
+    status: Literal["COMPLETE", "NO_SERVING", "PLANNED", "NO_JUDGE", "SKIPPED"]
     ballot: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
     trials: list[Trial] = Field(default_factory=list)
     modelScore: Score

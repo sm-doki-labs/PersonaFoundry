@@ -26,6 +26,7 @@ from character_factory_poc.contracts.video import ActionClip, ActionInputs
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.origin import is_twin
 from character_factory_poc.providers.base import ImageRequest, VideoRequest
+from character_factory_poc.providers.video_concurrency import run_video_jobs
 from character_factory_poc.providers.xai_video import estimate_cost
 from character_factory_poc.stages.s4_frames.approve import load_approved_frames
 from character_factory_poc.stages.s5_intro.probe import probe_video
@@ -53,6 +54,8 @@ DEFAULTS: dict[str, Any] = {
     "resolution": "720p",
     "aspect_ratio": "9:16",
     "generate_audio": False,
+    # 끝 화면을 첫 화면과 같은 사진으로 고정해 앱에서 영상을 갈아 끼워도 자세가 이어진다(D-0185).
+    "pin_last_frame": True,
     "durations": {"idle": 15, "emotion": 10, "special": 6},
 }
 
@@ -94,6 +97,19 @@ def _resolve_config(settings: dict[str, Any]) -> dict[str, Any]:
             cfg["chapters"] = ALL_CHAPTERS
             cfg["actions"] = list(actions or PRESETS[preset])
             cfg["preset"] = "custom" if actions else preset
+    if cfg.get("motif") and cfg.get("video_tier") == "light":
+        from .call_loop import VERSION, VideoScene
+
+        cfg["production_profile"] = VERSION
+        cfg["video_scene"] = VideoScene.model_validate(cfg.get("video_scene") or {}).model_dump()
+        cfg["generate_audio"] = False
+        cfg["pin_last_frame"] = True
+        sig = cfg.get("signature") or {}
+        if sig.get("template", "custom") not in {"custom", "camera_click"}:
+            problems.append("시그니처 template은 custom 또는 camera_click이다")
+        at = sig.get("middleFrameAtS", 2.0)
+        if not isinstance(at, (int, float)) or isinstance(at, bool) or not 0 < at < 4.5:
+            problems.append("시그니처 중간 시점은 0초 초과 4.5초 미만이다")
     durations = cfg["durations"]
     if not isinstance(durations, dict):
         problems.append("durations는 idle·emotion·special 길이를 담은 객체다")
@@ -114,6 +130,14 @@ def _resolve_config(settings: dict[str, Any]) -> dict[str, Any]:
         problems.append(str(e))
     if type(cfg["generate_audio"]) is not bool:
         problems.append("generate_audio는 boolean이다")
+    if type(cfg["pin_last_frame"]) is not bool:
+        problems.append("pin_last_frame은 boolean이다")
+    elif cfg["pin_last_frame"] and cfg["resolution"] == "1080p":
+        # xAI는 끝 화면을 정한 요청에 1080p를 받지 않는다(2026-11-12 실제 HTTP 400).
+        problems.append(
+            "끝 화면 고정(pin_last_frame)은 720p까지만 된다. 1080p가 필요하면 "
+            "pin_last_frame = false로 끈다"
+        )
     if problems:
         raise CheckFailed("s6", problems)
     cfg["durations"] = durations
@@ -132,10 +156,50 @@ def s6_config(ctx: Context, cid: str | None = None) -> dict[str, Any]:
         settings["motif"] = is_twin(ctx.character_dir(cid))
         if settings["motif"]:
             settings["signature"] = read_signature(ctx.character_dir(cid))
-    return _resolve_config(settings)
+    if cid and settings.get("motif"):
+        from .call_loop import PURPOSES
+
+        folder = ctx.character_dir(cid)
+        pack_path = folder / "source-pack.json"
+        pack = read_json(pack_path) if pack_path.exists() else {}
+        video_path = folder / "video-settings.json"
+        saved = read_json(video_path) if video_path.exists() else {}
+        settings["video_scene"] = (
+            {"purpose": PURPOSES.get(pack.get("chapterTemplate", "FAN_CALL"), PURPOSES["FAN_CALL"])}
+            | settings.get("video_scene", {})
+            | saved.get("videoScene", {})
+        )
+    cfg = _resolve_config(settings)
+    if cfg.get("production_profile") and cfg.get("signature", {}).get("middleFramePath"):
+        if ctx.config.provider("video").adapter not in {
+            "xai_video",
+            "grok_oauth",
+            "grok",
+            "fake",
+        }:
+            raise CheckFailed("s6", ["이 영상 경로는 중간 프레임 전달을 지원하지 않는다"])
+        import cv2
+
+        from character_factory_poc.common.source_store import inside
+
+        try:
+            source_path = cfg["signature"]["middleFramePath"]
+            if Path(source_path).is_absolute():
+                raise ValueError("relative path required")
+            path = inside(ctx.character_dir(cid), source_path)
+            if cv2.imread(str(path)) is None:
+                raise ValueError("invalid image")
+            cfg["middle_sha256"] = sha256_file(path)
+        except (OSError, ValueError) as exc:
+            raise CheckFailed(
+                "s6", ["중간 자세 사진이 없거나 안전한 이미지 경로가 아니다"]
+            ) from exc
+    return cfg
 
 
 def _duration(cfg: dict, key: str) -> int:
+    if cfg.get("production_profile") == "call-loop-v1":
+        return 6
     return cfg["durations"][clip_of(key, cfg)["pickRole"] or "idle"]
 
 
@@ -144,10 +208,11 @@ def estimate(ctx: Context, cfg: dict[str, Any], calls: int = 1) -> float:
     if pcfg.adapter not in {"xai_video", "grok_oauth", "grok"}:
         return 0.0
     each = estimate_cost(
-        pcfg.model or "grok-imagine-video-1.5-lite",
+        pcfg.model or "grok-imagine-video-1.5",
         cfg["resolution"],
         cfg["duration"],
         pcfg.extra.get("price_per_second"),
+        input_images=(2 if cfg.get("pin_last_frame") else 1) + cfg.get("keyframe_count", 0),
     )
     if each is None:
         raise CheckFailed(
@@ -171,10 +236,15 @@ def _partial(ctx: Context, cid: str, cfg: dict) -> tuple[str | None, dict[str, s
     if record.get("decision") != "REQUEST_CHANGES":
         return None, {}
     previous: ActionInputs = read_inputs(inputs_path)
+    if previous.productionProfile != cfg.get(
+        "production_profile"
+    ) or previous.videoScene != cfg.get("video_scene", {}):
+        return None, {}
     settings = {
         "resolution": previous.resolution,
         "aspect_ratio": previous.aspectRatio,
         "generate_audio": previous.generateAudio,
+        "pin_last_frame": previous.pinLastFrame,
         "candidates": previous.candidates,
     }
     if previous.frameRev != frame_gate.rev or any(cfg[k] != v for k, v in settings.items()):
@@ -187,6 +257,16 @@ def _partial(ctx: Context, cid: str, cfg: dict) -> tuple[str | None, dict[str, s
         ):
             return None, {}
     changes = {c["field"]: c["note"] for c in record["requestedChanges"]}
+    if cfg.get("motif"):
+        signature_changed = not signature_matches(dump(previous), cfg.get("signature"))
+        for ch in previous.chapters:
+            for action in ch.actions:
+                if action.actionKey != SIGNATURE_KEY:
+                    continue
+                if signature_changed or action.production.get("middleFrame", {}).get(
+                    "sha256"
+                ) != cfg.get("middle_sha256"):
+                    changes.setdefault(action.actionId, action.reviewNote)
     return (gate.rev, changes) if changes else (None, {})
 
 
@@ -204,10 +284,15 @@ def _carry(ctx: Context, cid: str, cfg: dict) -> tuple[str | None, dict[str, str
     if not inputs_path.exists() or not clips_path.exists():
         return None, {}
     previous: ActionInputs = read_inputs(inputs_path)
+    if previous.productionProfile != cfg.get(
+        "production_profile"
+    ) or previous.videoScene != cfg.get("video_scene", {}):
+        return None, {}
     settings = {
         "resolution": previous.resolution,
         "aspect_ratio": previous.aspectRatio,
         "generate_audio": previous.generateAudio,
+        "pin_last_frame": previous.pinLastFrame,
         "candidates": previous.candidates,
     }
     if previous.frameRev != frame_gate.rev or any(cfg[k] != v for k, v in settings.items()):
@@ -223,6 +308,10 @@ def _carry(ctx: Context, cid: str, cfg: dict) -> tuple[str | None, dict[str, str
             was = old.get(key)
             same = was is not None and (
                 was.prompt == prompt
+                and {k: v for k, v in was.production.items() if k != "middleFrame"}
+                == clip.get("production", {})
+                and was.production.get("middleFrame", {}).get("sha256")
+                == (cfg.get("middle_sha256") if key == SIGNATURE_KEY else None)
                 and was.duration == _duration(cfg, key)
                 and (was.title, was.description, was.useWhen)
                 == (clip["title"], clip["description"], clip["useWhen"])
@@ -259,12 +348,21 @@ def plan_calls(ctx: Context, cfg: dict[str, Any], cid: str | None = None) -> lis
                     continue
                 for n in range(1, inputs.candidates + 1):
                     if not (rev_dir / "assets" / f"{action.actionId}-v{n}.json").exists():
+                        raw = rev_dir / "raw" / f"{action.actionId}-v{n}.mp4"
+                        receipt = raw.with_suffix(".json")
+                        if raw.exists() != receipt.exists():
+                            raise CheckFailed("s6", ["생성 원본 저장이 불완전해 재제출하지 않는다"])
+                        if raw.exists() and receipt.exists():
+                            if sha256_file(raw) != read_json(receipt).get("sha256"):
+                                raise CheckFailed("s6", ["생성 원본의 해시가 다르다"])
+                            continue
                         durations.append(action.duration)
         chapter_count = len(inputs.chapters)
         action_count = len(inputs.chapters[0].actions)
         candidates = inputs.candidates
         aspect_ratio = inputs.aspectRatio
         resolution = inputs.resolution
+        pin_last_frame = inputs.pinLastFrame
     else:
         chapter_count = len(cfg["chapters"])
         action_count = len(cfg["actions"])
@@ -279,6 +377,7 @@ def plan_calls(ctx: Context, cfg: dict[str, Any], cid: str | None = None) -> lis
         ):
             bad_frames = chapter_count
         resolution = cfg["resolution"]
+        pin_last_frame = cfg["pin_last_frame"]
     pcfg = ctx.config.provider("video")
     note = NOTES.get(pcfg.adapter, pcfg.adapter)
     if previous:
@@ -299,7 +398,18 @@ def plan_calls(ctx: Context, cfg: dict[str, Any], cid: str | None = None) -> lis
                 bad_frames,
             )
         )
-    cost = sum(estimate(ctx, {"duration": d, "resolution": resolution}) for d in durations)
+    cost = sum(
+        estimate(
+            ctx,
+            {
+                "duration": d,
+                "resolution": resolution,
+                "pin_last_frame": pin_last_frame,
+                "keyframe_count": int(bool(cfg.get("middle_sha256"))),
+            },
+        )
+        for d in durations
+    )
     plans.append(CallPlan("s6", desc, n, est_cost_usd=round(cost, 4)))
     return plans
 
@@ -314,6 +424,19 @@ def _pending_rev(ctx: Context, cid: str) -> str | None:
     from character_factory_poc.pipeline.origin import read_signature, read_video_tier
 
     tier = read_video_tier(ctx.character_dir(cid))
+    cfg = s6_config(ctx, cid)
+    pending = read_inputs(path)
+    if any(
+        a.production.get("middleFrame", {}).get("sha256") != cfg.get("middle_sha256")
+        for ch in pending.chapters
+        for a in ch.actions
+        if a.actionKey == SIGNATURE_KEY
+    ):
+        return None
+    if pending.productionProfile != cfg.get("production_profile") or pending.videoScene != cfg.get(
+        "video_scene", {}
+    ):
+        return None
     if tier:
         inputs = read_inputs(path)
         if inputs.preset != f"tier:{tier}" or inputs.frameRev != ctx.state(cid).gate("G4").rev:
@@ -331,6 +454,10 @@ def run_s6(ctx: Context, cid: str) -> Path:
     state.require_deps("s6")
     frames, frame_dir = load_approved_frames(ctx, cid)
     budget = ctx.budget()
+    if cfg.get("production_profile") and ctx.config.provider("video").adapter != "fake":
+        from .postprocess import require_tools
+
+        require_tools()
     budget.check_plan(plan_calls(ctx, cfg, cid))
     rev = _pending_rev(ctx, cid) or next_rev(ctx.character_dir(cid) / "s6-actions", "va")
     rev_dir = ctx.character_dir(cid) / "s6-actions" / rev
@@ -456,10 +583,25 @@ def _make_inputs(ctx, cid, rev, rev_dir, frames, frame_dir, cfg, video, budget, 
         for key in cfg["actions"]:
             aid = f"{frame.chapterId}-{key}"
             if previous and aid not in changes:
-                actions.append(dump(carried[aid]))
+                carried_action = dump(carried[aid])
+                middle = carried_action.get("production", {}).get("middleFrame")
+                if middle:
+                    old_file = rev_dir.parent / previous / middle["path"]
+                    if sha256_file(old_file) != middle["sha256"]:
+                        raise CheckFailed("s6", ["재사용 중간 사진의 해시가 다르다"])
+                    write_once_bytes(rev_dir / middle["path"], old_file.read_bytes())
+                actions.append(carried_action)
                 continue
             clip = clip_of(key, cfg)
             note = changes.get(aid, "")
+            prod = dict(clip.get("production", {}))
+            if prod.get("middleFramePath"):
+                from character_factory_poc.common.source_store import inside
+
+                source = inside(ctx.character_dir(cid), prod["middleFramePath"])
+                rel = f"keyframes/{aid}{source.suffix.lower()}"
+                write_once_bytes(rev_dir / rel, source.read_bytes())
+                prod["middleFrame"] = {"path": rel, "sha256": sha256_file(rev_dir / rel)}
             actions.append(
                 {
                     "actionId": aid,
@@ -472,6 +614,7 @@ def _make_inputs(ctx, cid, rev, rev_dir, frames, frame_dir, cfg, video, budget, 
                     "description": clip["description"],
                     "useWhen": clip["useWhen"],
                     "duration": _duration(cfg, key),
+                    "production": prod,
                     "reviewNote": note,
                     "prompt": build_prompt(
                         key, frame.chapterId, note, motif=bool(cfg.get("motif")), clip=clip
@@ -515,7 +658,10 @@ def _make_inputs(ctx, cid, rev, rev_dir, frames, frame_dir, cfg, video, budget, 
             "resolution": cfg["resolution"],
             "aspectRatio": cfg["aspect_ratio"],
             "generateAudio": cfg["generate_audio"],
+            "pinLastFrame": cfg["pin_last_frame"],
             "candidates": cfg["candidates"],
+            "productionProfile": cfg.get("production_profile"),
+            "videoScene": cfg.get("video_scene", {}),
             "previousRev": previous,
             "regenerate": [
                 a["actionId"]
@@ -536,7 +682,7 @@ def _run(ctx, cid, rev, rev_dir, inputs, video) -> None:
             (c["actionId"], c["asset"]["candidateId"]): c
             for c in read_json(previous_dir / "clips.json")
         }
-    clips = []
+    jobs = []
     for chapter in inputs.chapters:
         for frame in (chapter.goodFrame, chapter.badFrame):
             if frame and sha256_file(rev_dir / frame.path) != frame.sha256:
@@ -544,33 +690,45 @@ def _run(ctx, cid, rev, rev_dir, inputs, video) -> None:
                     "s6", [f"{chapter.chapterId}: 고정한 첫 프레임의 sha256이 다르다"]
                 )
         for action in chapter.actions:
-            for n in range(1, inputs.candidates + 1):
-                if previous_dir and action.actionId not in inputs.regenerate:
-                    clip = validate("action-clip-v2", old[(action.actionId, f"v{n}")])
-                    asset = clip.asset
-                    name = f"{action.actionId}-v{n}.json"
-                    write_once_bytes(
-                        rev_dir / asset.filePath, (previous_dir / asset.filePath).read_bytes()
-                    )
-                    write_once_bytes(
-                        rev_dir / "assets" / name, (previous_dir / "assets" / name).read_bytes()
-                    )
-                    clip = clip.model_copy(update={"reusedFrom": inputs.previousRev})
-                else:
-                    asset = _generate(ctx, cid, rev, rev_dir, inputs, chapter, action, n, video)
-                    clip = ActionClip(
-                        actionId=action.actionId,
-                        chapterId=chapter.chapterId,
-                        actionKey=action.actionKey,
-                        playType=action.playType,
-                        mood=action.mood,
-                        pickRole=action.pickRole,
-                        actionCategory=action.actionCategory,
-                        title=action.title,
-                        frameId=chapter.frameId,
-                        asset=asset,
-                    )
-                clips.append(clip)
+            jobs.extend((chapter, action, n) for n in range(1, inputs.candidates + 1))
+
+    def generate(item) -> ActionClip:
+        chapter, action, n = item
+        if previous_dir and action.actionId not in inputs.regenerate:
+            clip = validate("action-clip-v2", old[(action.actionId, f"v{n}")])
+            asset = clip.asset
+            name = f"{action.actionId}-v{n}.json"
+            write_once_bytes(rev_dir / asset.filePath, (previous_dir / asset.filePath).read_bytes())
+            write_once_bytes(
+                rev_dir / "assets" / name, (previous_dir / "assets" / name).read_bytes()
+            )
+            raw_rel = asset.postprocess.get("rawPath")
+            if raw_rel:
+                raw_source = previous_dir / raw_rel
+                receipt_source = raw_source.with_suffix(".json")
+                receipt = read_json(receipt_source)
+                if sha256_file(raw_source) != receipt["sha256"]:
+                    raise CheckFailed("s6", ["재사용 생성 원본의 해시가 다르다"])
+                write_once_bytes(rev_dir / raw_rel, raw_source.read_bytes())
+                write_once_json((rev_dir / raw_rel).with_suffix(".json"), receipt)
+            return clip.model_copy(update={"reusedFrom": inputs.previousRev})
+        with video.job_slot("s6"):
+            asset = _generate(ctx, cid, rev, rev_dir, inputs, chapter, action, n, video)
+        return ActionClip(
+            actionId=action.actionId,
+            chapterId=chapter.chapterId,
+            actionKey=action.actionKey,
+            playType=action.playType,
+            mood=action.mood,
+            pickRole=action.pickRole,
+            actionCategory=action.actionCategory,
+            title=action.title,
+            frameId=chapter.frameId,
+            asset=asset,
+        )
+
+    workers = 1 if video.name == "grok_web" else min(6, getattr(video.limits, "limit", 6))
+    clips = run_video_jobs(generate, jobs, workers=workers)
     write_once_json(rev_dir / "clips.json", [dump(c) for c in clips])
     write_once_text(
         rev_dir / "gate-G5b.html",
@@ -591,25 +749,47 @@ def _generate(ctx, cid, rev, rev_dir, inputs, chapter, action, n, video):
                 _write_json(job_path, job | {"status": "DONE"})
         return asset
     first_frame = chapter.badFrame if action.mood == "bad" else chapter.goodFrame
+    first_path = str(rev_dir / first_frame.path)
     settings = {
         "prompt": action.prompt,
         "duration": action.duration,
         "resolution": inputs.resolution,
         "aspectRatio": inputs.aspectRatio,
         "generateAudio": inputs.generateAudio,
+        "pinLastFrame": inputs.pinLastFrame,
     }
+    keyframes = ()
+    if action.production.get("middleFrame"):
+        middle = action.production["middleFrame"]
+        middle_path = rev_dir / middle["path"]
+        if sha256_file(middle_path) != middle["sha256"]:
+            raise CheckFailed("s6", ["중간 자세 사진의 해시가 다르다"])
+        keyframes = ((action.production["middleFrameAtS"], str(middle_path)),)
     request = VideoRequest(
         stage="s6",
         prompt=action.prompt,
         ref=f"{cid}/{rev}/{name}",
-        first_frame=str(rev_dir / first_frame.path),
+        first_frame=first_path,
         duration=action.duration,
         resolution=inputs.resolution,
         aspect_ratio=inputs.aspectRatio,
         generate_audio=inputs.generateAudio,
+        last_frame=first_path if inputs.pinLastFrame else None,
+        keyframes=keyframes,
     )
-    job = read_json(job_path) if job_path.exists() and video.resumable else None
-    if job is None or job["status"] != "SUBMITTED":
+    raw_path = rev_dir / "raw" / f"{name}.mp4"
+    receipt_path = raw_path.with_suffix(".json")
+    if raw_path.exists() != receipt_path.exists():
+        raise CheckFailed("s6", ["생성 원본 저장이 불완전해 재제출하지 않는다"])
+    cached = raw_path.exists() and receipt_path.exists()
+    if cached:
+        receipt = read_json(receipt_path)
+        if sha256_file(raw_path) != receipt["sha256"]:
+            raise CheckFailed("s6", ["생성 원본의 해시가 다르다"])
+        if not job_path.exists():
+            raise CheckFailed("s6", ["생성 원본의 작업 기록이 없어 자동 재제출하지 않는다"])
+    job = read_json(job_path) if job_path.exists() and (video.resumable or cached) else None
+    if not cached and (job is None or job["status"] != "SUBMITTED"):
         job_id = video.submit(request)
         job = dump(
             validate(
@@ -625,37 +805,70 @@ def _generate(ctx, cid, rev, rev_dir, inputs, chapter, action, n, video):
                     "settings": settings,
                     "firstFrameSha256": first_frame.sha256,
                     "estCostUsd": estimate(
-                        ctx, {"duration": action.duration, "resolution": inputs.resolution}
+                        ctx,
+                        {
+                            "duration": action.duration,
+                            "resolution": inputs.resolution,
+                            "pin_last_frame": inputs.pinLastFrame,
+                            "keyframe_count": len(keyframes),
+                        },
                     ),
                 },
             )
         )
         _write_json(job_path, job)
-    try:
-        result = video.collect(job["jobId"], request)
-    except VideoGenerationError as e:
-        if not hasattr(e, "job_id"):
-            _write_json(job_path, job | {"status": "FAILED", "error": str(e)[:500]})
-        raise
-    if result.data[4:8] != b"ftyp":
-        _write_json(job_path, job | {"status": "FAILED", "error": "MP4가 아니다"})
-        raise VideoGenerationError(f"{name}: 받은 파일이 MP4가 아니다")
+    if cached:
+        receipt = read_json(receipt_path)
+        if sha256_file(raw_path) != receipt["sha256"]:
+            raise CheckFailed("s6", ["생성 원본의 해시가 다르다"])
+        data = raw_path.read_bytes()
+    else:
+        try:
+            result = video.collect(job["jobId"], request)
+        except VideoGenerationError as e:
+            if not hasattr(e, "job_id"):
+                _write_json(job_path, job | {"status": "FAILED", "error": str(e)[:500]})
+            raise
+        data = result.data
+        if data[4:8] != b"ftyp":
+            _write_json(job_path, job | {"status": "FAILED", "error": "MP4가 아니다"})
+            raise VideoGenerationError(f"{name}: 받은 파일이 MP4가 아니다")
+        receipt = {
+            "jobId": result.job_id,
+            "provider": result.provider,
+            "model": result.model,
+            "estCostUsd": result.est_cost_usd,
+        }
+        if action.production:
+            write_once_bytes(raw_path, data)
+            receipt["sha256"] = sha256_file(raw_path)
+            write_once_json(receipt_path, receipt)
+    postprocess = {}
+    if action.production:
+        if receipt["provider"] == "fake_video":
+            postprocess = {"status": "fake_unvalidated", "qualityApproved": False}
+        else:
+            from .postprocess import process
+
+            data, postprocess = process(raw_path, Path(first_path), action.production)
+            postprocess["rawPath"] = str(raw_path.relative_to(rev_dir))
     rel = f"videos/{name}.mp4"
-    write_once_bytes(rev_dir / rel, result.data)
+    write_once_bytes(rev_dir / rel, data)
     asset = validate(
         "video-asset-v1",
         {
             "videoId": job["videoId"],
             "candidateId": f"v{n}",
-            "jobId": result.job_id,
-            "provider": result.provider,
-            "model": result.model,
+            "jobId": receipt["jobId"],
+            "provider": receipt["provider"],
+            "model": receipt["model"],
             "filePath": rel,
             "fileSha256": sha256_file(rev_dir / rel),
-            "bytes": len(result.data),
+            "bytes": len(data),
             "settings": settings,
             "probe": dump(probe_video(rev_dir / rel)),
-            "estCostUsd": result.est_cost_usd,
+            "estCostUsd": receipt["estCostUsd"],
+            "postprocess": postprocess,
         },
     )
     write_once_json(asset_path, dump(asset))

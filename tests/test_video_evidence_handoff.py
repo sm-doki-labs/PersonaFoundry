@@ -1,4 +1,4 @@
-"""Persisted video authorization waits for real G6 approval; no video providers run."""
+"""Authorized videos overlap prompt preparation; G6 still requires real review."""
 
 import json
 import time
@@ -8,8 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from character_factory_poc.common.store import read_json
-from character_factory_poc.pipeline.orchestrator import RunLog, run_until
-from character_factory_poc.pipeline.origin import VIDEO_STAGES, write_video_tier
+from character_factory_poc.pipeline import orchestrator
+from character_factory_poc.pipeline.origin import VIDEO_STAGES, stage_def, write_video_tier
 from character_factory_poc.web.app import create_app
 from tests.support.web_gates import trait_sheet_for
 from tests.test_chapter_start import _start
@@ -40,17 +40,33 @@ def setup(tmp_path, monkeypatch, *, auto_resume=False):
     monkeypatch.setattr("character_factory_poc.web.jobs.Context", lambda **kw: ctx)
     video_runs = []
 
-    def run(context, character, options):
-        if not options.video_only:
-            return run_until(context, character, options)
-        # Replace the expensive video boundary only; intake, S8, S8c, G6 and jobs stay real.
-        assert context.state(cid).gate("G6").status == "APPROVED"
-        assert (root / "s8-prompts/pv1/persona-version.json").is_file()
-        video_runs.append(options)
-        context.state(cid).set_gate("G5b", "APPROVED", "va1", None)
-        return RunLog(stopped_at="G5b")
+    original = orchestrator._stage_runners
 
-    monkeypatch.setattr("character_factory_poc.web.jobs.run_until", run)
+    def runners(context, character, options):
+        out = original(context, character, options)
+
+        def video_stage(sid):
+            def run():
+                # Keep orchestration, evidence and review real; only asset generation is synthetic.
+                if sid == "s6":
+                    video_runs.append(options)
+                state = context.state(character)
+                state.transition(sid, "RUNNING", rev="synthetic")
+                gate = stage_def(context.character_dir(character), sid).gate
+                if gate:
+                    state.transition(sid, "AWAITING_HUMAN", rev="synthetic")
+                    state.set_gate(gate, "APPROVED", "synthetic", None)
+                state.transition(sid, "APPROVED", rev="synthetic")
+                return context.character_dir(character)
+
+            return run
+
+        out.update({sid: video_stage(sid) for sid in VIDEO_STAGES})
+        return out
+
+    monkeypatch.setattr(orchestrator, "_stage_runners", runners)
+    # Synthetic assets belong to the selected tier; revision/tier authorization remains real.
+    monkeypatch.setattr(orchestrator, "_matches_video_scope", lambda *args: True)
     return ctx, cid, video_runs
 
 
@@ -79,7 +95,7 @@ def approve(client, cid, **extra):
 
 @pytest.mark.parametrize("auto_resume", [False, True])
 @pytest.mark.parametrize("restart", [False, True])
-def test_video_waits_for_review_then_resumes_original_authorization(
+def test_video_completes_while_review_waits_then_resumes_without_regeneration(
     tmp_path,
     monkeypatch,
     auto_resume,
@@ -94,7 +110,7 @@ def test_video_waits_for_review_then_resumes_original_authorization(
     assert paused["status"] == "succeeded", paused["error"]
     assert paused["stoppedAt"] == "G6" and paused["waiting"] == ["G6"]
     assert paused["blocked"] == paused["held"] == []
-    assert videos == []
+    assert len(videos) == 1
     assert ctx.state(cid).stage("s8c").status == "APPROVED"
     assert ctx.state(cid).gate("G6").status == "AWAITING_HUMAN"
     root = ctx.character_dir(cid)
@@ -109,7 +125,7 @@ def test_video_waits_for_review_then_resumes_original_authorization(
         denied = approve(client, cid)
         assert denied.status_code == 400
         assert ctx.state(cid).gate("G6").status == "AWAITING_HUMAN"
-        assert videos == []
+        assert len(videos) == 1
         accepted = approve(client, cid, evidenceReviewed=True)
         assert accepted.status_code == 200, accepted.text
         continuation = accepted.json()["resumeJob"]
@@ -120,7 +136,7 @@ def test_video_waits_for_review_then_resumes_original_authorization(
         wait_idle(jobs, cid)
         assert jobs.get(continuation["jobId"])["status"] == "succeeded"
     assert len(videos) == 1
-    assert videos[0].until == "G5b" and videos[0].confirmed == set(VIDEO_STAGES)
+    assert videos[0].videos_with_chat and videos[0].confirmed == set(VIDEO_STAGES)
     assert ctx.state(cid).gate("G5b").status == "APPROVED"
     assert not (root / "s8-chapters/cs2").exists()
 
@@ -145,7 +161,7 @@ def test_rejected_evidence_never_resumes_video(tmp_path, monkeypatch, decision):
         )
         assert result.status_code == 200, result.text
         assert result.json()["resumeJob"] is None
-    assert videos == []
+    assert len(videos) == 1
     assert ctx.state(cid).gate("G6").status == "REJECTED"
 
 
@@ -167,7 +183,7 @@ def test_changed_scope_does_not_reuse_old_video_authorization(tmp_path, monkeypa
         # A different revision's approval must not satisfy the paused job.
         ctx.state(cid).set_gate("G6", "APPROVED", "pv999", None)
         assert jobs.request_resume(cid) is None
-    assert videos == []
+    assert len(videos) == 1
 
 
 def test_sample_failure_is_still_a_failure_and_cannot_resume_video(tmp_path, monkeypatch):
@@ -187,7 +203,7 @@ def test_sample_failure_is_still_a_failure_and_cannot_resume_video(tmp_path, mon
         result = approve(client, cid, evidenceReviewed=True)
         assert result.status_code == 200, result.text
         assert result.json()["resumeJob"] is None
-    assert videos == []
+    assert len(videos) == 1
 
 
 def test_no_video_run_keeps_existing_manual_review_flow(tmp_path, monkeypatch):
@@ -215,7 +231,7 @@ def test_repeated_resume_does_not_duplicate_authorized_video(tmp_path, monkeypat
     entered, release = Event(), Event()
 
     def run(context, character, options):
-        if options.video_only:
+        if options.videos_with_chat and context.state(character).gate("G6").status == "APPROVED":
             entered.set()
             assert release.wait(5)
         return original(context, character, options)
@@ -259,7 +275,7 @@ def test_tier_change_during_handoff_cannot_expand_authorization(tmp_path, monkey
         result = approve(client, cid, evidenceReviewed=True)
         assert result.status_code == 200, result.text
     wait_idle(jobs, cid)
-    assert videos == []
+    assert len(videos) == 1
 
 
 def test_gate_status_without_an_approval_record_does_not_resume(tmp_path, monkeypatch):
@@ -270,4 +286,4 @@ def test_gate_status_without_an_approval_record_does_not_resume(tmp_path, monkey
     assert jobs.get(first)["status"] == "succeeded"
     ctx.state(cid).set_gate("G6", "APPROVED", "pv1", None)
     assert jobs.request_resume(cid) is None
-    assert videos == []
+    assert len(videos) == 1

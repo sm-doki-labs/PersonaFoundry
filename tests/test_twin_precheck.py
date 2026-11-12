@@ -51,8 +51,8 @@ def test_default_plan_no_provider_or_files(rig, tmp_path, capsys):
     for s in (
         "codex_image",
         "gpt-6.1-sol",
-        "grok-imagine-video-1.5-lite",
-        "$0.19",
+        "grok-imagine-video-1.5",
+        "$0.85",
         "기준 얼굴",
         "편집 이미지",
         "6초",
@@ -176,3 +176,14 @@ def test_route_example_contains_only_pinned_fields_and_no_key(monkeypatch):
         apiKeyEnv="TWIN_SERVING_API_KEY",
         baseUrl="https://serving.invalid/v1",
     )
+
+
+def test_official_image_precheck_executes_with_explicit_estimate(rig, tmp_path):
+    invoke, _, image, video = rig
+    (tmp_path / "factory.toml").write_text(
+        '[providers.image]\nadapter="openai_images"\nestimated_cost_usd=1.0\n'
+    )
+    assert invoke("--execute", "--image-only") == 0
+    assert len(image.requests) == 1 and not video.submits
+    _, steps = read_report(tmp_path)
+    assert steps[0]["status"] == "SUCCESS" and steps[0]["estimatedUsd"] == 1.0

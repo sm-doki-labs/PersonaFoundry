@@ -736,3 +736,78 @@
 중단된 공정 변경을 제외한 staged tree를 별도 폴더로 내보내 검증했다. 최종 `python -m pytest -q`: 1,963 passed, 6 skipped, 3 warnings, 46 subtests passed (165.62초). `node --test studio/tests/*.test.cjs`: 177 passed. 변경 Python 파일 ruff와 staged diff 검사 통과. 최초 전체 검사에서 옛 워크숍 경로를 기대한 test_studio_integration 2건이 실패했고, 현재 화면을 기대하도록 수정 후 전체 재검사를 통과했다.
 
 리뷰에서 wheel 설치에 studio 자산이 빠지는 회귀를 확인하여 setuptools data-files와 설치 prefix 탐색을 추가했다. `uv build --wheel` 후 별도 가상환경에 설치하고 소스 체크아웃 밖에서 공장·채팅·검토 HTML과 공장 JS/CSS를 HTTP 200으로 확인했다. 패키지에는 실행용 studio 자산57개를 포함하며 tests/plans/recordings는 넣지 않는다. 기존 작업 폴더와 서버·채팅·pv6는 그대로 보존한다.
+
+## 2026-11-12 — 720p 시작·끝 프레임 기본값
+
+[인계의 명령·입력·결과](handoffs/handoff-2026-11-12-video720-default.md). 오프라인 128+33=161 passed. 변경 Python ruff·diff 검사 통과. `work/video720-frame-test/run.py --execute`: 합성 두 사진, 2초×2편, 공장 OAuth, 각각 720×1280·24fps·49프레임. 동일 첫/끝 및 서로 다른 첫/끝 직접 연락판 확인. 추정 $0.60이며 청구액 확인은 아님. 기존 2,101파일 해시 변화·누락 없음. 실인물 품질·프론트 전체 실행·배포 검증은 하지 않음.
+
+## 2026-11-12 — 720p 두 편 동시 생성
+
+`work/video720-parallel-test/run.py --execute`: 동일 합성 사진·프롬프트, 공장 OAuth·1.5·720p·2초·동시 2건. 2/2 완료, 720×1280·24fps·49장, 전체 37.40초, 추정 $0.60. 출력은 작업 폴더와 사용자 `outputs/video720-parallel-test/`에 저장. [방법·한계·현행 순차 구조](handoffs/handoff-2026-11-12-video-parallel-check.md). 기능 코드 수정과 공장 전체 병렬 실행 검증은 하지 않았다.
+
+## 2026-11-12 — 영상 6건 동시 요청
+
+`work/video720-parallel6-test/run.py --execute`: 공장 OAuth·1.5·720p·2초·동시 6건. HTTP 200 5건/429 1건, 성공 5편 디코딩 완료, 전체 38.56초, 추정 $1.50. 상세 제한 원인은 미확정(K-0122). [입력·결과·한계](handoffs/handoff-2026-11-12-video-parallel6-check.md). 공장 기능 코드와 서버 변경 없음.
+
+## 2026-11-12 — 1초 간격 영상 6건
+
+`work/video720-stagger6-test/run.py --execute`: 직전과 동일한 입력·모델, POST 간격 1.0001~1.0038초, 6/6 접수·다운로드·디코딩 성공. 전체 41.61초, HTTP 429 없음, 720×1280·24fps·49장, 추정 $1.80. 기존 2,101파일 해시 변화 없음. [방법·산출물·한계](handoffs/handoff-2026-11-12-video-stagger6-check.md). 기능 코드·서버 변경 없음.
+
+## 2026-11-12 — D-0190 공장 영상·프롬프트 병렬 적용
+
+전체 `.venv/bin/pytest -q`: 2,204 passed, 6 skipped, 3 warnings, 46 subtests passed (118.67초). 실행본 별도 src 검사63 passed. 변경 파일 ruff·diff 검사 통과, 전체 lint에는 기존/중단 영역 E501 6건이 남아 있다. 실제 S6 `work/video-factory-parallel-live/run.py --execute`: 720p·2초6편, 6/6 HTTP200, 39.62초, 제출 간격1.0002~1.0068초, 추정$1.80, G5b 사람검토대기. 8776 현재화면3개 HTTP200·maxParallel3·pv6/pv2 ready 확인. 기존2,101파일 변화0. 프론트 두 분기 중첩은 합성 API 검사로 확인했으며 전체 실제 LLM+영상 동시 생성은 별도 미실행. [범위·실행본·산출물](handoffs/handoff-2026-11-12-factory-parallel.md).
+
+
+## 2026-11-12 — D-0191 idle 포함 통화 영상 표준
+
+전체 `.venv/bin/pytest -q`: **2,217 passed, 6 skipped, 3 warnings, 46 subtests passed**, 120.94초. 활성 프론트178 passed(중단 quality-status 테스트 제외). 실제 실행본 src 지정 검사23 passed. 신규 call-loop 검사13 passed. 변경 범위 ruff·git diff --check 통과. 실제 모델 호출은0회다. 원본 캐시의 재개/비재개 공급자 재제출 방지, 불완전 저장 차단, 실제 합성 오디오 제거, 정지·복귀 실패 영상 보류, 시그니처만 수정시1회 생성, 중간 시점/사진해시 변경을 검사했다. 현재 서버37952에서 화면3개 HTTP200·pv6/pv2 ready, 기존2,101파일 변경0. [범위와 산출물](handoffs/handoff-2026-11-12-call-loop-standard.md).
+
+
+## 2026-11-12 D-0192 기준 사진 확인 공정
+
+- `.venv/bin/pytest -q`: 2238 passed,6 skipped,3 warnings,46 subtests; `/tmp/reference-full-final.log`.
+- `node --test` 활성 `studio/tests/*.test.cjs`(중단한 quality-status 제외):191 passed, `/tmp/reference-node-final.log`.
+- `.venv/bin/pytest -o pythonpath=work/reference-first-runtime/src tests/test_reference_frontend_flow.py tests/test_reference_master.py tests/test_reference_master_scheduler.py tests/test_call_loop.py -q`:34 passed, `/tmp/reference-runtime-final.log`.
+- CUA+독립fake Python8787: 원문/사진 접수한 초안 시작→기준사진표시→확인→영상완료표시, clips.json6개. frontend 단위13개는 revision/hash·409·중복·읽기실패·재개버튼을 검증. 실인물/유료 생성 없음.
+- 8776 sources/factory/chat·새정적파일200, 익준pv6/손흥민pv2 readytrue. 보존 manifest2,101항목 변경/누락0.
+- 변경 Ruff 및 git diff --check 통과. 결과/사진/로그: `/Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/outputs/reference-first-20261112`.
+
+## 2026-11-12 — D-0193 공식 OpenAI API 연결
+
+- 오프라인: `.venv/bin/pytest tests/test_openai_images.py tests/test_twin_precheck.py tests/test_reference_master.py tests/test_reference_master_scheduler.py tests/test_reference_frontend_flow.py tests/test_openai_dialect.py tests/test_codex_image.py tests/test_testpath_seeds.py -q` → 89 passed.
+- 실행본: `.venv/bin/pytest -o pythonpath=work/openai-direct-runtime/src tests/test_openai_images.py tests/test_reference_master.py tests/test_openai_dialect.py -q` → 53 passed. 변경 공급자 파일 Ruff 통과.
+- 실제: `work/openai-direct-20261112/smoke.py --execute`, 설정은 실행본과 동일한 Provider/Context 포트, 별도 합성 루트에 저장. 공식 모델 목록200, JUDGE4.50초·VISION5.95초·IMAGE18.46초 성공(720×1280 PNG). `smoke-result.json`, `access-check.json`, `smoke-factory/.../ledger/calls.jsonl`을 확인했다. 합성 검사만 했으므로 손흥민 품질 향상으로 해석하지 않는다.
+- API 거절/손상 PNG/참조 파일 전달/비용 미확인·명시적 추정값에 따른 사전 확인을 가짜 HTTP와 합성 자료로 검사했다. 최초 검토의 사전 확인 차단·PNG 헤더만 통과 문제는 실패 재현 뒤 수정했다.
+- 서버: 8776 PID75055, health configPath=openai-direct-runtime/factory-web.toml, 프론트200, 기존 채팅 메타 pv6/pv2 ready=true. 모든 기존 runs 파일2,423개 해시 변경0. `work/openai-direct-20261112/preservation.json`, `health.json`.
+
+## 2026-11-12 — D-0194 시그니처 참고 사진
+
+- `.venv/bin/pytest tests/test_signature_photo.py tests/test_source_intake.py tests/test_reference_frontend_flow.py tests/test_call_loop.py -q` → 49 passed. 신규8건은 업로드/제거/재접속/인물사진 분리/손상사진/해시변조/S3 사본/등급제한/업로드중 등급변경을 검사한다. 합성 end-to-end는 G4 확인 전 대기 후 영상6개 제출 중 한 개만 2초 keyframe을 받고 모두 같은 시작/끝 사진을 쓰는지 확인했다.
+- `node --test studio/tests/signature-photo.test.cjs studio/tests/sources.test.cjs studio/tests/reference.test.cjs` → 70 passed. 신규9건, 기존 화면/기준사진 회귀 포함.
+- `.venv/bin/pytest -o pythonpath=work/signature-photo-runtime/src tests/test_signature_photo.py -q` → 8 passed. 변경 Python Ruff와 git diff --check 통과.
+- 별도 합성 서버8787에서 CUA 파일 선택→준비됨→새로고침→미리보기 실제 이미지 디코딩 성공을 확인했다. 인물사진 칸은 빈 상태로 남았고 시작은 막혔다. 화면 `work/signature-photo-20261112/ui-preview.png`, 입력은 단색 합성 PNG. 유료 호출0.
+- 독립 검토: pending 시그니처 업로드 중 다른 등급 변경 경합1건을 재현 후 차단했고 재검토에서 남은 high/medium 없음.
+- 8776 실행본 `work/signature-photo-runtime`, PID77141. 실제 HTML에 업로드 컨트롤, OpenAPI에 photoRole, health에 새 configPath를 확인했다. 기존2,420파일 변경0·익준pv6/손흥민pv2 chatReady 유지. `work/signature-photo-20261112/deployment.json`.
+- 재시작 중 기존 서버가 연결 종료를 기다려 새 리스너 시작을 멈췄다. 실행 중 작업이 없고 기존 PID/명령을 확인해 종료한 뒤 복구했다. 임시 검증 서버는 종료했다.
+
+## 2026-11-12 — D-0195 시그니처 중간 프레임 시드
+
+- `tests/test_signature_photo.py` 8건을 새 흐름으로 고친 뒤 실패를 먼저 확인하고 구현했다. 이미지 요청2회(두 번째는 기준 사진+참고 사진), 시드 해시 없이/틀린 해시로 승인 409, 승인 후 시그니처 영상에만 시드가 2초 keyframe으로 들어가고 원본 해시와 다름, 참고 사진 없으면 1회·기존 승인 계약 유지, 기준 사진 흐름 밖 업로드 409.
+- 관련 Python 244 passed(시그니처·영상·기준 사진·twin·S4 계열 20파일). Node 72 passed(reference·signature-photo·sources).
+- 정적 미리보기로 두 이미지 확인 카드 렌더링 확인: `work/signature-photo-20261112/two-image-card.png`.
+- 8776 실행본 `work/signature-seed-runtime` PID81089, OpenAPI ConfirmReference에 signatureSha256. 기존2,420파일 변경0, 익준pv6/손흥민pv2 ready. `work/signature-seed-20261112/deployment.json`. 유료 호출0.
+
+## 2026-11-12 — 손흥민 시그니처 시드 실제 정식 시연
+
+- cf-20261112-motif-94aba10c14124ca2: 원문126+인물사진+찰칵 참고 사진, Lite·INTERVIEW. 14:02 시작→14:19 대화 가능. S4 이미지2장(실제 gpt-image-2.6-sunburst), S6 6/6(grok_oauth), S8 pv1(Gemini 64회). G4·G6는 사용자 지시로 에이전트가 검토 후 화면 승인.
+- 시그니처 영상만 시드 keyframe(해시 bb8ff6a7c750 일치), 사각 손 프레임 재현. 인사 과다 숙임 재현. 채팅6문항 직접 판독. 결과·영상·시트: /Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/outputs/son-signature-live-20261112. 상세는 handoff-2026-11-12-son-signature-live.md.
+
+## 2026-11-12 — Opus 현행 사용성 QA
+
+- 모델 `anthropic/claude-opus-5-5`, 독립 서브 에이전트. 8776 signature-seed-runtime를 기준으로 Chrome CUA 읽기 전용 검토. 새 제작폼·G6 승인시트·승인대기/완료진행·채팅가능/불가·390×844 모바일 에뮬레이션·키보드 진입을 관측했다. 현재 캡처18장, `work/usability-opus-20261112/01-...18-...png`.
+- 부모가 GET health/캐릭터 상태/참조사진 상태를 확인해 `runtime-observation.json`, `selected-states.json`에 저장했다. 실제 화면 캡처01·09·15를 직접 확인했다. 보고서의 모든 초기 항목이 필수라는 표현, 영상자동전환 과거인계 근거, 사진수 혼동을 정정했다. 언어학적 설명·최종프롬프트·생성/품질상태 보존 경계를 추가했다.
+- 보고서 `docs/reports/2026-11-12-usability-opus.md`. 전문가 사용성 리뷰이며 실사용자 성공률/전체 기능 통과/접근성 인증을 측정하지 않았다. 코드 수정·유료호출·승인·채팅전송·서버재시작 없음.
+
+### 2026-11-12 장면별 기준 페르소나 공정 (D-0197)
+
+작업 트리의 Python 전체 테스트 2,278개 통과, 6개 건너뜀(하위 검사 46개 통과). 로컬 적용본의 페르소나·장면·검토·기록·내보내기 검사 114개 통과(하위 검사 46개 통과). 합성 문답에서 분류 입력에 답이 없고, 근거 변조 시 G6 승인이 거절되며, 승인 뒤 채팅이 같은 프롬프트를 사용하는 것을 확인했다. 8776 입력 화면 HTTP 200, 두 장면의 S8 분기, 기존 대화 프롬프트 해시와 영상 응답, 설정 파일과 기존 산출물 3,243개의 동일성을 재확인했다. 실제 모델 호출·인물 유사도 비교·시간 재측정은 수행하지 않았다. [인계](handoffs/handoff-2026-11-12-interview-v2-factory.md)

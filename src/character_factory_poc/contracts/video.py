@@ -15,7 +15,7 @@ VIDEO_ID = r"^vd-cf-\d{8}-[a-z0-9-]+-(intro-vi|ch[123]-[a-z0-9_]+-va)\d+-\d+$"
 ACTION_KEY = r"^[a-z][a-z0-9]*(_[a-z0-9]+)*$"  # 앱 clip_key(예: glad_good, sad_good_strong)
 ACTION_ID = r"^ch[123]-[a-z][a-z0-9]*(_[a-z0-9]+)*$"
 # 앱 통화 영상 분류(api-svc character_clip, clip_taxonomy). 말하기·후속 영상은 만들지 않는다(D-0040)
-PlayType = Literal["idle", "reaction"]
+PlayType = Literal["idle", "speaking", "reaction"]
 PickRole = Literal["emotion", "special"]
 ActionCategory = Literal["aegyo", "touch"]  # 앱의 sexy(allure)·private는 공장 기본에서 뺀다
 Mood = Literal["good", "bad"]
@@ -27,6 +27,8 @@ class VideoSettings(Strict):
     resolution: Literal["480p", "720p", "1080p"]
     aspectRatio: str | None = None
     generateAudio: bool = False
+    # 끝 화면을 첫 화면과 같은 사진으로 고정했는지(D-0185). 예전 기록은 False로 읽는다.
+    pinLastFrame: bool = False
 
 
 class FirstFrameSource(Strict):
@@ -100,6 +102,7 @@ class VideoAsset(Strict):
     settings: VideoSettings
     probe: Probe
     estCostUsd: float | None = None
+    postprocess: dict = Field(default_factory=dict)
 
 
 @register("intro-video-approved-v1")
@@ -135,12 +138,13 @@ class ActionSpec(Strict):
     useWhen: str = ""
     duration: int = Field(ge=1, le=15)
     prompt: str = Field(min_length=1)
+    production: dict = Field(default_factory=dict)
     reviewNote: str = ""  # G5b 수정 요청으로 다시 만들 때 붙인 사람 메모
 
     @model_validator(mode="after")
     def _roles(self) -> ActionSpec:
-        if (self.playType == "idle") != (self.pickRole is None):
-            raise ValueError("대기(idle)만 pickRole이 없고, 반응은 emotion 또는 special이다")
+        if (self.playType in {"idle", "speaking"}) != (self.pickRole is None):
+            raise ValueError("대기·말하기는 pickRole이 없고 반응은 emotion 또는 special이다")
         if (self.pickRole == "special") != (self.actionCategory is not None):
             raise ValueError("특별 행동만 actionCategory(aegyo·touch)를 가진다")
         return self
@@ -192,7 +196,10 @@ class ActionInputs(Strict):
     resolution: Literal["480p", "720p", "1080p"]
     aspectRatio: str | None = None
     generateAudio: bool = False
+    pinLastFrame: bool = False  # 동작 영상의 끝 화면 = 첫 화면(D-0185)
     candidates: int = Field(ge=1, le=4)
+    productionProfile: str | None = None
+    videoScene: dict = Field(default_factory=dict)
     previousRev: str | None = None  # G5b 수정 요청 뒤 새 rev면 직전 rev
     regenerate: list[str] = Field(default_factory=list)  # 다시 만든 actionId. 나머지는 재사용
     chapters: list[ActionChapter] = Field(min_length=3, max_length=3)
@@ -230,7 +237,7 @@ class ApprovedClip(Strict):
     title: str = ""
     description: str = ""
     useWhen: str = ""
-    duration: int = Field(ge=1, le=15)
+    duration: float = Field(gt=0, le=15)
     videoId: str = Field(pattern=VIDEO_ID)
     video: ImageRef
 

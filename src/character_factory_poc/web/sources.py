@@ -17,8 +17,9 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import Response
 from fastapi.routing import APIRoute
-from pydantic import Field, StringConstraints, ValidationError
+from pydantic import Field, StringConstraints, ValidationError, model_validator
 
 from character_factory_poc.common.config import load_config
 from character_factory_poc.common.source_store import (
@@ -33,6 +34,7 @@ from character_factory_poc.common.source_store import (
 )
 from character_factory_poc.contracts.common import Strict
 from character_factory_poc.contracts.source import (
+    FactSheet,
     SourcePack,
     SourceSubject,
     SourceText,
@@ -56,9 +58,14 @@ from character_factory_poc.pipeline.origin import (
 )
 from character_factory_poc.stages.s0_source import parse
 from character_factory_poc.stages.s3_plan.common import new_character
+from character_factory_poc.stages.s6_actions.call_loop import VideoScene
 from character_factory_poc.web import reads
 from character_factory_poc.web.errors import WebError
 from character_factory_poc.web.launch_validation import validate_source_launch
+from character_factory_poc.web.reference_images import (
+    ReferenceImageSettings,
+    install_reference_routes,
+)
 
 EXTENSIONS = {".txt", ".srt", ".vtt", ".csv", ".json"}
 FIELDS = ("textId", "kind", "register", "subjectSpeaker", "userSpeaker", "date", "sourceUrl")
@@ -80,18 +87,26 @@ class SignaturePose(Strict):
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)]
     motion: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=400)]
     useWhen: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] = ""
+    template: Literal["custom", "camera_click"] = "custom"
+    middleFramePath: str | None = Field(default=None, max_length=500)
+    middleFrameAtS: float = Field(default=2.0, gt=0, lt=4.5)
 
 
 class Settings(Strict):
     videoTier: VideoTier
+    videoScene: VideoScene | None = None
     signaturePose: SignaturePose | None = None
 
 
 def _signature(pose: SignaturePose) -> dict:
-    return {k: v.strip() for k, v in pose.model_dump().items()}
+    data = pose.model_dump(exclude_defaults=True)
+    data.setdefault("useWhen", "")
+    return {k: v.strip() if isinstance(v, str) else v for k, v in data.items()}
 
 
 class Draft(Strict):
+    referenceImage: ReferenceImageSettings | None = None
+    videoScene: VideoScene | None = None
     videoTier: VideoTier = "none"
     signaturePose: SignaturePose | None = None
     displayName: str = Field(min_length=1)
@@ -101,21 +116,33 @@ class Draft(Strict):
     autoReview: bool = True
     chapterTemplate: Literal["FAN_CALL", "FAMILY_CALL", "FRIEND_CHAT", "INTERVIEW"] | None = None
     knownFacts: KnownFacts = Field(default_factory=KnownFacts)
+    # 사용자가 준 사실(한 줄에 하나). S8 [FACTS]에 글자 그대로 들어간다.
+    factSheet: FactSheet = Field(default_factory=list)
     # 시연 모드: 모든 관문 자동 승인 → 테스터 미리보기 발행 → 디스코드 알림(사용자 2026-11-12).
     demoMode: bool = False
     demoBudgetUsd: float = Field(default=15.0, gt=0, le=200)
+
+    @model_validator(mode="after")
+    def reference_tier(self):
+        if self.referenceImage is not None and self.videoTier != "light":
+            raise ValueError("기준 사진 확인 흐름은 Lite 영상 6개에서 사용할 수 있어요.")
+        if self.referenceImage is not None and self.demoMode:
+            raise ValueError("기준 사진 확인 흐름에서는 전체 자동 발행을 끄고 시작해 주세요.")
+        return self
 
 
 class DemoSwitch(Strict):
     enabled: bool
     budgetUsd: float = Field(default=15.0, gt=0, le=200)
     start: bool = False
+    publish: bool = True  # False면 패키지 승인(G9)까지만 하고 발행하지 않는다(로컬 시험)
 
 
 class Upload(Strict):
     filename: str
     size: int = Field(gt=0, le=MAX_BYTES)
     contentType: str = Field(min_length=1)
+    photoRole: Literal["identity", "signature"] = "identity"
 
 
 class ImportPath(Strict):
@@ -143,6 +170,8 @@ def _topic(word):
 def draft_problem(errors):
     """초안 422를 칸 이름과 한도가 담긴 한 문장으로 바꾼다. 모르는 오류면 공통 문장."""
     for error in errors:
+        if "factSheet" in error.get("loc", ()) and error.get("type") == "value_error":
+            return str(error.get("msg", "")).removeprefix("Value error, ")
         field = next((str(x) for x in reversed(error.get("loc", ())) if x in DRAFT_LABELS), None)
         limit = (error.get("ctx") or {}).get("max_length")
         if field and limit:
@@ -204,6 +233,8 @@ def photo_ok(name, data):
 def record(spec: Upload) -> dict:
     name = spec.filename
     photo = Path(name).suffix.lower() in PHOTO_FORMATS
+    if spec.photoRole == "signature" and not photo:
+        raise WebError(422, "시그니처 참고 사진은 jpg, png, webp로 올려 주세요.")
     if photo and spec.size > PHOTO_LIMIT:
         raise WebError(413, "사진은 15MB 이하로 올려 주세요.")
     if (
@@ -217,6 +248,7 @@ def record(spec: Upload) -> dict:
         raise WebError(400, "원문 파일 이름과 형식을 확인해 주세요.")
     return dict(
         fileType="photo" if photo else "text",
+        **({"photoRole": spec.photoRole} if photo else {}),
         fileId=uuid4().hex,
         filename=name,
         size=spec.size,
@@ -244,11 +276,18 @@ def summary(draft):
     if not any(f.get("fileType", "text") == "text" for f in files):
         problems.append("대화나 글이 담긴 원문을 하나 이상 올려 주세요.")
     if draft["videoTier"] != "none" and not any(
-        f["fileType"] == "photo" and f["status"] == "ready" for f in files
+        f["fileType"] == "photo" and f.get("photoRole") != "signature" and f["status"] == "ready"
+        for f in files
     ):
         problems.append("영상을 만들려면 인물 사진을 한 장 이상 올려 주세요.")
     if draft["videoTier"] != "none" and not draft.get("signaturePose"):
         problems.append("영상을 만들려면 시그니처 포즈를 정해 주세요.")
+    if (
+        draft.get("referenceImage") is not None
+        and sum(f.get("fileType") == "photo" and f.get("photoRole") != "signature" for f in files)
+        != 1
+    ):
+        problems.append("기준으로 쓸 인물 사진은 한 장만 올려 주세요.")
     ids = [f["textId"] for f in files if f["textId"]]
     if len(ids) != len(set(ids)):
         problems.append("원문 이름이 겹쳐요.")
@@ -263,6 +302,13 @@ def source_text(folder, item):
         **{k: item[k] for k in FIELDS},
         path=str(local_copy(folder, item["fileId"], item["filename"]).relative_to(folder)),
     )
+
+
+def photo_view(cid, item):
+    """Transient preview URLs never become source provenance or immutable inputs."""
+    if item.get("fileType") == "photo" and item["status"] == "ready":
+        return item | {"previewUrl": f"/api/sources/{cid}/files/{item['fileId']}/preview"}
+    return item
 
 
 def kakao_layout(raw):
@@ -431,6 +477,9 @@ def install_source_routes(app, conf, jobs):
             draft = {} if legacy else json.loads(state.read_text("utf-8"))
             draft["videoTier"] = read_video_tier(folder) or "none"
             draft["signaturePose"] = read_signature(folder)
+            from character_factory_poc.pipeline.origin import read_reference_image
+
+            draft["referenceImage"] = read_reference_image(folder)
             for item in draft.get("files", []):
                 item.setdefault("fileType", "text")
             if edit and (jobs.active_for(cid) or (draft.get("jobId") and not purge)):
@@ -447,6 +496,14 @@ def install_source_routes(app, conf, jobs):
         folder = ctx.character_dir(cid)
         write_origin(folder, SOURCE, auto_review=body.autoReview)
         write_video_tier(folder, body.videoTier)
+        if body.referenceImage is not None:
+            from character_factory_poc.pipeline.origin import write_reference_image
+
+            write_reference_image(folder, body.referenceImage.model_dump())
+        if body.videoScene:
+            from character_factory_poc.pipeline.origin import write_video_scene
+
+            write_video_scene(folder, body.videoScene.model_dump(exclude_unset=True))
         if body.signaturePose:
             write_signature(folder, _signature(body.signaturePose))
         write_model_mode(folder, body.modelMode)
@@ -459,20 +516,18 @@ def install_source_routes(app, conf, jobs):
             except FactoryError as exc:
                 raise WebError(422, str(exc)) from exc
         subject = SourceSubject(displayName=body.displayName, kind=body.subjectKind)
-        save(
-            inside(folder, "s0-source", "intake.json"),
-            dict(
-                characterId=cid,
-                createdAt=datetime.now(UTC).isoformat(),
-                subject=subject.model_dump(),
-                usageBasis=body.usageBasis.model_dump(),
-                chapterTemplate=body.chapterTemplate,
-                knownFacts={
-                    k: v.strip() for k, v in body.knownFacts.model_dump().items() if v.strip()
-                },
-                files=[],
-            ),
+        intake = dict(
+            characterId=cid,
+            createdAt=datetime.now(UTC).isoformat(),
+            subject=subject.model_dump(),
+            usageBasis=body.usageBasis.model_dump(),
+            chapterTemplate=body.chapterTemplate,
+            knownFacts={k: v.strip() for k, v in body.knownFacts.model_dump().items() if v.strip()},
+            files=[],
         )
+        if body.factSheet:
+            intake["factSheet"] = body.factSheet
+        save(inside(folder, "s0-source", "intake.json"), intake)
         return {"characterId": cid}
 
     @router.get("/drafts")
@@ -508,9 +563,12 @@ def install_source_routes(app, conf, jobs):
         with opened(cid) as (_, draft):
             problems, ready = summary(draft)
             return {k: draft[k] for k in ("characterId", "subject", "usageBasis", "files")} | {
+                "files": [photo_view(cid, item) for item in draft["files"]],
                 "videoTier": draft["videoTier"],
                 "signaturePose": draft["signaturePose"],
+                "referenceImage": draft["referenceImage"],
                 "knownFacts": draft.get("knownFacts", {}),
+                "factSheet": draft.get("factSheet", []),
                 "store": conf.source_store,
                 "allowPathImport": allow_import,
                 "problems": problems,
@@ -522,6 +580,20 @@ def install_source_routes(app, conf, jobs):
     def presign(cid: str, body: Upload):
         with opened(cid, edit=True) as (folder, draft):
             item = record(body)
+            if body.photoRole == "signature":
+                if draft["videoTier"] != "light" or not draft.get("signaturePose"):
+                    raise WebError(409, "Lite를 고르고 시그니처 동작을 정한 뒤 사진을 올려 주세요.")
+                if draft.get("referenceImage") is None:
+                    # The gesture is redrawn onto the approved master photo, so the
+                    # master-photo review flow is required.
+                    raise WebError(
+                        409, "시그니처 참고 사진은 기준 사진을 확인하는 Lite 흐름에서 쓸 수 있어요."
+                    )
+                if any(f.get("photoRole") == "signature" for f in draft["files"]):
+                    raise WebError(
+                        409,
+                        "시그니처 참고 사진은 한 장만 올려 주세요. 기존 사진을 먼저 지워 주세요.",
+                    )
             upload = store.upload(folder, item["fileId"], body.size, body.contentType)
             draft["files"].append(item)
             return {"fileId": item["fileId"], "upload": upload}
@@ -652,7 +724,46 @@ def install_source_routes(app, conf, jobs):
     @router.patch("/{cid}/files/{fid}")
     def complete(cid: str, fid: str, body: dict):
         with opened(cid, edit=True) as (folder, draft):
-            return check(folder, draft, find_file(draft, fid), body)
+            item = check(folder, draft, find_file(draft, fid), body)
+            if item.get("photoRole") == "signature":
+                signature = dict(read_signature(folder) or {})
+                # Raw upload is a gesture reference only. S4 redraws it onto the
+                # approved master photo; G4 approval binds that seed as middle frame.
+                if item["status"] == "ready":
+                    signature["poseReferencePath"] = str(
+                        local_copy(folder, fid, item["filename"]).relative_to(folder)
+                    )
+                else:
+                    signature.pop("poseReferencePath", None)
+                write_signature(folder, signature)
+            return photo_view(cid, item)
+
+    @router.get("/{cid}/files/{fid}/preview")
+    def preview_photo(cid: str, fid: str):
+        with opened(cid) as (folder, draft):
+            item = find_file(draft, fid)
+            if item.get("fileType") != "photo" or item["status"] != "ready":
+                raise WebError(409, "확인이 끝난 사진만 볼 수 있어요.")
+            try:
+                data = store.read(folder, fid, item["filename"], item["size"])
+                if hashlib.sha256(data).hexdigest() != item["sha256"]:
+                    raise ValueError("image changed")
+            except (OSError, ValueError):
+                raise WebError(409, "확인한 사진과 달라서 다시 올려야 해요.") from None
+            media = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".webp": "image/webp",
+            }[Path(item["filename"]).suffix.lower()]
+            return Response(
+                data,
+                media_type=media,
+                headers={
+                    "Cache-Control": "private, no-store",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
 
     @router.post("/{cid}/import-path")
     def import_path(cid: str, body: ImportPath):
@@ -681,6 +792,10 @@ def install_source_routes(app, conf, jobs):
             item = find_file(draft, fid)
             store.delete(folder, fid)
             draft["files"].remove(item)
+            if item.get("photoRole") == "signature":
+                signature = dict(read_signature(folder) or {})
+                signature.pop("poseReferencePath", None)
+                write_signature(folder, signature)
         return {"fileId": fid}
 
     @router.delete("/{cid}")
@@ -719,6 +834,9 @@ def install_source_routes(app, conf, jobs):
                     raise WebError(409, message) from None
                 if conf.source_store == "s3":
                     atomic_write(local_copy(folder, item["fileId"], item["filename"]), data)
+                if item.get("photoRole") == "signature":
+                    # Kept as a gesture keyframe, never an identity/source portrait.
+                    continue
                 if item["fileType"] == "photo":
                     photos.append(
                         {
@@ -735,6 +853,7 @@ def install_source_routes(app, conf, jobs):
             pack = SourcePack(
                 subject=draft["subject"],
                 knownFacts=draft.get("knownFacts", {}),
+                factSheet=draft.get("factSheet", []),
                 usageBasis=draft["usageBasis"],
                 texts=texts,
                 photos=photos,
@@ -743,7 +862,9 @@ def install_source_routes(app, conf, jobs):
             save(inside(folder, "source-pack.json"), pack.model_dump(mode="json"))
             from character_factory_poc.pipeline.demo import read_demo_mode
 
-            if read_demo_mode(folder):
+            if draft.get("referenceImage") is not None:
+                job = video_job(cid, prepare_chat=True)
+            elif read_demo_mode(folder):
                 job = demo_job(cid, draft.get("subject", {}).get("displayName") or cid)
             elif read_auto_review(folder) and draft["videoTier"] != "none":
                 job = video_job(cid, prepare_chat=True)
@@ -755,6 +876,7 @@ def install_source_routes(app, conf, jobs):
     def demo_job(cid, name):
         """시연 모드 실행: 패키지 승인(G9)까지 자동 승인으로 돌고 끝나면 발행·알림한다."""
         from character_factory_poc.common.notify import notify
+        from character_factory_poc.pipeline.demo import read_demo_mode
         from character_factory_poc.providers.grok_chain import route_summary
 
         job = jobs.submit(cid, until="G9", trigger="demo")
@@ -762,23 +884,44 @@ def install_source_routes(app, conf, jobs):
             route = route_summary(load_config(conf.root, conf.config_path).provider("video"))
         except (ValueError, OSError) as exc:
             route = f"영상 경로 확인 실패: {exc}"
+        mode = read_demo_mode(reads.character_dir(conf.root, cid))
+        last = (
+            "끝나면 테스터 전용으로 발행해요."
+            if mode is None or mode.publish
+            else "패키지 승인까지만 하고 발행은 하지 않아요."
+        )
         notify(
             "started",
             name,
-            ["모든 검토를 자동 승인하고, 끝나면 테스터 전용으로 발행해요.", route],
+            [f"모든 검토를 자동 승인하고, {last}", route],
             character_id=cid,
         )
         return job
 
     def video_job(cid, *, prepare_chat=False):
+        from character_factory_poc.pipeline.origin import graph_for_dir
+
+        graph = graph_for_dir(reads.character_dir(conf.root, cid))
         return jobs.submit(
             cid,
             until="G5b",
-            confirm=list(VIDEO_STAGES),
+            confirm=[sid for sid in VIDEO_STAGES if sid in graph],
             trigger="videos-with-chat" if prepare_chat else "videos",
         )
 
     def change_settings(folder, draft, cid, tier, signature=None):
+        from character_factory_poc.pipeline.origin import read_reference_image
+
+        if read_reference_image(folder) is not None and tier != "light":
+            raise WebError(409, "기준 사진 확인 흐름은 Lite 영상 6개로 유지해 주세요.")
+        if tier != "light" and (
+            (read_signature(folder) or {}).get("middleFramePath")
+            or (read_signature(folder) or {}).get("poseReferencePath")
+            or any(f.get("photoRole") == "signature" for f in draft.get("files", []))
+        ):
+            raise WebError(
+                409, "시그니처 참고 사진은 Lite에서 지원해요. 사진을 지운 뒤 등급을 바꿔 주세요."
+            )
         if jobs.active_for(cid):
             raise WebError(409, "만들기가 끝난 뒤에 바꿀 수 있어요.")
         if (draft.get("jobId") or "files" not in draft) and not reads.character_summary(folder)[
@@ -787,13 +930,35 @@ def install_source_routes(app, conf, jobs):
             raise WebError(409, "대화 준비가 끝난 뒤에 바꿀 수 있어요.")
         write_video_tier(folder, tier)
         if signature:
-            write_signature(folder, _signature(signature))
+            updated = _signature(signature)
+            previous = read_signature(folder) or {}
+            for key in ("template", "middleFramePath", "middleFrameAtS", "poseReferencePath"):
+                if key not in signature.model_fields_set and key in previous:
+                    updated[key] = previous[key]
+            # An uploaded pose remains attached when editing its text description.
+            uploaded = next(
+                (
+                    f
+                    for f in draft.get("files", [])
+                    if f.get("photoRole") == "signature" and f["status"] == "ready"
+                ),
+                None,
+            )
+            if uploaded:
+                updated["poseReferencePath"] = str(
+                    local_copy(folder, uploaded["fileId"], uploaded["filename"]).relative_to(folder)
+                )
+            write_signature(folder, updated)
             draft["signaturePose"] = read_signature(folder)
 
     @router.patch("/{cid}/settings")
     def settings(cid: str, body: Settings):
         with opened(cid, settings=True) as (folder, draft):
             change_settings(folder, draft, cid, body.videoTier, body.signaturePose)
+            if body.videoScene:
+                from character_factory_poc.pipeline.origin import write_video_scene
+
+                write_video_scene(folder, body.videoScene.model_dump(exclude_unset=True))
             return {"videoTier": body.videoTier, "signaturePose": read_signature(folder)}
 
     @router.put("/{cid}/demo-mode")
@@ -805,10 +970,16 @@ def install_source_routes(app, conf, jobs):
         folder = reads.character_dir(conf.root, cid)
         if not folder.is_dir() or not folder.is_relative_to(conf.root):
             raise WebError(404, "캐릭터를 찾을 수 없어요.")
+        from character_factory_poc.pipeline.origin import read_reference_image
+
+        if body.enabled and read_reference_image(folder) is not None:
+            raise WebError(409, "기준 사진 확인 흐름에서는 사진 확인 후 영상 6개를 만들어 주세요.")
         if jobs.active_for(cid):
             raise WebError(409, "진행 중인 작업이 끝난 뒤에 바꿀 수 있어요.")
         try:
-            mode = write_demo_mode(folder, enabled=body.enabled, budget_usd=body.budgetUsd)
+            mode = write_demo_mode(
+                folder, enabled=body.enabled, budget_usd=body.budgetUsd, publish=body.publish
+            )
         except FactoryError as exc:
             raise WebError(422, str(exc)) from exc
         job_id = None
@@ -838,7 +1009,12 @@ def install_source_routes(app, conf, jobs):
             ).get("photos"):
                 raise WebError(409, "영상을 만들려면 사진이 담긴 원문 묶음이 필요해요.")
             change_settings(folder, draft, cid, body.videoTier, body.signaturePose)
+            if body.videoScene:
+                from character_factory_poc.pipeline.origin import write_video_scene
+
+                write_video_scene(folder, body.videoScene.model_dump(exclude_unset=True))
             return {"jobId": video_job(cid)["jobId"]}
 
     app.include_router(videos)
     app.include_router(router)
+    install_reference_routes(app, conf, jobs)

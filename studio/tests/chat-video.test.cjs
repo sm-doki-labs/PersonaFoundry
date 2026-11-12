@@ -354,3 +354,16 @@ test('no video: a character made without photos gets a plain note instead of a d
   assert.equal(C.videoNote({ canMakeVideo: false }, clips, href), '');
 });
 
+
+test('call-loop idle holds the pinned opening frame instead of talking continuously', async () => {
+  const { call, players } = stage({ clips: {
+    ready: true, chapter: 'ch1',
+    idle: { good: { clipKey: 'speak_good', url: V('speak_good'), freeze: true }, bad: null },
+    emotion: []
+  }});
+  await call.start();
+  assert.equal(call.state.mode, 'idle');
+  assert.equal(call.clips.idle.good.freeze, true);
+  assert.equal(players.every((v) => v.paused && v.plays === 0), true);
+  call.destroy();
+});

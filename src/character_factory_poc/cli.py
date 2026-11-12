@@ -151,11 +151,21 @@ def cmd_persona_prompts(args) -> int:
         from character_factory_poc.pipeline.origin import is_twin
 
         if is_twin(ctx.character_dir(args.character_id)):
-            if ctx.config.stage("s8").get("motif_compiler", "evidence-v4") in {
+            from character_factory_poc.stages.s8_prompts.evidence_pipeline import (
+                configured_compiler,
+            )
+
+            compiler, _ = configured_compiler(ctx, args.character_id)
+            if compiler in {
                 "evidence-v2",
                 "evidence-v3",
                 "evidence-v4",
                 "evidence-v5",
+                "evidence-v6",
+                "evidence-v7",
+                "evidence-v8",
+                "evidence-v9",
+                "evidence-v10",
             }:
                 from character_factory_poc.stages.s8_prompts.evidence_pipeline import full_plan
 
@@ -167,7 +177,7 @@ def cmd_persona_prompts(args) -> int:
                         len(probes),
                         ctx.config.stage("s8").get("scene_traits", False),
                         ctx.config.stage("s8").get("trait_method", "focus"),
-                        ctx.config.stage("s8").get("motif_compiler", "evidence-v4"),
+                        compiler,
                     )
                 )
             )

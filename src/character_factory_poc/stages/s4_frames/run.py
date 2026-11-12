@@ -138,6 +138,12 @@ def _identity_reference(rev_dir, appearance, ref_src, cfg):
 
 
 def run_s4(ctx: Context, cid: str) -> Path:
+    from character_factory_poc.pipeline.origin import reference_image_enabled
+
+    if reference_image_enabled(ctx.character_dir(cid)):
+        from character_factory_poc.stages.s4_frames.reference import run_reference
+
+        return run_reference(ctx, cid)
     state = ctx.state(cid)
     state.require_deps("s4")
     appearance, ref_src = load_appearance_spec(ctx, cid)

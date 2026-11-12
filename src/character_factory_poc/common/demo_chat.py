@@ -186,6 +186,11 @@ class Scene:
             "evidence-pipeline-v3",
             "evidence-pipeline-v4",
             "evidence-pipeline-v5",
+            "evidence-pipeline-v6",
+            "evidence-pipeline-v7",
+            "evidence-pipeline-v8",
+            "evidence-pipeline-v9",
+            "evidence-pipeline-v10",
         }
 
     def compose(self, *, for_review=False):
@@ -202,6 +207,11 @@ class Scene:
             "evidence-pipeline-v3",
             "evidence-pipeline-v4",
             "evidence-pipeline-v5",
+            "evidence-pipeline-v6",
+            "evidence-pipeline-v7",
+            "evidence-pipeline-v8",
+            "evidence-pipeline-v9",
+            "evidence-pipeline-v10",
         }:
             return None
         data = load_json(self.prompt / "example-turns.json") if self.prompt else None
@@ -413,6 +423,11 @@ def chat_clips(folder: Path, chapter: str, *, for_picker: bool = False) -> dict:
         mood = row.get("mood") or defaults.get("mood")
         if raw in {"idle_good", "idle_bad"}:
             result["idle"][raw.removeprefix("idle_")] = item
+        elif row.get("playType") == "speaking":
+            result["speaking"] = item
+            # Legacy viewer can hold the pinned opening frame when no idle clip exists.
+            if result["idle"]["good"] is None:
+                result["idle"]["good"] = item | {"freeze": True}
         elif raw.startswith(("idle", "speak")) or raw.endswith("_talking"):
             continue
         else:

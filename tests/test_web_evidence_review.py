@@ -67,9 +67,13 @@ let source = fs.readFileSync(process.argv[1], 'utf8');
 assert.ok(source.includes('load().then(watch);'));
 source = source.replace('load().then(watch);',
   'window.testGate = {state: state, render: renderPrompts, ' +
-  'build: buildPrompts, hint: KINDS.prompts.hintFor};');
+  'build: buildPrompts, hint: KINDS.prompts.hintFor, quality: qualityNotice};');
 vm.runInNewContext(source, context);
 const gate = context.window.testGate;
+const autoNotice = gate.quality({record: {reviewer: '시연 자동 승인', decision: 'APPROVE'}}, {});
+assert.ok(autoNotice.includes('품질 검증 미완료'));
+assert.ok(gate.quality({}, {twin: {conditions: [{status: 'SKIPPED'}]}}).includes('비교 평가를 생략'));
+assert.equal(gate.quality({record: {reviewer: 'human', decision: 'APPROVE'}}, {}), '');
 const review = {
   schemaVersion: 'evidence-review-v1', status: 'AWAITING_HUMAN',
   records: [{id: 'r1', unit: ['synthetic'], context: '앞선 <맥락>', target: '본인 & 반응',
@@ -77,7 +81,11 @@ const review = {
   cards: [{section: 'VOICE', trigger: '조건 <img src=x onerror=bad()>', first: '첫 반응',
     shift: '전환', stop: '중단', limit: '한계', evidence: ['r1'],
     rule: '규칙 <script>bad()</script>'}],
-  held: [{index: 1, reason: '근거 <부족>'}], stats: {}, packetSha256: 'synthetic', binding: {}
+  held: [{index: 1, reason: '근거 <부족>',
+    claim: {function: '후속 보류 기능', realization: '후속 보류 설명'}}],
+  excludedClaims: [{phase: 'tendency-discover', chunkId: 'chunk-01', reason: '대사 <포함>',
+    claim: {function: '추출 제외 기능', trigger: '적용 <조건>',
+      realization: '제외 <설명>', evidence: ['r1']}}], stats: {}, packetSha256: 'synthetic', binding: {}
 };
 const items = {evidenceReview: review, long: {text: 'prompt'}, short: {}, probes: []};
 gate.state.items = items;
@@ -87,7 +95,9 @@ assert.equal((html.match(/data-evidence-reviewed/g) || []).length, 1);
 assert.ok(html.includes('원문 근거와 적용 조건을 읽고 확인했어요'));
 assert.ok(html.includes('<details class="gate-more">'));
 for (const text of ['앞선 &lt;맥락&gt;', '본인 &amp; 반응', '상대 다음 반응',
-  '본인 후속 반응', '더 이전 대화', '근거 &lt;부족&gt;', '말투', '구조 검사', '의미']) {
+  '본인 후속 반응', '더 이전 대화', '근거 &lt;부족&gt;', '말투', '구조 검사', '의미',
+  '추출에서 제외한 특징 1개', '추출 제외 기능', '제외 &lt;설명&gt;',
+  '대사 &lt;포함&gt;', '후속 보류 설명']) {
   assert.ok(html.includes(text), text);
 }
 assert.ok(!html.includes('<script>bad()'));
@@ -114,6 +124,8 @@ ack.checked = true;
 delete nodes['[data-evidence-reviewed]'];
 assert.throws(() => gate.build('APPROVE'), /원문 근거/);
 nodes['[data-evidence-reviewed]'] = ack;
+// History de-duplication below checks one retained card, independently of excluded references.
+review.excludedClaims = [];
 review.records[0].history = review.records[0].context;
 html = gate.render(items);
 assert.equal((html.match(/앞선 &lt;맥락&gt;/g) || []).length, 1);
@@ -149,3 +161,46 @@ gate.state.items = {};
 assert.ok(!('evidenceReviewed' in gate.build('APPROVE')));
 assert.ok(!gate.render({}).includes('data-evidence-reviewed'));
 """
+
+
+def test_legacy_excluded_claims_are_read_without_rewriting_artifacts(tmp_path):
+    from hashlib import sha256
+
+    folder = tmp_path / "s8-prompts/pv1"
+    analysis = folder / "analysis"
+    analysis.mkdir(parents=True)
+    (folder / "prompt-pair.json").write_text("{}")
+    excluded = {
+        "claim": {"function": "합성 제외 특징", "realization": "합성 발화"},
+        "reason": "예시 대사",
+    }
+    artifact = analysis / "tendency-discover-chunk-0001.json"
+    artifact.write_text(json.dumps({"output": {"heldClaims": [excluded]}}))
+    review_path = folder / "evidence-review.json"
+    review_path.write_text(
+        json.dumps(
+            {
+                "held": [],
+                "analysisArtifacts": {
+                    "analysis/" + artifact.name: sha256(artifact.read_bytes()).hexdigest()
+                },
+            }
+        )
+    )
+    before = {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+    result = prompts(tmp_path, "synthetic", "s8-prompts", "pv1")["evidenceReview"]
+    assert result["excludedClaims"] == [
+        dict(excluded, phase="tendency-discover", chunkId="chunk-0001")
+    ]
+    assert {p: p.read_bytes() for p in before} == before
+    # An unbound file must never appear as verified revision evidence.
+    unbound = analysis / "tendency-discover-chunk-0002.json"
+    unbound.write_text(artifact.read_text())
+    assert (
+        len(prompts(tmp_path, "synthetic", "s8-prompts", "pv1")["evidenceReview"]["excludedClaims"])
+        == 1
+    )
+    artifact.write_text("{}")
+    result = prompts(tmp_path, "synthetic", "s8-prompts", "pv1")["evidenceReview"]
+    assert not result["excludedClaims"]
+    assert result["excludedClaimsIssues"]

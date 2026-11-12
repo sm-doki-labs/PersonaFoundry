@@ -7,6 +7,7 @@ state.json 형식은 바꾸지 않는다.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -39,9 +40,11 @@ __all__ = [
     "origin_label",
     "read_model_mode",
     "read_origin",
+    "read_reference_image",
     "stage_def",
     "write_model_mode",
     "write_origin",
+    "write_reference_image",
 ]
 
 
@@ -69,6 +72,34 @@ def _write_video_settings(char_dir: Path, data: dict) -> None:
 
 def write_video_tier(char_dir: Path, tier: VideoTier) -> None:
     _write_video_settings(char_dir, _video_settings(char_dir) | {"videoTier": tier})
+
+
+def _reference_image(value: dict) -> dict:
+    if not isinstance(value, dict) or any(
+        not isinstance(value.get(key, ""), str) for key in ("wardrobe", "background")
+    ):
+        raise FactoryError("referenceImage는 wardrobe·background 문자열을 담은 객체다")
+    return {key: value.get(key, "").strip() for key in ("wardrobe", "background")}
+
+
+def read_reference_image(char_dir: Path) -> dict | None:
+    """명시적으로 켠 기준 이미지 설정. 빈 객체·빈 문자열도 원본 보존으로 활성화한다."""
+    value = _video_settings(char_dir).get("referenceImage")
+    return _reference_image(value) if value is not None else None
+
+
+def write_reference_image(char_dir: Path, reference: dict) -> None:
+    _write_video_settings(
+        char_dir, _video_settings(char_dir) | {"referenceImage": _reference_image(reference)}
+    )
+
+
+def reference_image_enabled(char_dir: Path) -> bool:
+    return (
+        read_origin(char_dir) == SOURCE
+        and _video_settings(char_dir).get("videoTier") == "light"
+        and read_reference_image(char_dir) is not None
+    )
 
 
 def read_signature(char_dir: Path) -> dict | None:
@@ -155,7 +186,16 @@ def stage_def(char_dir: Path, sid: str) -> Stage:
 
 def graph_for_dir(char_dir: Path) -> dict[str, Stage]:
     """그 캐릭터의 갈래·모델 준비 방식에 맞는 단계 그래프."""
-    return stages_for(read_origin(char_dir), read_model_mode(char_dir))
+    graph = stages_for(read_origin(char_dir), read_model_mode(char_dir))
+    if not reference_image_enabled(char_dir):
+        return graph
+    return {
+        sid: replace(stage, deps=frozenset({"G3", "G1s"}), needs=frozenset())
+        if sid == "s4"
+        else stage
+        for sid, stage in graph.items()
+        if sid not in {"s4a", "s4b"}
+    }
 
 
 def read_model_mode(char_dir: Path) -> str:
@@ -198,3 +238,12 @@ def write_model_mode(char_dir: Path, mode: str, *, reason: str = "") -> None:
             )
             + "\n"
         )
+
+
+def write_video_scene(char_dir: Path, scene: dict) -> None:
+    from character_factory_poc.stages.s6_actions.call_loop import VideoScene
+
+    valid = VideoScene.model_validate(scene).model_dump(exclude_unset=True)
+    current = _video_settings(char_dir)
+    merged = (current.get("videoScene") or {}) | valid
+    _write_video_settings(char_dir, current | {"videoScene": merged})

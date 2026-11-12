@@ -2,11 +2,13 @@
 # 모델 이름과 수치는 전부 제안값이다(docs/status/decisions.md).
 
 [providers.text]
-# 모티브 V3의 최종 편집에도 사용한다. 아래 모델은 로컬 비교에 쓴 편집 모델이다.
+# OpenAI 계열은 공식 API를 사용한다. Gemini 생성 경로는 vertex_openai로 별도 설정한다.
 adapter = "openai_compat"
-base_url = "http://127.0.0.1:10100/v1"
+base_url = "https://api.openai.com/v1"
 model = "gpt-6.1-sol"
-api_key_env = "CFP_TEXT_API_KEY"
+api_key_env = "OPENAI_API_KEY"
+reasoning_effort = "low"
+max_retries = 0
 
 [providers.judge]
 adapter = "openai_compat"
@@ -22,14 +24,20 @@ max_cost_usd_per_command = 20.0
 max_check_retries = 3
 
 [stages.s8]
-motif_compiler = "evidence-v4" # 현행 표준: 익준 pv6 생성 공정. evidence-v5는 명시적 실험용이다.
+# motif_compiler를 적지 않으면 확정 표준 evidence-v10(섹션별 후보·응답별 전수 표시, D-0201·D-0202)을 쓴다.
+# S3 장면 분석이 없는 캐릭터는 evidence-v4로 돌아간다. 값을 적으면 그 공정을 강제한다.
+# motif_compiler = "evidence-v10"
+interview_compiler = "interview-editor-v2" # 인터뷰의 질문 유형·길이와 검토된 관찰을 조립한다. inherit는 공통 컴파일러를 사용한다.
 # evidence_scenes = { "character-id" = "친구끼리 메신저로 이야기한다." } # 인물별 장면이 공통값보다 우선
 evidence_max_records = 80 # evidence-v1 전용 표본 상한(2~160). 기본 evidence-v4는 전체 처리
+evidence_min_support = { conversations = 8, share = 0.5 } # evidence-v4~v6: 카드를 함께 지지한 서로 다른 대화 수(원문 대화가 더 적으면 그 수)와 판정된 적용 응답 중 지지 비율. 미달 카드는 수치와 함께 G6 보류 목록에 남는다
 # evidence_scene = "인터뷰어의 질문에 답한다. 원문에 맞는 말높임을 쓴다." # 필요할 때 장면 명시
 scene_traits = false  # V3 비교 경로만: 두 말차례의 관심·대응 추가 분석
 trait_method = "focus"  # focus: 최대 2회. contrast: 반응을 가르는 단서 예측·검토, 최대 3회
 evidence_chunk_chars = 24000 # 모든 자료를 나눠 전달하는 호출별 크기 상한
-evidence_workers = 2
+evidence_workers = 4
+# evidence_hedge_s = 240  # evidence-v10: 표시 호출이 이 초 안에 안 오면 같은 요청을 한 번 더 보낸다(0이면 끔)
+# evidence_light_reasoning = "low"  # evidence-v10: 응답 표시·보충 단계의 추론 강도("" = 공급자 기본)
 example_turns = 0  # evidence-v1/v2/v3는 반드시 0. V3 비교 경로에서만 실제 문답 주입 가능
 motif_demo_chat_temperature = 0.8  # 모티브 대화 표본의 발화에만 적용
 long_prompt_max_chars = 8000  # 덱의 무압축 정본 상한
@@ -37,12 +45,26 @@ short_prompt_max_chars = 2400  # 섹션 예산 합계(1550) + 시스템 규칙·
 # 긴 프롬프트의 시스템 규칙 원문 경로 (Q-0006). 비우면 내장 기본 규칙(resources/system-rules-default-v1.md)을 쓴다.
 system_rules_path = ""
 
-# S1 미리보기 이미지. ChatGPT 구독으로 Codex 내장 이미지 생성을 쓴다(D-0019). API 키가 필요 없다.
-# Codex CLI가 ChatGPT 계정으로 로그인돼 있어야 한다. 테스트·데모는 adapter = "fake".
+# 공식 Images API. 참조 사진이 있으면 edits, 없으면 generations. API 키가 필요하다.
+# 구독 경로(codex_image)는 명시적으로 고를 때만 사용한다. 테스트는 adapter = "fake".
+# 시그니처 중간 사진(S4). 기준 사진의 몸 폭을 그대로 두고 손·표정만 바꾸는 Grok 이미지 편집.
+# 없으면 [providers.image]를 쓴다. OpenAI 이미지 모델은 손흥민 실측에서 몸통을 1.08~1.14배 넓혔다.
+[providers.signature_image]
+adapter = "xai_images"
+model = "grok-imagine-image-2.0"
+api_key_env = "XAI_API_KEY"
+timeout_s = 180
+max_retries = 1
+
 [providers.image]
-adapter = "codex_image"
-model = "gpt-6.1-sol"
-reasoning_effort = "low"
+adapter = "openai_images"
+base_url = "https://api.openai.com/v1"
+model = "gpt-image-2.6-sunburst"
+api_key_env = "OPENAI_API_KEY"
+quality = "high"
+complexity = "medium"
+estimated_cost_usd = 1.0 # 장당 계획용 보수적 추정액. 실제 청구액은 입력·출력 사용량에 따라 다르다.
+max_retries = 0
 timeout_s = 600
 
 # S1 기본값은 D-0018 제안, G1은 외모군마다 얼굴 한 장이다(D-0043 (1)).
@@ -85,16 +107,16 @@ image_size = "1024x1024"
 [providers.video]
 adapter = "grok"
 order = ["grok_oauth", "xai_video"]
-model = "grok-imagine-video-1.5-lite"  # 720p 1초 $0.03 + 입력 이미지 $0.01 (2026-10-21 공식 단가)
+model = "grok-imagine-video-1.5"  # 시작·끝 프레임 지정 지원. 720p 초당 $0.14 + 입력 이미지당 $0.01
 api_key_env = "XAI_API_KEY"
 # login_file = "~/.character-factory/xai-oauth.json"  # 기본값(CFP_XAI_OAUTH_FILE로도 바꾼다)
 # oauth_client_id = ""  # 비우면 Grok CLI 공개 클라이언트
 poll_interval_s = 5
 timeout_s = 600
 # 단가가 바뀌면 덮어쓴다. 모델 → 해상도 → 1초당 USD. 입력 이미지 $0.01은 따로 더한다.
-# [providers.video.price_per_second."grok-imagine-video-1.5-lite"]
-# "480p" = 0.02
-# "720p" = 0.03
+# [providers.video.price_per_second."grok-imagine-video-1.5"]
+# "480p" = 0.08
+# "720p" = 0.14
 
 # grok_web은 xAI 이용 정책(봇·스크립트 접근 금지) 위반 위험을 감수하고 켠다(D-0029).
 # 준비 절차는 `cfp video web-setup`이 안내한다. 쓰려면 위 절 대신 아래를 쓴다.
@@ -114,7 +136,7 @@ timeout_s = 600
 # token_file·token_env를 직접 적으면 그 외부 토큰(옛 opencodex 파일 등)을 읽는다. 기본은 공장 로그인이다.
 # [providers.video]
 # adapter = "grok_oauth"
-# model = "grok-imagine-video-1.5-lite"
+# model = "grok-imagine-video-1.5"
 # base_url = "https://api.x.ai/v1"
 # # token_file = "~/.opencodex/auth.json"  # 옛 경로: 직접 적을 때만 읽는다
 # # token_env = "XAI_OAUTH_ACCESS_TOKEN"   # 있으면 token_file보다 먼저 쓴다
@@ -141,6 +163,7 @@ candidates = 1         # 동작마다 후보 수
 resolution = "720p"
 aspect_ratio = "9:16"
 generate_audio = false
+pin_last_frame = true  # 끝 화면 = 첫 화면(D-0185). xAI는 이때 1080p를 받지 않아 720p까지 쓴다
 
 [stages.s6.durations]  # 초. Grok은 6·10·15초를 고를 수 있다. 앱 대기 영상은 20초지만 Grok 최대가 15초다
 idle = 15
@@ -151,6 +174,33 @@ special = 6
 [stages.s3]
 variants = 3
 max_check_retries = 3
+
+[stages.s3t]
+analysis_mode = "scenes" # 원문 모티브 기본: 원문 전체 분석 3회 + 기획 조립(고쳐 쓰기 포함 최대 4회).
+# analysis_input = "full"   # 분석기 3개가 생성용 원문 전체를 한 줄 형식으로 읽는다. "sample"은 연구용 표본
+# analysis_max_chars = 700000  # 이 크기를 넘을 때만 원문을 나눠 더 호출한다
+# assembly_format_retries = 1
+# assembly_check_retries = 2
+
+# S3 분석기와 조립기 모델(D-0199·D-0200). 실측 조합: 원문 분석 3회는 GPT-6.1 Sol, 기획 조립은 Claude Opus 5.5.
+# 블록이 없으면 analyzer → planner → text 순으로 쓴다.
+[providers.analyzer]
+adapter = "openai_compat"
+base_url = "https://api.openai.com/v1"
+model = "gpt-6.1-sol"
+api_key_env = "OPENAI_API_KEY"
+reasoning_effort = "medium"
+stream = true
+timeout_s = 900
+max_retries = 1
+
+[providers.planner]
+adapter = "anthropic"
+model = "claude-opus-5-5"
+api_key_env = "ANTHROPIC_API_KEY"
+effort = "high"
+timeout_s = 900
+max_retries = 2
 
 # 참고 자료 선별. 색인이 없으면 S3r은 건너뛴다. 색인은 원문을 담으므로 Git 밖 경로에 둔다(Q-0019).
 # [resources] 표에 reference_index = "/abs/path/refs-index.json"을 넣는다(cfp refs index로 만든다).
@@ -198,12 +248,19 @@ sse_heartbeat_s = 15
 default_until = "G6"         # POST /api/jobs에서 until을 생략할 때
 
 # 에이전틱 실행(D-0049, LLD §3·§6.6~§6.9). 값은 제안이다.
-# max_parallel: 동시에 돌릴 단계 수(1이면 순차). auto_resume: 워크숍에서 관문을 결정하면 이어서 돌린다.
+# max_parallel: 독립 단계를 동시에 진행한다. 완료된 단계의 후속 작업은 영상 완료를 기다리지 않는다.
+# 영상은 S5·S6 합계 최대 6편, xAI 제출 시작은 1초 간격(재시도 포함)이다.
+# auto_resume: 워크숍에서 관문을 결정하면 이어서 돌린다.
 # 워크숍 실행은 공급자 표에 paid = true가 있는 단계(예: [providers.video] paid = true)를 실행 확인 전에는 돌리지 않는다.
 [orchestrator]
 max_parallel = 3
+# 시연 병렬 실행: 비용 계획이 불명확한 단계의 예약·계획 상한(알려진 영상은 계산된 비용 사용).
+parallel_stage_cost_cap_usd = 10
 auto_resume = true
 resume_until = "sx"
+
+[orchestrator.provider_limits]
+judge = 0 # 판정 모델에 공장 자체 동시 호출 상한을 두지 않는다.
 
 # 관문 사전 검토. vision은 중계의 이미지 입력 확인(Q-0020) 뒤 켠다. G7a·G8은 검토하지 않는다.
 [review]
@@ -317,8 +374,15 @@ max_retries = 2
 # 로컬에서 다른 지역을 쓰면 project와 location을 함께 지정한다.
 location = "global"
 
-# 원문 조건부 경향 공정은 [stages.s8]의 motif_compiler = "evidence-v4"로 선택한다.
-# 기능·언어 형식 분리와 혼합 근거 보존을 적용하며 G6 검토를 유지한다.
+# evidence-v10 응답별 표시 모델(D-0201). 확정 설정은 Gemini API 키 경로의 Argon이다.
+# 이 블록이 없으면 [providers.analyzer](없으면 생성 모델)를 쓴다.
+[providers.labeler]
+adapter = "openai_compat"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+model = "gemini-4-argon"
+api_key_env = "GEMINI_API_KEY"
+timeout_s = 1200
+max_retries = 0
 
 # 테스터 전용 미리보기 발행(cfp preview publish, 시연 모드). 순서: 읽기 점검 → id 예약 →
 # content.segments preview 지정·대기 → 사진·영상 업로드 → api-svc 등록 → chat-svc 발행 → 대화 켜기 →

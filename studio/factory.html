@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <link rel="stylesheet" href="shared/foundry-tokens.css">
 <link rel="stylesheet" href="shared/flow.css">
+<link rel="stylesheet" href="shared/reference.css">
 </head>
 <body class="fl">
 <div class="fd-shell">
@@ -22,6 +23,7 @@
       <main class="fd-canvas" aria-label="진행">
         <div data-banner></div>
         <div data-head style="display:flex;flex-direction:column;gap:16px"></div>
+        <div data-reference hidden></div>
         <section class="fl-graph" data-graph aria-label="공정 그래프" hidden>
           <span class="fl-graph-head">공정</span>
           <div class="fl-zoom" data-zoombar role="toolbar" aria-label="그래프 보기"></div>
@@ -40,6 +42,7 @@
 <div class="fd-scrim" data-scrim hidden></div>
 <section class="fd-sheet" data-sheet role="dialog" aria-modal="true" aria-labelledby="fd-sheet-title" hidden></section>
 <script src="shared/runtime.js"></script>
+<script src="shared/reference.js"></script>
 <script src="shared/flow.js"></script>
 <script>
   window.factoryFlow = window.FactoryFlow.mount({ root: document, apiBase: '' });

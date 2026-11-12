@@ -6,6 +6,8 @@
   // 화면이 따로 들고 있는 것은 올리는 중인 파일과 저장 중인 고침뿐이다.
   // 아래 createIntake는 DOM 없이 돌아가서 시험이 가짜 fetch로 올리기 순서를 확인한다. mount는 그 위에 화면을 그린다.
 
+  const Ref = (typeof module !== 'undefined' && module.exports) ? require('./reference.js') : global.ReferencePreview;
+
   const MAX_BYTES = 20 * 1024 * 1024;
   const EXTENSIONS = ['.txt', '.srt', '.vtt', '.csv', '.json'];
   // 영상용 사진(계획 4차 약속 5). 원문과 같은 올리기 순서로 보내고, 서버가 fileType "photo"로 돌려준다.
@@ -15,7 +17,7 @@
   // [값, 이름, 한 줄 설명, 시간·비용 칸 수(0~4)]. 진행 화면(flow.js)도 같은 표를 쓴다(시험이 같은지 본다).
   const VIDEO_TIERS = [
     ['none', '영상 없이', '대화만 만들어요. 영상 비용이 들지 않아요.', 0],
-    ['light', '라이트', '자주 쓰는 기본 감정만, 가장 빨리 확인해요.', 1],
+    ['light', '라이트', '대기·말하기·파이팅·웃음·인사와 시그니처를 만들어요.', 1],
     ['standard', '스탠다드', '대화에서 자주 쓰는 감정까지 만들어요.', 2],
     ['pro', '프로', '더 섬세한 감정까지 만들어요.', 3],
     ['max', '맥스', '앱에서 쓰는 반응 전부예요. 가장 오래 걸리고 비용도 가장 커요.', 4]
@@ -48,6 +50,7 @@
   function sigOf(value) {
     const v = value || {};
     const sig = { title: text(v.title).trim(), motion: text(v.motion).trim(), useWhen: text(v.useWhen).trim() };
+    ['template', 'middleFramePath', 'middleFrameAtS'].forEach((k) => { if (v[k] !== undefined) sig[k] = v[k]; });
     return sig.title && sig.motion ? sig : null;
   }
   // 등급 고르기 카드. 원문 화면과 진행 화면의 영상 만들기가 같은 카드를 쓴다. paidOnly면 '영상 없이'를 뺀다.
@@ -106,12 +109,17 @@
       else if (!making) body = '대화는 지금 해 볼 수 있어요. 영상은 진행 화면에서 영상 만들기를 눌러 시작해요.';
       else body = '대화는 지금 해 볼 수 있어요. 영상은 이어서 만들고 있어요. 다 되면 대화할 때 영상이 나와요.';
     } else if (on && st === 'running' && body) body += ' 영상은 대화가 된 뒤에 이어서 만들어요.';
+    if (o.referenceImage) {
+      if (st === 'running') body = Ref.PARALLEL_COPY;
+      else if (st === 'needs_review') body = '프롬프트 검토와 기준 사진 승인은 각각 확인해야 해요. 진행 화면에서 원문 근거를 검토하고, 기준 사진 확인 카드에서 이미지를 승인해 주세요.';
+      else if (st === 'chat_ready') body = '대화할 수 있어요. 기준 사진과 영상 제작 상태는 기준 사진 확인 카드에서 확인해 주세요. 남은 제작 단계는 진행 화면에 표시돼요.';
+    }
     const vText = making ? '영상 만드는 중 · ' + tierName(tier) : (!auto && vs === 'none') ? '영상은 진행 화면에서 시작해요 · ' + tierName(tier) : videoText({ videoTier: tier, videoStatus: vs, videoLabel: c.videoLabel });
     return {
       ready, status: st, title, body,
       progress: c.goal || (c.progress && c.progress.total ? c.progress : null),
       tone: { chat_ready: 'ok', failed: 'fail', needs_review: 'wait', stopped: 'wait' }[st] || 'run',
-      video: { show: ready && on, text: vText, tone: vReady ? 'ok' : vFailed ? 'fail' : 'run', making },
+      video: { show: ready && on && !o.referenceImage, text: vText, tone: vReady ? 'ok' : vFailed ? 'fail' : 'run', making },
       chatLabel: vReady ? '영상과 함께 대화해 보기' : '대화해 보기'
     };
   }
@@ -168,6 +176,18 @@
   }
   // 사람이 카드에서 고칠 수 있다. 실마리가 없으면 인터뷰로 둔다.
   function guessKind(filename) { return kindHint(filename) || 'INTERVIEW'; }
+  // 사용자가 준 사실표(서버 FactSheet와 같은 한도). 한 줄에 사실 하나, 앞뒤 공백을 떼고 빈 줄은 버린다.
+  const FACT_SHEET_MAX_LINES = 40;
+  const FACT_SHEET_MAX_CHARS = 300;
+  function factSheetLines(raw) {
+    return String(raw == null ? '' : raw).split(/\r\n|\r|\n/).map((s) => s.trim()).filter(Boolean);
+  }
+  function factSheetProblem(raw) {
+    const lines = factSheetLines(raw);
+    if (lines.length > FACT_SHEET_MAX_LINES) return '사실은 ' + FACT_SHEET_MAX_LINES + '줄까지 적을 수 있어요.';
+    const n = lines.findIndex((s) => s.length > FACT_SHEET_MAX_CHARS);
+    return n < 0 ? null : '사실 ' + (n + 1) + '번째 줄은 ' + FACT_SHEET_MAX_CHARS + '자까지 적을 수 있어요.';
+  }
   // 서버가 원문에서 찾은 화자 이름(줄 수 많은 순). 없는 서버면 빈 목록.
   function speakersOf(rec) {
     return (Array.isArray(rec && rec.detectedSpeakers) ? rec.detectedSpeakers : []).map((s) => text(s && typeof s === 'object' ? s.name : s).trim()).filter(Boolean);
@@ -332,6 +352,7 @@
       thumbs: {}, // key → 이 브라우저에서 고른 사진의 미리보기 주소(서버가 주소를 주지 않아도 바로 보인다)
       busy: null, // 'create' | 'import' | 'finalize' | 'delete' | 'remove:<key>'
       error: null,
+      signaturePhotoError: null,
       notice: null,
       finalized: null,
       settings: null, // { modelMode, autoReview, videoTier } 이 화면에서 만든 초안이면 보낸 값, 다시 열면 서버 값
@@ -391,7 +412,7 @@
 
     function files() { return (state.draft && state.draft.files) || []; }
     function textFiles() { return files().filter((f) => !isPhotoRecord(f)); }
-    function photoFiles() { return files().filter(isPhotoRecord); }
+    function photoFiles(role) { return files().filter((f) => isPhotoRecord(f) && (f.photoRole || 'identity') === (role || 'identity')); }
     function takenIds(exceptKey) {
       const ids = [];
       textFiles().forEach((f) => { if (keyOf(f.fileId) !== exceptKey) ids.push(metaOfRecord(f).textId); });
@@ -424,6 +445,7 @@
     }
 
     async function load(cid) {
+      state.signaturePhotoError = null;
       if (cid !== state.cid) { dropThumbs(); Object.assign(state, { uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, settings: null, character: null, chat: null }); }
       state.cid = cid;
       state.loading = true;
@@ -512,6 +534,7 @@
       const s = state.settings || {};
       const pick = (k) => (d[k] != null ? d[k] : c[k] != null ? c[k] : s[k] != null ? s[k] : null);
       const out = { modelMode: pick('modelMode'), autoReview: pick('autoReview'), videoTier: tierOf(pick('videoTier')), signaturePose: sigOf(pick('signaturePose')) };
+      if (pick('referenceImage') != null) out.referenceImage = pick('referenceImage');
       if (pick('demoMode') === true) out.demoMode = true;
       return out;
     }
@@ -542,7 +565,7 @@
 
     // 시그니처 포즈(D-0165)를 저장한다. 영상 등급은 그대로 두고 함께 보낸다.
     async function setSignature(pose) {
-      const sig = sigOf(pose);
+      const sig = sigOf(Object.assign({}, settings().signaturePose || {}, pose));
       if (!state.cid || state.finalized || state.busy || !sig) return false;
       state.busy = 'tier';
       state.error = null;
@@ -577,6 +600,8 @@
       tooLong('age', '나이는', 20);
       tooLong('job', '하는 일은', 60);
       tooLong('background', '한 줄 배경은', 400);
+      const sheetProblem = factSheetProblem(v.factSheet);
+      if (sheetProblem) errors.factSheet = sheetProblem;
       if (tierOf(v.videoTier) !== 'none') {
         if (!text(v.sigTitle).trim()) errors.sigTitle = '시그니처 포즈 이름을 적어 주세요.';
         if (!text(v.sigMotion).trim()) errors.sigMotion = '어떤 동작인지 적어 주세요.';
@@ -596,7 +621,7 @@
       try {
         const modelMode = modeOf(input.modelMode);
         const autoReview = input.autoReview !== false;
-        const demoMode = input.demoMode === true;
+        const demoMode = input.demoMode === true && tierOf(input.videoTier) !== 'light';
         const videoTier = tierOf(input.videoTier);
         const body = {
           displayName: text(input.displayName).trim(),
@@ -607,8 +632,13 @@
           autoReview,
           videoTier
         };
+        const referenceImage = videoTier === 'light' ? { wardrobe: text(input.referenceWardrobe).trim(), background: text(input.referenceBackground).trim() } : null;
+        if (referenceImage) body.referenceImage = referenceImage;
         if (demoMode) body.demoMode = true;
         if (input.chapterTemplate) body.chapterTemplate = input.chapterTemplate;
+        // 비어 있으면 보내지 않는다(사실표를 모르는 이전 서버와도 그대로 맞는다).
+        const factSheet = factSheetLines(input.factSheet);
+        if (factSheet.length) body.factSheet = factSheet;
         const signaturePose = videoTier === 'none' ? null : sigOf({ title: input.sigTitle, motion: input.sigMotion, useWhen: input.sigWhen });
         if (signaturePose) body.signaturePose = signaturePose;
         const data = await request('POST', '/api/sources/drafts', body);
@@ -616,6 +646,7 @@
         if (o.onCid) o.onCid(data.characterId);
         await load(data.characterId);
         state.settings = demoMode ? { modelMode, autoReview, videoTier, signaturePose, demoMode } : { modelMode, autoReview, videoTier, signaturePose };
+        if (referenceImage) state.settings.referenceImage = referenceImage;
         emit();
         return { characterId: data.characterId };
       } catch (error) {
@@ -630,9 +661,21 @@
     // photoOnly(사진 칸에서 고르거나 떨어뜨림)면 사진이 아닌 파일은 사진 칸에서 거절한다.
     function addFiles(list, opts) {
       if (!state.draft) return [];
-      const photoOnly = !!(opts && opts.photoOnly);
+      const signature = !!(opts && opts.photoRole === 'signature');
+      const photoOnly = signature || !!(opts && opts.photoOnly);
+      const selected = Array.from(list || []);
+      if (signature) {
+        if (!selected.length) return [];
+        const occupied = photoFiles('signature').length || state.uploads.some((u) => u.photoRole === 'signature' && u.phase !== 'rejected');
+        const problem = state.finalized ? '만들기를 시작한 뒤에는 시그니처 참고 사진을 바꿀 수 없어요.'
+          : settings().videoTier !== 'light' ? '시그니처 포즈 참고 사진은 Lite(라이트)에서만 사용할 수 있어요.'
+          : selected.length > 1 || occupied ? '시그니처 포즈 참고 사진은 한 장만 올릴 수 있어요. 다른 사진을 쓰려면 기존 사진을 먼저 지워 주세요.'
+          : !isPhotoName(selected[0] && selected[0].name) ? '사진은 jpg, png, webp 파일로 올려 주세요.' : checkFile(selected[0]);
+        state.signaturePhotoError = problem || null;
+        if (problem) { state.announce = problem; emit(); return []; }
+      }
       const added = [];
-      Array.from(list || []).forEach((file) => {
+      selected.forEach((file) => {
         const photo = photoOnly || isPhotoName(file && file.name);
         if (state.finalized && !photo) return;
         const key = 'u' + (++seq);
@@ -643,6 +686,7 @@
           key,
           file,
           fileType: photo ? 'photo' : 'text',
+          photoRole: photo ? (signature ? 'signature' : 'identity') : undefined,
           filename: text(file.name),
           size: Number(file.size) || 0,
           contentType: text(file.type) || 'application/octet-stream',
@@ -697,7 +741,9 @@
             try { await request('DELETE', filesPath(old)); } catch (error) { /* 남은 자리는 서버 목록에서 지울 수 있다 */ }
           }
           entry.step = 'start';
-          const started = await request('POST', filesPath(), { filename: entry.filename, size: entry.size, contentType: entry.contentType });
+          const payload = { filename: entry.filename, size: entry.size, contentType: entry.contentType };
+          if (entry.photoRole === 'signature') payload.photoRole = 'signature';
+          const started = await request('POST', filesPath(), payload);
           entry.fileId = started.fileId;
           state.cardKey[started.fileId] = entry.key;
           if (entry.cancelled) throw Object.assign(new Error('abort'), { aborted: true });
@@ -782,6 +828,8 @@
     function retry(key) {
       const entry = state.uploads.find((u) => u.key === key);
       if (!entry || entry.phase !== 'failed') return;
+      if (entry.photoRole === 'signature' && (state.finalized || settings().videoTier !== 'light')) return;
+      if (entry.photoRole === 'signature') state.signaturePhotoError = null;
       entry.phase = 'queued';
       entry.error = null;
       emit();
@@ -884,6 +932,9 @@
 
     async function removeFile(key) {
       const entry = state.uploads.find((u) => u.key === key);
+      const rec = files().find((f) => keyOf(f.fileId) === key);
+      if (state.finalized && (entry || rec || {}).photoRole === 'signature') return;
+      if ((entry || rec || {}).photoRole === 'signature') state.signaturePhotoError = null;
       if (entry) {
         delete state.fieldErrors[key];
         delete state.rawInput[key];
@@ -899,7 +950,6 @@
         if (entry.fileId) { try { await request('DELETE', filesPath(entry.fileId)); } catch (error) { /* 서버 목록에 남으면 거기서 지운다 */ } await refresh(); }
         return;
       }
-      const rec = files().find((f) => keyOf(f.fileId) === key);
       if (!rec) return;
       state.busy = 'remove:' + key;
       state.error = null;
@@ -962,7 +1012,9 @@
       const noText = !textFiles().length && !state.uploads.some((u) => u.phase !== 'rejected' && u.fileType !== 'photo');
       if (noText && !serverProblems.some((p) => /원문.*하나 이상/.test(p))) reasons.push('원문 파일을 하나 이상 올려 주세요.');
       const needPhoto = settings().videoTier !== 'none' && !photoFiles().some((f) => f.status === 'ready');
-      if (needPhoto && !serverProblems.some((p) => /사진/.test(p))) reasons.push('영상을 만들려면 얼굴이 잘 보이는 사진을 1장 이상 올려 주세요.');
+      const referenceMode = !!settings().referenceImage;
+      if (needPhoto && !serverProblems.some((p) => /사진/.test(p))) reasons.push(referenceMode ? '얼굴이 잘 보이는 인물사진 한 장을 올려 주세요.' : '영상을 만들려면 얼굴이 잘 보이는 사진을 1장 이상 올려 주세요.');
+      if (referenceMode && photoFiles().length > 1 && !serverProblems.some((p) => /사진/.test(p))) reasons.push('인물사진은 한 장만 남겨 주세요. 나머지 사진은 지운 뒤 시작해 주세요.');
       serverProblems.forEach((p) => { if (reasons.indexOf(p) < 0) reasons.push(p); });
       if (d.canFinalize !== true && !reasons.length) reasons.push('아직 시작할 수 없어요. 파일마다 확인할 점을 봐 주세요.');
       return { ready: d.canFinalize === true && !reasons.length, reasons, needPhoto };
@@ -1002,6 +1054,7 @@
       }
       Object.keys(aborts).forEach((k) => aborts[k]());
       dropThumbs();
+      state.signaturePhotoError = null;
       Object.assign(state, { cid: null, draft: null, uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, busy: null, finalized: null, loadError: null, settings: null, character: null, chat: null, announce: '초안과 올린 원문을 지웠어요.' });
       if (o.onCid) o.onCid(null);
       emit();
@@ -1011,6 +1064,7 @@
     }
     function reset() {
       dropThumbs();
+      state.signaturePhotoError = null;
       Object.assign(state, { cid: null, draft: null, uploads: [], overlay: {}, saving: {}, saveError: {}, fieldErrors: {}, rawInput: {}, cardKey: {}, busy: null, finalized: null, loadError: null, error: null, notice: null, settings: null, character: null, chat: null });
       emit();
     }
@@ -1051,10 +1105,11 @@
     }
     // 영상용 사진 목록(미리보기 칸). 서버가 미리보기 주소(previewUrl·thumbUrl·url)를 주면 쓰고, 없으면 이 브라우저에서 고른 사진을 보인다.
     // 만들기를 시작한 뒤에는 이미 쓴 사진을 지우지 못하게 한다.
-    function photoItems() {
+    function photoItems(role) {
+      const photoRole = role || 'identity';
       const uploading = new Set(state.uploads.map((u) => u.fileId).filter(Boolean));
       const out = [];
-      photoFiles().forEach((f) => {
+      photoFiles(photoRole).forEach((f) => {
         if (uploading.has(f.fileId)) return;
         const key = keyOf(f.fileId);
         const st = f.status === 'ready' ? ['ok', '준비됐어요'] : f.status === 'problem' ? ['wait', '확인이 필요해요'] : ['muted', '다 올라가지 않았어요'];
@@ -1064,17 +1119,19 @@
         const thumb = f.status === 'problem' ? '' : text(f.previewUrl || f.thumbUrl || f.url) || state.thumbs[key] || '';
         out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, thumb, removable: !state.finalized && state.busy !== 'remove:' + key, retry: false });
       });
-      state.uploads.filter((u) => u.fileType === 'photo').forEach((u) => {
+      state.uploads.filter((u) => u.fileType === 'photo' && (u.photoRole || 'identity') === photoRole).forEach((u) => {
         const map = { queued: ['muted', '기다리는 중'], starting: ['run', '준비하는 중'], sending: ['run', '올리는 중 ' + Math.round(u.progress * 100) + '%'], checking: ['run', '확인하는 중'], failed: ['fail', '올리지 못했어요'], rejected: ['fail', '받을 수 없는 사진'] };
         const st = map[u.phase] || ['muted', ''];
-        out.push({ key: u.key, source: 'upload', fileId: u.fileId, filename: u.filename, size: u.size, tone: st[0], status: st[1], phase: u.phase, progress: u.phase === 'sending' ? u.progress : null, problems: u.error ? [u.error] : [], thumb: state.thumbs[u.key] || '', removable: !u.cancelled, retry: u.phase === 'failed' });
+        const locked = photoRole === 'signature' && !!state.finalized;
+        out.push({ key: u.key, source: 'upload', fileId: u.fileId, filename: u.filename, size: u.size, tone: st[0], status: st[1], phase: u.phase, progress: u.phase === 'sending' ? u.progress : null, problems: u.error ? [u.error] : [], thumb: state.thumbs[u.key] || '', removable: !u.cancelled && !locked, retry: u.phase === 'failed' && !locked && (photoRole !== 'signature' || settings().videoTier === 'light') });
       });
       return out;
     }
+    function signaturePhotoItems() { return photoItems('signature'); }
     function uploading() { return state.uploads.some((u) => ACTIVE.indexOf(u.phase) >= 0); }
 
     return {
-      state, load, refresh, progress, projects, drafts, settings, setTier, setSignature, createDraft, validateDraft, addFiles, retry, dismiss, stageFile, editFile, pickSpeaker, removeFile, importPath, finalize, deleteDraft, reset, startState, items, photoItems, uploading,
+      state, load, refresh, progress, projects, drafts, settings, setTier, setSignature, createDraft, validateDraft, addFiles, retry, dismiss, stageFile, editFile, pickSpeaker, removeFile, importPath, finalize, deleteDraft, reset, startState, items, photoItems, signaturePhotoItems, uploading,
       subscribe(fn) { listeners.push(fn); return () => { const i = listeners.indexOf(fn); if (i >= 0) listeners.splice(i, 1); }; }
     };
   }
@@ -1203,12 +1260,15 @@
       title: $('[data-title]'), intro: $('[data-intro]'), crumb: $('[data-crumb]'), resume: $('[data-resume]'), adv: $('[data-adv]'), startNote: $('[data-start-note]'),
       tierCards: $('[data-tier-cards]'), tierHint: $('[data-tier-hint]'), sumVideo: $('[data-sum-video]'), tierEdit: $('[data-tier-edit]'), sig: $('[data-sig]'), sumSig: $('[data-sum-sig]'),
       photos: $('[data-photos]'), photoList: $('[data-photo-list]'), photoPicker: $('[data-photo-picker]'), photoCount: $('[data-photo-count]'), photoHint: $('[data-photo-hint]'),
+      signaturePhotos: $('[data-signature-photos]'), signaturePhotoList: $('[data-signature-photo-list]'), signaturePhotoPicker: $('[data-signature-photo-picker]'), signaturePhotoCount: $('[data-signature-photo-count]'), signaturePhotoHint: $('[data-signature-photo-hint]'), signaturePhotoError: $('[data-signature-photo-error]'),
       videoLine: $('[data-video-line]'), videoText: $('[data-video-text]')
     };
-    if (r.tierCards) r.tierCards.innerHTML = tierCardsHTML('videoTier', 'none');
+    if (r.tierCards) r.tierCards.innerHTML = tierCardsHTML('videoTier', 'light');
+    const reference = Ref && Ref.mount({ host: $('[data-reference]'), fetch: opt.fetch, apiBase: opt.apiBase, expected: true });
     let tierEditOpen = false;
     let sigDraft = null; // 바꾸기 칸에 적고 아직 저장하지 않은 시그니처(다시 그려도 지우지 않는다, QA v5 E9)
     const tiles = new Map();
+    const signatureTiles = new Map();
     let chapterTouched = false;
     let confirmDelete = false;
     let listOpen = null; // null이면 파일 수로 정한다(많으면 접는다)
@@ -1263,6 +1323,16 @@
         r.form.hidden = hasDraft || S.loading || !!S.loadError;
         r.form.querySelectorAll('input,textarea,select,button').forEach((el) => { el.disabled = S.busy === 'create'; });
         const btn = r.form.querySelector('[type="submit"]');
+        const selectedTier = (r.form.querySelector('[name="videoTier"]:checked') || {}).value;
+        const refFields = $('[data-reference-inputs]');
+        if (refFields) refFields.hidden = selectedTier !== 'light';
+        if (r.tierHint) {
+          r.tierHint.hidden = selectedTier === 'none';
+          r.tierHint.textContent = selectedTier === 'light' ? '다음 단계에서 원문과 함께 얼굴이 잘 보이는 인물사진 한 장을 올려 주세요.' : '다음 단계에서 원문과 함께 얼굴이 잘 보이는 사진을 1장 이상 올려 주세요.';
+        }
+        if (r.sig) r.sig.hidden = selectedTier === 'none';
+        const demo = r.form.querySelector('[name="demoMode"]');
+        if (demo && selectedTier === 'light') { demo.checked = false; demo.disabled = true; }
         if (btn) btn.textContent = S.busy === 'create' ? '저장하는 중…' : '저장하고 원문 올리기';
       }
       if (r.formErr) { r.formErr.textContent = !hasDraft && S.error ? S.error : ''; r.formErr.hidden = !(!hasDraft && S.error); }
@@ -1276,7 +1346,24 @@
           const kf = d.knownFacts || {};
           const factsEl = r.summary.querySelector('[data-sum-facts]');
           if (factsEl) factsEl.textContent = [kf.age, kf.gender, kf.job].filter(Boolean).join(' · ') + (kf.background ? ' — ' + kf.background : '');
+          const sheetEl = r.summary.querySelector('[data-sum-factsheet]');
+          if (sheetEl) {
+            const sheet = Array.isArray(d.factSheet) ? d.factSheet : [];
+            sheetEl.textContent = sheet.join('\n');
+            sheetEl.parentElement.hidden = !sheet.length;
+          }
           const set = intake.settings();
+          if (set.referenceImage && r.form) {
+            for (const [field, value] of [['referenceWardrobe', set.referenceImage.wardrobe], ['referenceBackground', set.referenceImage.background]]) {
+              const input = r.form.querySelector('[name="' + field + '"]');
+              if (input) input.value = text(value);
+            }
+          }
+          const refSummary = r.summary.querySelector('[data-sum-reference]');
+          if (refSummary) {
+            refSummary.parentElement.hidden = !set.referenceImage;
+            if (set.referenceImage) refSummary.textContent = '복장: ' + (set.referenceImage.wardrobe || '사진 그대로') + ' · 배경: ' + (set.referenceImage.background || '사진 그대로');
+          }
           const modeEl = r.summary.querySelector('[data-sum-mode]');
           if (modeEl) { modeEl.textContent = labelOf(MODES, set.modelMode); modeEl.parentElement.hidden = !set.modelMode; }
           const autoEl = r.summary.querySelector('[data-sum-auto]');
@@ -1284,7 +1371,7 @@
           if (r.sumVideo) {
             r.sumVideo.textContent = tierName(set.videoTier);
             const edit = r.summary.querySelector('[data-act="tier-edit"]');
-            if (edit) { edit.hidden = !!S.finalized; edit.disabled = S.busy === 'tier'; edit.setAttribute('aria-expanded', String(tierEditOpen && !S.finalized)); edit.textContent = tierEditOpen ? '닫기' : '바꾸기'; }
+            if (edit) { edit.hidden = !!S.finalized || !!set.referenceImage; edit.disabled = S.busy === 'tier'; edit.setAttribute('aria-expanded', String(tierEditOpen && !S.finalized)); edit.textContent = tierEditOpen ? '닫기' : '바꾸기'; }
           }
           if (r.sumSig) {
             const sig = set.signaturePose;
@@ -1459,6 +1546,7 @@
         if (r.pathBtn) { r.pathBtn.disabled = S.busy === 'import'; r.pathBtn.textContent = S.busy === 'import' ? '가져오는 중…' : '가져오기'; }
       }
       renderPhotos();
+      renderSignaturePhotos();
     }
     // 영상용 사진: 영상 등급을 골랐거나 이미 올린 사진이 있으면 보인다. 시작한 뒤에도 대화가 되면 영상 만들기용 사진을 더 올릴 수 있다.
     function photoOpen() {
@@ -1471,6 +1559,10 @@
       // 사진은 처음 만들 때만 올린다(D-0160). 시작한 뒤에는 올린 사진만 보여 주고 더 받지 않는다(QA v5 E3).
       const show = tier !== 'none' || has;
       return { show, add: show && !S.finalized && c.videoStatus !== 'making', tier, ready };
+    }
+    function signaturePhotoOpen() {
+      const lite = intake.settings().videoTier === 'light';
+      return { show: !!S.draft && (lite || intake.signaturePhotoItems().length > 0), add: !!S.draft && lite && !S.finalized && !S.busy };
     }
     function syncTile(el, it) {
       const q = (s) => el.querySelector(s);
@@ -1496,14 +1588,33 @@
       const list = po.show ? intake.photoItems() : [];
       const ready = list.filter((i) => i.tone === 'ok').length;
       if (r.photoCount) r.photoCount.textContent = list.length ? ready + '장 준비' : '';
-      if (r.photoHint) r.photoHint.textContent = S.finalized ? '만들 때 올린 사진이에요. 진행 화면에서 영상을 만들 때 이 사진을 써요.' : '얼굴이 잘 보이는 사진 1장 이상 · jpg, png, webp · 한 장에 15MB까지';
+      const referenceMode = !!intake.settings().referenceImage;
+      if (r.photoPicker) r.photoPicker.multiple = !referenceMode;
+      if (r.photoHint) r.photoHint.textContent = S.finalized ? '만들 때 올린 사진이에요. 진행 화면에서 영상을 만들 때 이 사진을 써요.' : referenceMode ? '얼굴이 잘 보이는 인물사진 한 장 · jpg, png, webp · 15MB까지' : '얼굴이 잘 보이는 사진 1장 이상 · jpg, png, webp · 한 장에 15MB까지';
       const add = r.photos.querySelector('[data-act="pick-photo"]');
       if (add) { add.hidden = !po.add; add.disabled = !po.add; }
-      if (!r.photoList) return;
+      renderPhotoTiles(r.photoList, tiles, list);
+    }
+    function renderSignaturePhotos() {
+      if (!r.signaturePhotos) return;
+      const po = signaturePhotoOpen();
+      r.signaturePhotos.hidden = !po.show;
+      const list = po.show ? intake.signaturePhotoItems() : [];
+      if (r.signaturePhotoCount) r.signaturePhotoCount.textContent = list.length ? list.filter((i) => i.tone === 'ok').length + ' / 1장 준비' : '';
+      if (r.signaturePhotoHint) r.signaturePhotoHint.textContent = S.finalized ? '만들 때 올린 참고 사진이에요. 만들기를 시작한 뒤에는 바꿀 수 없어요.' : intake.settings().videoTier !== 'light' ? '참고 사진은 Lite(라이트)에서만 사용할 수 있어요. 다른 등급을 쓰려면 사진을 지워 주세요.' : list.length ? '다른 사진을 쓰려면 기존 참고 사진을 먼저 지워 주세요.' : 'jpg, png, webp · 15MB까지 · 인물 확인용 사진은 별도로 올려 주세요.';
+      const add = r.signaturePhotos.querySelector('[data-act="pick-signature-photo"]');
+      if (add) { add.hidden = !po.show || !!S.finalized || intake.settings().videoTier !== 'light'; add.disabled = !po.add; }
+      [add, r.signaturePhotoPicker].forEach((el) => { if (el) { if (S.signaturePhotoError) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); } });
+      if (r.signaturePhotoPicker) { r.signaturePhotoPicker.multiple = false; r.signaturePhotoPicker.disabled = !po.add; }
+      if (r.signaturePhotoError) { r.signaturePhotoError.hidden = !S.signaturePhotoError; r.signaturePhotoError.textContent = S.signaturePhotoError || ''; }
+      renderPhotoTiles(r.signaturePhotoList, signatureTiles, list);
+    }
+    function renderPhotoTiles(container, tileMap, list) {
+      if (!container) return;
       const keep = new Set(list.map((i) => i.key));
-      tiles.forEach((el, key) => { if (!keep.has(key)) { el.remove(); tiles.delete(key); } });
+      tileMap.forEach((el, key) => { if (!keep.has(key)) { el.remove(); tileMap.delete(key); } });
       list.forEach((it) => {
-        let el = tiles.get(it.key);
+        let el = tileMap.get(it.key);
         if (!el) {
           const holder = doc.createElement('div');
           holder.innerHTML = '<figure class="src-photo" data-key="' + E(it.key) + '"><span class="src-photo-img" aria-hidden="true"></span>' +
@@ -1512,13 +1623,13 @@
             '<button type="button" class="btn ghost src-photo-x" data-act="remove" aria-label="">' + icon('x') + '</button>' +
             '<button type="button" class="btn src-photo-retry" data-act="retry" hidden>' + icon('retry') + '다시 올리기</button></figure>';
           el = holder.firstChild;
-          tiles.set(it.key, el);
+          tileMap.set(it.key, el);
         }
         syncTile(el, it);
       });
-      const want = list.map((i) => tiles.get(i.key));
-      const now = Array.from(r.photoList.children);
-      if (want.length !== now.length || want.some((el, i) => el !== now[i])) want.forEach((el) => r.photoList.appendChild(el));
+      const want = list.map((i) => tileMap.get(i.key));
+      const now = Array.from(container.children);
+      if (want.length !== now.length || want.some((el, i) => el !== now[i])) want.forEach((el) => container.appendChild(el));
     }
 
     function renderStart() {
@@ -1537,6 +1648,7 @@
         ? '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. G0 출처 확인과 G3 기획 확인은 자동으로 처리하고, G6 원문 근거 검토는 사람이 해요.'
         : '원문에서 그 사람이 한 말을 골라 정리하고, 공인이면 사실 목록도 만들어요. 진행 화면에서 출처·기획 확인과 G6 원문 근거 검토를 기다려요.') +
         (tier !== 'none' ? ' 대화가 되면 이어서 ' + vName + ' 영상을 만들어요.' : '');
+      if (set.referenceImage && r.startLead) r.startLead.textContent = Ref.PARALLEL_COPY;
       if (r.startNote) {
         r.startNote.textContent = set.demoMode
           ? '원문 분석·사진·영상·대화 준비에 모델 사용 비용이 들어요 · 시연 예산 상한 15달러를 넘으면 멈추고 알려요'
@@ -1557,7 +1669,7 @@
         r.done.hidden = !S.finalized;
         if (r.doneLink && S.cid) r.doneLink.href = 'factory.html#c/' + encodeURIComponent(S.cid);
         const c = S.character || {};
-        const view = doneView(c, S.chat, { auto, tier });
+        const view = doneView(c, S.chat, { auto, tier, referenceImage: set.referenceImage });
         const ready = view.ready;
         if (r.doneTitle) r.doneTitle.textContent = view.title;
         if (r.doneText) { r.doneText.textContent = view.body; r.doneText.hidden = !view.body; }
@@ -1612,7 +1724,7 @@
         pollTimer = global.setInterval(() => { if (!(doc.hidden)) intake.progress(); }, 6000);
       } else if (!want && pollTimer) { global.clearInterval(pollTimer); pollTimer = null; }
     }
-    function render() { renderInfo(); renderFiles(); renderStart(); renderSide(); schedule(); }
+    function render() { renderInfo(); renderFiles(); renderStart(); renderSide(); schedule(); if (reference) reference.setCharacter(S.finalized && S.cid && intake.settings().referenceImage ? S.cid : null); }
     intake.subscribe(render);
 
     function onSubmit(e) {
@@ -1628,8 +1740,11 @@
       const auto = f.querySelector('[name="autoReview"]');
       const demo = f.querySelector('[name="demoMode"]');
       const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined, modelMode: mode, autoReview: auto ? auto.checked : true, videoTier: tier, sigTitle: f.querySelector('[name="sigTitle"]').value, sigMotion: f.querySelector('[name="sigMotion"]').value, sigWhen: f.querySelector('[name="sigWhen"]').value, demoMode: demo ? demo.checked : false };
+      input.referenceWardrobe = (f.querySelector('[name="referenceWardrobe"]') || {}).value || '';
+      input.referenceBackground = (f.querySelector('[name="referenceBackground"]') || {}).value || '';
+      input.factSheet = (f.querySelector('[name="factSheet"]') || {}).value || '';
       const errors = intake.validateDraft(input);
-      ['displayName', 'subjectKind', 'age', 'gender', 'job', 'background', 'sigTitle', 'sigMotion'].forEach((n) => fieldError(n, errors[n]));
+      ['displayName', 'subjectKind', 'age', 'gender', 'job', 'background', 'factSheet', 'sigTitle', 'sigMotion'].forEach((n) => fieldError(n, errors[n]));
       const first = Object.keys(errors)[0];
       if (first) { if (S.error) { S.error = null; render(); } const ctl = f.querySelector('[name="' + first + '"]'); if (ctl) ctl.focus(); return; }
       intake.createDraft(input).then((res) => {
@@ -1647,6 +1762,7 @@
       const key = card && card.dataset.key;
       if (act === 'pick' && r.picker) r.picker.click();
       else if (act === 'pick-photo' && r.photoPicker) r.photoPicker.click();
+      else if (act === 'pick-signature-photo' && r.signaturePhotoPicker && signaturePhotoOpen().add) r.signaturePhotoPicker.click();
       else if (act === 'tier-edit') { tierEditOpen = !tierEditOpen; render(); if (tierEditOpen && r.tierEdit) { const cur = r.tierEdit.querySelector('input:checked'); if (cur) cur.focus(); } }
       else if (act === 'sig-save' && r.tierEdit) {
         const q = (n) => (r.tierEdit.querySelector('[name="' + n + '"]') || {}).value;
@@ -1658,11 +1774,12 @@
       else if (act === 'fold') { listOpen = el.getAttribute('aria-expanded') !== 'true'; render(); }
       else if (act === 'toggle' && key) { open[key] = el.getAttribute('aria-expanded') !== 'true'; render(); }
       else if (act === 'remove' && key) {
-        const item = intake.items().concat(intake.photoItems()).find((i) => i.key === key);
+        const item = intake.items().concat(intake.photoItems(), intake.signaturePhotoItems()).find((i) => i.key === key);
         if (item && item.source === 'upload' && item.phase === 'rejected') intake.dismiss(key); else intake.removeFile(key);
         const next = card.nextElementSibling || card.previousElementSibling;
         const photo = r.photos && r.photos.contains(card);
-        setTimeout(() => { const t = next && next.querySelector('[data-act="remove"]'); if (t && doc.contains(t)) t.focus(); else { const p = photo ? r.photos.querySelector('[data-act="pick-photo"]') : r.drop && r.drop.querySelector('[data-act="pick"]'); if (p) p.focus(); } }, 0);
+        const signature = r.signaturePhotos && r.signaturePhotos.contains(card);
+        setTimeout(() => { const t = next && next.querySelector('[data-act="remove"]'); if (t && doc.contains(t)) t.focus(); else { const p = signature ? r.signaturePhotos.querySelector('[data-act="pick-signature-photo"]') : photo ? r.photos.querySelector('[data-act="pick-photo"]') : r.drop && r.drop.querySelector('[data-act="pick"]'); if (p && !p.hidden) p.focus(); } }, 0);
       }
       else if (act === 'retry' && key) intake.retry(key);
       else if (act === 'use-speaker' && key) intake.pickSpeaker(key, el.dataset.name);
@@ -1687,17 +1804,18 @@
       tierEditOpen = false;
       sigDraft = null;
       if (r.form) r.form.reset();
-      if (r.tierHint) r.tierHint.hidden = true;
-      if (r.sig) r.sig.hidden = true;
+      if (r.tierHint) r.tierHint.hidden = false;
+      if (r.sig) r.sig.hidden = false;
     }
     function onChange(e) {
       const t = e.target;
       if (t === r.picker) { intake.addFiles(t.files); t.value = ''; return; }
       if (t === r.photoPicker) { intake.addFiles(t.files, { photoOnly: true }); t.value = ''; return; }
+      if (t === r.signaturePhotoPicker) { intake.addFiles(t.files, { photoRole: 'signature' }); t.value = ''; return; }
       // 등급을 고르면 저장하되 칸은 열어 둔다. 시그니처를 같은 칸에서 이어서 적는다(QA v5 E9·A-11).
       if (t.name === 'videoTierEdit') { const v = t.value; intake.setTier(v).then((ok) => { if (ok) { render(); const c0 = r.tierEdit && r.tierEdit.querySelector('[name="videoTierEdit"][value="' + v + '"]'); if (c0) c0.focus(); } }); return; }
       if (r.form && r.form.contains(t)) {
-        if (t.name === 'videoTier') { if (r.tierHint) r.tierHint.hidden = t.value === 'none'; if (r.sig) r.sig.hidden = t.value === 'none'; return; }
+        if (t.name === 'videoTier') { if (r.tierHint) r.tierHint.hidden = t.value === 'none'; if (r.sig) r.sig.hidden = t.value === 'none'; renderInfo(); return; }
         if (t.name === 'chapterTemplate') chapterTouched = true;
         if (t.name === 'subjectKind') {
           fieldError('subjectKind', '');
@@ -1725,21 +1843,26 @@
       if (!hasFiles(e)) return;
       e.preventDefault();
       const onPhotos = !!(r.photos && !r.photos.hidden && r.photos.contains(e.target) && photoOpen().add);
-      const inside = onPhotos || (r.drop && r.drop.contains(e.target) && S.draft && !S.finalized);
+      const onSignature = !!(r.signaturePhotos && !r.signaturePhotos.hidden && r.signaturePhotos.contains(e.target) && signaturePhotoOpen().add);
+      const inside = onSignature || onPhotos || (r.drop && r.drop.contains(e.target) && S.draft && !S.finalized);
       if (e.dataTransfer) e.dataTransfer.dropEffect = inside ? 'copy' : 'none';
-      if (r.drop) r.drop.classList.toggle('is-over', !!inside && !onPhotos);
+      if (r.drop) r.drop.classList.toggle('is-over', !!inside && !onPhotos && !onSignature);
       if (r.photos) r.photos.classList.toggle('is-over', onPhotos);
+      if (r.signaturePhotos) r.signaturePhotos.classList.toggle('is-over', onSignature);
     }
     function onDragLeave(e) {
       if (r.drop && (!e.relatedTarget || !r.drop.contains(e.relatedTarget))) r.drop.classList.remove('is-over');
       if (r.photos && (!e.relatedTarget || !r.photos.contains(e.relatedTarget))) r.photos.classList.remove('is-over');
+      if (r.signaturePhotos && (!e.relatedTarget || !r.signaturePhotos.contains(e.relatedTarget))) r.signaturePhotos.classList.remove('is-over');
     }
     function onDrop(e) {
       if (!hasFiles(e)) return;
       e.preventDefault(); // 화면 밖에 떨어뜨려도 브라우저가 파일을 열며 화면을 떠나지 않게 한다.
       if (r.drop) r.drop.classList.remove('is-over');
       if (r.photos) r.photos.classList.remove('is-over');
-      if (r.photos && !r.photos.hidden && r.photos.contains(e.target) && photoOpen().add) intake.addFiles(e.dataTransfer.files, { photoOnly: true });
+      if (r.signaturePhotos) r.signaturePhotos.classList.remove('is-over');
+      if (r.signaturePhotos && !r.signaturePhotos.hidden && r.signaturePhotos.contains(e.target) && signaturePhotoOpen().add) intake.addFiles(e.dataTransfer.files, { photoRole: 'signature' });
+      else if (r.photos && !r.photos.hidden && r.photos.contains(e.target) && photoOpen().add) intake.addFiles(e.dataTransfer.files, { photoOnly: true });
       else if (r.drop && r.drop.contains(e.target)) intake.addFiles(e.dataTransfer.files);
     }
     function onHash() { const cid = route(); if (cid && cid !== S.cid) intake.load(cid); else if (!cid && S.cid) { intake.reset(); intake.drafts(); } }
@@ -1759,6 +1882,7 @@
     return {
       intake,
       destroy() {
+        if (reference) reference.destroy();
         if (pollTimer && global) { global.clearInterval(pollTimer); pollTimer = null; }
         doc.removeEventListener('submit', onSubmit);
         doc.removeEventListener('click', onClick);
@@ -1772,7 +1896,7 @@
     };
   }
 
-  const api = { sigOf, MAX_BYTES, EXTENSIONS, PHOTO_EXTENSIONS, PHOTO_MAX_BYTES, VIDEO_TIERS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, speakerChoices, ro, shortDate, suggestTextId, checkFile, isPhotoName, isPhotoRecord, tierOf, tierName, tierCardsHTML, videoText, doneView, wantsPoll, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
+  const api = { sigOf, factSheetLines, factSheetProblem, FACT_SHEET_MAX_LINES, FACT_SHEET_MAX_CHARS, MAX_BYTES, EXTENSIONS, PHOTO_EXTENSIONS, PHOTO_MAX_BYTES, VIDEO_TIERS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, speakerChoices, ro, shortDate, suggestTextId, checkFile, isPhotoName, isPhotoRecord, tierOf, tierName, tierCardsHTML, videoText, doneView, wantsPoll, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global) global.SourceIntake = api;
 })(typeof window !== 'undefined' ? window : null);

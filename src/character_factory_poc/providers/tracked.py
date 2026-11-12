@@ -28,7 +28,7 @@ from character_factory_poc.providers.base import (
     VisionResult,
 )
 
-DEFAULT_LIMITS = {"text": 4, "judge": 2, "image": 2, "vision": 2, "video": 2, "tuning": 1}
+DEFAULT_LIMITS = {"text": 4, "judge": 0, "image": 2, "vision": 2, "video": 6, "tuning": 1}
 WAIT_FILE = "provider-waits.jsonl"
 _pool_lock = threading.Lock()
 _pools = {}
@@ -65,8 +65,9 @@ class ProviderLimits:
         self.kind = kind
         self.ledger = ledger
         self.limit = orchestrator.get("provider_limits", {}).get(kind, DEFAULT_LIMITS[kind])
-        if type(self.limit) is not int or self.limit < 1:
-            raise ValueError(f"provider_limits.{kind}: 양의 정수가 필요하다")
+        minimum = 0 if kind == "judge" else 1
+        if type(self.limit) is not int or self.limit < minimum:
+            raise ValueError(f"provider_limits.{kind}: {minimum} 이상의 정수가 필요하다")
 
     def record(self, stage, reason, started, delay=None):
         append_jsonl(
@@ -83,6 +84,10 @@ class ProviderLimits:
 
     @contextmanager
     def slot(self, stage):
+        if self.limit == 0:
+            # The judge still uses provider backoff and the ordinary per-call budget.
+            yield
+            return
         # 설정을 다시 읽어도 사용 중인 풀은 분리하지 않는다.
         with _pool_lock:
             size, sem, users = _pools.get(self.kind) or (
@@ -547,6 +552,11 @@ class TrackedVideoModel:
         self.inner = inner
         self.ledger = ledger
         self.budget = budget
+
+    def job_slot(self, stage):
+        from character_factory_poc.providers.video_concurrency import video_job_slot
+
+        return video_job_slot(browser=self.inner.name == "grok_web")
 
     @property
     def name(self) -> str:

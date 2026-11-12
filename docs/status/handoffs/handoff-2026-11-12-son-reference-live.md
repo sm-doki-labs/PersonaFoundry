@@ -1,0 +1,17 @@
+# 2026-11-12 Son reference-first live run
+
+- User requested real Son source/photo run, explicit reference-photo review, then six videos and quality review. Existing chats, Son pv2, Ikjun pv6 preserved.
+- Character: `cf-20261112-motif-0c44bcd1e2cc4358`; live root: `/Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/work/evidence-tendency-live/factory`.
+- Runtime: `work/son-reference-runtime`, server PID 69632 on 8776 (verify before process control), current job `job-20261112033513-267b`. Paused unrelated persona changes remain excluded as in preceding reference-first handoff.
+- Inputs: all 126 existing Son text sources + son-bfa2023.jpg, INTERVIEW, PROMPT_ONLY, Lite, camera_click. Wardrobe/background blank preserve original photograph. 2310 generation messages / 838 target replies; 552 held-out messages.
+- S0 sp1/sp2 failed due missing Gemini public-facts key. Reused ten stored facts from prior Son sp2, removed cross-run selfView pointers, no new fact web verification. Runtime-only wrapper forces root source-pack for this CID until S0 approval because retry otherwise reuses frozen old pack. Current S0 sp3 succeeded.
+- Runtime-only persistent text/judge budget: max300 calls, 5M tokens, conservative token-price envelope $20. Not a claim of actual complete-provider invoice cap. Ledger `work/son-reference-live/text-budget.json`. Image/vision/video keep original stage budgets.
+- S4 fr1 generated via codex_image in 48.353s. G4 awaited user at 03:44:12 UTC. User clicked frontend confirmation at 03:44:45 and explicitly confirmed in chat. Agent initially misread this as automatic approval, briefly STOPped server, then CONT after user confirmation. **There is no observed G4 bypass defect in this run.**
+- S6 va1: all six real grok_oauth / grok-imagine-video-1.5 requests succeeded, 720x1280,24fps, output audio absent. Video stage completed03:45:51 (~66s after user confirmation; includes brief agent interruption, not clean benchmark). Ledger estimate6x$0.86=$5.16, not actual OAuth invoice claim.
+- G5b auto-selects first candidates. `qualityApproved:false` for all six. Selection and stage APPROVED do not establish human video-quality approval.
+- Direct review of72 sampled raw frames plus separate output final frames: idle/speaking are demo candidates (speaking pauses near end; TTS untested), laughter/cheering need endpoint or timing work, bow too deep and camera_click makes triangular rather than rectangular hand frame. Signature cut4.583s leaves teeth-visible smile despite similarityError0.02785<0.07. Global similarity alone is insufficient for return-to-pose quality.
+- Output report, reference PNG, six MP4s, contact sheets, ffprobe results, preservation report: `/Users/johnhuh619/Documents/Codex/2026-11-11/n8n-4-codex-threads-01a1c617-ec03-2/outputs/son-reference-live-20261112/`.
+- Existing2101-file preservation manifest rechecked:0 changes. No source implementation edits, no git commit/push, no replacement of prior release/chat baselines.
+- At03:50UTC S8 still running tendency-confirm after discovery/audit. Need read job/state again for final prompt result; do not claim persona quality passed. Current front-end left on this character's video stage. Saved screenshot `factory-result.png`.
+
+- Final observation: S8 pv1 finished and awaits G6 source-evidence review; S8c cs1 is running. Do not promote this prompt to Son demo baseline. Active job remains running for scene preparation. Video deliverable and quality review are complete.

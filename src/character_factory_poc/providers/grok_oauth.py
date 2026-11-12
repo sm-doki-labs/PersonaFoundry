@@ -40,7 +40,7 @@ from character_factory_poc.common.errors import VideoGenerationError, VideoTimeo
 from character_factory_poc.providers.base import VideoRequest, VideoResult
 from character_factory_poc.providers.xai_video import XaiVideoModel
 
-DEFAULT_MODEL = "grok-imagine-video-1.5-lite"
+DEFAULT_MODEL = "grok-imagine-video-1.5"
 DEFAULT_BASE_URL = "https://api.x.ai/v1"
 LOGIN_HINT = "opencodex에서 xAI 계정에 다시 로그인한다"
 

@@ -16,6 +16,16 @@ from character_factory_poc.stages.s8_prompts.evidence_compiler import compile_pr
 from character_factory_poc.stages.s8_prompts.evidence_source import validate_card
 
 VERSION = "evidence-pipeline-v2"
+_ATOMIC_VERSIONS = {
+    "evidence-pipeline-v3",
+    "evidence-pipeline-v4",
+    "evidence-pipeline-v5",
+    "evidence-pipeline-v6",
+    "evidence-pipeline-v7",
+    "evidence-pipeline-v8",
+    "evidence-pipeline-v9",
+    "evidence-pipeline-v10",
+}
 ATOMIC_RETRIES = 10
 
 
@@ -52,8 +62,34 @@ def _validate_phase(phase, out, payload):
             raise ValueError("분석 단계의 응답 형식이 다르다")
 
 
+def _output_limit(version, phase):
+    """v7 audits read about four times more conversations per call, so their citation cap
+    (evidence_tendencies.AUDIT_ITEM_LIMIT) needs more room. Every other call keeps 10k."""
+    labeled = {"evidence-pipeline-v9", "evidence-pipeline-v10"}
+    if version in labeled and phase in {"tendency-audit", "tendency-confirm"}:
+        return 60000  # one label row per responding turn, up to ~800 turns per call
+    if version == "evidence-pipeline-v10" and phase == "tendency-consolidate":
+        return 32000  # up to 39 section candidates with their evidence lists
+    if version in {"evidence-pipeline-v7", "evidence-pipeline-v8"} and phase in {
+        "tendency-audit",
+        "tendency-confirm",
+    }:
+        return 32000
+    return 10000
+
+
 def _call(
-    ctx, cid, folder, budget, phase, key, payload, *, version=VERSION, validator=_validate_phase
+    ctx,
+    cid,
+    folder,
+    budget,
+    phase,
+    key,
+    payload,
+    *,
+    version=VERSION,
+    validator=_validate_phase,
+    model_for=None,
 ):
     from character_factory_poc.stages.s8_prompts.evidence_pipeline import instructions
 
@@ -66,10 +102,7 @@ def _call(
     if path.exists():
         if receipt.exists() and read_json(receipt)["cacheSha256"] != sha256_file(path):
             raise ValueError("저장된 분석 응답의 무결성이 변경됐다")
-        if (
-            version in {"evidence-pipeline-v3", "evidence-pipeline-v4", "evidence-pipeline-v5"}
-            and not receipt.exists()
-        ):
+        if version in _ATOMIC_VERSIONS and not receipt.exists():
             raise ValueError("분석 응답의 독립 무결성 기록이 없다. 새 revision이 필요하다")
         saved = read_json(path)
         if saved["requestSha256"] != digest:
@@ -88,12 +121,12 @@ def _call(
         tries = folder / "analysis" / "attempts"
         attempt = len(list(tries.glob(f"{phase}-{key}-*.json"))) + 1
         write_once_json(tries / f"{phase}-{key}-{attempt}.json", dict(requestSha256=digest))
-        response = ctx.text_model(cid, budget).complete(
+        response = (model_for or ctx.text_model)(cid, budget).complete(
             ChatRequest(
                 kind="AGENT",
                 stage="s8",
                 ref=f"{cid}/{folder.name}/{phase}/{key}/attempt-{attempt}",
-                max_output_tokens=10000,
+                max_output_tokens=_output_limit(version, phase),
                 temperature=0.2,
                 response_json=True,
                 messages=(Message("system", system), Message("user", body)),
@@ -111,7 +144,7 @@ def _call(
             )
             if validation_attempt == 1:
                 raise
-            if version in {"evidence-pipeline-v3", "evidence-pipeline-v4", "evidence-pipeline-v5"}:
+            if version in _ATOMIC_VERSIONS:
                 _claim_atomic_retry(folder)
         else:
             write_once_json(path, dict(requestSha256=digest, output=out, model=response.model))
@@ -191,11 +224,23 @@ def validate_findings(out, claims, chunk):
 
 
 def verify_analysis_files(folder, review):
-    if review.get("schemaVersion") not in {
+    schema = review.get("schemaVersion")
+    if schema == "interview-editor-review-v2":
+        from character_factory_poc.stages.s8_prompts.interview_authoring import (
+            verify_analysis_files as verify_interview_analysis,
+        )
+
+        return verify_interview_analysis(folder, review)
+    if schema not in {
         "evidence-review-v2",
         "evidence-review-v3",
         "evidence-review-v4",
         "evidence-review-v5",
+        "evidence-review-v6",
+        "evidence-review-v7",
+        "evidence-review-v8",
+        "evidence-review-v9",
+        "evidence-review-v10",
     }:
         return
     if not review.get("coverage", {}).get("complete") or not review.get("auditCoverage", {}).get(
@@ -204,11 +249,11 @@ def verify_analysis_files(folder, review):
         raise ValueError("전체 원문 분석이나 대조가 미완료다")
     artifacts = review.get("analysisArtifacts", {})
     if not artifacts:
-        raise ValueError("전체 분석 기록이 없다")
+        raise ValueError("근거 분석 기록이 없다")
     for ref, digest in artifacts.items():
         path = (Path(folder) / ref).resolve()
         if not path.is_relative_to(Path(folder).resolve()) or sha256_file(path) != digest:
-            raise ValueError("전체 원문 분석 기록이 변경됐다")
+            raise ValueError("근거 분석 기록이 변경됐다")
 
 
 def build_full(ctx, cid, packet, source, binding, folder, budget, rework=None):

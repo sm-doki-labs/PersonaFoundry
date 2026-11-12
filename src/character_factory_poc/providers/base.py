@@ -111,7 +111,8 @@ class ImageModel(Protocol):
 
 @dataclass(frozen=True)
 class VideoRequest:
-    """이미지 → 영상 요청(S5·S6, D-0028). first_frame이 영상의 첫 프레임이 된다."""
+    """이미지 → 영상 요청(S5·S6, D-0028). first_frame이 영상의 첫 프레임이 된다.
+    last_frame을 주면 영상이 그 사진 상태로 끝난다(S6은 첫 화면과 같은 사진, D-0185)."""
 
     stage: str
     prompt: str
@@ -121,6 +122,8 @@ class VideoRequest:
     resolution: str = "720p"
     aspect_ratio: str | None = None
     generate_audio: bool = False
+    last_frame: str | None = None
+    keyframes: tuple[tuple[float, str], ...] = ()
 
 
 @dataclass(frozen=True)

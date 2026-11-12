@@ -53,6 +53,21 @@ def make_text_model(cfg: ProviderConfig) -> TextModel:
                 ttl_s=float(x.get("token_ttl_s", DEFAULT_TTL_S)),
             ),
         )
+    if cfg.adapter == "anthropic":
+        from character_factory_poc.providers.anthropic_messages import AnthropicTextModel
+
+        if not cfg.model:
+            raise ValueError('anthropic 어댑터에는 model이 필요하다(예: "claude-opus-5-5")')
+        x = cfg.extra
+        return AnthropicTextModel(
+            model=cfg.model,
+            api_key_env=cfg.api_key_env or "ANTHROPIC_API_KEY",
+            base_url=cfg.base_url or "https://api.anthropic.com/v1",
+            timeout=float(x.get("timeout_s", 900)),
+            max_retries=int(x.get("max_retries", 2)),
+            effort=x.get("effort"),
+            max_output_tokens=int(x.get("max_output_tokens", 64_000)),
+        )
     raise ValueError(f"알 수 없는 텍스트 어댑터: {cfg.adapter}")
 
 
@@ -68,7 +83,11 @@ def make_vision_model(cfg: ProviderConfig):
         if not cfg.base_url or not cfg.model:
             raise ValueError("openai_compat 비전 어댑터에는 base_url과 model이 필요하다")
         return OpenAICompatVisionModel(
-            base_url=cfg.base_url, model=cfg.model, api_key_env=cfg.api_key_env
+            base_url=cfg.base_url,
+            model=cfg.model,
+            api_key_env=cfg.api_key_env,
+            timeout=float(cfg.extra.get("timeout_s", 180)),
+            max_retries=int(cfg.extra.get("max_retries", 3)),
         )
     raise ValueError(f"알 수 없는 비전 어댑터: '{cfg.adapter}'. openai_compat 또는 fake다")
 
@@ -76,6 +95,30 @@ def make_vision_model(cfg: ProviderConfig):
 def make_image_model(cfg: ProviderConfig) -> ImageModel:
     if cfg.adapter == "fake":
         return FakeImageModel(model=cfg.model or "fake-image")
+    if cfg.adapter == "openai_images":
+        from character_factory_poc.providers.openai_images import OpenAIImageModel
+
+        x = cfg.extra
+        return OpenAIImageModel(
+            model=cfg.model or "gpt-image-2.6-sunburst",
+            api_key_env=cfg.api_key_env or "OPENAI_API_KEY",
+            base_url=cfg.base_url or "https://api.openai.com/v1",
+            timeout=float(x.get("timeout_s", 360)),
+            max_retries=int(x.get("max_retries", 0)),
+            quality=str(x.get("quality", "high")),
+            complexity=str(x.get("complexity", "medium")),
+        )
+    if cfg.adapter == "xai_images":
+        from character_factory_poc.providers.xai_images import XAIImageModel
+
+        x = cfg.extra
+        return XAIImageModel(
+            model=cfg.model or "grok-imagine-image-2.0",
+            api_key_env=cfg.api_key_env or "XAI_API_KEY",
+            base_url=cfg.base_url or "https://api.x.ai/v1",
+            timeout=float(x.get("timeout_s", 180)),
+            max_retries=int(x.get("max_retries", 0)),
+        )
     if cfg.adapter == "codex_image":
         from character_factory_poc.providers.codex_image import DEFAULT_DISABLE, CodexImageModel
 
@@ -89,7 +132,8 @@ def make_image_model(cfg: ProviderConfig) -> ImageModel:
         )
     raise ValueError(
         f"알 수 없는 이미지 어댑터: '{cfg.adapter}'. "
-        '[providers.image] adapter는 "codex_image"(ChatGPT 구독) 또는 "fake"다'
+        '[providers.image] adapter는 "openai_images"(공식 API), '
+        '"xai_images"(Grok 이미지), "codex_image"(ChatGPT 구독), "fake" 중 하나다'
     )
 
 
@@ -101,7 +145,7 @@ def make_video_model(cfg: ProviderConfig) -> VideoModel:
         from character_factory_poc.providers.xai_video import XaiVideoModel
 
         return XaiVideoModel(
-            model=cfg.model or "grok-imagine-video-1.5-lite",
+            model=cfg.model or "grok-imagine-video-1.5",
             api_key_env=cfg.api_key_env or "XAI_API_KEY",
             base_url=cfg.base_url or "https://api.x.ai/v1",
             poll_interval_s=float(x.get("poll_interval_s", 5)),
@@ -112,7 +156,7 @@ def make_video_model(cfg: ProviderConfig) -> VideoModel:
         from character_factory_poc.providers.grok_oauth import GrokOAuthVideoModel
 
         return GrokOAuthVideoModel(
-            model=cfg.model or "grok-imagine-video-1.5-lite",
+            model=cfg.model or "grok-imagine-video-1.5",
             token_file=x.get("token_file") or None,
             token_env=str(x.get("token_env") or ""),
             login_file=x.get("login_file") or None,

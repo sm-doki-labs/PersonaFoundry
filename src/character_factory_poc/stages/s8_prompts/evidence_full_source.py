@@ -6,13 +6,78 @@ from datetime import datetime
 
 from character_factory_poc.stages.s8_prompts.evidence_source import _UNSAFE, MAX_TURN_CHARS, _index
 
+# evidence-v7 transport: one turn per line ("id S|U text") instead of per-turn JSON objects.
+# Chunk bounds are measured on this rendering; validation still binds quotes to turn IDs.
+TRANSPORT = "lines-v1"
+# Room for the compact chunk wrapper ({"id": ..., "format": ..., "lines": ...}).
+_TRANSPORT_OVERHEAD = 64
 
-def prepare_full_source(train, holdout, flagged, *, max_chunk_chars=24000, max_gap_seconds=1800):
+
+def line_text(text):
+    """One physical line per turn; in-turn line breaks are shown as a marker."""
+    return " ⏎ ".join(text.replace("\t", " ").splitlines())
+
+
+def render_lines(segments):
+    out = []
+    for seg in segments:
+        out.append("## " + " ".join(seg["unit"]))
+        for t in seg["turns"]:
+            role = "S" if t["speaker"] == "SUBJECT" else "U"
+            out.append(f"{t['id']} {role} {line_text(t['text'])}")
+    return "\n".join(out)
+
+
+def lines_size(segments):
+    """Characters the rendering occupies inside the JSON request body."""
+    return len(json.dumps(render_lines(segments), ensure_ascii=False)) + _TRANSPORT_OVERHEAD
+
+
+def make_chunk(parts, chunk_id):
+    return dict(
+        id=chunk_id,
+        segments=parts,
+        recordIds=list(
+            dict.fromkeys(t["id"] for s in parts for t in s["turns"] if t["speaker"] == "SUBJECT")
+        ),
+    )
+
+
+def compact_chunk(chunk):
+    return dict(id=chunk["id"], format=TRANSPORT, lines=render_lines(chunk["segments"]))
+
+
+def pack_units(pieces, fits):
+    """First-fit packing that keeps each conversation's pieces in one chunk when they fit.
+
+    A conversation larger than one chunk is spread piece by piece. Never yields an empty chunk.
+    """
+    groups = {}
+    for piece in pieces:
+        groups.setdefault(tuple(piece["unit"]), []).append(piece)
+    bins = []
+    for group in groups.values():
+        for item in [group] if fits(group) else [[p] for p in group]:
+            for b in bins:
+                if fits(b + item):
+                    b.extend(item)
+                    break
+            else:
+                if not fits(item):
+                    raise ValueError("한 말차례를 보존할 수 없는 chunk 상한이다. 상한을 늘린다")
+                bins.append(list(item))
+    return bins
+
+
+def prepare_full_source(
+    train, holdout, flagged, *, max_chunk_chars=24000, max_gap_seconds=1800, transport="json"
+):
     if (
         type(max_chunk_chars) is not int
         or max_chunk_chars < 1000
         or type(max_gap_seconds) is not int
         or max_gap_seconds < 0
+        or transport not in ("json", TRANSPORT)
     ):
         raise ValueError("invalid full-source chunk bounds")
     train_ids, train_units = _index(train, "train")
@@ -124,17 +189,11 @@ def prepare_full_source(train, holdout, flagged, *, max_chunk_chars=24000, max_g
             )
 
     def chunk(parts, n=999999):
-        return dict(
-            id=f"chunk-{n:04d}",
-            segments=parts,
-            recordIds=list(
-                dict.fromkeys(
-                    t["id"] for s in parts for t in s["turns"] if t["speaker"] == "SUBJECT"
-                )
-            ),
-        )
+        return make_chunk(parts, f"chunk-{n:04d}")
 
     def fits(parts):
+        if transport == TRANSPORT:
+            return lines_size(parts) <= max_chunk_chars
         return len(json.dumps(chunk(parts), ensure_ascii=False)) <= max_chunk_chars
 
     pieces = []
@@ -158,14 +217,17 @@ def prepare_full_source(train, holdout, flagged, *, max_chunk_chars=24000, max_g
                 following += 1
             start = following
     chunks = []
-    parts = []
-    for piece in pieces:
-        if parts and not fits(parts + [piece]):
+    if transport == TRANSPORT:
+        chunks = [chunk(b, n) for n, b in enumerate(pack_units(pieces, fits), 1)]
+    else:
+        parts = []
+        for piece in pieces:
+            if parts and not fits(parts + [piece]):
+                chunks.append(chunk(parts, len(chunks) + 1))
+                parts = []
+            parts.append(piece)
+        if parts:
             chunks.append(chunk(parts, len(chunks) + 1))
-            parts = []
-        parts.append(piece)
-    if parts:
-        chunks.append(chunk(parts, len(chunks) + 1))
     included = {
         mid for c in chunks for s in c["segments"] for t in s["turns"] for mid in t["messageIds"]
     }
@@ -178,7 +240,7 @@ def prepare_full_source(train, holdout, flagged, *, max_chunk_chars=24000, max_g
         excluded=excluded,
         complete=True,
     )
-    return dict(
+    result = dict(
         records=records,
         chunks=chunks,
         holdoutIds=sorted(held_ids),
@@ -199,3 +261,7 @@ def prepare_full_source(train, holdout, flagged, *, max_chunk_chars=24000, max_g
             full_source=True,
         ),
     )
+    if transport == TRANSPORT:
+        result["transport"] = dict(format=TRANSPORT, maxChunkChars=max_chunk_chars)
+        result["stats"]["transport"] = TRANSPORT
+    return result

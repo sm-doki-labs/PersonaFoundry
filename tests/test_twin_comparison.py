@@ -183,6 +183,22 @@ def test_binding_uses_named_route_or_reports_missing(tmp_path, monkeypatch, serv
         assert "서빙 없음" in (folder / "gate-G8.html").read_text()
 
 
+def test_skip_setting_opens_g8_without_comparison_calls(tmp_path, monkeypatch):
+    """[stages.s10] comparison = "skip": 호출 없이 G8을 열고 평가 생략을 남긴다(D-0187)."""
+    ctx, cid, text, voter = _setup(tmp_path, monkeypatch, "PROMPT_ONLY")
+    ctx.config.stages["s10"] = {"comparison": "skip"}
+    assert compare.plan_calls(ctx, cid) == []
+    folder = run_s10_twin(ctx, cid)
+    (c,) = read_json(folder / blind.BASE)["conditions"]
+    assert c["status"] == "SKIPPED" and not c["trials"]
+    assert not text.requests and not voter.requests
+    assert "평가 생략" in (folder / "gate-G8.html").read_text()
+    assert ctx.state(cid).gate("G8").status == "AWAITING_HUMAN"
+    ctx.config.stages["s10"] = {"comparison": "maybe"}
+    with pytest.raises(FactoryError, match="comparison"):
+        compare.build_comparison(ctx, cid, tmp_path / "other")
+
+
 def test_dry_plan_budget_and_independent_judge_before_calls(tmp_path, monkeypatch):
     ctx, cid, text, voter = _setup(tmp_path, monkeypatch, "PROMPT_ONLY")
     ctx.execute = False

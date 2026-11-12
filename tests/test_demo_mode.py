@@ -88,7 +88,8 @@ def _motif(tmp_path, monkeypatch=None):
     return ctx, cid
 
 
-def test_demo_runs_every_gate_and_publishes(tmp_path, sent, monkeypatch):
+@pytest.mark.parametrize("parallel", [1, 3])
+def test_demo_runs_every_gate_and_publishes(tmp_path, sent, monkeypatch, parallel):
     ctx, cid = _motif(tmp_path, monkeypatch)
     write_demo_mode(ctx.character_dir(cid), enabled=True, budget_usd=5)
     calls = []
@@ -101,7 +102,11 @@ def test_demo_runs_every_gate_and_publishes(tmp_path, sent, monkeypatch):
         )
 
     monkeypatch.setattr(preview, "publish_preview", fake_publish)
-    log = run_until(ctx, cid, RunOptions(until="G6", source_pack=_pack(tmp_path), web=True))
+    log = run_until(
+        ctx,
+        cid,
+        RunOptions(until="G6", source_pack=_pack(tmp_path), web=True, max_parallel=parallel),
+    )
     state = ctx.state(cid)
     gates = ["G0", "G1s", "G3", "G4a", "G4b", "G4", "G5", "G5b", "G6", "G8", "G9"]
     assert {g: state.gate(g).status for g in gates} == {g: "APPROVED" for g in gates}, log.steps
@@ -124,11 +129,16 @@ def test_demo_runs_every_gate_and_publishes(tmp_path, sent, monkeypatch):
     assert calls == [cid]
 
 
-def test_budget_stop_notifies(tmp_path, sent, monkeypatch):
+@pytest.mark.parametrize("parallel", [1, 3])
+def test_budget_stop_notifies(tmp_path, sent, monkeypatch, parallel):
     ctx, cid = _motif(tmp_path, monkeypatch)
     write_demo_mode(ctx.character_dir(cid), enabled=True, budget_usd=5)
     monkeypatch.setattr("character_factory_poc.pipeline.demo.spent_since", lambda *a: 6.0)
-    log = run_until(ctx, cid, RunOptions(until="G6", source_pack=_pack(tmp_path), web=True))
+    log = run_until(
+        ctx,
+        cid,
+        RunOptions(until="G6", source_pack=_pack(tmp_path), web=True, max_parallel=parallel),
+    )
     assert any("시연 예산 상한" in s for s in log.steps)
     assert sent and sent[-1]["embeds"][0]["title"].startswith("⚠️ 예산 상한 도달")
 

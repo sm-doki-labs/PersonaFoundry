@@ -9,11 +9,17 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 if (HERE / "compiler.py").is_file():
-    from compiler import compile_prompt, main
+    from compiler import FACTS_GUARD, FACTS_GUARD_CARD, NEUTRAL, compile_prompt, main
 
     SAMPLE = HERE / "synthetic.json"
 else:
-    from character_factory_poc.stages.s8_prompts.evidence_compiler import compile_prompt, main
+    from character_factory_poc.stages.s8_prompts.evidence_compiler import (
+        FACTS_GUARD,
+        FACTS_GUARD_CARD,
+        NEUTRAL,
+        compile_prompt,
+        main,
+    )
 
     SAMPLE = HERE.parent / "examples/evidence/synthetic.json"
 
@@ -54,6 +60,35 @@ class EvidenceCompilerTest(unittest.TestCase):
     def test_no_evidence_means_no_traits(self):
         data = packet() | {"sections": [], "trainIds": [], "holdoutIds": []}
         self.assertEqual(compile_prompt(data).count("이 영역의 인물 특성을 정하지 않는다."), 7)
+
+    def test_interview_guard_card_alone_switches_layout(self):
+        data = packet() | {"formatVersion": "interview-editor-v2"}
+        card = data["sections"][0] | {"scope": "LOCAL", "shift": "", "stop": ""}
+        old = compile_prompt(data | {"sections": [card]})
+        # Packets saved without the guard keep the original filler and boundary.
+        self.assertEqual(old.count(NEUTRAL), 5)
+        self.assertNotIn(FACTS_GUARD, old)
+        new = compile_prompt(data | {"sections": [card, FACTS_GUARD_CARD]})
+        fill = {
+            "LIFE_AND_TASTES": "사실표에 없는 취향이나 생활 습관은 지어내지 않는다.",
+            "WANTS_AND_FEARS": "사실표에 없는 목표나 걱정은 지어내지 않는다.",
+        }
+        expected = old.replace("[KNOWS_AND_LIMITS]\n", "[KNOWS_AND_LIMITS]\n" + FACTS_GUARD + "\n")
+        for name in ("LIFE_AND_TASTES", "DISPOSITION", "WANTS_AND_FEARS", "READING_AND_TENSION"):
+            line = fill.get(name, "묻는 내용에 맞춰 답한다.")
+            expected = expected.replace(f"[{name}]\n{NEUTRAL}", f"[{name}]\n{line}")
+        expected = expected.replace(f"[VOICE]\n{NEUTRAL}", "[VOICE]\n묻는 내용에 맞춰 답한다.")
+        self.assertEqual(new, expected)
+        self.assertNotIn("자료", new)
+        for bad in (
+            [card, FACTS_GUARD_CARD | {"first": "수치는 대략 말한다."}],
+            [card, FACTS_GUARD_CARD | {"evidence": [card["evidence"][0]]}],
+            [card, FACTS_GUARD_CARD, FACTS_GUARD_CARD],
+        ):
+            with self.assertRaises(ValueError):
+                compile_prompt(data | {"sections": bad})
+        with self.assertRaises(ValueError):  # The guard exists only in interview packets.
+            compile_prompt(packet() | {"sections": [FACTS_GUARD_CARD]})
 
     def test_each_field_required_even_if_an_audit_field_never_renders(self):
         for level in ("packet", "card"):

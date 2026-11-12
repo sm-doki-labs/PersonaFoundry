@@ -167,6 +167,7 @@ def decorate(page: str, folder: Path) -> str:
             "NO_SERVING": "서빙 없음",
             "PLANNED": "실행 전",
             "NO_JUDGE": "독립 심사 모델 미설정",
+            "SKIPPED": "평가 생략(설정)",
             "COMPLETE": "판정 완료",
         }[c.status]
         block.append(

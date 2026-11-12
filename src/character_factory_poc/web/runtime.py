@@ -69,7 +69,7 @@ def _resume_settings(root: Path, conf: Any) -> dict[str, Any]:
     return {
         "autoResume": bool(orch.get("auto_resume", False)),
         "resumeUntil": str(orch.get("resume_until", "sx")),
-        "maxParallel": int(orch.get("max_parallel", 1)),
+        "maxParallel": int(orch.get("max_parallel", 3)),
     }
 
 

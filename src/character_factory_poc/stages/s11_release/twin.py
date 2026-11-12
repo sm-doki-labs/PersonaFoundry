@@ -148,13 +148,13 @@ def release_info(
     quotes.update(
         e.quote for refs in plan.evidence.values() for e in refs if e.kind == "SOURCE" and e.quote
     )
-    quotes.discard("")
-    # 짧은 감탄사나 한 글자가 다른 단어의 일부로 쓰인 경우까지 지우지 않는다.
-    alternatives = [
-        re.escape(q) if len(q) >= 4 else r"(?<!\w)" + re.escape(q) + r"(?!\w)"
-        for q in sorted(quotes, key=len, reverse=True)
-        if q
-    ]
-    pattern = re.compile("|".join(alternatives) or r"(?!)")
+    return info, SourceQuotes(quote_pattern(quotes))
 
-    return info, SourceQuotes(pattern)
+
+def quote_pattern(quotes) -> re.Pattern[str]:
+    """공개판에서 지울 원문 인용 패턴. 공백·문장부호를 빼고 3글자 이하인 맞장구("네", "아니")는
+    인용으로 보지 않는다. 사실 줄의 "네 번째" 같은 낱말까지 원문으로 잡아 공개판에서 사실이
+    지워지던 오탐을 막는다(D-0188)."""
+    kept = {q for q in quotes if len(re.sub(r"[\W_]", "", q)) >= 4}
+    alternatives = [re.escape(q) for q in sorted(kept, key=len, reverse=True)]
+    return re.compile("|".join(alternatives) or r"(?!)")

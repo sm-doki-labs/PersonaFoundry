@@ -138,6 +138,11 @@ def test_light(tmp_path, monkeypatch):
     try:
         assert entered.wait(5), client.get("/api/jobs/" + job).json()
         row = client.get(detail).json()
+        # 영상 준비가 먼저 시작할 수 있다. 비전 작업을 막아 둔 동안에도 대화 갈래는 끝나야 한다.
+        deadline = time.monotonic() + 3
+        while not row["chatReady"] and time.monotonic() < deadline:
+            time.sleep(0.01)
+            row = client.get(detail).json()
         assert row["chatReady"] and row["videoStatus"] == "making"
     finally:
         resume.set()
@@ -161,9 +166,9 @@ def test_light(tmp_path, monkeypatch):
     # D-0167: 라이트는 몸짓 5개 + 시그니처 1개이고 무표정 첫 화면을 만들지 않는다.
     assert len(inputs["chapters"][0]["actions"]) == 6 and inputs["chapters"][0]["badFrame"] is None
     signature = inputs["chapters"][0]["actions"][-1]
-    assert signature["title"] == POSE["title"] and signature["description"] == POSE["motion"]
+    assert signature["title"] == POSE["title"] and POSE["motion"] in signature["description"]
     assert signature["pickRole"] == "emotion" and POSE["useWhen"] in signature["useWhen"]
-    assert POSE["motion"] in signature["prompt"] and MOTIF_STAGE_NOTE in signature["prompt"]
+    assert POSE["motion"] in signature["prompt"] and "## Purpose" in signature["prompt"]
     assert row["signaturePose"] == POSE
     assert inputs["chapters"][0]["stageNote"] == MOTIF_STAGE_NOTE
     assert all("Relationship stage" not in a["prompt"] for a in inputs["chapters"][0]["actions"])
@@ -192,9 +197,11 @@ def test_light(tmp_path, monkeypatch):
     wait(client, client.post(detail + "/videos", json={"videoTier": "standard"}).json()["jobId"])
     upgraded = read_json(folder / "s6-actions/va2/inputs.json")
     # QA v5 E1(D-0166): 라이트에서 만든 몸짓은 옮겨 오고 스탠다드에 새로 생긴 10편만 만든다.
-    added = set(MOTIF_VIDEO_TIERS["standard"].actions) - set(MOTIF_VIDEO_TIERS["light"].actions)
-    assert upgraded["previousRev"] == "va1"
-    assert set(upgraded["regenerate"]) == {f"ch1-{k}" for k in added}
+    # D-0191: production profiles differ, so no unsafe legacy reuse.
+    assert upgraded["previousRev"] is None
+    assert set(upgraded["regenerate"]) == {
+        f"ch1-{k}" for k in (*MOTIF_VIDEO_TIERS["standard"].actions, SIGNATURE_KEY)
+    }
     # 스탠다드에 무표정 몸짓이 생기므로 무표정 첫 화면 한 장만 새로 만든다.
     assert upgraded["chapters"][0]["badFrame"] is not None
     # D-0164: 등급을 올려도 배경 하나·장면 하나다. 몸짓만 늘어난다.

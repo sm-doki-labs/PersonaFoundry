@@ -4,6 +4,7 @@
   // 캐릭터 공장 진행 화면(D-0101). 서버 기록만 읽는다. 가짜 진행·가짜 시간·자동 승인은 만들지 않는다.
   const R = (typeof module !== 'undefined' && module.exports) ? require('./runtime.js') : global.FactoryRuntime;
   const E = R.escapeHTML;
+  const Ref = (typeof module !== 'undefined' && module.exports) ? require('./reference.js') : global.ReferencePreview;
 
   // 팀 줄(서버 LANES id) → 그래프 칸. 위 줄은 외모 → 장면 → 영상, 아래 줄은 기획 → 페르소나 → 데이터 → 학습, 패키지는 오른쪽.
   // 모티브는 맨 앞 열에 출처 팀(so)이 생긴다.
@@ -57,7 +58,7 @@
   // 영상 등급(계획 4차 약속 5). 원문 화면(sources.js)과 같은 표·같은 카드다(시험이 같은지 본다). 화면에는 개수를 쓰지 않는다.
   const VIDEO_TIERS = [
     ['none', '영상 없이', '대화만 만들어요. 영상 비용이 들지 않아요.', 0],
-    ['light', '라이트', '자주 쓰는 기본 감정만, 가장 빨리 확인해요.', 1],
+    ['light', '라이트', '대기·말하기·파이팅·웃음·인사와 시그니처를 만들어요.', 1],
     ['standard', '스탠다드', '대화에서 자주 쓰는 감정까지 만들어요.', 2],
     ['pro', '프로', '더 섬세한 감정까지 만들어요.', 3],
     ['max', '맥스', '앱에서 쓰는 반응 전부예요. 가장 오래 걸리고 비용도 가장 커요.', 4]
@@ -829,6 +830,13 @@
       view: $('[data-view]'), zoombar: $('[data-zoombar]'), shell: $('.fd-shell'), body: $('.fd-body'),
       panel: $('[data-panel]'), sheet: $('[data-sheet]'), scrim: $('[data-scrim]'), offgoal: $('[data-offgoal]')
     };
+    let referenceState = null;
+    const reference = Ref && Ref.mount({ host: $('[data-reference]'), apiBase, onChange(s) {
+      const next = s.reference;
+      const changed = !!(next && next.enabled) !== !!(referenceState && referenceState.enabled);
+      referenceState = next;
+      if (changed) { state.video = null; render(); }
+    } });
     const store = (() => { try { return global.localStorage; } catch (error) { return null; } })();
     const state = {
       graph: null, rawGraph: null, health: null, projects: null, characterId: null, detail: null,
@@ -1492,7 +1500,7 @@
         else if (d.videoStatus === 'ready') t2 = st === 'chat_ready' ? '영상도 준비됐어요. 대화해 보기에서 영상과 함께 대화해요. 남은 제작 단계는 진행 화면에서 확인해 주세요.' : t2;
         else if (d.videoStatus === 'failed') t2 += ' 영상은 만들지 못했어요' + (d.videoError ? ': ' + plainError(d.videoError) : '.');
         const vOpen = Boolean(state.video && state.video.open);
-        const vBtn = canMakeVideo(d) ? '<button type="button" class="btn" data-act="video-open" aria-expanded="' + vOpen + '">' + icon('video') + (d.videoStatus === 'failed' ? '영상 다시 만들기' : d.videoStatus === 'ready' ? '영상 바꾸기' : '영상 만들기') + '</button>' : '';
+        const vBtn = canMakeVideo(d) && !(referenceState && referenceState.enabled) ? '<button type="button" class="btn" data-act="video-open" aria-expanded="' + vOpen + '">' + icon('video') + (d.videoStatus === 'failed' ? '영상 다시 만들기' : d.videoStatus === 'ready' ? '영상 바꾸기' : '영상 만들기') + '</button>' : '';
         html += '<div class="fl-item ok"><span class="mk"></span><div class="tx"><div class="t1">' + E(t1) + '</div><div class="t2">' + E(t2) + '</div></div><div class="acts"><a class="btn pri" href="' + E(chat) + '">' + icon('chat') + (d.videoStatus === 'ready' ? '영상과 함께 대화해 보기' : '대화해 보기') + '</a>' + vBtn + '</div>' +
           (vBtn && vOpen ? videoHTML(d) : '') +
           (st === 'chat_ready' && !tasks.length && !d.job && !vOpen ? moreBuildHTML() : '') + '</div>';
@@ -1542,6 +1550,7 @@
         '<div class="acts"><button type="button" class="btn" data-act="video-go"' + (busy ? ' disabled' : '') + '>' + (v.busy ? '시작하는 중…' : E(tierName(v.tier)) + ' 영상 만들기 시작') + '</button>' + (v.noPhoto ? photoLink : '') + '<button type="button" class="btn ghost" data-act="video-cancel">취소</button></div></div>';
     }
     async function openVideo() {
+      if (referenceState && referenceState.enabled) return;
       const d = state.detail;
       if (!d) return;
       const id = d.id;
@@ -1554,6 +1563,7 @@
       if (state.video && state.detail && state.detail.id === id) { state.video.photos = n; render(); }
     }
     async function startVideo() {
+      if (referenceState && referenceState.enabled) return;
       const d = state.detail;
       const v = state.video;
       if (!d || !v || v.busy) return;
@@ -2391,6 +2401,7 @@
       if (state.destroyed || !region.top) return;
       sumMemo = null;
       const rt = route();
+      if (reference) reference.setCharacter(!rt.overview && !state.form.open && state.detail && state.detail.origin === 'SOURCE' ? state.detail.id : null);
       state.overview = rt.overview && Boolean(state.graph) && !state.form.open;
       if (region.shell) region.shell.classList.toggle('is-overview', state.overview);
       renderSide();
@@ -2718,6 +2729,7 @@
       refresh,
       destroy() {
         state.destroyed = true;
+        if (reference) reference.destroy();
         clearInterval(tick);
         clearInterval(poll);
         clearTimeout(refreshTimer);

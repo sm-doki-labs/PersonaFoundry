@@ -25,11 +25,12 @@ DURATION = 6
 MODEL_DEFAULT = {
     ("image", "fake"): "fake-image",
     ("image", "codex_image"): "gpt-6.1-sol",
+    ("image", "openai_images"): "gpt-image-2.6-sunburst",
     ("video", "fake"): "fake-video",
     ("video", "grok_web"): "grok-imagine-web",
-    ("video", "grok"): "grok-imagine-video-1.5-lite",
-    ("video", "grok_oauth"): "grok-imagine-video-1.5-lite",
-    ("video", "xai_video"): "grok-imagine-video-1.5-lite",
+    ("video", "grok"): "grok-imagine-video-1.5",
+    ("video", "grok_oauth"): "grok-imagine-video-1.5",
+    ("video", "xai_video"): "grok-imagine-video-1.5",
 }
 STATUS = {
     "SUCCESS": "완성 파일을 받았어요.",
@@ -48,7 +49,9 @@ def _plan(ctx, kinds, resolution):
         if default is None:
             raise FactoryError(f"{kind} 공급자 설정을 확인해 주세요.")
         model = cfg.model or default
-        cost = 0.0
+        from character_factory_poc.providers.openai_images import image_cost_estimate
+
+        cost = image_cost_estimate(cfg) if kind == "image" else 0.0
         if cfg.adapter in {"grok", "grok_oauth", "xai_video"}:
             cost = estimate_cost(model, resolution, DURATION, cfg.extra.get("price_per_second"))
         if cost is not None and (not math.isfinite(cost) or cost < 0):
@@ -140,7 +143,9 @@ def run_precheck(ctx: Context, photo: Path, *, image: bool, video: bool) -> int:
         print("계획만 확인했어요. 승인한 뒤 --execute를 붙여 주세요.")
         return 0
     if any(s["estimatedUsd"] is None for s in steps):
-        raise FactoryError("예상 비용이 미확인이에요. 영상 모델과 단가표를 확인해 주세요.")
+        raise FactoryError(
+            "예상 비용이 미확인이에요. 이미지 estimated_cost_usd 또는 영상 단가표를 확인해 주세요."
+        )
     if not math.isfinite(budget.config.max_cost_usd_per_command):
         raise FactoryError("명령 비용 상한을 유한한 금액으로 정해 주세요.")
     budget.check_plan([CallPlan(s["kind"], "", 1, s["estimatedUsd"]) for s in steps])
