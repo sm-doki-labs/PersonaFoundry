@@ -4,6 +4,8 @@ FROM ghcr.io/astral-sh/uv:0.11.28 AS uv
 FROM python:3.12-slim-bookworm
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_PYTHON_DOWNLOADS=never PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+# 통화 영상 후처리(이어 붙이기·길이 확인)에 ffmpeg·ffprobe 가 필요하다.
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/chat-svc
 COPY vendor/chat-svc/pyproject.toml vendor/chat-svc/uv.lock vendor/chat-svc/README.md ./
