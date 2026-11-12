@@ -152,8 +152,28 @@ def test_default_terms_catch_endorsement_but_skip_shared_rule(tmp_path, monkeypa
     )
     result = presentation.run_checks(ctx, cid, rev_dir, tagged)
     hits = _by_id(result)["endorsement"]["hits"]
-    assert {h["term"] for h in hits} == {"본인이 직접", "함께한", "공식", "Official", "endorsed"}
+    expected = {"본인이 직접", "함께한", "공식 캐릭터", "Official", "endorsed"}
+    assert {h["term"] for h in hits} == expected
     assert result["status"] == "FAIL"
+
+
+def test_career_uses_of_gongsik_are_not_endorsement(tmp_path, monkeypatch):
+    # D-0213: 2026-11-13 손흥민 프롬프트에서 걸렸던 경력·자리 문장은 보증 표현이 아니다.
+    ctx, cid, rev_dir = _twin(tmp_path, monkeypatch)
+    prompt = rev_dir / "persona/long-prompt.txt"
+    prompt.write_text(
+        prompt.read_text("utf-8")
+        + "\n토트넘 홋스퍼로 공식 이적했다. 초면이거나 공식 석상에서는 말을 아낀다."
+        + " 공식 발표나 공식 기자회견에서는 문장을 맺는다.\n",
+        "utf-8",
+    )
+    assert _by_id(_check(rev_dir))["endorsement"]["ok"]
+    package = presentation.CharacterPackage.model_validate(read_json(rev_dir / "package.json"))
+    tagged = package.model_copy(
+        update={"profile": package.profile.model_copy(update={"tagline": "구단 공식캐릭터"})}
+    )
+    hits = _by_id(presentation.run_checks(ctx, cid, rev_dir, tagged))["endorsement"]["hits"]
+    assert [h["term"] for h in hits] == ["공식캐릭터"]
 
 
 def test_missing_chat_disclosure_fails(tmp_path, monkeypatch):
