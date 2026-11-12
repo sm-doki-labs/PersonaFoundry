@@ -811,3 +811,9 @@
 ### 2026-11-12 장면별 기준 페르소나 공정 (D-0197)
 
 작업 트리의 Python 전체 테스트 2,278개 통과, 6개 건너뜀(하위 검사 46개 통과). 로컬 적용본의 페르소나·장면·검토·기록·내보내기 검사 114개 통과(하위 검사 46개 통과). 합성 문답에서 분류 입력에 답이 없고, 근거 변조 시 G6 승인이 거절되며, 승인 뒤 채팅이 같은 프롬프트를 사용하는 것을 확인했다. 8776 입력 화면 HTTP 200, 두 장면의 S8 분기, 기존 대화 프롬프트 해시와 영상 응답, 설정 파일과 기존 산출물 3,243개의 동일성을 재확인했다. 실제 모델 호출·인물 유사도 비교·시간 재측정은 수행하지 않았다. [인계](handoffs/handoff-2026-11-12-interview-v2-factory.md)
+
+## 2026-11-13 — D-0208 Railway 시연 서버
+
+- 로컬: 같은 묶음으로 `docker build -f deploy/railway/Dockerfile` 성공. 이미지 안 /opt/chat-svc 컴파일러가 기존 캐릭터(481c1c0e…) 버전5·챕터20을 문제0으로 컴파일, `/api/health` 200. 서버 설정으로 공급자 11개(text·judge·dialogue·demo_chat·planner·analyzer·labeler·vision·image·signature_image·video)가 모두 만들어짐.
+- Railway: `deploy/railway/deploy.sh`(공장 273bd2c·chat-svc 864e02b6) 빌드·배포 완료. 공개 주소 `/api/health` 200(root /data/factory, configPath /app/deploy/factory.railway.toml), 첫 화면 200. `railway ssh` 로 서버 안에서 chat-svc 컴파일 같은 결과, dev 넣기 서비스 `GET /api/v1/factory-import/state` 200(토큰 통과).
+- 미검증: 서버에서 실제 캐릭터 생성(유료 호출), 테스터 발행 한 번, 담이 계정 통화 확인, 실제 Fish 음성.

@@ -12,6 +12,10 @@
 !studio/assets/**
 !deploy/
 !deploy/factory.server.toml
+!deploy/factory.railway.toml
+!vendor/
+!vendor/chat-svc/
+!vendor/chat-svc/**
 **/__pycache__/
 **/*.egg-info/
 **/.env*

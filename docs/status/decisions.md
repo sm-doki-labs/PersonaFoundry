@@ -274,3 +274,10 @@ dev api-svc 는 통화 몸짓을 jev(CLIP_PICK_LLM_PROVIDER=opencode, jev-latest
 근거: 사용자 "공장에서 반응 키워드 운영 세트처럼 채우고, 시그니처 포즈 use_when 문구도 jev가 잘 고르게 다듬어줘". dev 와 같은 api-svc 판(6bfba75) clip_picker.pick_clip·jev-latest 로 Lite 4편 후보를 비교했다: 문구와 함께 고른 말 10개 × 3회 followup 21/30 → 30/30, 문구 예시에 없는 말 8개 × 3회 reaction 18/24 → 21/24, followup 18/24 → 21/24. 남은 오답은 돌려 말한 팬심("실물 보는 것 같아요")이 시그니처 대신 none·웃음으로 간 경우. 소표본·작성자 판정이다.
 버린 안: s6 영상 단계의 useWhen 을 바꾸기(이미 만든 시그니처 영상 재생성), 반응 키워드에 여러 낱말(운영 세트는 하나).
 
+### D-0208 — 공장 시연 서버를 Railway 한 대로 띄운다: Vertex 없이 API 키 경로, dev 배포판 chat-svc 컴파일러 동봉 (확정, 2026-11-13)
+
+공장 웹앱을 Railway 프로젝트 persona-foundry 의 서비스 factory 한 대로 띄운다(https://factory-production-eff53ef8.up.railway.app). 설계도는 `deploy/railway/Dockerfile`, 설정은 `deploy/factory.railway.toml`, 올리기는 `deploy/railway/deploy.sh`. (1) 텍스트·라벨·대화 모델은 Vertex 대신 Gemini API 키 경로(openai_compat)로 부른다. planner 는 Anthropic, 분석기·판정·비전·이미지는 OpenAI, 영상과 시그니처 사진은 xAI API 키(서버에 Grok 로그인이 없어 xai_video 만). (2) 테스터 발행(D-0206)에 필요한 chat-svc 컴파일러는 로컬 dev 배포판 체크아웃(864e02b6)을 git archive 로 묶음에 넣어 /opt/chat-svc 에 venv 와 함께 설치한다. GitHub 토큰이 필요 없다. (3) 저장은 Railway 볼륨 /data(CFP_ROOT=/data/factory). 볼륨이 root 소유라 컨테이너를 root 로 실행한다. (4) Railway 가 railway.json 의 dockerfilePath 를 쓰지 않아 서비스 변수 RAILWAY_DOCKERFILE_PATH 로 지정한다. (5) 키·넣기 토큰·디스코드 주소는 Railway 서비스 변수로만 둔다.
+
+근거: 사용자 "railway로 걍 해도 되지 않아? vertex 빼버리고?", "깃허브 토큰도 걍 너가 만들어서 하면 될듯?". fine-grained 토큰은 API 로 만들 수 없고, 넓은 개인 토큰을 빌드 인자로 넘기면 이미지 기록에 남을 수 있어 코드를 묶어 올리는 쪽을 골랐다.
+버린 안: 빌드 때 GitHub 토큰으로 chat-svc 받기, 사설 이미지 저장소를 거치는 배포, AWS(기존 deploy/aws) 경로.
+
