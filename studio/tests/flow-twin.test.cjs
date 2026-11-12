@@ -35,8 +35,8 @@ test('twin teams: source team first, no s1, s9h sits with evaluation, and no-tra
     assert.ok(raw.lanes.find((l) => l.id === 'training').stages.includes('s9h'));
     assert.ok(!raw.stages.some((s) => s.id === 's1'));
   }
-  assert.deepEqual(laneIds(TRAIN), ['source', 'appearance', 'plan', 'scene', 'video', 'persona', 'data', 'training', 'release']);
-  assert.deepEqual(laneIds(PROMPT), ['source', 'appearance', 'plan', 'scene', 'video', 'persona', 'training', 'release']);
+  assert.deepEqual(laneIds(TRAIN), ['source', 'appearance', 'plan', 'scene', 'video', 'persona', 'data', 'training', 'voice', 'release']);
+  assert.deepEqual(laneIds(PROMPT), ['source', 'appearance', 'plan', 'scene', 'video', 'persona', 'training', 'voice', 'release']);
   assert.equal(PROMPT.lanes.find((l) => l.id === 'training').label, '평가');
   for (const id of ['s9s', 's9', 's10t']) assert.ok(!PROMPT.stages.some((s) => s.id === id), id + ' is removed, not greyed');
 });

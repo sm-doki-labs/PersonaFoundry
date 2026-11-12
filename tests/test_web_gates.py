@@ -78,6 +78,7 @@ def test_stage_dirs_and_lane_names_follow_lld():
         "페르소나",
         "데이터",
         "학습",
+        "음성",
         "패키지",
     ]
 
@@ -419,6 +420,7 @@ def test_projects_expose_lanes_and_job_queue(tmp_path):
         "persona",
         "data",
         "training",
+        "voice",
         "release",
     }
     assert lanes["appearance"]["done"] == 2

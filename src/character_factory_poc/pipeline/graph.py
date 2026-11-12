@@ -77,10 +77,13 @@ STAGES: dict[str, Stage] = {
             gate="G8",
             implemented=True,
         ),
+        # D-0205: 만들 때 적은 Fish Audio 음성 ID를 그대로 기록한다. 모델 호출·관문 없음.
+        Stage("sv", "음성", implemented=True),
         Stage(
             "s11",
             "릴리즈 패키지",
             deps=frozenset({"G4", "G5", "G5b", "G6", "G8"}),
+            after=frozenset({"sv"}),
             gate="G9",
             implemented=True,
         ),
@@ -125,6 +128,8 @@ def _twin_stages() -> dict[str, Stage]:
             )
         if sid == "s9":
             out["s9h"] = _TWIN_FRONT["s9h"]
+    # 모티브는 출처 확인(G0) 뒤에만 단계를 움직인다. 음성도 같은 규칙을 따른다(D-0205).
+    out["sv"] = Stage("sv", "음성", deps=frozenset({"G0"}), implemented=True)
     return out
 
 

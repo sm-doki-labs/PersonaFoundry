@@ -21,6 +21,7 @@ from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.graph import GATES, STAGES
 from character_factory_poc.pipeline.scheduler import paid_providers
 from character_factory_poc.pipeline.state import StateFile
+from character_factory_poc.stages.sv_voice.run import normalize_reference_id, write_voice
 from character_factory_poc.web import reads
 from character_factory_poc.web.errors import WebError
 from character_factory_poc.web.jobs import MAX_CREATOR_BRIEF_CHARS
@@ -48,7 +49,8 @@ def install_runtime_routes(app: FastAPI, root: Path, conf: Any, jobs: Any) -> No
         body: Annotated[dict[str, Any], Body()],
     ) -> dict[str, str]:
         slug, brief = _creator_input(body)
-        return {"characterId": _create_character(factory, conf, slug, brief)}
+        voice = _voice_input(body)
+        return {"characterId": _create_character(factory, conf, slug, brief, voice)}
 
 
 def _paid_stages(root: Path, conf: Any, stages=STAGES) -> dict[str, list[str]]:
@@ -117,7 +119,7 @@ def _graph_lanes(stages) -> list[dict[str, Any]]:
 def _creator_input(body: Any) -> tuple[str, str]:
     if not isinstance(body, dict):
         raise WebError(400, "생성 요청 본문은 JSON 객체여야 한다")
-    unknown = sorted(set(body) - {"slug", "brief"})
+    unknown = sorted(set(body) - {"slug", "brief", "voiceReferenceId"})
     if unknown:
         raise WebError(400, f"알 수 없는 생성 필드다: {', '.join(unknown)}")
     slug = body.get("slug")
@@ -135,7 +137,17 @@ def _creator_input(body: Any) -> tuple[str, str]:
     return slug, brief
 
 
-def _create_character(root: Path, conf: Any, slug: str, brief: str) -> str:
+def _voice_input(body: dict) -> str | None:
+    """D-0205: 선택 입력 Fish Audio 음성 ID. 형식이 틀리면 만들기 전에 거절한다."""
+    try:
+        return normalize_reference_id(body.get("voiceReferenceId"))
+    except ValueError as exc:
+        raise WebError(400, str(exc)) from exc
+
+
+def _create_character(
+    root: Path, conf: Any, slug: str, brief: str, voice: str | None = None
+) -> str:
     """숨긴 임시 폴더에서 준비한 뒤 완성된 요청만 같은 파일시스템에서 publish한다."""
     cid = character_id(slug)
     characters = root / "runs" / "characters"
@@ -158,6 +170,7 @@ def _create_character(root: Path, conf: Any, slug: str, brief: str) -> str:
                 folder.mkdir(parents=True)
                 with (folder / "brief-r1.md").open("x", encoding="utf-8") as handle:
                     handle.write(brief)
+                write_voice(prepared, voice)
                 StateFile(prepared / "state.json", cid).save()
                 prepared.rename(target)
     except OSError as exc:

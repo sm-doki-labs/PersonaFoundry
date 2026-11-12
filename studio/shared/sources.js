@@ -602,6 +602,9 @@
       tooLong('background', '한 줄 배경은', 400);
       const sheetProblem = factSheetProblem(v.factSheet);
       if (sheetProblem) errors.factSheet = sheetProblem;
+      // D-0205: Fish Audio 음성 ID는 비워 두거나 영문 소문자·숫자 32자다(서버 규칙과 같다).
+      const voice = text(v.voiceReferenceId).trim().toLowerCase();
+      if (voice && !/^[0-9a-f]{32}$/.test(voice)) errors.voiceReferenceId = 'Fish Audio 음성 ID는 영문 소문자·숫자 32자예요.';
       if (tierOf(v.videoTier) !== 'none') {
         if (!text(v.sigTitle).trim()) errors.sigTitle = '시그니처 포즈 이름을 적어 주세요.';
         if (!text(v.sigMotion).trim()) errors.sigMotion = '어떤 동작인지 적어 주세요.';
@@ -639,6 +642,8 @@
         // 비어 있으면 보내지 않는다(사실표를 모르는 이전 서버와도 그대로 맞는다).
         const factSheet = factSheetLines(input.factSheet);
         if (factSheet.length) body.factSheet = factSheet;
+        const voiceReferenceId = text(input.voiceReferenceId).trim().toLowerCase();
+        if (voiceReferenceId) body.voiceReferenceId = voiceReferenceId;
         const signaturePose = videoTier === 'none' ? null : sigOf({ title: input.sigTitle, motion: input.sigMotion, useWhen: input.sigWhen });
         if (signaturePose) body.signaturePose = signaturePose;
         const data = await request('POST', '/api/sources/drafts', body);
@@ -1743,8 +1748,9 @@
       input.referenceWardrobe = (f.querySelector('[name="referenceWardrobe"]') || {}).value || '';
       input.referenceBackground = (f.querySelector('[name="referenceBackground"]') || {}).value || '';
       input.factSheet = (f.querySelector('[name="factSheet"]') || {}).value || '';
+      input.voiceReferenceId = (f.querySelector('[name="voiceReferenceId"]') || {}).value || '';
       const errors = intake.validateDraft(input);
-      ['displayName', 'subjectKind', 'age', 'gender', 'job', 'background', 'factSheet', 'sigTitle', 'sigMotion'].forEach((n) => fieldError(n, errors[n]));
+      ['displayName', 'subjectKind', 'age', 'gender', 'job', 'background', 'factSheet', 'voiceReferenceId', 'sigTitle', 'sigMotion'].forEach((n) => fieldError(n, errors[n]));
       const first = Object.keys(errors)[0];
       if (first) { if (S.error) { S.error = null; render(); } const ctl = f.querySelector('[name="' + first + '"]'); if (ctl) ctl.focus(); return; }
       intake.createDraft(input).then((res) => {

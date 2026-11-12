@@ -357,14 +357,24 @@
     };
   }
 
-  function createCharacterRequest(slug, brief) {
+  // Fish Audio 음성(모델) ID. 비워 두면 음성 없이 만든다(D-0205).
+  const FISH_VOICE_ID = /^[0-9a-f]{32}$/;
+  function voiceReferenceIdOf(value) {
+    const clean = text(value).trim().toLowerCase();
+    if (!clean) return '';
+    if (!FISH_VOICE_ID.test(clean)) throw new Error('Fish Audio 음성 ID는 영문 소문자·숫자 32자예요(예: 802e3bc2b27e49c2995d23ef70e6ac89).');
+    return clean;
+  }
+
+  function createCharacterRequest(slug, brief, voiceReferenceId) {
     const cleanSlug = text(slug).trim();
     const cleanBrief = text(brief).trim();
     if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(cleanSlug)) {
       throw new Error('slug는 소문자·숫자로 시작하는 1~41자(소문자·숫자·하이픈)여야 해요.');
     }
     if (!cleanBrief || cleanBrief.length > 20000) throw new Error('브리프는 1~20,000자로 적어 주세요.');
-    return { slug: cleanSlug, brief: cleanBrief };
+    const voice = voiceReferenceIdOf(voiceReferenceId);
+    return voice ? { slug: cleanSlug, brief: cleanBrief, voiceReferenceId: voice } : { slug: cleanSlug, brief: cleanBrief };
   }
 
   function extractHeld(source) {
@@ -536,6 +546,7 @@
     progressText,
     runRequest,
     createCharacterRequest,
+    voiceReferenceIdOf,
     extractHeld,
     confirmHeldRequest,
     apiPath,
@@ -1117,6 +1128,7 @@
         '<div class="rt-create-head"><div><h3>새 캐릭터 등록</h3><p>슬러그와 브리프를 저장해 실제 캐릭터 폴더를 만들어요. 모델 생성은 자동으로 시작하지 않아요.</p></div><button type="button" class="btn btn--sm" data-runtime-close-form>닫기</button></div>' +
         '<label class="rt-field">슬러그<input type="text" name="slug" data-runtime-slug value="' + escapeHTML(state.form.slug) + '" maxlength="41" pattern="[a-z0-9][a-z0-9-]{0,40}" placeholder="hana-01" autocomplete="off" required></label>' +
         '<label class="rt-field">브리프<textarea name="brief" data-runtime-brief rows="4" maxlength="20000" placeholder="이름, 성격, 관계, 원하는 장면을 적어 주세요." required>' + escapeHTML(state.form.brief) + '</textarea></label>' +
+        '<label class="rt-field">Fish Audio 음성 ID (선택)<input type="text" name="voiceReferenceId" data-runtime-voice value="' + escapeHTML(state.form.voice || '') + '" maxlength="40" placeholder="비워 두면 음성 없이 만들어요" autocomplete="off" spellcheck="false"></label>' +
         '<div class="rt-form-foot"><span class="rt-form-status" data-runtime-form-status role="status"></span><button type="submit" class="btn btn--primary" data-runtime-create' + disabled + '>캐릭터 등록</button></div>' +
         '</form>';
     }
@@ -1603,9 +1615,11 @@
       const brief = form.querySelector('[data-runtime-brief]');
       state.form.slug = slug ? slug.value : state.form.slug;
       state.form.brief = brief ? brief.value : state.form.brief;
+      const voice = form.querySelector('[data-runtime-voice]');
+      state.form.voice = voice ? voice.value : state.form.voice;
       let payload;
       try {
-        payload = createCharacterRequest(state.form.slug, state.form.brief);
+        payload = createCharacterRequest(state.form.slug, state.form.brief, state.form.voice);
       } catch (error) {
         state.form.error = error.message;
         render();
@@ -1626,6 +1640,7 @@
         state.form.open = false;
         state.form.slug = '';
         state.form.brief = '';
+        state.form.voice = '';
         if (typeof location !== 'undefined') location.hash = '#char/' + encodeURIComponent(characterId);
         await refresh();
       } catch (error) {
@@ -1724,6 +1739,7 @@
       if (!target || !target.matches) return;
       if (target.matches('[data-runtime-slug]')) state.form.slug = target.value;
       else if (target.matches('[data-runtime-brief]')) state.form.brief = target.value;
+      else if (target.matches('[data-runtime-voice]')) state.form.voice = target.value;
     }
     function onChange(event) {
       const target = event.target;

@@ -81,6 +81,13 @@
             <p class="src-fhint" id="src-chapter-h">공인은 팬과 첫 통화, 개인은 가족과 통화가 기본이에요. 원문과 관계에 맞는 장면으로 바꿀 수 있어요.</p>
           </div>
 
+          <div class="src-fld">
+            <label for="src-voice">Fish Audio 음성 ID <span class="opt">선택</span></label>
+            <input id="src-voice" name="voiceReferenceId" maxlength="40" autocomplete="off" spellcheck="false" placeholder="예: 802e3bc2b27e49c2995d23ef70e6ac89" aria-describedby="src-voice-h src-voice-e">
+            <p class="src-fhint" id="src-voice-h">Fish Audio에서 쓰는 목소리의 ID예요. 적은 그대로 캐릭터 패키지에 담고, 비워 두면 음성 없이 만들어요.</p>
+            <p class="src-ferr" id="src-voice-e" data-err="voiceReferenceId" hidden></p>
+          </div>
+
           <fieldset class="src-fld src-choice" data-mode-choice>
             <legend>모델 준비 방식</legend>
             <label class="src-opt"><input type="radio" name="modelMode" value="PROMPT_ONLY" checked><span><b>프롬프트만</b><small>별도 모델 학습 없이 원문으로 만든 프롬프트를 써요. G6에서 사람이 근거를 검토하며, 원문 분석·프롬프트 생성·대화에는 모델 사용 비용이 들어요.</small></span></label>

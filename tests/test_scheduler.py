@@ -41,7 +41,10 @@ def _waiting(st: StateFile, sid: str, gate: str, rev: str = "r1") -> None:
 
 def test_ready_stages_follow_the_turn_table(tmp_path: Path) -> None:
     st = _state(tmp_path)
-    assert ready_stages(st, RUNNERS, set(), AXIS) == ["s1"]
+    # 음성(sv)은 앞 단계가 없어 처음부터 준비된다(D-0205)
+    assert ready_stages(st, RUNNERS, set(), AXIS) == ["s1", "sv"]
+    st.transition("sv", "RUNNING", rev="vo1")
+    st.transition("sv", "APPROVED", rev="vo1")
     _waiting(st, "s1", "G1")
     assert ready_stages(st, RUNNERS, set(), AXIS) == []
     st.set_gate("G1", "APPROVED", "r1", "gates/G1-r1.json")

@@ -39,6 +39,7 @@ from character_factory_poc.contracts.release import (
     Appearance,
     Chapter,
     CharacterPackage,
+    CharacterVoice,
     CheckpointSelectionRef,
     GateRef,
     PackageFile,
@@ -61,6 +62,7 @@ from character_factory_poc.stages.s4b_poses.approve import load_scene_and_pose
 from character_factory_poc.stages.s5_intro.approve import load_approved_intro
 from character_factory_poc.stages.s6_actions.approve import load_approved_actions
 from character_factory_poc.stages.s8_prompts.build import load_latest_trait_sheet
+from character_factory_poc.stages.sv_voice.run import approved_voice
 
 # G9로 넘기기 전에 반드시 승인돼 있어야 하는 관문. S9·S10(G7·G8)은 없어도 된다(D-0044).
 REQUIRED_GATES = ("G4", "G5", "G5b", "G6")
@@ -841,6 +843,20 @@ def build_package(ctx: Context, cid: str) -> Path:
                 )
         if serving is not None:
             write_once_json(rev_dir / SERVING_REL, dump(serving))
+        approved = approved_voice(char_dir, ctx.state(cid))
+        voice = None
+        if approved:
+            # D-0205: 음성 ID는 받은 그대로 싣는다. 패키지 안 파일로도 남겨 해시 목록에 든다.
+            write_once_json(
+                rev_dir / "voice/voice.json",
+                {"provider": approved["provider"], "referenceId": approved["referenceId"]},
+            )
+            voice = CharacterVoice(
+                provider=approved["provider"],
+                referenceId=approved["referenceId"],
+                voiceRev=approved["voiceRev"],
+                record="voice/voice.json",
+            )
         package = validate(
             "character-package-v1",
             dump(
@@ -859,6 +875,7 @@ def build_package(ctx: Context, cid: str) -> Path:
                     videos=videos,
                     persona=persona,
                     sft=sft,
+                    voice=voice,
                     gates=gate_refs,
                     files=_package_files(rev_dir),
                 )

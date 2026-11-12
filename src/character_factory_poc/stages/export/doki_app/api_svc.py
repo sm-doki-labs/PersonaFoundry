@@ -146,6 +146,13 @@ def build_seed(
 
     twin = package.twin
     voice_bundle_id = None
+    if package.voice is not None:
+        # D-0205: 패키지의 Fish Audio 음성 ID는 받은 그대로 둔다. api-svc의 voice_id는
+        # voice-svc 음성 번호(UUID)라 이 ID를 바로 넣을 칸이 없다.
+        unmapped.append(
+            f"voice.referenceId={package.voice.referenceId} "
+            f"({package.voice.provider}, api-svc voice_id는 voice-svc UUID라 그대로 넣지 않는다)"
+        )
     if twin:
         unmapped.append(f"twin.chapterTemplate={twin.chapterTemplate} (api-svc 관계 틀 칸이 없다)")
         mapping.extend(

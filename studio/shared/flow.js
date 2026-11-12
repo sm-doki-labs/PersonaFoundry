@@ -1310,6 +1310,7 @@
       const f = state.form;
       return '<form class="fl-form" data-form><h2>새로 지어내기</h2><p class="hint">지어낸 캐릭터를 브리프로 만들어요. 실존 인물이라면 <a href="sources.html">원문으로 만들기</a>를 써 주세요. 등록만 하고 바로 실행하지 않아요.</p>' +
         '<label for="fl-brief">어떤 캐릭터인가요</label><textarea id="fl-brief" data-brief placeholder="타깃, 분위기, 성격, 챕터 배경 등을 적어 주세요.">' + E(f.brief) + '</textarea>' +
+        '<label for="fl-voice">Fish Audio 음성 ID (선택)</label><input id="fl-voice" data-voice autocomplete="off" spellcheck="false" maxlength="40" value="' + E(f.voice || '') + '" placeholder="비워 두면 음성 없이 만들어요"><p class="hint">적은 ID를 그대로 캐릭터 패키지에 담아요.</p>' +
         '<details class="fl-adv"' + (f.slug ? ' open' : '') + '><summary>짧은 이름 직접 정하기 (선택)</summary><label for="fl-slug">짧은 이름 (영문 소문자·숫자·하이픈)</label><input id="fl-slug" data-slug autocomplete="off" value="' + E(f.slug) + '" placeholder="비워 두면 자동으로 정해요"></details>' +
         (f.error ? '<p class="err" role="alert">' + E(f.error) + '</p>' : '') +
         '<div class="acts"><button type="submit" class="btn pri"' + (state.busy ? ' disabled' : '') + '>등록하기</button>' + (characters().length ? '<button type="button" class="btn ghost" data-act="cancel-form">취소</button>' : '') + '</div></form>';
@@ -2509,16 +2510,18 @@
     async function create(form) {
       state.form.slug = form.querySelector('[data-slug]').value.trim();
       state.form.brief = form.querySelector('[data-brief]').value;
+      const voiceInput = form.querySelector('[data-voice]');
+      state.form.voice = voiceInput ? voiceInput.value : '';
       if (!state.form.brief.trim()) { state.form.error = '어떤 캐릭터인지 적어 주세요.'; render(); return; }
       if (state.form.slug && !/^[a-z0-9][a-z0-9-]{0,40}$/.test(state.form.slug)) { state.form.error = '짧은 이름은 영문 소문자나 숫자로 시작하고, 영문 소문자·숫자·하이픈만 쓸 수 있어요. 비워 두면 자동으로 정해요.'; render(); return; }
       let payload;
-      try { payload = R.createCharacterRequest(state.form.slug || autoSlug(state.form.brief), state.form.brief); } catch (error) { state.form.error = error.message; render(); return; }
+      try { payload = R.createCharacterRequest(state.form.slug || autoSlug(state.form.brief), state.form.brief, state.form.voice); } catch (error) { state.form.error = error.message; render(); return; }
       state.busy = true;
       state.form.error = '';
       render();
       try {
         const data = await request('POST', '/api/runtime/characters', payload);
-        state.form = { open: false, slug: '', brief: '', error: '' };
+        state.form = { open: false, slug: '', brief: '', voice: '', error: '' };
         state.feedback = { tone: 'ok', text: '캐릭터를 등록했어요. 어디까지 돌릴지 고르고 실행을 시작하세요.' };
         global.location.hash = '#c/' + encodeURIComponent(data.characterId);
       } catch (error) {
