@@ -503,37 +503,41 @@ class JobManager:
             self.request_resume(job.character_id)
 
     def _run_locked(self, job: Job) -> None:
-        with self.locks.hold(job.character_id):
-            job.status = "running"
-            job.started_at = now_iso()
+        # D-0204: the job no longer holds the character lock for its whole run. One job per
+        # character is enforced by _active (submit rejects a second job), state.json writes are
+        # serialized by its file lock, and a human decision is written atomically only while the
+        # gate still awaits that revision (StateFile.set_gate expect_awaiting). Holding the lock
+        # here made a G6 approval wait minutes for an unrelated parallel stage (s8c).
+        job.status = "running"
+        job.started_at = now_iso()
+        self._persist(job)
+        self._publish_job(job)
+        stream = _JobStream(self, job)
+        router = self._stdout_router()
+        router.register(stream)
+        try:
+            log = self._dispatch(job, stream)
+            job.stopped_at = log.stopped_at
+            job.ran_stages = list(log.timings)
+            job.steps = list(log.steps)
+            job.waiting = list(log.waiting)
+            job.blocked = list(log.blocked)
+            job.held = list(getattr(log, "held", []))
+            job.status = "succeeded"
+        except (Exception, SystemExit) as exc:  # 작업 실패를 기록하고 서버는 계속 돈다
+            job.status = "failed"
+            job.error = f"{type(exc).__name__}: {exc}"
+            self._append_log(job, f"작업 실패: {job.error}")
+        finally:
+            router.unregister()
+            job.finished_at = now_iso()
+            stream.flush_lines()
             self._persist(job)
+            with self._lock:
+                if self._active.get(job.character_id) == job.job_id:
+                    del self._active[job.character_id]
             self._publish_job(job)
-            stream = _JobStream(self, job)
-            router = self._stdout_router()
-            router.register(stream)
-            try:
-                log = self._dispatch(job, stream)
-                job.stopped_at = log.stopped_at
-                job.ran_stages = list(log.timings)
-                job.steps = list(log.steps)
-                job.waiting = list(log.waiting)
-                job.blocked = list(log.blocked)
-                job.held = list(getattr(log, "held", []))
-                job.status = "succeeded"
-            except (Exception, SystemExit) as exc:  # 작업 실패를 기록하고 서버는 계속 돈다
-                job.status = "failed"
-                job.error = f"{type(exc).__name__}: {exc}"
-                self._append_log(job, f"작업 실패: {job.error}")
-            finally:
-                router.unregister()
-                job.finished_at = now_iso()
-                stream.flush_lines()
-                self._persist(job)
-                with self._lock:
-                    if self._active.get(job.character_id) == job.job_id:
-                        del self._active[job.character_id]
-                self._publish_job(job)
-                self.publish_state(job.character_id, force=True)
+            self.publish_state(job.character_id, force=True)
 
     def run_options(self, job: Job, stream: _JobStream, **over: Any) -> RunOptions:
         """워크숍 실행의 RunOptions(D-0049): 물결 실행, 유료 단계 확인, 작업 스레드 로그 연결."""

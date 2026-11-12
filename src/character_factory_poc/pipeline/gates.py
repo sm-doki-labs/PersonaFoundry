@@ -61,7 +61,10 @@ def write_gate_record(
     write_once_json(p, dump(rec))
     approved = decision in {"APPROVE", "SELECT"}
     state.set_gate(
-        gate, "APPROVED" if approved else "REJECTED", rev, p.relative_to(char_dir).as_posix()
+        gate,
+        "APPROVED" if approved else "REJECTED",
+        rev,
+        p.relative_to(char_dir).as_posix(),
     )
     if state.stage(stage_id).status == "AWAITING_HUMAN":
         state.transition(stage_id, "APPROVED" if approved else "REJECTED", rev=rev)

@@ -22,6 +22,7 @@ from character_factory_poc.common.errors import FactoryError
 from character_factory_poc.pipeline.approve import approve_gate
 from character_factory_poc.pipeline.context import Context
 from character_factory_poc.pipeline.origin import set_archived
+from character_factory_poc.pipeline.state import DECISION_SNAPSHOT
 from character_factory_poc.web import reads
 from character_factory_poc.web.demo_chat import install_demo_routes
 from character_factory_poc.web.errors import WebError
@@ -326,6 +327,8 @@ def create_app(
         if expected_rev is not None and not isinstance(expected_rev, str):
             raise WebError(400, "expectedRev는 문자열이어야 한다")
         char_dir = reads.character_dir(root, character_id)
+        # D-0204: running jobs no longer hold this lock, so a decision is recorded right away.
+        # The lock now only orders decisions and short web edits on the same character.
         with jobs.locks.hold(character_id):
             state, state_error = reads.read_state(char_dir)
             if state_error:
@@ -340,6 +343,9 @@ def create_app(
                     f"{gate}는 이미 결정이 기록됐다. 새 revision으로 다시 돌린 뒤 결정한다",
                 )
             ctx = Context(config=load_config(root, conf.config_path), execute=True)
+            snapshot = DECISION_SNAPSHOT.set(
+                {gate: (gate_state.get("status", "PENDING"), gate_state.get("rev"))}
+            )
             try:
                 output = approve_gate(ctx, character_id, gate, answer)
             except FactoryError as exc:
@@ -348,6 +354,8 @@ def create_app(
                 message = str(exc)
                 status = 501 if "아직 구현되지 않았다" in message else 400
                 raise WebError(status, message) from exc
+            finally:
+                DECISION_SNAPSHOT.reset(snapshot)
         detail = reads.character_detail(root, character_id)
         view = reads.gate_view(root, character_id, gate)
         hub.publish(

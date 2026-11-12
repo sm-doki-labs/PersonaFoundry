@@ -11,6 +11,7 @@ updatedAt 하나만 덮어쓰므로 시작·종료 시각과 회차별 실패 �
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import fcntl
 import json
 import os
@@ -22,6 +23,14 @@ from character_factory_poc.common.errors import GateNotApprovedError, StateTrans
 from character_factory_poc.common.ledger import append_jsonl
 from character_factory_poc.common.schema import dump, validate
 from character_factory_poc.contracts.common import GateState, StageState, State
+
+# D-0204: a human decision no longer waits for the running job. The web decision API records
+# the gate's (status, rev) it checked; set_gate writes the decision only if the gate is still in
+# exactly that state under the state file lock, so a revision the job opened meanwhile is never
+# overwritten by a decision about the previous one.
+DECISION_SNAPSHOT: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "decision_snapshot", default=None
+)
 
 _ALLOWED = {
     "PENDING": {"RUNNING", "SKIPPED"},
@@ -154,10 +163,25 @@ class StateFile:
                     f"{sid}는 {a} 완료가 필요하다(현재 {self.stage(a).status})"
                 )
 
-    def set_gate(self, gid: str, status: str, rev: str | None, record_ref: str | None) -> None:
+    def set_gate(
+        self,
+        gid: str,
+        status: str,
+        rev: str | None,
+        record_ref: str | None,
+    ) -> None:
         with self._locked():
             self._reload()
             g = self.gate(gid)
+            snap = (DECISION_SNAPSHOT.get() or {}).get(gid)
+            decided = status in {"APPROVED", "REJECTED"}
+            if decided and snap is not None and (g.status, g.rev) != snap:
+                from character_factory_poc.common.errors import FactoryError
+
+                raise FactoryError(
+                    f"{gid}의 상태가 검토하는 동안 바뀌었다(지금 {g.status} {g.rev}). "
+                    "최신 후보를 다시 확인한다"
+                )
             changed = (g.status, g.rev) != (status, rev)
             g.status = status  # type: ignore[assignment]
             g.rev = rev
