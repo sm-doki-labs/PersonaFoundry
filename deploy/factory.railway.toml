@@ -1,0 +1,166 @@
+# Railway 시연 서버 설정(D-0208). 로컬 시연 설정(손흥민 전체 시연)과 같은 모델을 쓰되 Vertex 는 빼고
+# 모두 API 키 경로로 부른다. 키는 Railway 환경변수: OPENAI_API_KEY, GEMINI_API_KEY, ANTHROPIC_API_KEY, XAI_API_KEY.
+# 테스터 발행은 FACTORY_IMPORT_TOKEN 으로 dev 넣기 서비스를 부른다.
+
+[web]
+host = "0.0.0.0"
+port = 8080
+studio_dir = "/app/studio"
+default_until = "G6"
+
+[text_pipeline]
+enabled = true
+profile = "basic_test"
+route = "api"
+transport_retries = 1
+
+[text_pipeline.routes.api.families.openai]
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+
+[text_pipeline.routes.api.families.gemini]
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+api_key_env = "GEMINI_API_KEY"
+
+# 로컬 중계 경로는 서버에 없다.
+[text_pipeline.routes.opencodex]
+base_url = ""
+
+[providers.text]
+adapter = "openai_compat"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+model = "gemini-3.8-flash"
+api_key_env = "GEMINI_API_KEY"
+reasoning_effort = "low"
+max_retries = 1
+timeout_s = 300
+
+[providers.judge]
+adapter = "openai_compat"
+base_url = "https://api.openai.com/v1"
+model = "gpt-6.1-sol"
+api_key_env = "OPENAI_API_KEY"
+max_retries = 0
+timeout_s = 180
+
+[providers.dialogue]
+adapter = "openai_compat"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+model = "gemini-3.8-flash"
+api_key_env = "GEMINI_API_KEY"
+
+[providers.demo_chat]
+adapter = "openai_compat"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+model = "gemini-3.8-flash"
+api_key_env = "GEMINI_API_KEY"
+reasoning_effort = "low"
+max_retries = 2
+
+# S3 원문 분석 조립(D-0198): Claude Opus 5.5 공식 API.
+[providers.planner]
+adapter = "anthropic"
+model = "claude-opus-5-5"
+api_key_env = "ANTHROPIC_API_KEY"
+effort = "high"
+max_retries = 2
+timeout_s = 900
+
+# S3 원문 분석기(D-0200): GPT-6.1 Sol 공식 API.
+[providers.analyzer]
+adapter = "openai_compat"
+base_url = "https://api.openai.com/v1"
+model = "gpt-6.1-sol"
+api_key_env = "OPENAI_API_KEY"
+reasoning_effort = "medium"
+stream = true
+timeout_s = 900
+max_retries = 1
+
+# 응답별 표시(D-0201·D-0202): Gemini API 키 경로 Argon.
+[providers.labeler]
+adapter = "openai_compat"
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+model = "gemini-4-argon"
+api_key_env = "GEMINI_API_KEY"
+max_retries = 0
+timeout_s = 1200
+
+# 영상: 서버에는 Grok 로그인이 없으므로 xAI API 키만 쓴다. 1.5 모델 720p.
+[providers.video]
+adapter = "xai_video"
+model = "grok-imagine-video-1.5"
+api_key_env = "XAI_API_KEY"
+poll_interval_s = 5
+timeout_s = 600
+
+[providers.image]
+adapter = "openai_images"
+base_url = "https://api.openai.com/v1"
+model = "gpt-image-2.6-sunburst"
+api_key_env = "OPENAI_API_KEY"
+quality = "high"
+complexity = "medium"
+estimated_cost_usd = 1.0
+max_retries = 0
+timeout_s = 600
+
+[providers.vision]
+adapter = "openai_compat"
+base_url = "https://api.openai.com/v1"
+model = "gpt-6.1-sol"
+api_key_env = "OPENAI_API_KEY"
+max_retries = 0
+
+# 시그니처 중간 사진(D-0203): Grok 이미지 편집.
+[providers.signature_image]
+adapter = "xai_images"
+model = "grok-imagine-image-2.0"
+api_key_env = "XAI_API_KEY"
+timeout_s = 180
+max_retries = 1
+
+[stages.image_qa]
+enabled = true
+allow_same_family = true
+max_fix_rounds = 1
+
+[stages.s3t]
+analysis_mode = "scenes"
+
+[stages.s5]
+resolution = "720p"
+candidates = 1
+
+[stages.s6]
+resolution = "720p"
+pin_last_frame = true
+
+[stages.s8]
+example_turns = 0
+evidence_chunk_chars = 24000
+evidence_workers = 4
+
+[stages.s10]
+comparison_call_usd_upper = 0.05
+comparison = "skip"
+
+[review]
+enabled = false
+
+[budget]
+max_calls_per_command = 500
+max_cost_usd_per_command = 30
+
+[orchestrator]
+max_parallel = 3
+parallel_stage_cost_cap_usd = 10
+auto_resume = true
+resume_until = "G6"
+
+# 테스터 전용 발행(D-0206): dev 넣기 서비스. chat-svc 컴파일러는 이미지 안 /opt/chat-svc.
+[publish.preview]
+target = "dev"
+base_url = "https://factory-import.dev.dokilabs.com"
+chat_svc_repo = "/opt/chat-svc"
+expires_minutes = 60
