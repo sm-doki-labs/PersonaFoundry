@@ -736,3 +736,7 @@
 중단된 공정 변경을 제외한 staged tree를 별도 폴더로 내보내 검증했다. 최종 `python -m pytest -q`: 1,963 passed, 6 skipped, 3 warnings, 46 subtests passed (165.62초). `node --test studio/tests/*.test.cjs`: 177 passed. 변경 Python 파일 ruff와 staged diff 검사 통과. 최초 전체 검사에서 옛 워크숍 경로를 기대한 test_studio_integration 2건이 실패했고, 현재 화면을 기대하도록 수정 후 전체 재검사를 통과했다.
 
 리뷰에서 wheel 설치에 studio 자산이 빠지는 회귀를 확인하여 setuptools data-files와 설치 prefix 탐색을 추가했다. `uv build --wheel` 후 별도 가상환경에 설치하고 소스 체크아웃 밖에서 공장·채팅·검토 HTML과 공장 JS/CSS를 HTTP 200으로 확인했다. 패키지에는 실행용 studio 자산57개를 포함하며 tests/plans/recordings는 넣지 않는다. 기존 작업 폴더와 서버·채팅·pv6는 그대로 보존한다.
+
+### 2026-11-12 장면별 기준 페르소나 공정 (D-0197)
+
+작업 트리의 Python 전체 테스트 2,278개 통과, 6개 건너뜀(하위 검사 46개 통과). 로컬 적용본의 페르소나·장면·검토·기록·내보내기 검사 114개 통과(하위 검사 46개 통과). 합성 문답에서 분류 입력에 답이 없고, 근거 변조 시 G6 승인이 거절되며, 승인 뒤 채팅이 같은 프롬프트를 사용하는 것을 확인했다. 8776 입력 화면 HTTP 200, 두 장면의 S8 분기, 기존 대화 프롬프트 해시와 영상 응답, 설정 파일과 기존 산출물 3,243개의 동일성을 재확인했다. 실제 모델 호출·인물 유사도 비교·시간 재측정은 수행하지 않았다. [인계](handoffs/handoff-2026-11-12-interview-v2-factory.md)

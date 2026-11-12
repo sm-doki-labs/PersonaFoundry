@@ -610,6 +610,7 @@ def build_package(ctx: Context, cid: str) -> Path:
             "builtin:evidence-pipeline-v3",
             "builtin:evidence-pipeline-v4",
             "builtin:evidence-pipeline-v5",
+            "builtin:interview-editor-v2",
         }:
             from character_factory_poc.stages.s11_release.presentation import CHAT_DISCLOSURE
 
@@ -815,6 +816,7 @@ def build_package(ctx: Context, cid: str) -> Path:
             "builtin:evidence-pipeline-v3",
             "builtin:evidence-pipeline-v4",
             "builtin:evidence-pipeline-v5",
+            "builtin:interview-editor-v2",
         }:
             write_once_json(
                 rev_dir / "persona/prompt-compiler.json",

@@ -19,6 +19,7 @@ from character_factory_poc.stages.s8_prompts.chapter_start import (
 )
 from character_factory_poc.web.app import create_app
 from character_factory_poc.web.sources import Draft
+from tests.support.interview import interview_author, interview_judge
 from tests.support.web_gates import trait_sheet_for
 from tests.test_chapter_start import _start
 from tests.test_evidence_pipeline import candidate
@@ -89,12 +90,18 @@ def test_scene_survives_approved_plan_final_prompt_and_chapter_start(
     assert read_json(plan_dir / "variants.json")["seedSha256"] == source_hash
     model.add("AGENT", lambda req: trait_sheet_for(ctx, cid))
     run_s7(ctx, cid)
-    model.add("AGENT", candidate)
+    if template == "INTERVIEW":
+        model.add("AGENT", interview_author)
+        model.add("JUDGE", interview_judge)
+        expected_compiler = "builtin:interview-editor-v2"
+    else:
+        model.add("AGENT", candidate)
+        expected_compiler = "builtin:evidence-pipeline-v4"
     prompt_dir = run_s8(ctx, cid, [])
     pair = read_json(prompt_dir / "prompt-pair.json")
     packet = read_json(prompt_dir / "evidence-packet.json")
     binding = read_json(prompt_dir / "evidence-binding.json")
-    assert pair["systemRulesRef"] == "builtin:evidence-pipeline-v4"
+    assert pair["systemRulesRef"] == expected_compiler
     assert all(token in packet["scene"] for token in scene_tokens)
     if template == "FAN_CALL":
         assert packet["scene"] == "처음 만나는 팬과 통화한다. 해요체를 쓴다."

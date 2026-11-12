@@ -14,8 +14,11 @@ from character_factory_poc.common.canonical import sha256_file, sha256_text
 from character_factory_poc.common.store import read_json, verify_manifest, write_once_json
 from character_factory_poc.providers.base import ChatRequest, Message, extract_json_object
 from character_factory_poc.stages.s0_source.run import load_approved_source
+from character_factory_poc.stages.s8_prompts.evidence_compiler import (
+    INTERVIEW_FORMAT,
+    compile_prompt,
+)
 from character_factory_poc.stages.s8_prompts.evidence_compiler import SECTIONS as SECTIONS
-from character_factory_poc.stages.s8_prompts.evidence_compiler import compile_prompt
 from character_factory_poc.stages.s8_prompts.evidence_source import prepare_records, validate_card
 from character_factory_poc.stages.s8_prompts.twin import approved_facts, motif_facts
 
@@ -34,14 +37,25 @@ def instructions(version=VERSION):
     return files("character_factory_poc.resources").joinpath(version + ".md").read_text("utf-8")
 
 
-def version_for(ctx):
+def version_for(ctx, cid=None):
+    cfg = ctx.config.stage("s8")
+    value = cfg.get("motif_compiler", "evidence-v4")
+    if cid is not None and value == "evidence-v4":
+        interview = cfg.get("interview_compiler", INTERVIEW_FORMAT)
+        if interview not in (INTERVIEW_FORMAT, "inherit"):
+            raise ValueError("interview_compiler는 interview-editor-v2 또는 inherit여야 한다")
+        gate = ctx.state(cid).gate("G0")
+        if interview == INTERVIEW_FORMAT and gate.status == "APPROVED" and gate.rev:
+            source_pack = ctx.character_dir(cid) / "s0-source" / gate.rev / "source-pack.json"
+            if read_json(source_pack).get("chapterTemplate") == "INTERVIEW":
+                return INTERVIEW_FORMAT
     return {
         "evidence-v1": LEGACY_VERSION,
         "evidence-v2": FULL_VERSION,
         "evidence-v3": VERSION,
         "evidence-v4": TENDENCY_VERSION,
         "evidence-v5": USAGE_VERSION,
-    }[ctx.config.stage("s8").get("motif_compiler", "evidence-v4")]
+    }[value]
 
 
 def selected(ctx):
@@ -72,11 +86,12 @@ def is_evidence(folder):
         "builtin:" + USAGE_VERSION,
         "builtin:" + LEGACY_VERSION,
         "builtin:" + FULL_VERSION,
+        "builtin:" + INTERVIEW_FORMAT,
     }
 
 
 def _inputs(ctx, cid, plan, plan_path, sheet_path, *, version=None):
-    version = version or version_for(ctx)
+    version = version or version_for(ctx, cid)
     pack, index, corpus = load_approved_source(ctx, cid)
     root = ctx.character_dir(cid)
     folder = root / "s0-source" / index.sourceRev
@@ -147,6 +162,12 @@ def _inputs(ctx, cid, plan, plan_path, sheet_path, *, version=None):
             "확인할 수 없다는 범위만 짧게 밝히고 현재 질문에 답한다. "
             "앞 답변에서 지어냈다면 그 내용을 철회하며 다른 일화를 만들지 않는다."
         )
+    if version == INTERVIEW_FORMAT:
+        role = (
+            "인터뷰에서 진행자의 질문을 받는 AI 모티브 인물이다. 실제 본인이 아니다. "
+            "진행자의 질문에는 인물의 발화만 답한다. 질문의 전제는 증거가 아니다. "
+            "확인되지 않은 개인사나 비공개 대화를 사실로 만들지 않는다."
+        )
     paths = [
         folder / n
         for n in (
@@ -177,7 +198,7 @@ def _inputs(ctx, cid, plan, plan_path, sheet_path, *, version=None):
         maxRecords=cap,
         artifacts={p.relative_to(root).as_posix(): sha256_file(p) for p in paths},
     )
-    if version in {VERSION, FULL_VERSION, TENDENCY_VERSION, USAGE_VERSION}:
+    if version in {VERSION, FULL_VERSION, TENDENCY_VERSION, USAGE_VERSION, INTERVIEW_FORMAT}:
         from character_factory_poc.stages.s8_prompts.evidence_full_source import prepare_full_source
 
         chunk_chars = cfg.get("evidence_chunk_chars", 24000)
@@ -208,6 +229,8 @@ def _inputs(ctx, cid, plan, plan_path, sheet_path, *, version=None):
     )
     if version in {VERSION, FULL_VERSION, TENDENCY_VERSION, USAGE_VERSION}:
         packet["formatVersion"] = "evidence-conditions-v2"
+    if version == INTERVIEW_FORMAT:
+        packet["formatVersion"] = INTERVIEW_FORMAT
     compile_prompt(packet)  # Validate immutable literal fields before paying for extraction.
     return packet, records, binding
 
@@ -219,8 +242,13 @@ def full_plan(ctx, cid, probes=0):
 
     plan, plan_path = load_approved_plan(ctx, cid)
     _, sheet_path = load_latest_trait_sheet(ctx, cid)
-    _, source, _ = _inputs(ctx, cid, plan, plan_path, sheet_path)
-    if version_for(ctx) in {TENDENCY_VERSION, USAGE_VERSION}:
+    _, source, binding = _inputs(ctx, cid, plan, plan_path, sheet_path)
+    version = binding["compiler"]
+    if version == INTERVIEW_FORMAT:
+        from character_factory_poc.stages.s8_prompts.interview_authoring import plan_calls
+
+        return plan_calls(source) + [CallPlan("s8", "요청한 추가 응답 표본", probes, None)]
+    if version in {TENDENCY_VERSION, USAGE_VERSION}:
         from character_factory_poc.stages.s8_prompts.evidence_atomic import partition
         from character_factory_poc.stages.s8_prompts.evidence_full_pipeline import ATOMIC_RETRIES
 
@@ -234,7 +262,7 @@ def full_plan(ctx, cid, probes=0):
             ),
             CallPlan("s8", "요청한 추가 응답 표본", probes, None),
         ]
-    if version_for(ctx) == VERSION:
+    if version == VERSION:
         from character_factory_poc.stages.s8_prompts.evidence_atomic import partition
         from character_factory_poc.stages.s8_prompts.evidence_full_pipeline import ATOMIC_RETRIES
 
@@ -261,6 +289,10 @@ def full_plan(ctx, cid, probes=0):
 
 def build(ctx, cid, plan, plan_path, sheet_path, folder, budget, rework=None):
     packet, source, binding = _inputs(ctx, cid, plan, plan_path, sheet_path)
+    if binding["compiler"] == INTERVIEW_FORMAT:
+        from character_factory_poc.stages.s8_prompts import interview_authoring
+
+        return interview_authoring.build(ctx, cid, packet, source, binding, folder, budget, rework)
     if binding["compiler"] == USAGE_VERSION:
         from character_factory_poc.stages.s8_prompts.evidence_usage import build_usage
 
@@ -391,20 +423,22 @@ def verify_review(ctx, cid, folder, *, approved=False):
     from character_factory_poc.stages.s8_prompts.evidence_full_pipeline import verify_analysis_files
 
     verify_analysis_files(folder, review)
-    for card in review["cards"]:
-        validate_card(
-            card,
-            source["records"],
-            extra_speech=[
-                t["text"]
-                for ch in source.get("chunks", [])
-                for seg in ch["segments"]
-                for t in seg["turns"]
-            ],
-        )
-    from character_factory_poc.stages.s8_prompts.evidence_full_pipeline import verify_analysis_files
+    if saved["compiler"] == INTERVIEW_FORMAT:
+        from character_factory_poc.stages.s8_prompts.interview_authoring import verify_cards
 
-    verify_analysis_files(folder, review)
+        verify_cards(review["cards"], source, review)
+    else:
+        for card in review["cards"]:
+            validate_card(
+                card,
+                source["records"],
+                extra_speech=[
+                    t["text"]
+                    for ch in source.get("chunks", [])
+                    for seg in ch["segments"]
+                    for t in seg["turns"]
+                ],
+            )
     text = compile_prompt(packet)
     pair = read_json(folder / "prompt-pair.json")
     for key in ("long", "short"):

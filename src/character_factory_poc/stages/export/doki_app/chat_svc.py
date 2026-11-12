@@ -55,6 +55,7 @@ EVIDENCE_COMPILERS = {
     "builtin:evidence-pipeline-v3",
     "builtin:evidence-pipeline-v4",
     "builtin:evidence-pipeline-v5",
+    "builtin:interview-editor-v2",
 }
 EVIDENCE_HEADERS = (
     "FACTS",

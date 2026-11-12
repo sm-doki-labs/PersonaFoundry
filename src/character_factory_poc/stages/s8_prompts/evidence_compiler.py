@@ -16,6 +16,16 @@ SECTIONS = (
     "VOICE",
     "KNOWS_AND_LIMITS",
 )
+INTERVIEW_FORMAT = "interview-editor-v2"
+_INTERVIEW_SCOPES = ("LOCAL", "REPEATED", "REPORTED", "MEASURED")
+_INTERVIEW_BOUNDARY = (
+    "경험을 묻는 질문에는 사실표와 본인이 직접 밝힌 범위까지만 개인사로 답한다. "
+    "그때의 날짜·연락·인용·감정·지금도 계속하는 습관은 별개의 사실이다. "
+    "확인되지 않은 전제는 있었다거나 없었다고 받지 않는다. "
+    "기억이 흐리다는 말로 사건이 있었던 듯 처리하지 않는다. "
+    "확인할 수 없는 경험은 짧게 유보하고, "
+    "함께 물은 판단이나 이유에는 현재 의견이나 조건부 설명으로 답한다."
+)
 NEUTRAL = "자료가 부족하므로 이 영역의 인물 특성을 정하지 않는다."
 _PACKET = {"role", "facts", "scene", "sections", "trainIds", "holdoutIds"}
 _CARD = {"section", "trigger", "first", "shift", "stop", "limit", "evidence", "rule"}
@@ -68,7 +78,8 @@ def compile_prompt(packet: dict) -> str:
     """Render only the three literal inputs and the reviewed rule of each valid card."""
     conditions = isinstance(packet, dict) and "formatVersion" in packet
     _keys(packet, _PACKET | ({"formatVersion"} if conditions else set()), "packet")
-    if conditions and packet["formatVersion"] != "evidence-conditions-v2":
+    interview = conditions and packet.get("formatVersion") == INTERVIEW_FORMAT
+    if conditions and packet["formatVersion"] not in {"evidence-conditions-v2", INTERVIEW_FORMAT}:
         raise ValueError("unknown evidence formatVersion")
     role, scene, facts = (
         _text(packet[k], k, literal=k == "facts") for k in ("role", "scene", "facts")
@@ -83,16 +94,31 @@ def compile_prompt(packet: dict) -> str:
     rules = {heading: [] for heading in SECTIONS[1:]}
     for n, card in enumerate(packet["sections"]):
         path = f"sections[{n}]"
-        _keys(card, _CARD, path)
+        _keys(card, _CARD | ({"scope"} if interview else set()), path)
+        if interview and card["scope"] not in _INTERVIEW_SCOPES:
+            raise ValueError(f"{path}.scope: unknown interview evidence scope")
         heading = card["section"]
         if not isinstance(heading, str) or heading not in rules:
             raise ValueError(f"{path}.section: unknown section or reserved FACTS")
         for key in ("trigger", "first", "shift", "stop", "limit", "rule"):
+            if interview and key in ("shift", "stop") and card[key] == "":
+                continue
             _text(card[key], f"{path}.{key}")
         refs = _ids(card["evidence"], f"{path}.evidence")
         if not refs or not refs <= train:
             raise ValueError(f"{path}.evidence: expected one or more training IDs only")
-        if conditions:
+        if interview:
+            first = card["first"].strip()
+            trigger = card["trigger"].strip()
+            # Preserve the condition even if the writer didn't put it into the first sentence.
+            lead = first if first.startswith(trigger) else f"{trigger}: {first}"
+            line = " ".join(
+                [lead] + [card[key].strip() for key in ("shift", "stop", "limit") if card[key]]
+            )
+            if line in rules[heading]:
+                raise ValueError(f"{path}: duplicate interview rule")
+            rules[heading].append(line)
+        elif conditions:
             # Do not let an independently authored summary erase the scoped behavior.
             labels = (
                 ("trigger", "적용 상황"),
@@ -105,6 +131,8 @@ def compile_prompt(packet: dict) -> str:
         else:
             rules[heading].append(card["rule"])
 
+    if interview:
+        rules["KNOWS_AND_LIMITS"].append(_INTERVIEW_BOUNDARY)
     parts = [role, scene, "[FACTS]\n" + facts]
     for name, lines in rules.items():
         parts.append(f"[{name}]\n" + ("\n".join(lines) if lines else NEUTRAL))

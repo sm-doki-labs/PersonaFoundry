@@ -191,7 +191,14 @@ def validate_findings(out, claims, chunk):
 
 
 def verify_analysis_files(folder, review):
-    if review.get("schemaVersion") not in {
+    schema = review.get("schemaVersion")
+    if schema == "interview-editor-review-v2":
+        from character_factory_poc.stages.s8_prompts.interview_authoring import (
+            verify_analysis_files as verify_interview_analysis,
+        )
+
+        return verify_interview_analysis(folder, review)
+    if schema not in {
         "evidence-review-v2",
         "evidence-review-v3",
         "evidence-review-v4",
@@ -204,11 +211,11 @@ def verify_analysis_files(folder, review):
         raise ValueError("전체 원문 분석이나 대조가 미완료다")
     artifacts = review.get("analysisArtifacts", {})
     if not artifacts:
-        raise ValueError("전체 분석 기록이 없다")
+        raise ValueError("근거 분석 기록이 없다")
     for ref, digest in artifacts.items():
         path = (Path(folder) / ref).resolve()
         if not path.is_relative_to(Path(folder).resolve()) or sha256_file(path) != digest:
-            raise ValueError("전체 원문 분석 기록이 변경됐다")
+            raise ValueError("근거 분석 기록이 변경됐다")
 
 
 def build_full(ctx, cid, packet, source, binding, folder, budget, rework=None):

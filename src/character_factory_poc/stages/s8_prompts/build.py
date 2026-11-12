@@ -522,14 +522,21 @@ def run_deck_s8(
     from character_factory_poc.stages.s8_prompts import evidence_pipeline
 
     evidence_mode = motif and evidence_pipeline.selected(ctx)
+    evidence_version = evidence_pipeline.version_for(ctx, cid) if evidence_mode else None
     current = state.stage("s8")
-    if evidence_mode and current.status in {"RUNNING", "CHECK_FAILED"} and current.currentRev:
+    # An interview phase may already have spent its one allowed call on a failed response.
+    resumable = (
+        {"RUNNING"}
+        if evidence_version == evidence_pipeline.INTERVIEW_FORMAT
+        else {"RUNNING", "CHECK_FAILED"}
+    )
+    if evidence_mode and current.status in resumable and current.currentRev:
         interrupted = base / current.currentRev
         if (interrupted / "evidence-binding.json").is_file() and not (
             interrupted / "prompt-pair.json"
         ).exists():
             prior_binding = read_json(interrupted / "evidence-binding.json")
-            if prior_binding.get("compiler") == evidence_pipeline.version_for(ctx):
+            if prior_binding.get("compiler") == evidence_version:
                 rev, folder = current.currentRev, interrupted
     if evidence_mode:
         if ctx.config.stage("s8").get("example_turns", 0):
@@ -542,9 +549,7 @@ def run_deck_s8(
         else:
             brief = load_rework(ctx, cid, "G6")
             write_once_json(rework_path, {"brief": dump(brief) if brief else None})
-        write_once_json(
-            folder / "evidence-intent.json", {"compiler": evidence_pipeline.version_for(ctx)}
-        )
+        write_once_json(folder / "evidence-intent.json", {"compiler": evidence_version})
         state.transition("s8", "RUNNING", rev=rev)
         state.set_gate("G6", "PENDING", rev, None)
         try:
