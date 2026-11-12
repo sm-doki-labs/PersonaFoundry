@@ -3620,13 +3620,15 @@
       ['표시 위치', [['package', '패키지'], ['appSeed', '앱 시드'], ['chat', '대화 프롬프트']].map(function (p) { return p[1] + (places[p[0]] ? ' ✓' : ' ✕'); }).join(' · ')],
       ['대상', pres.subjectKind === 'PUBLIC_FIGURE' ? '공인' : pres.subjectKind === 'PRIVATE_PERSON' ? '사인(가족·지인)' : '-'],
       ['공개 동의', consent.detail],
-      ['찾는 표현', joinList(endorsement.terms, ', ')]
+      ['찾는 표현', list(endorsement.terms).length ? joinList(endorsement.terms, ', ') : '없음(막지 않아요)']
     ]) +
       (hits.length
         ? '<table class="gate-table pres-hits"><thead><tr><th>위치</th><th>표현</th><th>앞뒤 문장</th></tr></thead><tbody>' +
           hits.map(function (h) { return '<tr><td>' + esc(h.where) + '</td><td><b>' + esc(h.term) + '</b></td><td>' + esc(h.excerpt) + '</td></tr>'; }).join('') + '</tbody></table>' +
           '<p class="qa-note">문구를 고친 뒤 패키지를 다시 만들면 다시 점검해요. 다른 뜻으로 쓴 말이면 설정의 찾는 표현 목록을 바꿀 수 있어요.</p>'
-        : '<p class="qa-note">추천·협력·공식처럼 보이는 표현을 찾지 못했어요.</p>');
+        : list(endorsement.terms).length
+          ? '<p class="qa-note">추천·협력·공식처럼 보이는 표현을 찾지 못했어요.</p>'
+          : '');
   }
   function renderPackage(items) {
     if (!state.pkgRestored) {

@@ -33,25 +33,11 @@ CHAT_DISCLOSURE = (
     f"[표시] 이 대화 상대는 {DISCLOSURE}이다. "
     "진짜 본인이냐고 물으면 본인이 아니라 AI가 만든 기술 시연이라고 짧게 밝힌다."
 )
-#: 기본 금지 표현. [stages.s11] presentation_banned_terms로 바꾼다.
-#: D-0213: '공식' 단독은 경력·말하는 자리 문장("공식 이적", "공식 석상")에도 쓰여 생성할 때마다
-#: 걸렸다. 본인 측 보증·협력으로 읽히는 '공식 ○○' 표현만 막는다. 띄어쓰기는 있어도 없어도 잡는다.
-DEFAULT_BANNED = (
-    "공식 협력",
-    "공식 파트너",
-    "공식 후원",
-    "공식 승인",
-    "공식 인증",
-    "공식 계정",
-    "공식 캐릭터",
-    "공식 콜라보",
-    "본인이 직접",
-    "협찬",
-    "함께한",
-    "추천",
-    "official",
-    "endorsed",
-)
+#: 기본 금지 표현. D-0214: 기본은 비어 있어 추천·협력 표현 검사가 아무것도 막지 않는다.
+#: 다시 켜려면 [stages.s11] presentation_banned_terms에 목록을 넣는다(띄어쓰기는 있어도 없어도
+#: 잡는다). 예전 기본값: 공식 협력·파트너·후원·승인·인증·계정·캐릭터·콜라보, 본인이 직접, 협찬,
+#: 함께한, 추천, official, endorsed.
+DEFAULT_BANNED: tuple[str, ...] = ()
 #: 금지 표현이 다른 뜻으로 들어간 공통 문구. 찾기 전에 지운다.
 #: [stages.s11] presentation_allowed_phrases로 바꾼다.
 #: "매 턴 채울 공식이 아니다"는 모든 캐릭터 프롬프트에 붙는 공통 규칙
@@ -264,8 +250,12 @@ def run_checks(ctx: Context, cid: str, rev_dir: Path, package: CharacterPackage)
         f"{len(hits)}곳에서 찾았어요: "
         + ", ".join(sorted({f"{h['where']}('{h['term']}')" for h in hits})[:6])
         if hits
-        else f"표현 {len(banned)}개를 프로필·소개·챕터·시작 버튼·영상·페르소나 프롬프트에서 "
-        "찾지 못했어요",
+        else (
+            f"표현 {len(banned)}개를 프로필·소개·챕터·시작 버튼·영상·페르소나 프롬프트에서 "
+            "찾지 못했어요"
+            if banned
+            else "찾는 표현이 없어 막지 않아요"
+        ),
         terms=banned,
         allowed=allowed,
         hits=hits[:50],

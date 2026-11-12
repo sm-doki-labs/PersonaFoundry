@@ -136,13 +136,10 @@ def test_banned_terms_come_from_config_and_cover_video_prompts(tmp_path, monkeyp
         guard_g9(ctx, cid, rev_dir, _approve())
 
 
-def test_default_terms_catch_endorsement_but_skip_shared_rule(tmp_path, monkeypatch):
+def test_default_has_no_banned_terms(tmp_path, monkeypatch):
+    # D-0214: 기본은 금지 표현이 없어 추천·협력처럼 보이는 문구도 G9를 막지 않는다.
     ctx, cid, rev_dir = _twin(tmp_path, monkeypatch)
     package = presentation.CharacterPackage.model_validate(read_json(rev_dir / "package.json"))
-    # 모든 프롬프트에 붙는 공통 규칙("매 턴 채울 공식이 아니다")은 걸리지 않는다.
-    prompt = rev_dir / "persona/long-prompt.txt"
-    prompt.write_text(prompt.read_text("utf-8") + "\n매 턴 채울 공식이 아니다.\n", "utf-8")
-    assert _by_id(_check(rev_dir))["endorsement"]["ok"]
     tagged = package.model_copy(
         update={
             "profile": package.profile.model_copy(
@@ -151,29 +148,31 @@ def test_default_terms_catch_endorsement_but_skip_shared_rule(tmp_path, monkeypa
         }
     )
     result = presentation.run_checks(ctx, cid, rev_dir, tagged)
-    hits = _by_id(result)["endorsement"]["hits"]
-    expected = {"본인이 직접", "함께한", "공식 캐릭터", "Official", "endorsed"}
-    assert {h["term"] for h in hits} == expected
-    assert result["status"] == "FAIL"
+    endorsement = _by_id(result)["endorsement"]
+    assert endorsement["ok"] and endorsement["terms"] == [] and endorsement["hits"] == []
+    assert result["status"] == "PASS"
 
 
-def test_career_uses_of_gongsik_are_not_endorsement(tmp_path, monkeypatch):
-    # D-0213: 2026-11-13 손흥민 프롬프트에서 걸렸던 경력·자리 문장은 보증 표현이 아니다.
+def test_configured_terms_match_with_or_without_spaces(tmp_path, monkeypatch):
+    original = flow._approved
+
+    def approved(tmp, mode, *, legacy_v3=False):
+        ctx, *rest = original(tmp, mode, legacy_v3=legacy_v3)
+        ctx.config.stages["s11"] = {"presentation_banned_terms": ["공식 캐릭터", "official"]}
+        return (ctx, *rest)
+
+    monkeypatch.setattr(flow, "_approved", approved)
     ctx, cid, rev_dir = _twin(tmp_path, monkeypatch)
-    prompt = rev_dir / "persona/long-prompt.txt"
-    prompt.write_text(
-        prompt.read_text("utf-8")
-        + "\n토트넘 홋스퍼로 공식 이적했다. 초면이거나 공식 석상에서는 말을 아낀다."
-        + " 공식 발표나 공식 기자회견에서는 문장을 맺는다.\n",
-        "utf-8",
-    )
-    assert _by_id(_check(rev_dir))["endorsement"]["ok"]
     package = presentation.CharacterPackage.model_validate(read_json(rev_dir / "package.json"))
     tagged = package.model_copy(
-        update={"profile": package.profile.model_copy(update={"tagline": "구단 공식캐릭터"})}
+        update={
+            "profile": package.profile.model_copy(
+                update={"tagline": "구단 공식캐릭터, 공식 이적", "job": "Officially"}
+            )
+        }
     )
     hits = _by_id(presentation.run_checks(ctx, cid, rev_dir, tagged))["endorsement"]["hits"]
-    assert [h["term"] for h in hits] == ["공식캐릭터"]
+    assert {h["term"] for h in hits} == {"공식캐릭터", "Official"}
 
 
 def test_missing_chat_disclosure_fails(tmp_path, monkeypatch):
