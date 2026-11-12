@@ -1,12 +1,18 @@
 # 에이전틱 캐릭터 공장 상세 설계 (LLD)
 
-- 문서 버전: v1.51
+- 문서 버전: v1.52
 - 작성일: 2026-10-14
 - 수정일: 2026-11-12
+- 이번 변경: v1.52(2026-11-12), S3 장면 분석 3회와 기획 조립 1회(D-0198).
 - 이번 변경: v1.51(2026-11-12), interview-editor-v2 분기, 근거 검토 및 승인 본문 재현 규칙을 추가한다(D-0197).
+- 이번 변경: v1.50(2026-11-12), 시그니처 중간 프레임 시드 생성과 두 이미지 승인(D-0195).
+- 이번 변경: v1.49(2026-11-12), 시그니처 포즈 참고 사진 업로드와 중간 프레임 연결(D-0194).
+- 이번 변경: v1.48(2026-11-12), openai_images 어댑터·실험 클라이언트 호환·공식 연결 설정을 추가한다(D-0193).
+- 이번 변경: v1.47(2026-11-12), referenceImage API·단일 S4·확인/재개 경합 처리(D-0192).
+- 이전 변경: v1.44(2026-11-12), §3·§8.5 영상 기본 모델·끝 프레임 입력 비용·재사용 조건(D-0189).
 - 상태: 초안, 사용자 검토 전
-- 근거: [PRD v1.25](../product/prd.md), [시스템 명세 v1.37](spec.md). 이 문서는 명세를 코드로 옮기는 세부만 정하고 다른 결정을 담지 않는다. 절마다 근거가 되는 명세 절을 `(명세 §n)`으로 적는다.
-- 이번 변경: v1.40 말투 사용 조건 추출 표준(D-0179). 이전: v1.39 기능·말투 분리, 혼합 근거 보존과 조건부 조립(D-0178). 이전:  v1.37 전체 생성용 원문 분할 분석·반례 대조·조건 보존(D-0176). 이전: v1.36 원문 근거 기반 무예시 8섹션 공장의 기본 S8·G6·시연·내보내기 연결(D-0174). 이전: v1.35 실제 문답을 이전 턴으로 넣는 선택 기능(D-0173). 이전: v1.34 모티브 대조 특질 검증(D-0171). 이전: v1.33 두 말차례의 관심과 대응(D-0170). 이전: v1.32 모티브 반응 특질의 독립 대조 실험(D-0169). 이전: v1.31 모티브 V3 조립(D-0163).
+- 근거: [PRD v1.28](../product/prd.md), [시스템 명세 v1.40](spec.md). 이 문서는 명세를 코드로 옮기는 세부만 정하고 다른 결정을 담지 않는다. 절마다 근거가 되는 명세 절을 `(명세 §n)`으로 적는다.
+- 이번 변경: v1.46(2026-11-12), 프롬프트 조립·keyframes·복귀/무음 처리·원본 재개(D-0191).
 - 변경 이력: v0.1 최초 작성 / v0.2(2026-10-20) S1을 화제성 순위 → 외모 특징 프록시로 바꾸고 §2~§5·§8.1·§9~§13을 고쳤다(D-0017, D-0018) / v0.3(2026-10-20) 인물 인상 칸과 계약 v2(§5.2·§5.5·§8.1·§10, D-0020, D-0021) / v0.4(2026-10-21) G1 참조 사진·S2 구현(§2~§5·§5.7·§5.8·§8.1·§8.2·§9·§10·§12·§13, D-0022, D-0023) / v0.5(2026-10-21) S3 외모 연결, S4·G4 구현(§2~§5·§5.10·§8.3·§8.4·§12, D-0024~D-0026) / v0.6(2026-10-21) S5·G5와 xai_video·grok_web 어댑터(§2~§5·§5.11·§8.5·§9·§10·§12·§13, D-0028~D-0030) / v0.7(2026-10-21) 9:16 세로 첫 프레임과 `intro-inputs-v2`(§3·§4·§5.11·§8.5, D-0031), 실제 grok.com 화면에 맞춘 `grok_web`(§9, D-0032) / v0.8(2026-10-22) 씨앗 → 변형 기획, S3r 참고 자료, S4a·S4b·S4 배경 → 자세 → 완성 이미지, 갈래별 진행 오케스트레이터(§2~§6·§8.3·§8.3a·§8.4·§11·§12, D-0033~D-0035) / v0.9(2026-10-22) 이미지 자동 검사·수정 루프(§2·§3·§5.10b·§8.4a·§9·§11·§12, D-0036, D-0037) / v1.0(2026-10-22) S6 동작 영상 골격과 G5b(§2~§5·§5.11a·§6.1·§8.5a·§11·§12, D-0038, D-0039) / v1.1(2026-10-22) 앱 통화 영상 카탈로그, 무표정 첫 프레임, 계약 v2(§2~§4·§5.11a·§8.5·§11·§12, D-0040, D-0041) / v1.2(2026-10-27) 얼굴은 G1에서 한 장만 고르고 S2를 자동 기준 사진·동일인 검사로 바꿔 G2를 없앴다. 아직 코드에는 반영하지 않았다(§2~§4·§5.7·§5.8·§5.9·§5.17·§6.1·§8.1~§8.5·§11~§13, D-0042, D-0043) / v1.3(2026-10-27) 3일 PoC 계약: §4 명령(S1 수집·S9~S11·내보내기·웹앱), §5.14·§5.15·§5.17을 새 계약(`data-plan-v1` 등, `training-run-v2` 등, `character-package-v1`·`export-result-v1`)으로 바꾸고, §6.5 워크숍 API, §8.8~§8.11(S9 샘플·대량 두 단계와 G7a, S10 학습·평가 분리, 패키지, 우리 앱 내보내기), §9 어댑터(`grok_oauth`, 순위 수집기, `gemma_qlora`, `vertex_gemini`), §12 M8을 더했다(D-0044, D-0045) / v1.4(2026-10-28) 학습 없이 긴 프롬프트로 패키지까지 가는 G8 결정(§8.9), 학습 제출 분리(`--submit-training`), G8 답 형식(§6.5)(D-0048) / v1.5(2026-10-28) 에이전틱 실행: §3 설정, §4 명령, §5.16 관문 기록 선택 칸, §5.19~§5.21 새 계약, §6.6~§6.10 물결 실행·자동 재개·사전 검토·재작업·대기열, §11 시험, §12 M9(D-0049) / v1.6(2026-10-29) 한소민 근거로 정본 직접 보존·조건부 적용·사실 소유자 구분을 보완했다(D-0053·D-0054)
 
 ## 1. 범위와 기준
@@ -101,7 +107,7 @@ character-factory-poc/
 [providers.vision]     adapter = "openai_compat"; base_url = "http://127.0.0.1:10100/v1"; model = "google-antigravity/gemini-3.1-pro"; api_key_env = "CFP_TEXT_API_KEY"   # 이미지 생성(gpt)과 다른 계열(D-0010). 중계의 이미지 입력은 Q-0020
 [stages.image_qa]      enabled = true; max_fix_rounds = 2; fix_mode = "edit"; allow_same_family = false   # D-0037 제안
 [providers.image]      adapter = "codex_image"; model = "gpt-6.1-sol"; reasoning_effort = "low"; timeout_s = 600   # D-0019. 테스트·데모는 "fake"
-[providers.video]      adapter = "xai_video"; model = "grok-imagine-video-1.5-lite"; api_key_env = "XAI_API_KEY"; poll_interval_s = 5; timeout_s = 600   # 테스트는 "fake"
+[providers.video]      adapter = "grok"; model = "grok-imagine-video-1.5"; api_key_env = "XAI_API_KEY"; poll_interval_s = 5; timeout_s = 600   # 테스트는 "fake"
                        # 웹: adapter = "grok_web"; accept_terms_risk = true; cdp_url = "http://127.0.0.1:9222"; [providers.video.selectors] video_mode/option/audio/upload/uploaded/prompt/submit(기본값은 2026-10-21 화면, D-0032)
                        # 웹을 쓸 때 [stages.s5] duration = 6; resolution = "480p"(웹은 6/10/15초·480p/720p만, 무료 등급은 480p·6초)
 [stages.s5]            candidates = 2; duration = 8; resolution = "720p"; generate_audio = false   # D-0030 제안
@@ -516,6 +522,10 @@ def run_agent(spec, workspace, inputs, checks, provider) -> AgentResult
 **보류.** 얼굴 임베딩 유사도와 S1 얼굴 미리보기 검사는 나중에 붙인다(Q-0011).
 
 ### 8.5 S5·S6 영상 (S5 구현, S6은 골격)
+
+D-0190(명세 §11): `providers/video_concurrency.py`의 공유 슬롯은 영상 전체 작업을 최대 6개로 제한하고 `run_video_jobs`는 결과 입력 순서를 보존한다. 실패 후 대기 작업을 중단하고 진행 중 작업을 회수한 뒤 오류를 올린다. `XaiVideoModel._request`에서 `/videos/generations`의 각 POST를 주소별 `SubmissionPacer`로 1초 간격 제어하며 429 `Retry-After`를 반영한다. 조회·다운로드에는 제출 간격을 적용하지 않는다. `TrackedVideoModel.job_slot`은 S5·S6에서 함께 사용하고 grok_web은 별도 공유 슬롯 1개를 쓴다. `GrokVideoChain`은 작업 실행 문맥별 인증 경로 이름을 유지하고 `Budget.consume`은 잠금으로 동시 호출 수 경합을 막는다. 단계 스케줄러는 완료된 작업부터 후속 의존을 재평가한다. 시연의 미확정 단계는 `orchestrator.parallel_stage_cost_cap_usd`(기본10)와 명령 상한 중 작은 값을 예약하고 실제 worker의 계획 검사에도 적용한다. 이미 완료한 단계의 관문 처리에는 비용을 예약하지 않는다.
+
+D-0189(명세 §11): `VideoRequest.last_frame`은 선택 입력이며 `image`와 `last_frame`에 각 사진 data URI를 넣는다. xAI·OAuth·Grok 체인의 모델 미지정 기본값은 `grok-imagine-video-1.5`다. 끝 프레임이 있으면 Lite 및 1080p 요청을 제출 전에 거절한다. S6 기본 `pin_last_frame=true`는 첫 사진을 끝에도 전달한다. `estimate_cost(..., input_images=2)`를 계획·저장 작업·실제 결과 비용에 적용하며, 재개 계획은 고정된 `inputs.pinLastFrame`을 읽는다. 수정 요청 및 등급 변경의 재사용 판정에도 이 값을 포함한다. 기존 revision은 수정하지 않는다.
 
 **S5 구현.** `stages/s5_intro/`, 진입점 `run.run_s5(ctx, cid)`. 단계 `s5`, rev `vi<k>`, 관문 G5, 그래프 의존은 `s2` 승인(D-0028, D-0042). (1) 실행 전 `plan_calls`가 예상 비용을 계산해 예산 상한을 넘으면 거절한다. (2) 첫 프레임(D-0031, `stages/s5_intro/first_frame.py`): 외모 명세의 기준 이미지(기준 사진)를 `hero.png`로 복사하고, `first_frame = "vertical"`(기본)이면 `hero.png`를 참조로 붙여 이미지 모델에 세로 첫 프레임 1장을 요청한다(크기 힌트 `1024x1536`, 고정 프롬프트: 같은 얼굴·머리·옷·배경·빛, 허리 위 미디엄 샷, 눈높이 위 1/3, 손은 내려 얼굴에서 뗌; 피할 것 문자·워터마크·로고·얼굴에 손·턱 괴기). 원본은 `first-frame-raw.png`로 두고, 가운데 기준으로 목표 비율의 가장 큰 상자를 잘라 `first-frame.png`를 쓴다. 생성 결과 비율이 목표에서 25%를 넘게 벗어나면(예: 정사각형) 자르지 않고 `CHECK_FAILED`로 멈춘다. `"hero"`면 대표 이미지를 그대로 쓴다. 얼굴 크롭은 쓰지 않는다(첫 프레임이 곧 첫 장면이므로). 재개할 때는 `inputs.json`이 있으면 첫 프레임을 다시 만들지 않는다. (3) 움직임 프롬프트는 고정 템플릿이다: 첫 프레임에서 시작하는 고개 돌림·미소·머리카락·눈 깜빡임, 고정 카메라 또는 아주 느린 푸시인, 같은 사람·옷·배경 유지, 손은 얼굴에서 떨어짐, 문자·로고·다른 사람 없음. (4) 후보마다 `submit` 직후 `jobs/v<n>.json`(SUBMITTED, 작업 ID)을 먼저 쓰고 `collect`로 받는다. MP4 시그니처(4~8바이트 `ftyp`)를 확인하고 `videos/v<n>.mp4`, `assets/v<n>.json`을 쓴다. ffprobe가 있으면 길이·해상도를 잰다. (5) 시간 초과(`VideoTimeoutError`)면 작업을 SUBMITTED로 두고 단계 `CHECK_FAILED`. 다음 실행은 같은 rev에서 받은 영상은 건너뛰고, 재개할 수 있는 공급자(`xai_video`)는 같은 작업 ID로 다시 수집하며, 재개할 수 없는 공급자(`grok_web`)는 다시 제출한다. 그 밖의 실패는 FAILED와 사유를 남긴다. (6) `videos.json`, `gate-G5.html`(대표 이미지와 첫 프레임을 나란히 보이고 `<video>` 재생), manifest. G5 SELECT면 `approved-intro.json`. 자동 영상 검사(`video-qa`)는 보류한다.
 
@@ -1050,6 +1060,37 @@ D-0181 상세: `GET /api/characters/{cid}/chat/sessions`, `GET/PUT .../{sid}`는
 
 명세 v1.38 구현: stages/export/preview.py·preview_scripts.py(대상 저장소 가상환경에서 실행하는 DB 조각), pipeline/demo.py·demo_flow.py, common/notify.py(CFP_DISCORD_WEBHOOK_URL), orchestrator RunOptions.demo(유료 확인 생략·관문 시연 승인·예산 확인·G9 뒤 발행), web/sources.py demoMode·PUT /api/sources/{cid}/demo-mode, reads.demo 요약, studio 시연 스위치·상태 낱말. 고정 200만 번대 id 묶음(sx)은 로컬 시연 DB 전용으로 남긴다.
 
+
+## 2026-11-12 주제별 무음 통화 영상 표준(D-0191)
+
+명세 D-0191 구현: s6_actions/call_loop.py가 VideoScene과6개 레시피를 조립하고 ActionInputs.productionProfile/videoScene, ActionSpec.production에 고정한다. xai_video.body는 keyframes image/timestamp_s와1/3초 격자 중복을 검증한다. postprocess.py는 중앙/타일 영상차이 및 안정 구간으로 복귀 후보를 계산하고 ffmpeg -an, ffprobe로 무음을 확인한다. 원본 raw/와 receipt를 저장해 재시도 시 추가제출·비용 예약을 피한다. run.py는 keyframe 복사/해시와 원본·receipt 부분재사용을 보장한다. API videoScene은 exclude_unset으로 저장한다. 말하기는 speaking 슬롯으로 내보내며 로컬 화면의 음성길이 동기화 재생은 별도다.
+
+[제작 규칙과 설정](../guides/call-loop-video.md). 변경 이력: v1.46(2026-11-12), idle 포함6편·주제별 영상 프롬프트·복귀/무음 후처리를 추가했다.
+
+## 2026-11-12 기준 사진 확인 후 영상 생성(D-0192)
+
+명세 v1.42 D-0192: video-settings.json의 referenceImage={wardrobe,background}로 opt-in한다. graph_for_dir는 SOURCE+light에서 s4a/s4b를 제외하고 S4의 G3·G1s 의존을 둔다. s4_frames/reference.py는 전체 사진을 참조하여 9:16 ch1-f1을 만들고 reference-image-inputs-v1·원본 해시·프롬프트·frames.json을 고정한다. 기존 G4 승인 계약을 유지한다. sources draft/finalize는 사진 한 장과 시그니처를 요구한다. GET /api/sources/{cid}/reference, POST .../reference/confirm(revision,sha256), POST .../reference/retry(revision,wardrobe,background)를 제공한다. 확인은 별도 파일 잠금 및 StateFile 잠금으로 G4만 갱신하여 프롬프트 작업을 막지 않는다. scheduler는 작업 완료마다 승인 상태를 재확인한다. 완료 경합은 JobManager의 영상 전용 재개로 보완하며 실패한 유료 시도는 자동 반복하지 않는다. 수정은 실행 중 또는 확인 후에는 거절한다. 기존 파일은 수정하지 않고 새 fr revision을 만든다. 실제 영상 동시6개/제출1초 간격과720p를 유지한다.
+
+변경 이력: v1.47(2026-11-12), 기준 사진 확인 흐름을 추가했다.
+
+### 공식 OpenAI 연결 구현 (명세 §11, D-0193)
+
+`providers/openai_images_client.py`가 기존 testpath의 HTTP 구현을 공유한다. `testpath/image_api.py`는 import 호환 경로로 남긴다. `providers/openai_images.py`는 `ImageRequest.reference_images`가 있으면 multipart `POST /images/edits`, 없으면 JSON `POST /images/generations`를 호출한다. 기본값은 `gpt-image-2.6-sunburst`, quality=high, complexity=medium, max_retries=0이다. 모델 선택은 구현 기본값이며 인물 품질 검증 완료를 뜻하지 않는다. 반환 bytes는 PNG 서명과 OpenCV 디코딩으로 검사한다. 계획용 estimated_cost_usd는 양의 유한한 설정값을 받으며 미설정이면 미확인이다. 사전 확인 명령은 미확인 비용으로 실행하지 않는다. `factory.py`는 새 어댑터를 선택하고 비전의 timeout/max_retries 설정을 전달한다. SOURCE 기준 사진 계획과 사전 확인에서 API 비용 미확인을 0으로 표시하지 않는다.
+
+실행 설정의 judge/vision은 `openai_compat`, base_url=`https://api.openai.com/v1`, api_key_env=`OPENAI_API_KEY`, model=`gpt-6.1-sol`이다. text의 Vertex Gemini와 video의 Grok은 바꾸지 않는다. 8776 실행본은 검증된 이전 실행본에서 이번 공급자 파일만 갱신하여 중단된 페르소나 작업을 재개하지 않는다.
+
+### 시그니처 포즈 참고 사진 (D-0194, 2026-11-12)
+
+명세 v1.44 D-0194: POST files의 photoRole=signature는 이미지 형식과 Lite·시그니처 설정·한 장 제한을 검사한다. 사진 complete에서 검증한 local_copy 상대경로를 signature.middleFramePath로 연결한다. S3는 finalize에서 해시를 재검증해 로컬 사본을 만들며 source-pack.photos에 포함하지 않는다. DELETE로 연결도 제거한다. GET files/{fid}/preview는 저장소·해시 확인 후 no-store 이미지 응답을 보내며 detail/complete의 previewUrl로 재접속 미리보기를 복구한다. 설정 수정 시 생략된 template/중간 프레임 필드를 유지하고 첨부한 사진 경로를 우선한다. 기존 S6는 시그니처의 2초 지점 keyframe만 복사·동결하며 시작/끝은 기준 사진을 사용한다. 프론트 photoItems와 signaturePhotoItems를 분리한다.
+
+### 시그니처 중간 프레임 시드 (D-0195, 2026-11-12)
+
+명세 v1.45 D-0195: 업로드 complete는 signature.poseReferencePath를 쓴다. reference.py는 inputs.signaturePose(경로·해시·프롬프트)를 고정하고 reference/pose.*로 복사한 뒤 ImageRequest(reference_images=(ch1/f1.png, pose))로 ch1/signature-mid.png와 signature-frame.json을 만든다. plan_calls는 2회를 계획한다. GET reference는 signatureImageUrl·signatureSha256을, confirm은 signatureSha256 일치를 요구한다. approve_g4가 승인 시 middleFramePath=s4-frames/{rev}/ch1/signature-mid.png, middleFrameAtS=2.0을 기록한다. reference.js는 두 이미지 모두 디코딩된 뒤 승인 버튼을 연다.
+
 ## 2026-11-12 인터뷰 기준판의 제작 방식 복원(D-0197)
 
 S8은 G0의 승인 revision을 기준으로 분기하며 `stages.s8.interview_compiler = "inherit"`로 이 분기를 끌 수 있다. 인터뷰는 기존 안전 필터를 거친 생성용 문답 중 출처를 나눠 뽑은 표본에서 질문만 분류하고, 원문 답의 길이를 계산한다. 저작과 별도 근거 검토 뒤 LOCAL·REPEATED·REPORTED·MEASURED 카드를 검증한다. 범위와 통계가 뒷받침하는 지시만 사실표와 함께 조립하며, 고정 답변이나 수치 제한을 복사하지 않는다. 검토 자료와 본문을 해시로 묶고 G6 및 시연 시 다시 검증한다. 명시적 실험 버전, 기존 승인판, 영상 제작 규칙은 그대로 둔다.
+
+## 2026-11-12 S3 장면 분석과 기획 조립(D-0198)
+
+기본 설정은 stages.s3t.analysis_mode=scenes다. 세 관점의 분석 응답과 원문 참조를 S3 revision에 보존한다. 새 조립은 구조·근거 검사에 실패하면 자동 내용 재생성 대신 실패를 기록한다. 기존 승인판과 연구용 exhaustive 설정을 읽을 수 있다. orchestrator.provider_limits.judge=0이 기본이며 양의 정수로 공장 내부 제한을 다시 지정할 수 있다.

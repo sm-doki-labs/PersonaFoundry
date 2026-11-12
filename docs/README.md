@@ -80,3 +80,5 @@
 - [실제 공장 화면 실행 안내](guides/agentic-studio.md): 기본 실제 모드, 요청·작업·검수·자동 재개와 시연 경계.
 
 - [실제 에이전틱 공장 화면 연결 인계](status/handoffs/handoff-2026-10-30-agentic-studio-runtime.md): 시작·관문·자동 재개·실제 그래프·검증과 남은 경계.
+
+- [기준 사진 확인 후 영상6편 생성 인계](status/handoffs/handoff-2026-11-12-reference-first.md) — D-0192, 현재 프론트 입력·사진확인·병렬 생성.
