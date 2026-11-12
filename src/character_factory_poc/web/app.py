@@ -55,6 +55,7 @@ class _StudioStaticFiles(_DevStaticFiles):
             "index.html",
             "factory.html",
             "sources.html",
+            "settings.html",
             "chat.html",
             "d-ops.html",
             "c-glass.html",
@@ -100,6 +101,9 @@ def create_app(
     from character_factory_poc.web.text_pipeline import install_text_pipeline_routes
 
     install_text_pipeline_routes(app, root, conf, jobs)
+    from character_factory_poc.web.settings_routes import install_settings_routes
+
+    install_settings_routes(app, conf)
     from character_factory_poc.web.runtime import install_runtime_routes
 
     install_runtime_routes(app, root, conf, jobs)

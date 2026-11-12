@@ -1143,6 +1143,7 @@
 
   // ---- 화면 ----
   const ICON = {
+    gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
     file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><polyline points="14 3 14 8 19 8"/>',
     upload: '<path d="M12 16V4"/><polyline points="7 9 12 4 17 9"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
     x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
@@ -1192,7 +1193,8 @@
       '<span class="lbl"><span class="nm"><span class="tx">' + E(name) + '</span>' + (motif ? '<span class="fd-org">모티브</span>' : '') + '</span>' +
       (sub ? '<small>' + E(sub) + '</small>' : '') + '</span></a>';
   }
-  function sideHTML(list, theme) {
+  function sideHTML(list, theme, opts) {
+    const current = (opts && opts.current) || 'sources';
     const shown = (list || []).filter((c) => !c.archived)
       .slice().sort((x, y) => (Date.parse(text(y.createdAt)) || 0) - (Date.parse(text(x.createdAt)) || 0));
     const counts = {};
@@ -1200,11 +1202,11 @@
     const items = shown.map((c) => sideItemHTML(c, counts[text(c.displayName).trim() || displayName(c.name, c.id)] > 1)).join('');
     const themes = THEMES.map((t) => '<button type="button" data-act="theme" data-theme="' + t[0] + '" aria-pressed="' + (theme === t[0]) + '" aria-label="' + t[2] + '" title="' + t[2] + '">' + icon(t[1]) + '</button>').join('');
     return '<div class="fd-brand">' + MARK + '<div class="fd-word"><b>Foundry</b><small>캐릭터 공장</small></div></div>' +
-      '<div class="fd-side-actions"><a class="btn block" href="sources.html" aria-current="page" title="원문으로 새 캐릭터" style="text-decoration:none">' + icon('user') + '<span class="lbl">원문으로 만들기</span></a></div>' +
+      '<div class="fd-side-actions"><a class="btn block" href="sources.html"' + (current === 'sources' ? ' aria-current="page"' : '') + ' title="원문으로 새 캐릭터" style="text-decoration:none">' + icon('user') + '<span class="lbl">원문으로 만들기</span></a></div>' +
       '<nav aria-label="캐릭터 탐색"><a class="fd-nav" href="factory.html#all" title="전체 캐릭터">' + icon('grid') + '<span class="lbl">전체 캐릭터</span><span class="num">' + (list ? shown.length + '명' : '') + '</span></a>' +
       '<a class="fd-nav" href="factory.html#all/mine" title="받은 일">' + icon('inbox') + '<span class="lbl">받은 일</span></a>' +
       '<h2>캐릭터</h2>' + (list ? items || '<p class="hint" style="padding:0 8px">아직 없어요</p>' : '<p class="hint" style="padding:0 8px">불러오는 중이에요</p>') + '</nav>' +
-      '<div class="fd-side-foot"><a class="fd-help" href="help.html" target="_blank" rel="noopener" title="사용 안내" aria-label="사용 안내">?</a><div class="fd-theme" role="group" aria-label="화면 테마">' + themes + '</div><div class="fd-foot-links"><a href="help.html" target="_blank" rel="noopener">사용 안내</a></div></div>';
+      '<div class="fd-side-foot"><a class="fd-help" href="help.html" target="_blank" rel="noopener" title="사용 안내" aria-label="사용 안내">?</a><div class="fd-theme" role="group" aria-label="화면 테마">' + themes + '</div><div class="fd-foot-links"><a href="help.html" target="_blank" rel="noopener">사용 안내</a><a class="fd-ops" href="settings.html" title="설정" aria-label="설정"' + (current === 'settings' ? ' aria-current="page"' : '') + '>' + icon('gear') + '</a></div></div>';
   }
   function icon(name) { return '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">' + ICON[name] + '</svg>'; }
   function options(pairs, value) { return pairs.map((p) => '<option value="' + p[0] + '"' + (p[0] === value ? ' selected' : '') + '>' + p[1] + '</option>').join(''); }

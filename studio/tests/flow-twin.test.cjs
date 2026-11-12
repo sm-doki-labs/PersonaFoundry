@@ -254,7 +254,9 @@ test('QA F20/F09/F7: no link to the old screen, names stay visible on laptops, a
   const src = fs.readFileSync(path.join(__dirname, '..', 'shared', 'flow.js'), 'utf8');
   const page = fs.readFileSync(path.join(__dirname, '..', 'factory.html'), 'utf8');
   assert.ok(!src.includes('>이전 화면<'), 'the old-screen link is gone');
-  assert.ok(src.includes('모델 설정 (운영 담당용)'), 'model settings moved to a small operator link');
+  // D-0211: 톱니바퀴는 예전 시안(d-ops.html) 대신 새 디자인 설정 화면으로 간다.
+  assert.ok(src.includes('href="settings.html" title="설정"'), 'settings live on the new-design settings page');
+  assert.ok(!src.includes('d-ops.html'), 'no link to the old design page');
   // 첫 글자만 남는 레일은 900px 아래에서만 쓴다(1280px에서도 이름이 보인다).
   const rail = css.split('@media (max-width:899px){')[1] || '';
   assert.ok(rail.split('}')[0].includes('grid-template-columns:60px'), 'rail only below 900px');

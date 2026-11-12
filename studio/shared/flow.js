@@ -1211,7 +1211,7 @@
         (items || '<p class="hint fd-side-empty">' + empty + '</p>') +
         (arch || state.showArchived ? '<button type="button" class="fd-nav fd-arch" data-act="archived" aria-pressed="' + state.showArchived + '" title="' + (state.showArchived ? '보관함 닫기' : '보관한 캐릭터 보기') + '">' + icon('archive') + '<span class="lbl">' + (state.showArchived ? '보관함 닫기' : '보관함') + '</span><span class="num">' + arch + '명</span></button>' : '') + '</nav>' +
         '<div class="fd-side-foot"><a class="fd-help" href="help.html" target="_blank" rel="noopener" title="사용 안내" aria-label="사용 안내">?</a><div class="fd-theme" role="group" aria-label="화면 테마">' + theme + '</div>' +
-        '<div class="fd-foot-links"><a href="help.html" target="_blank" rel="noopener">사용 안내</a><a class="fd-ops" href="d-ops.html?panel=text" title="모델 설정 (운영 담당용)" aria-label="모델 설정 (운영 담당용)">' + icon('gear') + '</a></div></div>';
+        '<div class="fd-foot-links"><a href="help.html" target="_blank" rel="noopener">사용 안내</a><a class="fd-ops" href="settings.html" title="설정" aria-label="설정">' + icon('gear') + '</a></div></div>';
     }
 
     // ---- 머리줄 ----
