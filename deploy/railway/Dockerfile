@@ -21,6 +21,7 @@ COPY src/ src/
 RUN uv sync --locked --no-dev && uv cache clean
 COPY studio/ studio/
 COPY deploy/factory.railway.toml deploy/factory.railway.toml
-# Railway 볼륨(/data)은 root 소유로 붙으므로 root 로 실행한다.
+# Railway 볼륨(/data)은 root 소유로 붙으므로 root 로 실행한다. 서버 안 cfp 명령(preview remove 등)도
+# 같은 설정을 읽도록 루트의 factory.toml 을 서버 설정에 잇는다.
 EXPOSE 8080
-CMD ["sh","-ec","mkdir -p \"$CFP_ROOT\"; exec python -m character_factory_poc.web --root \"$CFP_ROOT\" --config \"$CFP_CONFIG\" --host 0.0.0.0 --port 8080"]
+CMD ["sh","-ec","mkdir -p \"$CFP_ROOT\"; ln -sfn \"$CFP_CONFIG\" \"$CFP_ROOT/factory.toml\"; exec python -m character_factory_poc.web --root \"$CFP_ROOT\" --config \"$CFP_CONFIG\" --host 0.0.0.0 --port 8080"]
