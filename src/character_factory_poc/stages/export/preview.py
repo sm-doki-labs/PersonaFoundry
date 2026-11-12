@@ -355,6 +355,43 @@ class PreviewResult:
 # ------------------------------------------------------------------ 본체
 
 
+#: chat-svc 활성 퀘스트는 관문 있는 메인 챕터가 정확히 3개다(content_cli/loader.py). 슬롯별 진입 단계.
+_SPREAD_STAGES = {2: ("ACQUAINTANCE", "두 번째 통화"), 3: ("FLIRTING", "세 번째 통화")}
+
+
+def spread_single_chapter(package):
+    """챕터 1개짜리 모티브를 같은 장면으로 1~3단계에 펼친다(D-0210). 패키지 파일은 그대로다.
+
+    2·3단계는 1단계와 같은 사실·프레임·통화 영상을 쓰고, 관계 진입 단계만 chat-svc 슬롯에 맞춘다.
+    """
+    if len(package.chapters) != 1:
+        return package, ""
+    first = package.chapters[0]
+    if first.chapterNo != 1:
+        return package, ""
+    chapters = [first]
+    for no, (stage, title) in _SPREAD_STAGES.items():
+        chapters.append(
+            first.model_copy(
+                update={
+                    "chapterNo": no,
+                    "chapterId": f"ch{no}",
+                    "relationshipStage": stage,
+                    "title": title,
+                }
+            )
+        )
+    videos = list(package.videos)
+    for video in package.videos:
+        if video.kind == "ACTION" and (video.chapterNo or 1) == 1:
+            for no in _SPREAD_STAGES:
+                videos.append(
+                    video.model_copy(update={"chapterNo": no, "videoId": f"{video.videoId}-ch{no}"})
+                )
+    note = "챕터가 1개라 같은 장면·통화 영상을 1~3단계에 펼쳤어요(chat-svc 는 관문 챕터 3개가 필요해요)"
+    return package.model_copy(update={"chapters": chapters, "videos": videos}), note
+
+
 def publish_preview(
     ctx: Context,
     cid: str,
@@ -379,6 +416,9 @@ def publish_preview(
             raise PreviewError(
                 "전용 대화 모델을 쓰는 캐릭터예요. dev chat-svc 에는 캐릭터별 모델 경로가 없어요"
             )
+        package, spread = spread_single_chapter(package)
+        if spread:
+            result.warnings.append(spread)
         result.name = package.profile.name
         uid, handle = str(character_uid(cid)), slug_for(cid)
         result.characterUid = uid

@@ -86,9 +86,11 @@ api_key_env = "GEMINI_API_KEY"
 max_retries = 0
 timeout_s = 1200
 
-# 영상: 서버에는 Grok 로그인이 없으므로 xAI API 키만 쓴다. 1.5 모델 720p.
+# 영상(D-0210): 서버 공장 Grok 로그인(기기 코드, CFP_XAI_OAUTH_FILE 볼륨 파일)을 먼저 쓰고
+# 막히면 xAI API 키로 넘어간다. 1.5 모델 720p.
 [providers.video]
-adapter = "xai_video"
+adapter = "grok"
+order = ["grok_oauth", "xai_video"]
 model = "grok-imagine-video-1.5"
 api_key_env = "XAI_API_KEY"
 poll_interval_s = 5
@@ -144,6 +146,18 @@ evidence_workers = 4
 [stages.s10]
 comparison_call_usd_upper = 0.05
 comparison = "skip"
+
+# 실존 인물 공개 점검(D-0209): '공식'이 경력·말하는 자리를 뜻하는 문구는 추천·협력 표시가 아니다.
+# 금지어 '공식' 자체는 그대로 둬서 '공식 협력'·'공식 계정' 같은 표현은 계속 막는다.
+[stages.s11]
+presentation_allowed_phrases = [
+  "매 턴 채울 공식이 아니다",
+  "공식 입단",
+  "공식 기자회견",
+  "공식 소감",
+  "공식 인사",
+  "공식 질의응답",
+]
 
 [review]
 enabled = false

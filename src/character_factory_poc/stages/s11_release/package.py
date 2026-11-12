@@ -7,6 +7,7 @@ LLD §5.17·§8.10, D-0011·D-0044. 모든 참조 파일의 sha256을 다시 재
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,7 +27,7 @@ from character_factory_poc.common.store import (
 from character_factory_poc.contracts.common import ArtifactRef
 from character_factory_poc.contracts.dataset import DatasetRev
 from character_factory_poc.contracts.frames import ApprovedFrames
-from character_factory_poc.contracts.hero import AppearanceSpec
+from character_factory_poc.contracts.hero import AppearanceSpec, ImageRef
 from character_factory_poc.contracts.persona import (
     PromptPair,
     PromptPairV2,
@@ -50,11 +51,11 @@ from character_factory_poc.contracts.release import (
     TmiItem,
     Video,
 )
-from character_factory_poc.contracts.scene import CHAPTERS, ScenePlan
+from character_factory_poc.contracts.scene import CHAPTERS, PlatedScene, ScenePlan
 from character_factory_poc.contracts.training import TrainingRun
 from character_factory_poc.contracts.video import ApprovedActions, VideoAsset
 from character_factory_poc.pipeline.context import Context
-from character_factory_poc.pipeline.origin import SOURCE, read_origin
+from character_factory_poc.pipeline.origin import SOURCE, read_origin, reference_image_enabled
 from character_factory_poc.stages.s2_hero.approve import load_appearance_spec
 from character_factory_poc.stages.s3_plan.importer import load_approved_plan_v2
 from character_factory_poc.stages.s4_frames.approve import load_approved_frames
@@ -572,6 +573,61 @@ def scene_ids(frames) -> tuple[str, ...]:
     return tuple(ch for ch in CHAPTERS if ch in have)
 
 
+def reference_scene(
+    ctx: Context, cid: str, plan: CharacterPlanV2, frames: ApprovedFrames, frames_dir: Path
+) -> tuple[ScenePlan, Path]:
+    """기준 사진 흐름(D-0192)의 장면 정보(D-0209).
+
+    이 흐름에는 배경·장면·자세 단계(S4a·S4b, G4b)가 없다. 장면 사실과 지킬 선은 챕터 시작
+    설정(S8c)에서, 배경은 사람이 승인한 기준 사진에서 가져온다. 내보내기는 사실 파일의
+    chapterStart 를 먼저 쓰므로 여기 칸은 그 설정을 옮겨 둔 것이다.
+    """
+    from character_factory_poc.stages.s8_prompts.chapter_start import load_latest_chapter_start
+
+    start = load_latest_chapter_start(ctx.character_dir(cid))
+    if not start:
+        raise GateNotApprovedError(f"{cid}: 챕터 시작 설정(S8c)이 없어 장면 정보를 만들 수 없다")
+    by_id = {c["chapterId"]: c for c in start.get("chapters", [])}
+    chapters: list[PlatedScene] = []
+    for frame in frames.frames:
+        chapter = by_id.get(frame.chapterId)
+        if chapter is None:
+            raise GateNotApprovedError(f"{cid}: {frame.chapterId} 챕터 시작 설정이 없다")
+        relationship = chapter.get("relationship") or {}
+        facts = [s.strip() for s in chapter.get("sceneFacts") or [] if str(s).strip()]
+        meeting = str(relationship.get("presenceReason") or "").strip() or facts[0]
+        # presenceReason 은 "…연결했기 때문이다." 꼴의 이유 문장이다. 앱 단계 소개로 읽히게 바꾼다.
+        meeting = re.sub(r"기 때문이다\.?$", "다.", meeting)
+        if len(facts) < 2:
+            facts = [*facts, meeting][:2]
+        boundaries = [s.strip() for s in chapter.get("sceneBoundaries") or [] if str(s).strip()]
+        chapters.append(
+            PlatedScene(
+                chapterId=frame.chapterId,
+                source="USER",
+                place="영상통화 화면",
+                timeOfDay="통화 중",
+                mood=str((relationship.get("moodRange") or {}).get("start") or "").strip()
+                or "차분하다",
+                sceneFacts=facts[:5],
+                meetingContext=meeting,
+                sceneBoundaries=boundaries[:5]
+                or ["장면 밖 장소 이동과 행동 지문을 만들지 않는다."],
+                plateBrief="사람이 승인한 기준 사진의 배경을 그대로 쓴다",
+                plate=ImageRef(id=frame.frameId, path=frame.path, sha256=frame.sha256),
+            )
+        )
+    scene = ScenePlan(
+        characterId=cid,
+        sceneRev="ps0",
+        backgroundRev="reference",
+        planRev=plan.planRev,
+        aspectRatio="9:16",
+        chapters=chapters,
+    )
+    return scene, frames_dir
+
+
 def build_package(ctx: Context, cid: str) -> Path:
     """승인된 revision에서 character-package-v1을 만들고 G9 대기로 둔다."""
     for gate in REQUIRED_GATES:
@@ -581,8 +637,11 @@ def build_package(ctx: Context, cid: str) -> Path:
     state = ctx.state(cid)
     plan, _ = load_approved_plan_v2(ctx, cid)
     appearance, hero_path = load_appearance_spec(ctx, cid)
-    scene, _poses, scene_dir = load_scene_and_pose(ctx, cid)
     frames, frames_dir = load_approved_frames(ctx, cid)
+    if reference_image_enabled(char_dir):
+        scene, scene_dir = reference_scene(ctx, cid, plan, frames, frames_dir)
+    else:
+        scene, _poses, scene_dir = load_scene_and_pose(ctx, cid)
     intro, intro_dir = load_approved_intro(ctx, cid)
     actions, actions_dir = load_approved_actions(ctx, cid)
     persona, persona_sources, pair, _sheet, persona_problems = load_persona(ctx, cid)
