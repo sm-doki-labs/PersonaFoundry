@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -13,16 +14,24 @@ import numpy as np
 
 from character_factory_poc.common.errors import VideoGenerationError
 
+# 영상 여러 편을 동시에 받아도 후처리(ffmpeg 재인코딩)는 한 번에 하나씩, 스레드 2개로 돌린다.
+# 컨테이너는 실제 호스트 코어 수를 보므로 libx264 기본 스레드가 수십 개가 되어 한 편에 500MB를 넘고,
+# 1GB 서버에서 동시에 돌면 운영체제가 ffmpeg를 강제 종료했다(Railway 손흥민, 종료 코드 -9).
+_FFMPEG_SLOT = threading.BoundedSemaphore(1)
+_FFMPEG_THREADS = "2"
+
 
 def _run(args: list[str]) -> None:
     try:
-        proc = subprocess.run(args, capture_output=True, timeout=90, check=False)
+        with _FFMPEG_SLOT:
+            proc = subprocess.run(args, capture_output=True, timeout=90, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise VideoGenerationError(f"영상 후처리 실패: {exc}") from exc
     if proc.returncode:
-        raise VideoGenerationError(
-            "영상 후처리 실패: " + proc.stderr.decode(errors="replace")[-400:]
-        )
+        detail = proc.stderr.decode(errors="replace")[-400:].strip()
+        if proc.returncode < 0:
+            detail = f"ffmpeg가 신호 {-proc.returncode}로 강제 종료됨(메모리 부족 가능) {detail}".strip()
+        raise VideoGenerationError(f"영상 후처리 실패(종료 코드 {proc.returncode}): {detail}")
 
 
 def require_tools() -> None:
@@ -113,13 +122,16 @@ def process(raw: Path, reference: Path, production: dict) -> tuple[bytes, dict]:
     report = select_cut(raw, reference, production.get("trimWindowS"))
     with TemporaryDirectory(prefix="cfp-silent-") as tmp:
         target = Path(tmp) / "silent.mp4"
-        args = ["ffmpeg", "-v", "error", "-y", "-i", str(raw), "-map", "0:v:0", "-an"]
+        args = ["ffmpeg", "-v", "error", "-y", "-threads", _FFMPEG_THREADS, "-i", str(raw)]
+        args += ["-map", "0:v:0", "-an"]
         if report["cutAtS"] is not None:
             args += [
                 "-t",
                 str(report["cutAtS"]),
                 "-c:v",
                 "libx264",
+                "-threads",
+                _FFMPEG_THREADS,
                 "-crf",
                 "18",
                 "-pix_fmt",
