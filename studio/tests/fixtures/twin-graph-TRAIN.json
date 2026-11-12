@@ -214,6 +214,18 @@
    "paid": []
   },
   {
+   "id": "sv",
+   "name": "음성",
+   "deps": [
+    "G0"
+   ],
+   "needs": [],
+   "after": [],
+   "gate": null,
+   "implemented": true,
+   "paid": []
+  },
+  {
    "id": "s11",
    "name": "릴리즈 패키지",
    "deps": [
@@ -224,7 +236,9 @@
     "G8"
    ],
    "needs": [],
-   "after": [],
+   "after": [
+    "sv"
+   ],
    "gate": "G9",
    "implemented": true,
    "paid": []
@@ -374,6 +388,13 @@
     "s9h",
     "s10t",
     "s10"
+   ]
+  },
+  {
+   "id": "voice",
+   "label": "음성",
+   "stages": [
+    "sv"
    ]
   },
   {

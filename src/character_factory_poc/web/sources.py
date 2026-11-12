@@ -59,6 +59,11 @@ from character_factory_poc.pipeline.origin import (
 from character_factory_poc.stages.s0_source import parse
 from character_factory_poc.stages.s3_plan.common import new_character
 from character_factory_poc.stages.s6_actions.call_loop import VideoScene
+from character_factory_poc.stages.sv_voice.run import (
+    normalize_reference_id,
+    read_voice,
+    write_voice,
+)
 from character_factory_poc.web import reads
 from character_factory_poc.web.errors import WebError
 from character_factory_poc.web.launch_validation import validate_source_launch
@@ -121,6 +126,8 @@ class Draft(Strict):
     # 시연 모드: 모든 관문 자동 승인 → 테스터 미리보기 발행 → 디스코드 알림(사용자 2026-11-12).
     demoMode: bool = False
     demoBudgetUsd: float = Field(default=15.0, gt=0, le=200)
+    # D-0205: Fish Audio 음성 ID(선택). 적은 그대로 캐릭터 패키지에 싣는다.
+    voiceReferenceId: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="after")
     def reference_tier(self):
@@ -128,6 +135,7 @@ class Draft(Strict):
             raise ValueError("기준 사진 확인 흐름은 Lite 영상 6개에서 사용할 수 있어요.")
         if self.referenceImage is not None and self.demoMode:
             raise ValueError("기준 사진 확인 흐름에서는 전체 자동 발행을 끄고 시작해 주세요.")
+        self.voiceReferenceId = normalize_reference_id(self.voiceReferenceId)
         return self
 
 
@@ -496,6 +504,7 @@ def install_source_routes(app, conf, jobs):
         folder = ctx.character_dir(cid)
         write_origin(folder, SOURCE, auto_review=body.autoReview)
         write_video_tier(folder, body.videoTier)
+        write_voice(folder, body.voiceReferenceId)
         if body.referenceImage is not None:
             from character_factory_poc.pipeline.origin import write_reference_image
 
@@ -560,13 +569,14 @@ def install_source_routes(app, conf, jobs):
 
     @router.get("/{cid}")
     def detail(cid: str):
-        with opened(cid) as (_, draft):
+        with opened(cid) as (folder, draft):
             problems, ready = summary(draft)
             return {k: draft[k] for k in ("characterId", "subject", "usageBasis", "files")} | {
                 "files": [photo_view(cid, item) for item in draft["files"]],
                 "videoTier": draft["videoTier"],
                 "signaturePose": draft["signaturePose"],
                 "referenceImage": draft["referenceImage"],
+                "voiceReferenceId": (read_voice(folder) or {}).get("referenceId"),
                 "knownFacts": draft.get("knownFacts", {}),
                 "factSheet": draft.get("factSheet", []),
                 "store": conf.source_store,

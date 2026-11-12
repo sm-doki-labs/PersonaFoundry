@@ -253,3 +253,8 @@ S4 시그니처 중간 사진은 [providers.signature_image]의 Grok 이미지 �
 ### D-0204 — 관문 결정은 돌고 있는 작업을 기다리지 않는다 (확정, 2026-11-13)
 
 웹 작업은 캐릭터 잠금을 작업 전체 동안 쥐지 않는다. 한 캐릭터에 작업 하나만 도는 것은 작업 목록(_active)이 막고, state.json 쓰기는 파일 잠금이 막는다. 관문 결정 API는 확인한 관문 상태(status, rev)를 기록해 두고, StateFile.set_gate가 같은 파일 잠금 안에서 그 상태가 그대로일 때만 결정을 쓴다. 작업이 그사이 새 revision을 열었으면 결정은 409로 거절된다. 손흥민 main 시연에서 G6 승인이 병렬 채팅 장면 단계(s8c) 때문에 약 2분 반 "저장 중"으로 멈춘 문제를 고친다. 모델 연결·GPU 반납·기준 사진 다시 만들기·기본 설정 저장은 작업 중이면 이전처럼 바로 거절한다.
+
+### D-0205 — 음성 노드: Fish Audio 음성 ID를 받은 그대로 패키지에 싣는다 (확정, 2026-11-13)
+
+모든 생성 경로(원문으로 만들기, 새로 지어내기, 실행 화면 등록)에 선택 입력인 Fish Audio 음성 ID 칸을 둔다. 형식은 영문 소문자·숫자 32자이고, 대문자와 앞뒤 공백은 정리하며 틀리면 만들기 전에 거절한다. ID는 voice-settings.json에 저장한다. 모든 갈래 그래프에 sv(음성) 단계를 두며, 모델 호출과 관문이 없다. sv는 voice/vo<n>/voice.json을 쓰고 바로 승인되며, ID가 없어도 "없음"으로 승인된다. 모티브 갈래에서는 다른 단계처럼 G0 뒤에 돈다. s11은 sv 뒤에 오며(after), 승인된 ID가 있으면 패키지에 voice/voice.json과 package.voice(provider, referenceId, voiceRev, record)를 넣는다. ID가 없으면 voice 칸 자체를 빼서 이전 패키지와 바이트가 같다. 공장은 음성을 합성하지 않는다. Doki 앱 내보내기의 api-svc voice_id는 voice-svc UUID라 이 ID를 그대로 넣지 않고 unmapped에 기록한다. 기존 twin.voiceId·default_voice_id 경로는 그대로다.
+

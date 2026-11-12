@@ -270,6 +270,9 @@ def _stage_runners(ctx: Context, cid: str, opt: RunOptions) -> dict[str, Callabl
         "s10t": s10t,
         "s10": s10,
     }
+    from character_factory_poc.stages.sv_voice.run import run_sv
+
+    runners["sv"] = lambda: run_sv(ctx, cid)  # D-0205: 모든 갈래, 모델 호출 없음
     if opt.ranking is not None:
         runners["s1"] = lambda: run_s1(ctx, cid, opt.ranking)
     elif _last_gate_decision(ctx, cid, "G1") == "REQUEST_CHANGES":

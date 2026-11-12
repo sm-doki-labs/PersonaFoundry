@@ -37,6 +37,7 @@ STAGE_PROVIDERS: dict[str, frozenset[str]] = {
     "s10t": frozenset({"tuning"}),
     "s10": frozenset({"text", "judge"}),
     "s11": frozenset(),
+    "sv": frozenset(),
     "sx": frozenset(),
     # 모티브 갈래(D-0128). s0은 출처 정리 에이전트가 텍스트 모델을 쓴다. s9h는 원문만 다룬다(제안).
     "s0": frozenset({"text"}),

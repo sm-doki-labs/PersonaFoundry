@@ -191,6 +191,7 @@ LANES = [
     {"id": "persona", "label": "페르소나", "stages": ("s7", "s8")},
     {"id": "data", "label": "데이터", "stages": ("s9s", "s9")},
     {"id": "training", "label": "학습", "stages": ("s10t", "s10")},
+    {"id": "voice", "label": "음성", "stages": ("sv",)},
     {"id": "release", "label": "패키지", "stages": ("s11", "sx")},
 ]
 

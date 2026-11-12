@@ -165,6 +165,15 @@ class GateRef(Strict):
     recordRef: str
 
 
+class CharacterVoice(Strict):
+    """D-0205: 사용자가 준 TTS 음성. 공장은 합성하지 않고 ID를 그대로 싣는다."""
+
+    provider: Literal["fish_audio"] = "fish_audio"
+    referenceId: str = Field(pattern=r"^[0-9a-f]{32}$", description="Fish Audio 음성 모델 ID")
+    voiceRev: str = Field(pattern=r"^vo\d+$")
+    record: str = Field(description="캐릭터 폴더 기준 음성 기록 파일")
+
+
 class TwinRelease(Strict):
     origin: Literal["SOURCE"] = "SOURCE"
     # D-0144에서 표시 이름을 모티브로 바꿨다. 그 전에 만든 패키지의 "트윈"도 읽는다.
@@ -204,6 +213,8 @@ class CharacterPackage(Strict):
     videos: list[Video]
     persona: Persona
     sft: Sft = Field(default_factory=Sft)
+    # D-0205: 만들 때 적은 Fish Audio 음성 ID. 없으면 칸 자체를 빼서 이전 패키지 바이트가 같다.
+    voice: CharacterVoice | None = Field(default=None, exclude_if=lambda v: v is None)
     gates: list[GateRef]
     files: list[PackageFile] = Field(
         description="패키지에 든 모든 파일. 적재 전에 해시를 다시 잰다"
