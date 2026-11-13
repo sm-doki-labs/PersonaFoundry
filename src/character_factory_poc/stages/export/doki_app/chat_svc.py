@@ -101,7 +101,37 @@ _SLOTS: dict[int, dict[str, Any]] = {
         "passAct": "ACCEPT",
         "affinityTarget": 55,
     },
+    # D-0219: 미션 3개 뒤 자유 통화. 관문·평가·정산 없이 연인 단계에서 이어진다(서지안 4번과 같다).
+    4: {
+        "entry": "DATING",
+        "target": "DATING",
+        "dialoguePolicy": "free-chat-v1",
+        "mode": "FREE_CHAT",
+    },
 }
+
+#: 자유 통화 챕터의 장면 배경 키(scene.backgrounds). 통화 장면이 하나라 하나만 둔다.
+FREE_CHAT_BACKGROUND = "CALL"
+FREE_CHAT_TURN_BLOCK = (
+    "[FREE_CHAT_TURN]\n"
+    "발화자: {character_name}\n"
+    "사용자의 방금 입력에 담긴 실제 내용과 요청부터 네 말로 직접 받는다. 그 뒤 자연스러울 때만 "
+    "네 생활이나 현재 장면의 다른 소재를 꺼낸다. 이 통화는 정해진 결말이나 목표가 없는 편한 "
+    "통화다. 상황이 맞으면 다음에 이야기하고 싶은 것을 먼저 꺼내도 된다. 현재 장면과 관계 "
+    "프로파일을 지키고, 사용자의 말·행동·감정·선택이나 둘의 공유 과거를 근거 없이 덧쓰지 "
+    "않는다. 청자 대우법은 현재 관계 프로파일의 지시를 따른다."
+)
+FREE_CHAT_OPENING_BLOCK = (
+    "[FREE_CHAT_OPENING_TURN]\n"
+    "사용자는 아직 이 통화에서 말하지 않았다. 사용자의 말·행동·생각을 만들어 내지 않는다.\n"
+    "두 사람은 이미 여러 번 통화한 사이다. 모르는 사람처럼 인사하지 않고, 이전 대화와 통화가 "
+    "있으면 그 흐름을 이어받아 {character_name}이 먼저 건네는 실제 대사 한 턴만 쓴다.\n"
+    "청자 대우법은 관계 프로파일의 지시를 따르고, 안전 경계를 지킨다."
+)
+
+
+def is_free_chat(chapter_no: int) -> bool:
+    return _SLOTS.get(chapter_no, {}).get("mode") == "FREE_CHAT"
 
 
 @dataclass(frozen=True)
@@ -200,9 +230,14 @@ def build_tree(package: CharacterPackage, package_dir: Path) -> ChatTree:
         files[f"split_prompt_bundles/{bundle_rev}.json"] = _bundle(
             prefix, chapter, facts, sheet, bundle_rev, dialogue_model
         )
-        files[f"chapter_definitions/{definition_rev}.json"] = _definition(
-            definition_rev, key, chapter, slot, asset_rev, bundle_rev
-        )
+        if slot.get("mode") == "FREE_CHAT":
+            files[f"chapter_definitions/{definition_rev}.json"] = _free_definition(
+                definition_rev, key, chapter, slot, asset_rev, bundle_rev
+            )
+        else:
+            files[f"chapter_definitions/{definition_rev}.json"] = _definition(
+                definition_rev, key, chapter, slot, asset_rev, bundle_rev
+            )
         files[f"relationship_profiles/{profile_rev}.json"] = _profile(
             slug, chapter, key, profile_rev, slot, facts, sheet, package.profile.name, speech_level
         )
@@ -246,7 +281,11 @@ def build_tree(package: CharacterPackage, package_dir: Path) -> ChatTree:
             ("profile.name", "chat-svc quest.display.name", ""),
             ("profile.tagline", "chat-svc quest.display.tagline", ""),
             ("persona.personaVersion", "chat-svc quest.personaRevision", ""),
-            ("chapters[].chapterNo", "chat-svc chapters 순서(1~3, gate 있는 챕터)", ""),
+            (
+                "chapters[].chapterNo",
+                "chat-svc chapters 순서(1~3 gate 있는 챕터, 4 자유 통화)",
+                "",
+            ),
             ("chapters[].title", "chat-svc chapter_definitions.display.title", ""),
             ("chapters[].goal", "chat-svc chapter_definitions.display.goalSummary", ""),
             (
@@ -632,6 +671,48 @@ def _definition(
     }
 
 
+def _free_definition(
+    revision: str,
+    chapter_key: str,
+    chapter: Chapter,
+    slot: dict[str, Any],
+    asset_rev: str,
+    bundle_rev: str,
+) -> dict[str, Any]:
+    """D-0219: 관문·평가·정산이 없는 자유 통화 챕터. chat-svc FREE_CHAT 규칙을 따른다."""
+    return {
+        "schemaVersion": "chapter-definition-v2",
+        "chapterRevision": revision,
+        "chapterId": chapter_key,
+        "display": {
+            "title": chapter.title,
+            "goalSummary": chapter.goal or chapter.title,
+            "inputHint": "메시지를 입력하세요",
+            "kernelReady": True,
+        },
+        "scene": {
+            "sceneKey": f"{chapter_key}-SCENE",
+            "chapterAssetRevision": asset_rev,
+            "activityRevision": None,
+            "meetingContexts": {},
+            "backgrounds": {FREE_CHAT_BACKGROUND: asset_rev},
+        },
+        "runtime": {
+            "mode": "FREE_CHAT",
+            "entryStage": slot["entry"],
+            "targetStage": slot["target"],
+            "initialState": None,
+            "dialoguePolicyId": slot["dialoguePolicy"],
+            "terminalAction": None,
+            "gate": None,
+            "completionEvents": [],
+            "settlementRuleSetVersion": None,
+            "metricCatalogVersion": None,
+        },
+        "splitPromptBundleRevision": bundle_rev,
+    }
+
+
 def _persona_speech_level(prompt: str, sheet: dict) -> str:
     from character_factory_poc.stages.s7_traits.check import _plan_speech_level
 
@@ -821,6 +902,27 @@ def _bundle(
         "캐릭터의 발화만 쓴다. 내부 결과명·수치를 대사에서 말하지 않는다."
     )
     slot = _SLOTS[chapter.chapterNo]
+    if slot.get("mode") == "FREE_CHAT":
+        # D-0219: 자유 통화는 평가·마무리 역할이 없고, 턴·첫마디 지시를 번들에 싣는다.
+        return {
+            "schemaVersion": "split-prompt-bundle-v3",
+            "splitPromptBundleRevision": revision,
+            "frameRevision": PROMPT_FRAME_REVISION,
+            "dialogue": {
+                "promptVersion": f"{slug}-{chapter.chapterId}-dialogue-writer-v1",
+                "responseSchemaVersion": "character-dialogue-text-v1",
+                "modelConfigRevision": dialogue_model,
+                "contract": dialogue,
+                "turnBlock": FREE_CHAT_TURN_BLOCK,
+                "openingBlock": FREE_CHAT_OPENING_BLOCK,
+            },
+            "assessment": None,
+            "finalDialogue": None,
+            "compilerOptions": {
+                "writerRegister": "v3",
+                "assessorVocabulary": ASSESSOR_VOCABULARY,
+            },
+        }
     return {
         "schemaVersion": "split-prompt-bundle-v3",
         "splitPromptBundleRevision": revision,
@@ -928,8 +1030,14 @@ def _quest_problems(files, revisions) -> list[str]:
         if persona_rev not in revisions:
             problems.append(f"{rel}: personaRevision 대상을 찾지 못했다")
         chapters = payload.get("chapters") or []
-        if len(chapters) != 3:
-            problems.append(f"{rel}: gate 있는 챕터 3개가 아니다")
+        gated = [
+            (revisions.get(c.get("chapterRevision")) or {}).get("runtime", {}).get("gate")
+            is not None
+            for c in chapters
+        ]
+        # chat-svc: gate 있는 챕터 정확히 3개로 시작하고, 뒤에는 자유 통화만 붙는다(D-0219).
+        if gated[:3] != [True, True, True] or any(gated[3:]):
+            problems.append(f"{rel}: gate 있는 챕터 3개 뒤에 자유 통화만 붙어야 한다")
         uids = [chapter.get("chapterUid") for chapter in chapters]
         if len(uids) != len(set(uids)):
             problems.append(f"{rel}: chapterUid가 중복이다")
@@ -978,9 +1086,6 @@ def _profile_problems(files, revisions) -> list[str]:
             continue
         if set(payload) != fields:
             problems.append(f"{rel}: 칸이 v3와 다르다")
-        mood = payload.get("moodRange") or {}
-        if set(mood) != {"down", "start", "middle", "top"}:
-            problems.append(f"{rel}: affinity gate 챕터는 moodRange 네 단계가 필요하다")
         if payload.get("enabledLoopRefs"):
             problems.append(f"{rel}: v6 persona에는 loop가 없어 enabledLoopRefs가 비어야 한다")
         definition = next(
@@ -995,6 +1100,9 @@ def _profile_problems(files, revisions) -> list[str]:
             problems.append(f"{rel}: chapterId에 맞는 챕터 정의가 없다")
             continue
         runtime = definition.get("runtime") or {}
+        mood = payload.get("moodRange") or {}
+        if runtime.get("gate") is not None and set(mood) != {"down", "start", "middle", "top"}:
+            problems.append(f"{rel}: affinity gate 챕터는 moodRange 네 단계가 필요하다")
         if payload.get("appliesToStage") != runtime.get("entryStage"):
             problems.append(f"{rel}: appliesToStage가 챕터 entryStage와 다르다")
     return problems
@@ -1011,7 +1119,17 @@ def _bundle_problems(files, revisions) -> list[str]:
             continue
         if not payload.get("frameRevision"):
             problems.append(f"{rel}: frameRevision이 없다")
-        for role in ("dialogue", "assessment", "finalDialogue"):
+        definition = next(
+            (
+                item
+                for item in revisions.values()
+                if item.get("splitPromptBundleRevision") == payload.get("splitPromptBundleRevision")
+                and "runtime" in item
+            ),
+            {},
+        )
+        free = (definition.get("runtime") or {}).get("mode") == "FREE_CHAT"
+        for role in ("dialogue",) if free else ("dialogue", "assessment", "finalDialogue"):
             block = payload.get(role)
             if not isinstance(block, dict):
                 problems.append(f"{rel}: {role}가 없다")
@@ -1022,7 +1140,12 @@ def _bundle_problems(files, revisions) -> list[str]:
         model = (payload.get("dialogue") or {}).get("modelConfigRevision")
         if model and model != DIALOGUE_MODEL and f"models/{model}.json" not in files:
             problems.append(f"{rel}: 캐릭터별 대화 모델 설정 파일이 없다")
-        if "turnBlock" in (payload.get("dialogue") or {}):
+        dialogue_block = payload.get("dialogue") or {}
+        if free and not (dialogue_block.get("turnBlock") and dialogue_block.get("openingBlock")):
+            problems.append(f"{rel}: 자유 통화 번들에 turnBlock·openingBlock이 없다")
+        if free and (payload.get("assessment") is not None or payload.get("finalDialogue")):
+            problems.append(f"{rel}: 자유 통화 번들에는 평가·마무리 역할이 없어야 한다")
+        if not free and "turnBlock" in dialogue_block:
             problems.append(f"{rel}: CHAPTER 번들에 turnBlock이 있다")
         assessment = payload.get("assessment") or {}
         if assessment and assessment.get("relationshipRuleSetVersion") != RULE_SET_VERSION:

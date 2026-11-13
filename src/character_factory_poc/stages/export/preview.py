@@ -392,6 +392,42 @@ def spread_single_chapter(package):
     return package.model_copy(update={"chapters": chapters, "videos": videos}), note
 
 
+#: D-0219: 미션 3개 뒤에 붙이는 자유 통화 챕터. 기존 캐릭터(이서연·서지안 등)와 같은 4번 자리다.
+FREE_CHAT_NO = 4
+
+
+def add_free_chat_chapter(package):
+    """미션 챕터 1~3 뒤에 턴 제한 없는 4번 자유 통화 챕터를 붙인다(D-0219). 패키지 파일은 그대로다.
+
+    api-svc 관리자 일반 통화(#302)는 FREE_CHAT 챕터로만 들어간다. 4번은 3번 챕터의 사실·프레임과
+    통화 영상을 그대로 쓰고, 관계 진입 단계는 기존 캐릭터처럼 연인(DATING)이다.
+    """
+    numbers = sorted(c.chapterNo for c in package.chapters)
+    if numbers != [1, 2, 3]:
+        return package, ""
+    last = max(package.chapters, key=lambda c: c.chapterNo)
+    free = last.model_copy(
+        update={
+            "chapterNo": FREE_CHAT_NO,
+            "chapterId": f"ch{FREE_CHAT_NO}",
+            "relationshipStage": "DATING",
+            "title": "자유 통화",
+            "goal": "정해진 목표 없이 편하게 이야기를 나눈다",
+        }
+    )
+    videos = list(package.videos)
+    for video in package.videos:
+        if video.kind == "ACTION" and (video.chapterNo or 1) == last.chapterNo:
+            videos.append(
+                video.model_copy(
+                    update={"chapterNo": FREE_CHAT_NO, "videoId": f"{video.videoId}-free"}
+                )
+            )
+    chapters = [*package.chapters, free]
+    note = "4번 자유 통화 챕터를 붙였어요(3번 챕터의 장면·통화 영상을 같이 써요)"
+    return package.model_copy(update={"chapters": chapters, "videos": videos}), note
+
+
 def publish_preview(
     ctx: Context,
     cid: str,
@@ -419,6 +455,9 @@ def publish_preview(
         package, spread = spread_single_chapter(package)
         if spread:
             result.warnings.append(spread)
+        package, free = add_free_chat_chapter(package)
+        if free:
+            result.warnings.append(free)
         result.name = package.profile.name
         uid, handle = str(character_uid(cid)), slug_for(cid)
         result.characterUid = uid
