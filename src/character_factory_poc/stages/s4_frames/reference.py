@@ -65,10 +65,12 @@ def build_prompt(settings: dict) -> str:
             "both hands clasped behind the back, relaxed shoulders, "
             "and a slight closed-mouth smile. "
             "Hands stay naturally behind the torso; do not invent visible hands in front.",
-            "Frame the complete head and upper body through the hips, with comfortable headroom "
-            "and generous space on both sides for later hand gestures at chest and face height. "
-            "Keep the shoulders, elbows and arm paths within the central 9:16 safe area. "
-            "Use a stable eye-level view without a tight face crop, dramatic perspective or props.",
+            # D-0218: 원본보다 넓게 다시 그리면 같은 날 찍은 시그니처 사진과 구도가 달라져
+            # 중간 프레임에서 화면이 당겨졌다(2026-11-13 손흥민2).
+            "Keep the SAME camera distance, framing and crop as the source photograph: the "
+            "person's head and body stay the same size and in the same place in the frame. "
+            "Do not zoom out, do not add extra space around the person and do not zoom in. "
+            "Only if the source is not 9:16, extend or trim the background at the edges.",
             "Keep all unrequested identity, wardrobe and background details unchanged. "
             "No second person, duplicate body, added text or watermark.",
         ]
@@ -131,12 +133,14 @@ def build_pose_prompt(signature: dict) -> str:
             "framing and 9:16 composition from the first image.",
             BODY_LOCK,
             gesture,
-            "Use the second image only as a pose and hand-shape reference: do not copy its "
-            "person, face, clothing, background, props, lighting or text.",
+            "The SECOND image is ONLY a reference for the arm, hand and face pose. IGNORE its "
+            "camera distance, zoom, crop and framing completely: copy the pose, never the shot; "
+            "do not copy its person, face, clothing, background, props, lighting or text.",
             "Hands are empty with natural five fingers each. Keep the whole face visible and "
             "the hands, elbows and arms inside the frame. Exactly one person.",
             "This still image is the peak moment of a short signature gesture in a video call; "
-            "it must look like the same shot as the first image.",
+            "it must look like the same shot as the first image, taken from the same camera "
+            "without moving or zooming.",
         ]
     )
 
@@ -328,7 +332,7 @@ def _signature_seed(ctx, cid, rev, folder, inputs, base_rel, budget) -> str:
     write_once_bytes(copy, source.read_bytes())
     if sha256_file(copy) != pose["sha256"]:
         raise CheckFailed("s4", ["시그니처 참고 사진을 고정하는 동안 원본이 변경됐다"])
-    from character_factory_poc.stages.s4_frames.framing import distance, face_scale
+    from character_factory_poc.stages.s4_frames.framing import align_to_base, distance, face_scale
 
     # D-0210: 인물이 기준 사진보다 커지거나 작아지면 영상이 2초에 확대됐다 돌아온다.
     # 얼굴 크기 비율이 범위를 벗어나면 최대 두 번 더 만들고 가장 가까운 것을 쓴다.
@@ -347,9 +351,12 @@ def _signature_seed(ctx, cid, rev, folder, inputs, base_rel, budget) -> str:
             data, _, _ = crop_to_ratio(result.data, (9, 16))
         except ValueError as exc:
             raise CheckFailed("s4", [str(exc)]) from exc
+        # D-0218: 모델이 지시와 달리 당겨 그려도 얼굴 크기·위치를 기준 사진에 맞춘다.
+        data, aligned = align_to_base(folder / base_rel, data)
         candidate = f"ch1/signature-mid-try{attempt}.png"
         write_once_bytes(folder / candidate, data)
         check = face_scale(folder / base_rel, folder / candidate)
+        check["aligned"] = aligned
         tries.append({"path": candidate, "data": data, "result": result, "framing": check})
         if check["ok"] is not False:
             break
