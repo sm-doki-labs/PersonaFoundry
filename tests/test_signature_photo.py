@@ -117,7 +117,7 @@ def test_generated_pose_seed_is_confirmed_and_only_it_reaches_signature_clip(tmp
     assert len(pose_req.reference_images) == 2
     assert pose_req.reference_images[0].endswith("ch1/f1.png")
     assert open(pose_req.reference_images[1], "rb").read() == data
-    assert "Change only" in pose_req.prompt and "do not copy" in pose_req.prompt
+    assert "EXACTLY the same pose" in pose_req.prompt and "do not copy" in pose_req.prompt
     preview = client.get(url + "/reference").json()
     assert preview["status"] == "awaiting_confirmation"
     assert preview["signatureImageUrl"] and preview["signatureSha256"]

@@ -44,7 +44,9 @@ test('Lite draft sends reference config, signature and chapter, and keeps demo m
       const reopened = Sources.createIntake({ fetch, XHR: null });
       await reopened.load('synthetic');
       assert.deepEqual(reopened.settings().referenceImage, sent.referenceImage);
-      assert.deepEqual(intake.validateDraft({ ...input, sigMotion: '' }), { sigMotion: '어떤 동작인지 적어 주세요.' });
+      // D-0220: 동작 묘사는 선택이다(참고 사진이 있으면 사진 자세를 따른다). 이름만 필수다.
+      assert.deepEqual(intake.validateDraft({ ...input, sigMotion: '' }), {});
+      assert.deepEqual(intake.validateDraft({ ...input, sigTitle: '' }), { sigTitle: '시그니처 포즈 이름을 적어 주세요.' });
     } else {
       assert.equal(sent.referenceImage, undefined);
       assert.equal(sent.demoMode, true, 'legacy mode stays intact');

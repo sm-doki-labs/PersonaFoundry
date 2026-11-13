@@ -117,15 +117,22 @@ def clip(key: str, cfg: dict) -> dict:
     if key == "signature_good":
         sig = cfg["signature"]
         title, use_when = sig["title"], sig.get("useWhen") or "이 인물을 대표하는 동작을 요청할 때."
-        motion = (
-            CAMERA_CLICK
-            if sig.get("template") == "camera_click"
-            else (
+        note = str(sig.get("motion") or "").strip()
+        if sig.get("template") == "camera_click":
+            motion = CAMERA_CLICK
+        elif sig.get("middleFramePath"):
+            # D-0220: 중간 프레임(참고 사진 자세)이 동작의 기준이다. 묘사는 적었을 때만 보탠다.
+            motion = (
+                "SIGNATURE. Move from the reference pose into exactly the pose shown in the "
+                "middle keyframe, once, at natural speed; then smoothly restore the reference pose."
+                + (f" Gesture note: {note}." if note else "")
+            )
+        else:
+            motion = (
                 "SIGNATURE. Perform exactly this user-specified gesture once: "
-                + sig["motion"]
+                + note
                 + ". Make it clear, then smoothly restore the reference pose."
             )
-        )
     else:
         title, use_when, motion = RECIPES[key]
     prod = production(key, cfg)

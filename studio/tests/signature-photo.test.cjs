@@ -189,7 +189,8 @@ test('the separate optional section has one-file input, linked inline errors and
   const section = html.match(/<section[^>]*data-signature-photos[\s\S]*?<\/section>/)[0];
   assert.match(section, /시그니처 포즈 참고 사진/);
   assert.match(section, /선택/);
-  assert.match(section, /시그니처 동작 중간에만/);
+  assert.match(section, /자세를 그대로 따라/);
+  assert.match(section, /배경과 구도는 기준 사진 그대로/);
   assert.match(section, /시작과 끝은 승인한 기준 사진/);
   assert.match(section, /손 모양과 자세만 참고/);
   assert.match(section, /같은 인물·복장·배경에 이 동작만 입힌 중간 프레임/);

@@ -63,12 +63,13 @@ def test_edit_request_sends_both_images_and_returns_png(tmp_path, monkeypatch):
         model.generate(ImageRequest(stage="s4", ref="r", prompt="p", reference_images=("x",)))
 
 
-def test_body_lock_is_shared_and_camera_click_uses_the_hand_template():
+def test_pose_edit_follows_only_the_reference_photo_and_video_keeps_the_hand_template():
+    """D-0220: 참고 사진이 있는 편집 지시에는 글로 쓴 동작·템플릿을 넣지 않는다."""
     click = reference.build_pose_prompt({"template": "camera_click", "motion": "찰칵"})
     other = reference.build_pose_prompt({"template": "custom", "motion": "두 손으로 하트"})
-    assert reference.BODY_LOCK in click and reference.BODY_LOCK in other
-    assert "LEFT eye" in click and "찰칵" not in click
-    assert "두 손으로 하트" in other and "LEFT eye" not in other
+    assert click == other and reference.BODY_LOCK in click
+    assert "찰칵" not in click and "두 손으로 하트" not in click and "LEFT eye" not in click
+    assert "EXACTLY the same pose as the person in the SECOND image" in click
     assert "wider shoulders" in reference.POSE_NEGATIVE
 
     cfg = {"signature": {"title": "찰칵", "motion": "m", "template": "camera_click"}}
@@ -85,7 +86,37 @@ def test_master_keeps_source_framing_and_pose_ignores_reference_shot():
     assert "SAME camera distance, framing and crop as the source" in master
     assert "generous space" not in master
     pose = reference.build_pose_prompt({"template": "custom", "motion": "두 손으로 하트"})
-    assert "IGNORE its camera distance, zoom, crop and framing" in pose
+    assert "Take ONLY the pose from the SECOND image" in pose
+    assert "background, logos and lettering, lighting, camera distance" in pose
+
+
+def test_signature_clip_follows_the_middle_keyframe_and_motion_is_optional():
+    """D-0220: 중간 프레임이 있으면 그 자세가 기준이고, 묘사는 적었을 때만 보탠다."""
+    middle = "s4-frames/fr1/ch1/signature-mid.png"
+    keyed = {"signature": {"title": "찰칵", "middleFramePath": middle}}
+    text = call_loop.clip("signature_good", keyed)["motion"]
+    assert "middle keyframe" in text and "Gesture note" not in text
+    noted = {"signature": {**keyed["signature"], "motion": "윙크하며 찰칵"}}
+    assert "Gesture note: 윙크하며 찰칵." in call_loop.clip("signature_good", noted)["motion"]
+
+
+def test_start_needs_a_motion_or_a_signature_photo():
+    """D-0220: 동작 묘사가 비었으면 시그니처 참고 사진이 있어야 시작할 수 있다."""
+    from character_factory_poc.web.sources import summary
+
+    text = {"fileType": "text", "status": "ready", "textId": "a", "problems": []}
+    portrait = {"fileType": "photo", "status": "ready", "textId": None, "problems": []}
+    pose = portrait | {"photoRole": "signature"}
+    draft = {
+        "videoTier": "light",
+        "signaturePose": {"title": "찰칵", "motion": "", "useWhen": ""},
+        "files": [text, portrait],
+    }
+    problems, ready = summary(draft)
+    assert "시그니처 동작을 적거나 시그니처 참고 사진을 올려 주세요." in problems and not ready
+    assert summary(draft | {"files": [text, portrait, pose]}) == ([], True)
+    written = draft | {"signaturePose": {"title": "찰칵", "motion": "윙크", "useWhen": ""}}
+    assert summary(written) == ([], True)
 
 
 def test_zoomed_signature_frame_is_scaled_back_to_the_master():
