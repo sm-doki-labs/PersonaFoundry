@@ -110,7 +110,7 @@
           <div class="src-sig" data-sig>
             <p class="src-sig-h"><b>시그니처 포즈</b><span class="src-fhint">모든 영상 등급에 한 편씩 들어가요. 이 사람 하면 떠오르는 동작을 적어 주세요.</span></p>
             <div class="src-fld"><label for="src-sig-title">이름</label><input id="src-sig-title" name="sigTitle" maxlength="30" autocomplete="off" placeholder="예: 찰칵 세리머니" aria-describedby="src-sig-title-e"><p class="src-ferr" id="src-sig-title-e" data-err="sigTitle" hidden></p></div>
-            <div class="src-fld"><label for="src-sig-motion">어떤 동작인가요</label><textarea id="src-sig-motion" name="sigMotion" rows="2" maxlength="400" placeholder="예: 두 손으로 카메라 모양을 만들어 눈앞에 대고 찰칵 누르는 시늉을 해요." aria-describedby="src-sig-motion-e"></textarea><p class="src-ferr" id="src-sig-motion-e" data-err="sigMotion" hidden></p></div>
+            <div class="src-fld"><label for="src-sig-motion">어떤 동작인가요 <span class="opt">선택</span></label><textarea id="src-sig-motion" name="sigMotion" rows="2" maxlength="400" placeholder="예: 두 손으로 카메라 모양을 만들어 눈앞에 대고 찰칵 누르는 시늉을 해요." aria-describedby="src-sig-motion-h src-sig-motion-e"></textarea><p class="src-fhint" id="src-sig-motion-h">다음 단계에서 시그니처 참고 사진을 올리면 사진 속 자세를 그대로 따라 하니 비워 둬도 돼요. 사진이 없으면 적어 주세요.</p><p class="src-ferr" id="src-sig-motion-e" data-err="sigMotion" hidden></p></div>
             <div class="src-fld"><label for="src-sig-when">언제 나오면 좋을까요 <span class="opt">선택</span></label><input id="src-sig-when" name="sigWhen" maxlength="200" autocomplete="off" placeholder="예: 골이나 축하 얘기를 할 때"></div>
           </div>
           </fieldset>
@@ -190,7 +190,7 @@
 
         <section class="src-photos src-signature-photos" data-signature-photos aria-labelledby="st-signature-photos" hidden>
           <div class="src-h"><h3 id="st-signature-photos">시그니처 포즈 참고 사진 <span class="src-count">선택</span></h3><span class="src-count" data-signature-photo-count></span></div>
-          <p class="src-fhint" id="src-signature-photo-h">Lite(라이트)에서 한 장만 사용할 수 있어요. 시그니처 동작 중간에만 이 사진의 포즈를 쓰고, 시작과 끝은 승인한 기준 사진으로 돌아와요.</p>
+          <p class="src-fhint" id="src-signature-photo-h">Lite(라이트)에서 한 장만 사용할 수 있어요. 시그니처 동작 중간에 이 사진의 자세를 그대로 따라 하고, 배경과 구도는 기준 사진 그대로 둬요. 시작과 끝은 승인한 기준 사진으로 돌아와요.</p>
           <p class="src-fhint">이 사진은 손 모양과 자세만 참고해요. 기준 사진을 만든 뒤 같은 인물·복장·배경에 이 동작만 입힌 중간 프레임을 한 장 더 만들고, 기준 사진과 함께 확인한 다음 영상에 써요. 사진이 없으면 적어 둔 동작 설명만 사용해요.</p>
           <p class="src-fhint" id="src-signature-photo-state" data-signature-photo-hint>jpg, png, webp · 15MB까지 · 인물 확인용 사진은 별도로 올려 주세요.</p>
           <div class="src-photo-grid">

@@ -89,9 +89,10 @@ class KnownFacts(Strict):
 class SignaturePose(Strict):
     """유저가 정하는 시그니처 포즈(D-0165). 모든 영상 등급에 한 편씩 들어간다."""
 
-    # 앞뒤 공백을 뗀 뒤 길이를 본다(공백만 적은 이름·동작은 받지 않는다).
+    # 앞뒤 공백을 뗀 뒤 길이를 본다(공백만 적은 이름은 받지 않는다).
     title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)]
-    motion: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=400)]
+    # D-0220: 시그니처 참고 사진이 있으면 묘사는 비워도 된다(사진 자세를 그대로 따른다).
+    motion: Annotated[str, StringConstraints(strip_whitespace=True, max_length=400)] = ""
     useWhen: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] = ""
     template: Literal["custom", "camera_click"] = "custom"
     middleFramePath: str | None = Field(default=None, max_length=500)
@@ -107,6 +108,7 @@ class Settings(Strict):
 def _signature(pose: SignaturePose) -> dict:
     data = pose.model_dump(exclude_defaults=True)
     data.setdefault("useWhen", "")
+    data.setdefault("motion", "")
     return {k: v.strip() if isinstance(v, str) else v for k, v in data.items()}
 
 
@@ -289,6 +291,12 @@ def summary(draft):
         problems.append("영상을 만들려면 인물 사진을 한 장 이상 올려 주세요.")
     if draft["videoTier"] != "none" and not draft.get("signaturePose"):
         problems.append("영상을 만들려면 시그니처 포즈를 정해 주세요.")
+    elif (
+        draft["videoTier"] != "none"
+        and not str((draft.get("signaturePose") or {}).get("motion") or "").strip()
+        and not any(f.get("photoRole") == "signature" and f["status"] == "ready" for f in files)
+    ):
+        problems.append("시그니처 동작을 적거나 시그니처 참고 사진을 올려 주세요.")
     if (
         draft.get("referenceImage") is not None
         and sum(f.get("fileType") == "photo" and f.get("photoRole") != "signature" for f in files)

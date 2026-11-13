@@ -114,33 +114,23 @@ POSE_TEMPLATES = {
 
 
 def build_pose_prompt(signature: dict) -> str:
-    """Redraw only the gesture from the user's pose photo onto the approved master image."""
-    template = POSE_TEMPLATES.get(signature.get("template") or "")
-    gesture = (
-        "Change only the arms, hands and facial expression to the pose of the SECOND attached "
-        "image. " + template
-        if template
-        else "Change only the arms, hands, upper-body pose and facial expression so that the "
-        "person performs the gesture shown in the SECOND attached image: "
-        + signature["motion"].strip()
-        + "."
-    )
+    """Redraw only the gesture from the user's pose photo onto the approved master image.
+
+    D-0220: 참고 사진이 있으면 글로 쓴 동작 묘사·템플릿을 넣지 않는다. 묘사와 사진이 함께 있으면
+    모델이 둘을 섞어 사진 자세를 덜 따르고, 배경·구도 고정 지시도 흐려졌다(2026-11-13 손흥민).
+    """
     return "\n".join(
         [
-            "Edit the FIRST attached image, the approved 9:16 master photo of this person.",
-            "Keep the exact same person, face, facial features, age, skin tone, hair, body "
-            "proportions, wardrobe, background, lighting, camera position, eye-level view, "
-            "framing and 9:16 composition from the first image.",
+            "Edit the FIRST attached image.",
+            "Make the person in the FIRST image take EXACTLY the same pose as the person in the "
+            "SECOND image: the same arms, hands, fingers, head angle and facial expression.",
+            "Everything else stays exactly as in the FIRST image: the same person, face, hair, "
+            "clothing, body shape, background, logos and lettering, lighting, camera distance, "
+            "framing, and the person's size and position in the frame.",
             BODY_LOCK,
-            gesture,
-            "The SECOND image is ONLY a reference for the arm, hand and face pose. IGNORE its "
-            "camera distance, zoom, crop and framing completely: copy the pose, never the shot; "
-            "do not copy its person, face, clothing, background, props, lighting or text.",
-            "Hands are empty with natural five fingers each. Keep the whole face visible and "
-            "the hands, elbows and arms inside the frame. Exactly one person.",
-            "This still image is the peak moment of a short signature gesture in a video call; "
-            "it must look like the same shot as the first image, taken from the same camera "
-            "without moving or zooming.",
+            "Take ONLY the pose from the SECOND image; do not copy its background, framing, "
+            "zoom, crop, lighting, clothing or text. Do not zoom, crop or move the camera.",
+            "Hands are empty with five natural fingers each. Exactly one person.",
         ]
     )
 
@@ -193,7 +183,7 @@ def _current_inputs(ctx: Context, cid: str) -> tuple[dict, Path, str]:
             "path": "reference/pose" + pose_path.suffix.lower(),
             "sha256": sha256_file(pose_path),
             "title": signature.get("title", ""),
-            "motion": signature["motion"],
+            "motion": signature.get("motion", ""),
             "middleFrameAtS": SIGNATURE_AT_S,
             "prompt": build_pose_prompt(signature),
             "negativePrompt": POSE_NEGATIVE,

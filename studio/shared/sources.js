@@ -61,12 +61,12 @@
   function labelOf(pairs, id) { const p = pairs.find((x) => x[0] === id); return p ? p[1] : ''; }
   function tierOf(value) { return VIDEO_TIERS.some((t) => t[0] === value) ? value : 'none'; }
   function tierName(value) { return labelOf(VIDEO_TIERS, tierOf(value)); }
-  // 시그니처 포즈(D-0165): 이름과 동작이 있어야 쓴다. 앞뒤 공백은 뗀다.
+  // 시그니처 포즈(D-0165): 이름이 있어야 쓴다. 동작 묘사는 참고 사진이 있으면 비워도 된다(D-0220).
   function sigOf(value) {
     const v = value || {};
     const sig = { title: text(v.title).trim(), motion: text(v.motion).trim(), useWhen: text(v.useWhen).trim() };
     ['template', 'middleFramePath', 'middleFrameAtS'].forEach((k) => { if (v[k] !== undefined) sig[k] = v[k]; });
-    return sig.title && sig.motion ? sig : null;
+    return sig.title ? sig : null;
   }
   // 등급 고르기 카드. 원문 화면과 진행 화면의 영상 만들기가 같은 카드를 쓴다. paidOnly면 '영상 없이'를 뺀다.
   function tierCardsHTML(name, value, opts) {
@@ -656,7 +656,6 @@
       if (voice && !/^[0-9a-f]{32}$/.test(voice)) errors.voiceReferenceId = 'Fish Audio 음성 ID는 영문 소문자·숫자 32자예요.';
       if (tierOf(v.videoTier) !== 'none') {
         if (!text(v.sigTitle).trim()) errors.sigTitle = '시그니처 포즈 이름을 적어 주세요.';
-        if (!text(v.sigMotion).trim()) errors.sigMotion = '어떤 동작인지 적어 주세요.';
       }
       if (v.demoMode === true) {
         const budgetProblem = demoBudgetProblem(v.demoBudgetUsd);
@@ -1478,7 +1477,7 @@
           }
           if (r.sumSig) {
             const sig = set.signaturePose;
-            r.sumSig.textContent = sig ? sig.title + ' — ' + sig.motion : '아직 정하지 않았어요';
+            r.sumSig.textContent = sig ? sig.title + ' — ' + (sig.motion || '참고 사진의 자세를 그대로 따라요') : '아직 정하지 않았어요';
             r.sumSig.parentElement.hidden = set.videoTier === 'none';
           }
           const notes = r.summary.querySelector('[data-sum-notes]');
@@ -1871,7 +1870,7 @@
       else if (act === 'sig-save' && r.tierEdit) {
         const q = (n) => (r.tierEdit.querySelector('[name="' + n + '"]') || {}).value;
         const pose = { title: q('sigeTitle'), motion: q('sigeMotion'), useWhen: q('sigeWhen') };
-        if (!sigOf(pose)) { S.error = '시그니처 포즈의 이름과 동작을 적어 주세요.'; render(); return; }
+        if (!sigOf(pose)) { S.error = '시그니처 포즈의 이름을 적어 주세요.'; render(); return; }
         intake.setSignature(pose).then((ok) => { if (ok) { sigDraft = null; tierEditOpen = false; render(); const b = r.summary && r.summary.querySelector('[data-act="tier-edit"]'); if (b) b.focus(); } });
       }
       else if (act === 'theme' || act === 'theme-next') setTheme(el.dataset.theme || 'system');
@@ -1899,7 +1898,7 @@
       const s = sig || { title: '', motion: '', useWhen: '' };
       return '<div class="src-sig" data-sig-edit><p class="src-sig-h"><b>시그니처 포즈</b><span class="src-fhint">모든 영상 등급에 한 편씩 들어가요.</span></p>' +
         '<div class="src-fld"><label for="src-sige-title">이름</label><input id="src-sige-title" name="sigeTitle" maxlength="30" autocomplete="off" placeholder="예: 찰칵 세리머니" value="' + E(s.title) + '"></div>' +
-        '<div class="src-fld"><label for="src-sige-motion">어떤 동작인가요</label><textarea id="src-sige-motion" name="sigeMotion" rows="2" maxlength="400" placeholder="예: 두 손으로 카메라 모양을 만들어 눈앞에 대고 찰칵 누르는 시늉을 해요.">' + E(s.motion) + '</textarea></div>' +
+        '<div class="src-fld"><label for="src-sige-motion">어떤 동작인가요 <span class="opt">선택</span></label><textarea id="src-sige-motion" name="sigeMotion" rows="2" maxlength="400" placeholder="참고 사진을 올리면 비워 둬도 돼요">' + E(s.motion) + '</textarea></div>' +
         '<div class="src-fld"><label for="src-sige-when">언제 나오면 좋을까요 <span class="opt">선택</span></label><input id="src-sige-when" name="sigeWhen" maxlength="200" autocomplete="off" placeholder="예: 골이나 축하 얘기를 할 때" value="' + E(s.useWhen) + '"></div>' +
         '<div class="acts"><button type="button" class="btn" data-act="sig-save"' + (busy ? ' disabled' : '') + '>시그니처 포즈 저장</button></div></div>';
     }
