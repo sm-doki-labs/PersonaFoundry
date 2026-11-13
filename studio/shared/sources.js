@@ -35,6 +35,21 @@
   const FILE_FOLD = 6;
   const KIND_SLUG = { INTERVIEW: 'interview', ARTICLE: 'article', TRANSCRIPT: 'transcript', KAKAO_EXPORT: 'kakao' };
   const TEXT_ID = /^[A-Za-z0-9_-]+$/;
+  // D-0217: 시연 예산 상한 기본값과 한도. 서버(DemoSwitch·Draft)와 같다.
+  const DEMO_BUDGET_DEFAULT = 30;
+  const DEMO_BUDGET_MAX = 200;
+  function demoBudgetOf(value) {
+    const raw = text(value).trim();
+    if (!raw) return DEMO_BUDGET_DEFAULT;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : NaN;
+  }
+  function demoBudgetProblem(value) {
+    const n = demoBudgetOf(value);
+    if (!Number.isFinite(n) || n <= 0 || n > DEMO_BUDGET_MAX) return '시연 예산은 0보다 크고 ' + DEMO_BUDGET_MAX + '달러 이하로 적어 주세요.';
+    return null;
+  }
+  function usdText(n) { return (Math.round(Number(n) * 100) / 100) + '달러'; }
   const META_FIELDS = ['textId', 'kind', 'register', 'subjectSpeaker', 'userSpeaker', 'date', 'sourceUrl'];
   const ACTIVE = ['queued', 'starting', 'sending', 'checking'];
 
@@ -568,6 +583,8 @@
       const out = { modelMode: pick('modelMode'), autoReview: pick('autoReview'), videoTier: tierOf(pick('videoTier')), signaturePose: sigOf(pick('signaturePose')) };
       if (pick('referenceImage') != null) out.referenceImage = pick('referenceImage');
       if (pick('demoMode') === true) out.demoMode = true;
+      const budget = c.demo && c.demo.budgetUsd != null ? c.demo.budgetUsd : s.demoBudgetUsd;
+      if (out.demoMode) out.demoBudgetUsd = budget != null ? Number(budget) : DEMO_BUDGET_DEFAULT;
       return out;
     }
     // 시작 전에 영상 등급을 바꾼다(약속 5 PATCH settings). 실패하면 화면 값은 그대로 두고 알린다.
@@ -641,6 +658,10 @@
         if (!text(v.sigTitle).trim()) errors.sigTitle = '시그니처 포즈 이름을 적어 주세요.';
         if (!text(v.sigMotion).trim()) errors.sigMotion = '어떤 동작인지 적어 주세요.';
       }
+      if (v.demoMode === true) {
+        const budgetProblem = demoBudgetProblem(v.demoBudgetUsd);
+        if (budgetProblem) errors.demoBudgetUsd = budgetProblem;
+      }
       return errors;
     }
     async function createDraft(input) {
@@ -657,6 +678,7 @@
         const modelMode = modeOf(input.modelMode);
         const autoReview = input.autoReview !== false;
         const demoMode = input.demoMode === true;
+        const demoBudgetUsd = demoMode ? demoBudgetOf(input.demoBudgetUsd) : null;
         const videoTier = tierOf(input.videoTier);
         const body = {
           displayName: text(input.displayName).trim(),
@@ -669,7 +691,7 @@
         };
         const referenceImage = videoTier === 'light' ? { wardrobe: text(input.referenceWardrobe).trim(), background: text(input.referenceBackground).trim() } : null;
         if (referenceImage) body.referenceImage = referenceImage;
-        if (demoMode) body.demoMode = true;
+        if (demoMode) { body.demoMode = true; body.demoBudgetUsd = demoBudgetUsd; }
         if (input.chapterTemplate) body.chapterTemplate = input.chapterTemplate;
         // 비어 있으면 보내지 않는다(사실표를 모르는 이전 서버와도 그대로 맞는다).
         const factSheet = factSheetLines(input.factSheet);
@@ -682,7 +704,7 @@
         state.busy = null;
         if (o.onCid) o.onCid(data.characterId);
         await load(data.characterId);
-        state.settings = demoMode ? { modelMode, autoReview, videoTier, signaturePose, demoMode } : { modelMode, autoReview, videoTier, signaturePose };
+        state.settings = demoMode ? { modelMode, autoReview, videoTier, signaturePose, demoMode, demoBudgetUsd } : { modelMode, autoReview, videoTier, signaturePose };
         if (referenceImage) state.settings.referenceImage = referenceImage;
         emit();
         return { characterId: data.characterId };
@@ -1412,6 +1434,8 @@
         }
         if (r.sig) r.sig.hidden = selectedTier === 'none';
         const demo = r.form.querySelector('[name="demoMode"]');
+        const budgetBox = $('[data-demo-budget]');
+        if (budgetBox) budgetBox.hidden = !(demo && demo.checked);
         if (btn) btn.textContent = S.busy === 'create' ? '저장하는 중…' : '저장하고 원문 올리기';
       }
       if (r.formErr) { r.formErr.textContent = !hasDraft && S.error ? S.error : ''; r.formErr.hidden = !(!hasDraft && S.error); }
@@ -1730,7 +1754,7 @@
       if (set.referenceImage && !set.demoMode && r.startLead) r.startLead.textContent = Ref.PARALLEL_COPY;
       if (r.startNote) {
         r.startNote.textContent = set.demoMode
-          ? '원문 분석·사진·영상·대화 준비에 모델 사용 비용이 들어요 · 시연 예산 상한 15달러를 넘으면 멈추고 알려요'
+          ? '원문 분석·사진·영상·대화 준비에 모델 사용 비용이 들어요 · 시연 예산 상한 ' + usdText(set.demoBudgetUsd != null ? set.demoBudgetUsd : DEMO_BUDGET_DEFAULT) + '을 넘을 것 같으면 멈추고 알려요'
           : '원문 분석·프롬프트 생성·대화에는 모델 사용 비용이 들어요' + (tier !== 'none' ? ' · 영상 제작에는 별도 비용이 들어요' : '') + (set.modelMode === 'TRAIN' ? ' · 학습은 비용 확인 후 시작해요' : '');
         r.startNote.hidden = !!S.finalized;
       }
@@ -1818,13 +1842,13 @@
       const tier = (f.querySelector('[name="videoTier"]:checked') || {}).value;
       const auto = f.querySelector('[name="autoReview"]');
       const demo = f.querySelector('[name="demoMode"]');
-      const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined, modelMode: mode, autoReview: auto ? auto.checked : true, videoTier: tier, sigTitle: f.querySelector('[name="sigTitle"]').value, sigMotion: f.querySelector('[name="sigMotion"]').value, sigWhen: f.querySelector('[name="sigWhen"]').value, demoMode: demo ? demo.checked : false };
+      const input = { displayName: f.querySelector('[name="displayName"]').value, subjectKind: kind, notes: f.querySelector('[name="notes"]').value, age: f.querySelector('[name="age"]').value, gender: f.querySelector('[name="gender"]').value, job: f.querySelector('[name="job"]').value, background: f.querySelector('[name="background"]').value, chapterTemplate: f.querySelector('[name="chapterTemplate"]').value || undefined, modelMode: mode, autoReview: auto ? auto.checked : true, videoTier: tier, sigTitle: f.querySelector('[name="sigTitle"]').value, sigMotion: f.querySelector('[name="sigMotion"]').value, sigWhen: f.querySelector('[name="sigWhen"]').value, demoMode: demo ? demo.checked : false, demoBudgetUsd: (f.querySelector('[name="demoBudgetUsd"]') || {}).value || '' };
       input.referenceWardrobe = (f.querySelector('[name="referenceWardrobe"]') || {}).value || '';
       input.referenceBackground = (f.querySelector('[name="referenceBackground"]') || {}).value || '';
       input.factSheet = (f.querySelector('[name="factSheet"]') || {}).value || '';
       input.voiceReferenceId = (f.querySelector('[name="voiceReferenceId"]') || {}).value || '';
       const errors = intake.validateDraft(input);
-      ['displayName', 'subjectKind', 'age', 'gender', 'job', 'background', 'factSheet', 'voiceReferenceId', 'sigTitle', 'sigMotion'].forEach((n) => fieldError(n, errors[n]));
+      ['displayName', 'subjectKind', 'age', 'gender', 'job', 'background', 'factSheet', 'voiceReferenceId', 'sigTitle', 'sigMotion', 'demoBudgetUsd'].forEach((n) => fieldError(n, errors[n]));
       const first = Object.keys(errors)[0];
       if (first) { if (S.error) { S.error = null; render(); } const ctl = f.querySelector('[name="' + first + '"]'); if (ctl) ctl.focus(); return; }
       intake.createDraft(input).then((res) => {
@@ -1896,6 +1920,7 @@
       if (t.name === 'videoTierEdit') { const v = t.value; intake.setTier(v).then((ok) => { if (ok) { render(); const c0 = r.tierEdit && r.tierEdit.querySelector('[name="videoTierEdit"][value="' + v + '"]'); if (c0) c0.focus(); } }); return; }
       if (r.form && r.form.contains(t)) {
         if (t.name === 'videoTier') { if (r.tierHint) r.tierHint.hidden = t.value === 'none'; if (r.sig) r.sig.hidden = t.value === 'none'; renderInfo(); return; }
+        if (t.name === 'demoMode') { const box = r.form.querySelector('[data-demo-budget]'); if (box) box.hidden = !t.checked; return; }
         if (t.name === 'chapterTemplate') chapterTouched = true;
         if (t.name === 'subjectKind') {
           fieldError('subjectKind', '');
@@ -1976,7 +2001,7 @@
     };
   }
 
-  const api = { sigOf, factSheetLines, factSheetProblem, FACT_SHEET_MAX_LINES, FACT_SHEET_MAX_CHARS, MAX_BYTES, EXTENSIONS, PHOTO_EXTENSIONS, PHOTO_MAX_BYTES, VIDEO_TIERS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, speakerChoices, ro, shortDate, suggestTextId, checkFile, isPhotoName, isMetaName, parseSourceMeta, isPhotoRecord, tierOf, tierName, tierCardsHTML, videoText, doneView, wantsPoll, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
+  const api = { sigOf, demoBudgetOf, demoBudgetProblem, DEMO_BUDGET_DEFAULT, factSheetLines, factSheetProblem, FACT_SHEET_MAX_LINES, FACT_SHEET_MAX_CHARS, MAX_BYTES, EXTENSIONS, PHOTO_EXTENSIONS, PHOTO_MAX_BYTES, VIDEO_TIERS, KINDS, REGISTERS, SUBJECT_KINDS, CHAPTERS, MODES, DEFAULT_SCOPE, FILE_FOLD, defaultRegister, nextRegister, kindHint, guessKind, speakersOf, suggestedSpeaker, speakerChoices, ro, shortDate, suggestTextId, checkFile, isPhotoName, isMetaName, parseSourceMeta, isPhotoRecord, tierOf, tierName, tierCardsHTML, videoText, doneView, wantsPoll, formatSize, textIdProblem, metaBody, fileSummary, sideHTML, putFile, errorText, createIntake, mount };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (global) global.SourceIntake = api;
 })(typeof window !== 'undefined' ? window : null);

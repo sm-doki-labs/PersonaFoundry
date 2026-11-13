@@ -1068,3 +1068,26 @@ test('a broken meta.json is reported in plain words and uploads nothing', async 
   assert.ok(!server.calls.some((c) => c.method === 'POST'));
   assert.deepEqual(S.parseSourceMeta('\uFEFF[{"filename":"x/y.txt","kind":"ARTICLE","extra":1}]'), { 'y.txt': { kind: 'ARTICLE' } });
 });
+
+test('demo mode sends a budget cap that defaults to 30 dollars and rejects out-of-range values', async () => {
+  const base = { displayName: '손흥민', subjectKind: 'PUBLIC_FIGURE', age: '34세', gender: '남성', job: '축구선수', demoMode: true };
+  const server = fakeServer();
+  const intake = S.createIntake({ fetch: server.fetch, origin: ORIGIN, XHR: null });
+  assert.equal(S.DEMO_BUDGET_DEFAULT, 30);
+  assert.ok(intake.validateDraft(Object.assign({}, base, { demoBudgetUsd: '0' })).demoBudgetUsd);
+  assert.ok(intake.validateDraft(Object.assign({}, base, { demoBudgetUsd: '201' })).demoBudgetUsd);
+  assert.ok(intake.validateDraft(Object.assign({}, base, { demoBudgetUsd: 'abc' })).demoBudgetUsd);
+  assert.equal(intake.validateDraft(Object.assign({}, base, { demoMode: false, demoBudgetUsd: '0' })).demoBudgetUsd, undefined);
+  await intake.createDraft(Object.assign({}, base, { demoBudgetUsd: '' }));
+  assert.equal(server.calls.find((c) => c.path === '/api/sources/drafts').body.demoBudgetUsd, 30);
+  const other = fakeServer();
+  const b = S.createIntake({ fetch: other.fetch, origin: ORIGIN, XHR: null });
+  await b.createDraft(Object.assign({}, base, { demoBudgetUsd: '45' }));
+  assert.equal(other.calls.find((c) => c.path === '/api/sources/drafts').body.demoBudgetUsd, 45);
+  const plain = fakeServer();
+  const p = S.createIntake({ fetch: plain.fetch, origin: ORIGIN, XHR: null });
+  await p.createDraft(Object.assign({}, base, { demoMode: false, demoBudgetUsd: '45' }));
+  assert.equal('demoBudgetUsd' in plain.calls.find((c) => c.path === '/api/sources/drafts').body, false);
+  const html = fs.readFileSync(path.join(__dirname, '..', 'sources.html'), 'utf8');
+  assert.ok(html.includes('name="demoBudgetUsd"') && html.includes('value="30"'));
+});

@@ -25,7 +25,9 @@ DEMO_FILE = "demo-mode.json"
 SCHEMA = "demo-mode-v1"
 REVIEWER = "시연 자동 승인"
 REASON = "시연 모드 자동 승인. 사람 검토·품질 합격이 아니다."
-DEFAULT_BUDGET_USD = 15.0
+#: D-0217: 단계 시작 전에 비영상 단계마다 최대 10달러를 잡아 두므로, 영상 뒤 S7이 15달러로는
+#: 시작하지 못했다(실제 전체 비용은 2026-11-13 손흥민 약 9.4달러).
+DEFAULT_BUDGET_USD = 30.0
 
 
 @dataclass(frozen=True)
