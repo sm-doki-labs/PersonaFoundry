@@ -1635,7 +1635,7 @@ def _build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("demo", help="시연 모드: 모든 관문 자동 승인 → 테스터 발행 → 알림")
     s.add_argument("character_id")
     s.add_argument("state", choices=["on", "off"])
-    s.add_argument("--budget", type=float, default=15.0, help="시연 예산 상한(달러)")
+    s.add_argument("--budget", type=float, default=30.0, help="시연 예산 상한(달러)")
     s.set_defaults(fn=cmd_demo_mode)
 
     s = sub.add_parser("web", help="워크숍 웹앱(LLD §6.5)")

@@ -43,6 +43,7 @@ from character_factory_poc.contracts.source import (
     default_register,
 )
 from character_factory_poc.pipeline.context import Context
+from character_factory_poc.pipeline.demo import DEFAULT_BUDGET_USD as DEFAULT_DEMO_BUDGET_USD
 from character_factory_poc.pipeline.origin import (
     SOURCE,
     VIDEO_STAGES,
@@ -125,7 +126,7 @@ class Draft(Strict):
     factSheet: FactSheet = Field(default_factory=list)
     # 시연 모드: 모든 관문 자동 승인 → 테스터 미리보기 발행 → 디스코드 알림(사용자 2026-11-12).
     demoMode: bool = False
-    demoBudgetUsd: float = Field(default=15.0, gt=0, le=200)
+    demoBudgetUsd: float = Field(default=DEFAULT_DEMO_BUDGET_USD, gt=0, le=200)
     # D-0205: Fish Audio 음성 ID(선택). 적은 그대로 캐릭터 패키지에 싣는다.
     voiceReferenceId: str | None = Field(default=None, max_length=64)
 
@@ -139,7 +140,7 @@ class Draft(Strict):
 
 class DemoSwitch(Strict):
     enabled: bool
-    budgetUsd: float = Field(default=15.0, gt=0, le=200)
+    budgetUsd: float = Field(default=DEFAULT_DEMO_BUDGET_USD, gt=0, le=200)
     start: bool = False
     publish: bool = True  # False면 패키지 승인(G9)까지만 하고 발행하지 않는다(로컬 시험)
 
