@@ -335,3 +335,56 @@ def test_short_backchannel_is_not_treated_as_source_quote():
     text = fact + "\n말투: 저는 그냥 열심히 했어요 라고 한다."
     public = quotes.public_prompt(text)
     assert fact in public and "열심히 했어요" not in public
+
+
+def test_redact_drops_quoted_source_examples():
+    """D-0216: 특질 시트 예시에 든 원문 발화는 괄호째 지우고, 나머지 설명은 남긴다."""
+    from character_factory_poc.stages.s11_release.twin import SourceQuotes, quote_pattern
+
+    quotes = SourceQuotes(quote_pattern({"제가 그냥 펴면 되나요?"}))
+    sheet = {
+        "card": {
+            "questions": "조심스러운 질문('제가 그냥 펴면 되나요?')을 낮은 빈도로 쓴다.",
+            "other": ["제가 그냥 펴면 되나요? 하고 묻는다", "인용 없음"],
+        }
+    }
+    public = quotes.redact(sheet)
+    assert public["card"]["questions"] == "조심스러운 질문을 낮은 빈도로 쓴다."
+    assert public["card"]["other"] == ["(원문 인용 생략) 하고 묻는다", "인용 없음"]
+    quotes.check(public, "trait-sheet")
+
+
+def test_trait_sheet_quote_is_redacted_instead_of_blocking(tmp_path: Path, monkeypatch):
+    """2026-11-13 손흥민: 특질 시트 예시에 원문 발화가 들어가 S11이 멈췄다(D-0216)."""
+    import re
+
+    from character_factory_poc.stages.s11_release import twin as twin_module
+
+    ctx, cid, _, _ = _approved(tmp_path, "PROMPT_ONLY")
+    root = ctx.character_dir(cid)
+    sheet = read_json(next(root.glob("s7-traits/*/trait-sheet.json")))
+    texts = []
+
+    def walk(value):
+        if isinstance(value, dict):
+            for v in value.values():
+                walk(v)
+        elif isinstance(value, list):
+            for v in value:
+                walk(v)
+        elif isinstance(value, str) and len(value) >= 12:
+            texts.append(value)
+
+    walk(sheet.get("card", sheet))
+    quote = texts[0][:8]
+    original = twin_module.release_info
+
+    def with_quote(*args, **kwargs):
+        info, quotes = original(*args, **kwargs)
+        pattern = re.compile(re.escape(quote) + "|" + quotes.pattern.pattern)
+        return info, twin_module.SourceQuotes(pattern)
+
+    monkeypatch.setattr(twin_module, "release_info", with_quote)
+    pk = build_package(ctx, cid)
+    public = (pk / "persona/trait-sheet.json").read_text("utf-8")
+    assert quote not in public and "(원문 인용 생략)" in public

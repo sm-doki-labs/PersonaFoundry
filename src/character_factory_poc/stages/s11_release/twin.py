@@ -79,6 +79,25 @@ class SourceQuotes:
             # 오류·장부에도 원문을 남기지 않는다.
             raise CheckFailed("s11", [f"{label}: 승인 원문 인용을 요약으로 바꿔야 한다"])
 
+    def redact(self, payload: object) -> object:
+        """D-0216: 공개판 특질 시트에서 원문 인용을 지운 사본. 괄호째 든 예시는 괄호까지 뺀다."""
+        if isinstance(payload, dict):
+            return {k: self.redact(v) for k, v in payload.items()}
+        if isinstance(payload, list):
+            return [self.redact(v) for v in payload]
+        if not isinstance(payload, str) or not self.pattern.search(payload):
+            return payload
+        text = self.pattern.sub(_CUT, payload)
+        text = _QUOTED_CUT_IN_PARENS.sub("", text)
+        return _QUOTED_CUT.sub(_CUT, text)
+
+
+_CUT = "(원문 인용 생략)"
+_QUOTED_CUT = re.compile(r"[\'\"‘’“”「」]\s*" + re.escape(_CUT) + r"\s*[\'\"‘’“”「」]")
+_QUOTED_CUT_IN_PARENS = re.compile(
+    r"\s*\(\s*[\'\"‘’“”「」]?\s*" + re.escape(_CUT) + r"\s*[\'\"‘’“”「」]?\s*\)"
+)
+
 
 def release_info(
     ctx: Context, cid: str, plan: CharacterPlanV2, adopted: str | None, runs: list[Path]
