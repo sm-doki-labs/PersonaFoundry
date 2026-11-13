@@ -93,6 +93,8 @@ def _stage_row(
     quest_revision: str,
     exported_at: str,
 ) -> list[Any]:
+    # D-0219: 4번 이후는 턴 제한 없는 자유 통화(FREE_CHAT)다. 1~3은 20턴 미션이다.
+    free = chapter.chapterNo >= 4
     return [
         stage_id,
         character_id,
@@ -103,11 +105,11 @@ def _stage_row(
         exported_at,  # created_at
         chapter.intro,  # intro_story
         stage_uid,
-        "MISSION",
+        "FREE_CHAT" if free else "MISSION",
         chapter.relationshipStage,
         chapter.title,
         chapter.goal,
-        20,  # turn_limit(MISSION은 필수)
+        None if free else 20,  # turn_limit(MISSION은 필수, FREE_CHAT은 null)
         f"{slug}-{chapter.chapterId}",
         quest_revision,
         None,  # synced_at

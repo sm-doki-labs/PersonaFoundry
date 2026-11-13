@@ -387,3 +387,39 @@ def test_real_chat_svc_compiler_output_fits_import_api(approved):
         for row in fake.body["api"]["tables"]["character_stage"]["rows"]
     }
     assert {m["chapterUid"] for m in chat["releaseChapters"]} == {str(u) for u in stage_uids}
+    # D-0219: 4번 자유 통화도 chat-svc 컴파일러가 턴 제한 없는 연인 단계 챕터로 받는다.
+    numbers = {c["number"]: c for c in chat["chapterVersions"]}
+    assert sorted(numbers) == [1, 2, 3, 4]
+    assert numbers[4]["turnLimit"] is None and numbers[4]["entryStage"] == "DATING"
+    assert all(numbers[n]["turnLimit"] for n in (1, 2, 3))
+
+
+def test_free_chat_chapter_is_added_after_three_missions(approved):
+    """D-0219: 관리자 일반 통화(api-svc #302)가 들어갈 4번 자유 통화 챕터를 붙인다."""
+    ctx, settings = approved
+    fake = FakeImport()
+    result = publish_preview(ctx, CID, settings=settings, ports=fake.ports())
+    assert result.status == "PUBLISHED", result.failure
+    assert any("자유 통화" in w for w in result.warnings)
+    tables = fake.body["api"]["tables"]
+    stage = tables["character_stage"]
+    rows = [dict(zip(stage["columns"], r, strict=True)) for r in stage["rows"]]
+    by_no = {r["stage_no"]: r for r in rows}
+    assert sorted(by_no) == [1, 2, 3, 4]
+    assert [by_no[n]["mode"] for n in (1, 2, 3, 4)] == ["MISSION"] * 3 + ["FREE_CHAT"]
+    assert by_no[4]["turn_limit"] is None and by_no[4]["entry_relationship_stage"] == "DATING"
+    assert all(by_no[n]["turn_limit"] == 20 for n in (1, 2, 3))
+    clips = tables["character_clip"]
+    stage_col = clips["columns"].index("character_stage_id")
+    free_clips = [r for r in clips["rows"] if r[stage_col] == by_no[4]["id"]]
+    third = [r for r in clips["rows"] if r[stage_col] == by_no[3]["id"]]
+    assert free_clips and len(free_clips) == len(third)
+
+
+def test_free_chat_chapter_only_follows_exactly_three_missions():
+    from types import SimpleNamespace
+
+    from character_factory_poc.stages.export.preview import add_free_chat_chapter
+
+    two = SimpleNamespace(chapters=[SimpleNamespace(chapterNo=1), SimpleNamespace(chapterNo=2)])
+    assert add_free_chat_chapter(two) == (two, "")
