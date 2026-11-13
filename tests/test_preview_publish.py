@@ -409,6 +409,8 @@ def test_free_chat_chapter_is_added_after_three_missions(approved):
     assert [by_no[n]["mode"] for n in (1, 2, 3, 4)] == ["MISSION"] * 3 + ["FREE_CHAT"]
     assert by_no[4]["turn_limit"] is None and by_no[4]["entry_relationship_stage"] == "DATING"
     assert all(by_no[n]["turn_limit"] == 20 for n in (1, 2, 3))
+    # chat-svc 는 넣은 버전을 지우지 않으므로 자유 통화가 붙은 판은 quest 이름이 다르다.
+    assert all(r["chat_content_revision"].endswith("-quest-v1-fc") for r in rows)
     clips = tables["character_clip"]
     stage_col = clips["columns"].index("character_stage_id")
     free_clips = [r for r in clips["rows"] if r[stage_col] == by_no[4]["id"]]
