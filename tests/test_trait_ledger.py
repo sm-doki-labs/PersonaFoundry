@@ -3,7 +3,7 @@
 import pytest
 
 from character_factory_poc.common.schema import validate
-from character_factory_poc.stages.s7_traits.ledger import check_ledger
+from character_factory_poc.stages.s7_traits.ledger import SOFT, check_ledger
 from character_factory_poc.stages.s8_prompts.actor_persona import (
     BASE_RATE_LINE,
     compose_from_ledger,
@@ -71,7 +71,7 @@ def test_ledger_check_rejects_praise_first_or_thanks_closing_default():
         "인물은 상대 말을 바로 받아 주고 다정한 감사나 다짐으로 말을 맺는다.",
     ):
         problems = check_ledger("윤서진")(_ledger(defaultResponse=text))
-        assert any(p.startswith("defaultResponse: 상대 평가") for p in problems)
+        assert any(p.startswith(SOFT + "defaultResponse: 상대 평가") for p in problems)
 
 
 def test_ledger_check_keeps_speaking_style_out_of_the_baseline():
@@ -82,8 +82,8 @@ def test_ledger_check_keeps_speaking_style_out_of_the_baseline():
         "reading": "인물은 상대 말을 존댓말로 정중하게 받는다.",
     }
     problems = check_ledger("윤서진")(_ledger(**over))
-    assert any(p.startswith("defaultResponse: 말하는 방식") for p in problems)
-    assert any(p.startswith("reading: 말하는 방식") for p in problems)
+    assert any(p.startswith(SOFT + "defaultResponse: 말하는 방식") for p in problems)
+    assert any(p.startswith(SOFT + "reading: 말하는 방식") for p in problems)
     # 계기가 있는 특질의 말 행동(말끝 흐리기 등)은 막지 않는다.
     ok = _ledger()
     ok.traits[1].behavior = "인물은 대답을 한두 마디로 끊고 말끝을 흐린다."

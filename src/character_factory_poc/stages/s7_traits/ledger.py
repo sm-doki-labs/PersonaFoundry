@@ -17,6 +17,15 @@ from character_factory_poc.pipeline.origin import SOURCE, read_origin
 from character_factory_poc.stages.s3_plan import tendencies as T
 
 QUOTES = re.compile(r"[\"'“”‘’「」]")
+#: D-0223: 문장 모양만 보는 휴리스틱 검사의 머리표. 재시도 때는 고치라고 알리지만, 마지막 시도에서
+#: 이것만 남으면 장부를 받고 경고로 남긴다(시연 중 문장 모양 때문에 단계가 멈추지 않게).
+SOFT = "[권장] "
+
+
+def soft_only(problems: list[str]) -> bool:
+    return bool(problems) and all(p.startswith(SOFT) for p in problems)
+
+
 #: 개념 겹침을 셀 때 빼는 흔한 낱말 앞 두 글자.
 STOP = frozenset(
     (
@@ -75,13 +84,17 @@ def _situation(cell: str) -> str:
 
 
 # 막연한 말투·길이와 구별할 수 있는 화행이나 구체적인 말의 내용이 있는지 본다.
+# D-0223: 동사 앞에 꾸밈말이 끼어도 인정한다("모른다고 분명히 밝힌", "화제를 아는 일상으로 돌린").
+# 2026-11-13 손흥민 S7이 구체적인 행동 문장을 두 번 모두 "말투만"으로 잘못 걸러 실패했다.
 _ACTION = re.compile(
     r"되묻|되물|맞받|받아치|받아친|바로잡|되짚|짚어|짚고|돌려주|돌려준|물어|묻는|"
     r"(?:인정|거절|사과|공감|제안|칭찬|반문|격려|응원|확인|정정|반박|수긍|권유)"
     r"(?:부터 |을 |를 )?(?:한|하|해)|"
-    r"권한|권하|덧붙|보탠|보태|털어놓|들려[주준]|말을 아[끼낀]|"
-    r"선을 (?:긋|그어)|화제를 (?:돌|바|닫)|[다냐자]고 (?:말|답|한|밝|알)|"
-    r"(?:경험|사례|이유|사실|기억|질문|농담|감사|예시|일화)[을를] [가-힣]+"
+    r"권한|권하|덧붙|보탠|보태|털어놓|들려[주준]|말을 아[끼낀]|밝[히힌혀]|미[루룬뤄]|"
+    r"설명[하한해]|좁혀|좁힌|"
+    r"선을 (?:긋|그어)|화제를 (?:[가-힣]+ ){0,4}(?:돌|바|닫)|"
+    r"[다냐자]고 (?:[가-힣]+ ){0,2}(?:말|답|한|밝|알)|"
+    r"(?:경험|사례|이유|사실|기억|질문|농담|감사|예시|일화|한계)[을를] [가-힣]+"
 )
 
 
@@ -102,7 +115,7 @@ def check_ledger(name: str, tendencies: dict | None = None, source_refs: set[str
             for t in ledger.traits:
                 if not _ACTION.search(t.behavior):
                     problems.append(
-                        f"{t.id}.behavior: 말투만 적지 말고 구체적으로 무엇을 하는지 쓴다"
+                        f"{SOFT}{t.id}.behavior: 말투만 적지 말고 구체적으로 무엇을 하는지 쓴다"
                     )
                 if t.basis == "INFERRED":
                     if t.sourceRef not in (source_refs or set()):
@@ -141,7 +154,7 @@ def check_ledger(name: str, tendencies: dict | None = None, source_refs: set[str
             ledger.defaultResponse
         ):
             problems.append(
-                "defaultResponse: 상대 평가·격려로 시작하거나 감사·다짐으로 맺는 방식을 "
+                f"{SOFT}defaultResponse: 상대 평가·격려로 시작하거나 감사·다짐으로 맺는 방식을 "
                 "기본 대응에 두지 않는다. 그런 반응은 계기가 있는 trait에 둔다"
             )
         base = {
@@ -153,7 +166,7 @@ def check_ledger(name: str, tendencies: dict | None = None, source_refs: set[str
         for key, btext in base.items():
             if found := VOICE_TERMS.search(btext):
                 problems.append(
-                    f"{key}: 말하는 방식('{found.group(0)}')은 말투 칸이 소유한다. "
+                    f"{SOFT}{key}: 말하는 방식('{found.group(0)}')은 말투 칸이 소유한다. "
                     "평소 칸에는 무엇을 하는지만 쓴다"
                 )
         traits = {t.id: f"{t.trigger} {t.behavior}" for t in ledger.traits}
@@ -162,7 +175,7 @@ def check_ledger(name: str, tendencies: dict | None = None, source_refs: set[str
             for key, btext in base.items():
                 if overlap(tt, concept_tokens(btext, exclude)) >= DUP_THRESHOLD:
                     problems.append(
-                        f"{key}: 조건부 특질 {tid}의 내용을 평소 모습 칸에 다시 썼다. "
+                        f"{SOFT}{key}: 조건부 특질 {tid}의 내용을 평소 모습 칸에 다시 썼다. "
                         "한 특질은 한 곳에만 쓴다"
                     )
         ids = list(traits)
@@ -171,13 +184,15 @@ def check_ledger(name: str, tendencies: dict | None = None, source_refs: set[str
                 ta = concept_tokens(traits[a], exclude)
                 tb = concept_tokens(traits[b], exclude)
                 if overlap(ta, tb) >= DUP_THRESHOLD:
-                    problems.append(f"traits {a}·{b}: 계기와 행동이 겹친다. 하나로 합친다")
+                    problems.append(f"{SOFT}traits {a}·{b}: 계기와 행동이 겹친다. 하나로 합친다")
         for t in ledger.traits:
             if (
                 overlap(concept_tokens(t.trigger, exclude), concept_tokens(t.nearMiss, exclude))
                 >= 0.9
             ):
-                problems.append(f"{t.id}.nearMiss: 계기와 거의 같다. 켜지지 않는 다른 상황을 쓴다")
+                problems.append(
+                    f"{SOFT}{t.id}.nearMiss: 계기와 거의 같다. 켜지지 않는 다른 상황을 쓴다"
+                )
         return problems
 
     return _check
@@ -260,5 +275,19 @@ def run_ledger(ctx, cid: str, plan, sheet, rev_dir: Path, budget, model) -> Trai
         backend=ctx.agent_backend(cid, budget, "s7"),
     )
     if not result.ok:
+        # D-0223: 마지막 시도에 문장 모양 경고만 남았으면 장부를 받고 경고를 남긴다.
+        workspace = rev_dir / "ledger-workspace"
+        raw = result.raw
+        if raw is None and (workspace / "last-failed.json").is_file():
+            raw = read_json(workspace / "last-failed.json")
+        if raw is not None and soft_only(result.problems):
+            from character_factory_poc.common.schema import validate
+
+            accepted = validate("trait-ledger-v1", raw)
+            (rev_dir / "ledger-warnings.json").write_text(
+                json.dumps({"warnings": result.problems}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            return accepted
         raise SystemExit("특질 장부 검사 실패:\n- " + "\n- ".join(result.problems))
     return result.output
