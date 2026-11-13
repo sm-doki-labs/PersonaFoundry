@@ -152,4 +152,15 @@ def process(raw: Path, reference: Path, production: dict) -> tuple[bytes, dict]:
         if any(s["codec_type"] == "audio" for s in streams):
             raise VideoGenerationError("무음 처리 뒤 오디오 트랙이 남았다")
         report["audioRemoved"] = True
+        if production.get("middleFrame"):
+            # D-0222: 중간 프레임이 있는 시그니처 영상만 배경을 기준 사진으로 고정한다.
+            from .bg_lock import lock_background
+
+            locked = Path(tmp) / "locked.mp4"
+            lock = lock_background(
+                target, reference, locked, slot=_FFMPEG_SLOT, threads=_FFMPEG_THREADS
+            )
+            report["backgroundLock"] = lock
+            if lock.get("applied"):
+                target = locked
         return target.read_bytes(), report
