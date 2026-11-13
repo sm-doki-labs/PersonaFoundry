@@ -12,6 +12,8 @@ dependencies = [
     "fastapi>=0.115,<1",
     "uvicorn>=0.32,<1",
     "boto3>=1.35,<2",
+    # 시그니처 영상 배경 고정의 사람 분리 모델 실행기(D-0222). mediapipe 는 OpenCV 5 를 끌고 와 쓰지 않는다.
+    "ai-edge-litert>=2.3,<3",
 ]
 
 [project.scripts]
@@ -36,7 +38,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-character_factory_poc = ["prompts/*.md", "prompts/review/*.md", "resources/*.json", "resources/*.md", "web/static/**/*"]
+character_factory_poc = ["prompts/*.md", "prompts/review/*.md", "resources/*.json", "resources/*.md", "resources/*.tflite", "web/static/**/*"]
 
 [tool.setuptools.data-files]
 "share/character-factory-poc/studio" = ["studio/*.html"]
