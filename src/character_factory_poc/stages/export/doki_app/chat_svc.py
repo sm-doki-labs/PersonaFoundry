@@ -134,6 +134,11 @@ def is_free_chat(chapter_no: int) -> bool:
     return _SLOTS.get(chapter_no, {}).get("mode") == "FREE_CHAT"
 
 
+def free_chat_suffix(chapters) -> str:
+    """자유 통화 챕터가 붙은 판의 quest revision 꼬리(D-0219). 없으면 예전 이름 그대로다."""
+    return "-fc" if any(is_free_chat(c.chapterNo) for c in chapters) else ""
+
+
 @dataclass(frozen=True)
 class ChatTree:
     files: dict[str, dict[str, Any]]
@@ -151,7 +156,9 @@ def build_tree(package: CharacterPackage, package_dir: Path) -> ChatTree:
     persona_rev = f"{prefix}-r1"
     # 이름 있는 대화 경로를 담는 번들과 그 상위 참조만 새 revision으로 발행한다.
     version = "v2" if package.twin and package.twin.servingRoute else "v1"
-    quest_rev = f"{prefix}-quest-{version}"
+    # D-0219: chat-svc 는 넣은 캐릭터 버전을 지우지 않는다. 4번 자유 통화가 붙은 판은 챕터 목록이
+    # 달라 같은 이름으로 다시 보내면 거절되므로 이름을 나눈다.
+    quest_rev = f"{prefix}-quest-{version}" + free_chat_suffix(package.chapters)
     sheet = _read_json(relative_file(package_dir, package.persona.traitSheet))
     scene = _scene_facts(package, package_dir)
     prompt = relative_file(package_dir, package.persona.longPrompt).read_text("utf-8")

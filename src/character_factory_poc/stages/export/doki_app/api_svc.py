@@ -314,7 +314,9 @@ def build_seed(
     )
 
     prefix = revision_prefix(package.characterId, package.packageRev, twin=bool(twin))
-    quest_revision = f"{prefix}-quest-v1"
+    from character_factory_poc.stages.export.doki_app.chat_svc import free_chat_suffix
+
+    quest_revision = f"{prefix}-quest-v1" + free_chat_suffix(package.chapters)
     for index, chapter in enumerate(sorted(package.chapters, key=lambda c: c.chapterNo), start=1):
         builder.add(
             "character_stage",

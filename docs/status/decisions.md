@@ -348,3 +348,4 @@ S11이 모티브 패키지를 만들 때 특질 시트(persona/trait-sheet.json)
 
 근거: 2026-11-13 dev api-svc #302(관리자 계정은 FREE_CHAT·무제한 턴 챕터로 바로 일반 통화)가 배포된 뒤, 관리자 계정이 공장 캐릭터에 통화를 걸면 409 NORMAL_CALL_NOT_READY가 났다. 공장 캐릭터에는 미션 챕터 3개뿐이었다. dev의 기존 캐릭터 15명은 모두 4번 FREE_CHAT(DATING, 턴 제한 없음)을 갖는다. chat-svc는 관문 챕터 정확히 3개 뒤에 FREE_CHAT을 붙이는 구성을 지원한다. 손흥민 패키지로 dev 배포 판 chat-svc 컴파일러(864e02b6)를 돌려 4번이 turnLimit null·DATING으로 나오는 것을 확인했다. 사용자 "4번 자유 통화 챕터 붙이는 걸로 바로 고쳐서".
 버린 안: 기존 미션 챕터를 FREE_CHAT으로 바꾸기(chat-svc가 관문 챕터 3개를 요구하고, api-svc와 chat-svc의 챕터 성격이 어긋나며, 일반 테스터의 미션 흐름이 깨진다), api-svc에 미션 대체 요청(#302가 일부러 대체하지 않는다).
+D-0219 보충(2026-11-13): chat-svc는 넣은 캐릭터 버전을 지우지 않고, 버전 이름은 quest revision으로 정해진다. 4번이 붙은 판을 예전 3챕터 판과 같은 이름(`…-quest-v1`)으로 보내자 dev 넣기가 "같은 revision이 다른 내용으로 이미 있다"(409)로 거절했다. 자유 통화가 붙은 판은 quest revision 끝에 `-fc`를 붙인다(api-svc character_stage.chat_content_revision도 같다).
