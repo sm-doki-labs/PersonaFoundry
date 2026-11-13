@@ -15,7 +15,7 @@ from tests.test_source_intake import META, RAW, FakeS3
 from tests.test_video_evidence_handoff import wait_idle
 
 
-def pose_upload(client, url, data=None):
+def pose_upload(client, url, data=None, use=None):
     data = data if data is not None else solid_png(90, 160, (30, 160, 90))
     response = client.post(
         url + "/files",
@@ -24,7 +24,8 @@ def pose_upload(client, url, data=None):
             "size": len(data),
             "contentType": "image/png",
             "photoRole": "signature",
-        },
+        }
+        | ({"photoUse": use} if use else {}),
     )
     assert response.is_success, response.text
     reg = response.json()
@@ -248,3 +249,39 @@ def test_pose_upload_requires_reference_photo_flow(tmp_path, monkeypatch):
     }
     # Without the master-photo review there is no image to redraw the gesture onto.
     assert client.post(url + "/files", json=body).status_code == 409
+
+
+def test_frame_use_puts_the_uploaded_photo_in_as_is_without_an_edit(tmp_path, monkeypatch):
+    """D-0221: '영상에 그대로 넣을 사진'이면 편집 없이 올린 사진을 중간 프레임으로 쓴다."""
+    import cv2
+    import numpy as np
+
+    ctx, cid, url, jobs, client = intake(tmp_path, monkeypatch)
+    image, video = FakeImageModel(), FakeVideoModel()
+    ctx.use_image(image)
+    ctx.use_video(video)
+    record, data = pose_upload(client, url, use="frame")
+    assert record["photoUse"] == "frame"
+    root = ctx.character_dir(cid)
+    assert read_signature(root)["poseUse"] == "frame"
+    assert client.post(url + "/finalize").is_success
+    wait_idle(jobs, cid)
+    assert len(image.requests) == 1, "only the master photo is generated"
+    rev = ctx.state(cid).gate("G4").rev
+    frame = read_json(root / "s4-frames" / rev / "signature-frame.json")
+    assert frame["use"] == "frame" and frame["model"] == "upload" and frame["prompt"] == ""
+    master = cv2.imread(str(root / "s4-frames" / rev / "ch1/f1.png"))
+    mid = cv2.imread(str(root / "s4-frames" / rev / frame["filePath"]))
+    assert mid.shape == master.shape
+    uploaded = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    assert abs(float(mid.mean()) - float(uploaded.mean())) < 2, "the photo itself, only resized"
+    preview = client.get(url + "/reference").json()
+    ok = {
+        "revision": preview["revision"],
+        "sha256": preview["sha256"],
+        "signatureSha256": preview["signatureSha256"],
+    }
+    assert client.post(url + "/reference/confirm", json=ok).is_success
+    wait_idle(jobs, cid)
+    keyed = [r for r in video.submits if r.keyframes]
+    assert len(keyed) == 1 and keyed[0].keyframes[0][0] == 2.0

@@ -154,7 +154,8 @@ def plan_calls(ctx: Context, cid: str | None = None) -> list[CallPlan]:
 
     cost = image_cost_estimate(ctx.config.provider("image"))
     calls = [CallPlan("s4", "승인한 전체 사진으로 9:16 기준 이미지 한 장 생성", 1, cost)]
-    if cid and _pose_reference(ctx.character_dir(cid)):
+    pose = _pose_reference(ctx.character_dir(cid)) if cid else None
+    if pose and pose[1].get("poseUse") != "frame":
         calls.append(
             CallPlan("s4", "기준 이미지에 시그니처 동작을 입힌 중간 프레임 한 장 생성", 1, cost)
         )
@@ -179,14 +180,16 @@ def _current_inputs(ctx: Context, cid: str) -> tuple[dict, Path, str]:
     extra = {}
     if pose:
         pose_path, signature = pose
+        use = "frame" if signature.get("poseUse") == "frame" else "reference"
         extra["signaturePose"] = {
             "path": "reference/pose" + pose_path.suffix.lower(),
             "sha256": sha256_file(pose_path),
             "title": signature.get("title", ""),
             "motion": signature.get("motion", ""),
             "middleFrameAtS": SIGNATURE_AT_S,
-            "prompt": build_pose_prompt(signature),
-            "negativePrompt": POSE_NEGATIVE,
+            "use": use,
+            "prompt": build_pose_prompt(signature) if use == "reference" else "",
+            "negativePrompt": POSE_NEGATIVE if use == "reference" else "",
         }
     return (
         {
@@ -324,6 +327,9 @@ def _signature_seed(ctx, cid, rev, folder, inputs, base_rel, budget) -> str:
         raise CheckFailed("s4", ["시그니처 참고 사진을 고정하는 동안 원본이 변경됐다"])
     from character_factory_poc.stages.s4_frames.framing import align_to_base, distance, face_scale
 
+    if pose.get("use") == "frame":
+        return _signature_as_is(folder, pose, copy, base_rel)
+
     # D-0210: 인물이 기준 사진보다 커지거나 작아지면 영상이 2초에 확대됐다 돌아온다.
     # 얼굴 크기 비율이 범위를 벗어나면 최대 두 번 더 만들고 가장 가까운 것을 쓴다.
     tries: list[dict] = []
@@ -384,6 +390,62 @@ def _signature_seed(ctx, cid, rev, folder, inputs, base_rel, budget) -> str:
         'alt="기준 이미지에 시그니처 동작을 입힌 중간 프레임">'
         f'<img class="ref" src="{escape(pose["path"])}" alt="업로드한 동작 참고 사진">'
         "</div><p>얼굴·복장·배경은 기준 이미지와 같고 동작만 참고 사진을 따라야 해요.</p>"
+        + warning
+        + "</fieldset>"
+    )
+
+
+def _signature_as_is(folder: Path, pose: dict, copy: Path, base_rel: str) -> str:
+    """D-0221: 올린 사진을 편집 없이 중간 프레임으로 쓴다. 9:16 비율과 기준 사진 크기만 맞춘다."""
+    from html import escape
+
+    import cv2
+    import numpy as np
+
+    from character_factory_poc.stages.s4_frames.framing import face_scale
+
+    try:
+        data, _, _ = crop_to_ratio(copy.read_bytes(), (9, 16))
+    except ValueError as exc:
+        raise CheckFailed("s4", [f"시그니처 사진을 9:16으로 맞추지 못했다: {exc}"]) from exc
+    base = cv2.imread(str(folder / base_rel))
+    frame = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    if base is not None and frame is not None and frame.shape[:2] != base.shape[:2]:
+        size = (base.shape[1], base.shape[0])
+        frame = cv2.resize(frame, size, interpolation=cv2.INTER_AREA)
+        data = cv2.imencode(".png", frame)[1].tobytes()
+    relative = "ch1/signature-mid.png"
+    write_once_bytes(folder / relative, data)
+    framing = face_scale(folder / base_rel, folder / relative)
+    write_once_json(
+        folder / SIGNATURE_FRAME,
+        {
+            "frameId": "ch1-sig",
+            "baseFramePath": base_rel,
+            "baseFrameSha256": sha256_file(folder / base_rel),
+            "poseReference": {"path": pose["path"], "sha256": pose["sha256"]},
+            "filePath": relative,
+            "fileSha256": sha256_file(folder / relative),
+            "middleFrameAtS": pose["middleFrameAtS"],
+            "use": "frame",
+            "prompt": "",
+            "negativePrompt": "",
+            "model": "upload",
+            "provider": "upload",
+            "framing": framing,
+            "attempts": [],
+        },
+    )
+    warning = ""
+    if framing["ok"] is False:
+        warning = (
+            f'<p class="warn">올린 사진의 인물 크기가 기준 사진의 {framing["scale"]:.2f}배예요. '
+            "영상이 2초에 확대·축소돼 보일 수 있어요.</p>"
+        )
+    return (
+        '<fieldset><legend>시그니처 중간 프레임</legend><div class="scene">'
+        f'<img class="frame" src="{escape(relative)}" alt="올린 사진을 그대로 쓴 중간 프레임">'
+        "</div><p>올린 사진을 편집하지 않고 그대로 영상 중간 장면으로 써요.</p>"
         + warning
         + "</fieldset>"
     )

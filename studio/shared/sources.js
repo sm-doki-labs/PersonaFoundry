@@ -750,6 +750,7 @@
           file,
           fileType: photo ? 'photo' : 'text',
           photoRole: photo ? (signature ? 'signature' : 'identity') : undefined,
+          photoUse: signature ? (opts && opts.photoUse === 'frame' ? 'frame' : 'reference') : undefined,
           filename: text(file.name),
           size: Number(file.size) || 0,
           contentType: text(file.type) || 'application/octet-stream',
@@ -841,6 +842,7 @@
           entry.step = 'start';
           const payload = { filename: entry.filename, size: entry.size, contentType: entry.contentType };
           if (entry.photoRole === 'signature') payload.photoRole = 'signature';
+          if (entry.photoRole === 'signature') payload.photoUse = entry.photoUse === 'frame' ? 'frame' : 'reference';
           const started = await request('POST', filesPath(), payload);
           entry.fileId = started.fileId;
           state.cardKey[started.fileId] = entry.key;
@@ -1216,13 +1218,13 @@
         if (f.status === 'pending' && !problems.length) problems.push('끝까지 올라가지 않았어요. 지우고 다시 올려 주세요.');
         // 열 수 없는 사진은 브라우저 깨진 그림 대신 사진 아이콘을 둔다(QA v5 A-14).
         const thumb = f.status === 'problem' ? '' : text(f.previewUrl || f.thumbUrl || f.url) || state.thumbs[key] || '';
-        out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, thumb, removable: !state.finalized && state.busy !== 'remove:' + key, retry: false });
+        out.push({ key, source: 'record', fileId: f.fileId, filename: text(f.filename), size: f.size, tone: st[0], status: st[1], progress: null, problems, thumb, removable: !state.finalized && state.busy !== 'remove:' + key, retry: false, photoUse: f.photoUse });
       });
       state.uploads.filter((u) => u.fileType === 'photo' && (u.photoRole || 'identity') === photoRole).forEach((u) => {
         const map = { queued: ['muted', '기다리는 중'], starting: ['run', '준비하는 중'], sending: ['run', '올리는 중 ' + Math.round(u.progress * 100) + '%'], checking: ['run', '확인하는 중'], failed: ['fail', '올리지 못했어요'], rejected: ['fail', '받을 수 없는 사진'] };
         const st = map[u.phase] || ['muted', ''];
         const locked = photoRole === 'signature' && !!state.finalized;
-        out.push({ key: u.key, source: 'upload', fileId: u.fileId, filename: u.filename, size: u.size, tone: st[0], status: st[1], phase: u.phase, progress: u.phase === 'sending' ? u.progress : null, problems: u.error ? [u.error] : [], thumb: state.thumbs[u.key] || '', removable: !u.cancelled && !locked, retry: u.phase === 'failed' && !locked && (photoRole !== 'signature' || settings().videoTier === 'light') });
+        out.push({ key: u.key, source: 'upload', fileId: u.fileId, filename: u.filename, size: u.size, tone: st[0], status: st[1], phase: u.phase, progress: u.phase === 'sending' ? u.progress : null, problems: u.error ? [u.error] : [], thumb: state.thumbs[u.key] || '', removable: !u.cancelled && !locked, retry: u.phase === 'failed' && !locked && (photoRole !== 'signature' || settings().videoTier === 'light'), photoUse: u.photoUse });
       });
       return out;
     }
@@ -1662,6 +1664,10 @@
       const show = tier !== 'none' || has;
       return { show, add: show && !S.finalized && c.videoStatus !== 'making', tier, ready };
     }
+    function signatureUse() {
+      const el = r.signaturePhotos && r.signaturePhotos.querySelector('[name="signaturePhotoUse"]:checked');
+      return el && el.value === 'frame' ? 'frame' : 'reference';
+    }
     function signaturePhotoOpen() {
       const lite = intake.settings().videoTier === 'light';
       return { show: !!S.draft && (lite || intake.signaturePhotoItems().length > 0), add: !!S.draft && lite && !S.finalized && !S.busy };
@@ -1709,6 +1715,12 @@
       [add, r.signaturePhotoPicker].forEach((el) => { if (el) { if (S.signaturePhotoError) el.setAttribute('aria-invalid', 'true'); else el.removeAttribute('aria-invalid'); } });
       if (r.signaturePhotoPicker) { r.signaturePhotoPicker.multiple = false; r.signaturePhotoPicker.disabled = !po.add; }
       if (r.signaturePhotoError) { r.signaturePhotoError.hidden = !S.signaturePhotoError; r.signaturePhotoError.textContent = S.signaturePhotoError || ''; }
+      // D-0221: 올린 사진의 용도를 보여 주고, 사진이 있는 동안에는 바꾸지 않는다(지우고 다시 올린다).
+      const current = (list.find((i) => i.photoUse) || {}).photoUse || null;
+      r.signaturePhotos.querySelectorAll('[name="signaturePhotoUse"]').forEach((el) => {
+        if (current) el.checked = el.value === current;
+        el.disabled = !!list.length || !po.add;
+      });
       renderPhotoTiles(r.signaturePhotoList, signatureTiles, list);
     }
     function renderPhotoTiles(container, tileMap, list) {
@@ -1914,7 +1926,7 @@
       const t = e.target;
       if (t === r.picker) { intake.addFiles(t.files); t.value = ''; return; }
       if (t === r.photoPicker) { intake.addFiles(t.files, { photoOnly: true }); t.value = ''; return; }
-      if (t === r.signaturePhotoPicker) { intake.addFiles(t.files, { photoRole: 'signature' }); t.value = ''; return; }
+      if (t === r.signaturePhotoPicker) { intake.addFiles(t.files, { photoRole: 'signature', photoUse: signatureUse() }); t.value = ''; return; }
       // 등급을 고르면 저장하되 칸은 열어 둔다. 시그니처를 같은 칸에서 이어서 적는다(QA v5 E9·A-11).
       if (t.name === 'videoTierEdit') { const v = t.value; intake.setTier(v).then((ok) => { if (ok) { render(); const c0 = r.tierEdit && r.tierEdit.querySelector('[name="videoTierEdit"][value="' + v + '"]'); if (c0) c0.focus(); } }); return; }
       if (r.form && r.form.contains(t)) {
@@ -1965,7 +1977,7 @@
       if (r.drop) r.drop.classList.remove('is-over');
       if (r.photos) r.photos.classList.remove('is-over');
       if (r.signaturePhotos) r.signaturePhotos.classList.remove('is-over');
-      if (r.signaturePhotos && !r.signaturePhotos.hidden && r.signaturePhotos.contains(e.target) && signaturePhotoOpen().add) intake.addFiles(e.dataTransfer.files, { photoRole: 'signature' });
+      if (r.signaturePhotos && !r.signaturePhotos.hidden && r.signaturePhotos.contains(e.target) && signaturePhotoOpen().add) intake.addFiles(e.dataTransfer.files, { photoRole: 'signature', photoUse: signatureUse() });
       else if (r.photos && !r.photos.hidden && r.photos.contains(e.target) && photoOpen().add) intake.addFiles(e.dataTransfer.files, { photoOnly: true });
       else if (r.drop && r.drop.contains(e.target)) intake.addFiles(e.dataTransfer.files);
     }
