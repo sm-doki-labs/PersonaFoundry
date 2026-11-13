@@ -817,6 +817,7 @@ def build_package(ctx: Context, cid: str) -> Path:
         )
 
     public_gates = {}
+    public_persona: dict[str, object] = {}
     if quotes:
         # 발표용 관문 기록에 검토자가 붙여 넣은 대화·동의자 이름을 옮기지 않는다.
         for item in gate_sources:
@@ -828,7 +829,15 @@ def build_package(ctx: Context, cid: str) -> Path:
                 "requestedChanges": [],
             }
             quotes.check(public_gates[item.rel], item.label)
-        for item in (*persona_sources, *sft_sources):
+        for item in persona_sources:
+            # D-0216: 특질 시트 예시에 원문 발화가 그대로 들어가도 멈추지 않고 그 부분만 지운
+            # 사본을 싣는다. 이 파일은 기록용이고 앱 발행은 쓰지 않는다.
+            original = read_json(item.src)
+            public = quotes.redact(original)
+            if public != original:
+                public_persona[item.rel] = public
+            quotes.check(public, item.label)
+        for item in sft_sources:
             quotes.check(read_json(item.src), item.label)
         quotes.check(dump(_profile(plan)), "profile")
         quotes.check([dump(chapter) for chapter in chapters], "chapters")
@@ -848,9 +857,12 @@ def build_package(ctx: Context, cid: str) -> Path:
     rev_dir = char_dir / "s11-release" / rev
     state.transition("s11", "RUNNING", rev=rev)
     try:
-        for group in (sources, persona_sources, sft_sources, [] if is_twin else gate_sources):
+        copied_persona = [item for item in persona_sources if item.rel not in public_persona]
+        for group in (sources, copied_persona, sft_sources, [] if is_twin else gate_sources):
             _copy_checked(rev_dir, group)
         for rel, record in public_gates.items():
+            write_once_json(rev_dir / rel, record)
+        for rel, record in public_persona.items():
             write_once_json(rev_dir / rel, record)
         spec = dump(appearance)
         spec["referenceImage"] = {**spec["referenceImage"], "path": "appearance/hero.png"}
