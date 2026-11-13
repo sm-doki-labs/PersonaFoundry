@@ -152,6 +152,9 @@ class Upload(Strict):
     size: int = Field(gt=0, le=MAX_BYTES)
     contentType: str = Field(min_length=1)
     photoRole: Literal["identity", "signature"] = "identity"
+    # D-0221: 시그니처 사진의 용도. reference=자세만 참고해 기준 사진에 입힌다,
+    # frame=편집 없이 그대로 영상 중간 장면으로 쓴다.
+    photoUse: Literal["reference", "frame"] = "reference"
 
 
 class ImportPath(Strict):
@@ -258,6 +261,7 @@ def record(spec: Upload) -> dict:
     return dict(
         fileType="photo" if photo else "text",
         **({"photoRole": spec.photoRole} if photo else {}),
+        **({"photoUse": spec.photoUse} if photo and spec.photoRole == "signature" else {}),
         fileId=uuid4().hex,
         filename=name,
         size=spec.size,
@@ -750,8 +754,10 @@ def install_source_routes(app, conf, jobs):
                     signature["poseReferencePath"] = str(
                         local_copy(folder, fid, item["filename"]).relative_to(folder)
                     )
+                    signature["poseUse"] = item.get("photoUse", "reference")
                 else:
                     signature.pop("poseReferencePath", None)
+                    signature.pop("poseUse", None)
                 write_signature(folder, signature)
             return photo_view(cid, item)
 
@@ -812,6 +818,7 @@ def install_source_routes(app, conf, jobs):
             if item.get("photoRole") == "signature":
                 signature = dict(read_signature(folder) or {})
                 signature.pop("poseReferencePath", None)
+                signature.pop("poseUse", None)
                 write_signature(folder, signature)
         return {"fileId": fid}
 
@@ -933,7 +940,13 @@ def install_source_routes(app, conf, jobs):
         if signature:
             updated = _signature(signature)
             previous = read_signature(folder) or {}
-            for key in ("template", "middleFramePath", "middleFrameAtS", "poseReferencePath"):
+            for key in (
+                "template",
+                "middleFramePath",
+                "middleFrameAtS",
+                "poseReferencePath",
+                "poseUse",
+            ):
                 if key not in signature.model_fields_set and key in previous:
                     updated[key] = previous[key]
             # An uploaded pose remains attached when editing its text description.
@@ -949,6 +962,7 @@ def install_source_routes(app, conf, jobs):
                 updated["poseReferencePath"] = str(
                     local_copy(folder, uploaded["fileId"], uploaded["filename"]).relative_to(folder)
                 )
+                updated["poseUse"] = uploaded.get("photoUse", "reference")
             write_signature(folder, updated)
             draft["signaturePose"] = read_signature(folder)
 

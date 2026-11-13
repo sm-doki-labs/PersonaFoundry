@@ -190,8 +190,13 @@
 
         <section class="src-photos src-signature-photos" data-signature-photos aria-labelledby="st-signature-photos" hidden>
           <div class="src-h"><h3 id="st-signature-photos">시그니처 포즈 참고 사진 <span class="src-count">선택</span></h3><span class="src-count" data-signature-photo-count></span></div>
-          <p class="src-fhint" id="src-signature-photo-h">Lite(라이트)에서 한 장만 사용할 수 있어요. 시그니처 동작 중간에 이 사진의 자세를 그대로 따라 하고, 배경과 구도는 기준 사진 그대로 둬요. 시작과 끝은 승인한 기준 사진으로 돌아와요.</p>
-          <p class="src-fhint">이 사진은 손 모양과 자세만 참고해요. 기준 사진을 만든 뒤 같은 인물·복장·배경에 이 동작만 입힌 중간 프레임을 한 장 더 만들고, 기준 사진과 함께 확인한 다음 영상에 써요. 사진이 없으면 적어 둔 동작 설명만 사용해요.</p>
+          <p class="src-fhint" id="src-signature-photo-h">Lite(라이트)에서 한 장만 사용할 수 있어요. 이 사진은 시그니처 동작의 가운데 장면이 되고, 시작과 끝은 승인한 기준 사진으로 돌아와요.</p>
+          <fieldset class="src-fld src-choice src-sig-use" data-signature-use>
+            <legend>이 사진을 어떻게 쓸까요</legend>
+            <label><input type="radio" name="signaturePhotoUse" value="reference" checked> <span><b>자세 참고용</b><small>손 모양과 자세만 참고해요. 기준 사진의 인물·복장·배경·구도는 그대로 두고 이 동작만 입힌 중간 프레임을 새로 만들어요.</small></span></label>
+            <label><input type="radio" name="signaturePhotoUse" value="frame"> <span><b>영상에 그대로 넣을 사진</b><small>편집하지 않고 이 사진을 그대로 중간 장면으로 써요. 인물 사진과 같은 자리·같은 구도로 찍은 사진일 때 고르세요.</small></span></label>
+          </fieldset>
+          <p class="src-fhint">사진이 없으면 적어 둔 동작 설명만 사용해요. 용도를 바꾸려면 사진을 지우고 다시 올려 주세요.</p>
           <p class="src-fhint" id="src-signature-photo-state" data-signature-photo-hint>jpg, png, webp · 15MB까지 · 인물 확인용 사진은 별도로 올려 주세요.</p>
           <div class="src-photo-grid">
             <div class="src-photo-list" data-signature-photo-list aria-label="올린 시그니처 포즈 참고 사진"></div>
